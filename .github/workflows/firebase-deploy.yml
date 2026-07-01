@@ -22,9 +22,6 @@ jobs:
       - name: Install (workspace)
         run: pnpm install --frozen-lockfile
 
-      - name: Install functions deps (standalone pour le déploiement)
-        run: npm --prefix functions install
-
       - name: Build web
         run: pnpm --filter web build
 
