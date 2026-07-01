@@ -6,15 +6,18 @@ import "@fontsource-variable/bricolage-grotesque";
 import "./index.css";
 import App from "./App";
 import { AuthProvider } from "./lib/rbac";
+import { ToastProvider } from "./design/components";
 
 const queryClient = new QueryClient();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

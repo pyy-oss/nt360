@@ -62,16 +62,18 @@ export default function App() {
         </header>
 
         {/* Tabs */}
-        <nav className="flex gap-5 border-b border-line mb-6 overflow-x-auto [&::-webkit-scrollbar]:h-0">
+        <nav className="flex gap-1 border-b border-line mb-6 overflow-x-auto [&::-webkit-scrollbar]:h-0">
           {visible.map((m) => {
             const on = m.id === (allowed?.id);
+            const Icon = m.icon;
             return (
               <button
                 key={m.id}
                 onClick={() => setActive(m.id)}
-                className={cx("whitespace-nowrap py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors",
-                  on ? "text-ink border-gold" : "text-muted border-transparent hover:text-ink")}
+                className={cx("inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors",
+                  on ? "text-ink border-gold" : "text-muted border-transparent hover:text-ink hover:bg-panel/50 rounded-t-lg")}
               >
+                <Icon size={15} className={on ? "text-gold" : ""} />
                 {m.label}
               </button>
             );

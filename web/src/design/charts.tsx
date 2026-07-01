@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, AreaChart, Area, Line,
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, RadialBarChart, RadialBar, PolarAngleAxis,
 } from "recharts";
-import { T, BU_COL, fmt } from "./tokens";
+import { T, BU_COL, fmt, fmtFull } from "./tokens";
 
 export function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload || !payload.length) return null;
@@ -11,7 +11,7 @@ export function ChartTooltip({ active, payload, label }: any) {
     <div className="rounded-lg border border-line bg-panel2 px-3 py-2 text-xs shadow-card">
       {label != null && <div className="text-muted mb-1">{label}</div>}
       {payload.map((p: any, i: number) => (
-        <div key={i} className="tabnum" style={{ color: p.color || T.ink }}>{p.name}: <b>{fmt(p.value)}</b></div>
+        <div key={i} className="tabnum" style={{ color: p.color || T.ink }}>{p.name}: <b>{fmtFull(p.value)}</b> FCFA</div>
       ))}
     </div>
   );

@@ -2,11 +2,14 @@
 // primitives + graphes Recharts, lecture temps réel summaries/*, écritures gardées.
 import { useState, type FC } from "react";
 import { where } from "firebase/firestore";
-import { AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle, LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp,
+  Percent, FileText, Truck, ClipboardList, Users, Boxes, Search, Shield, type LucideIcon,
+} from "lucide-react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, Busy, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, colText, colNum, money, cx } from "../design/components";
 import { AreaTrend, DonutBU, Bars, GroupedBars, Gauge } from "../design/charts";
 import {
   addOpportunity, setBcStatus, upsertCreditLine, upsertObjective,
@@ -14,7 +17,6 @@ import {
 } from "../lib/writes";
 
 type Props = { period: string };
-const grid = "grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6";
 const grid4 = "grid gap-3 grid-cols-2 lg:grid-cols-4";
 const cols2 = "grid gap-3 md:grid-cols-2";
 
@@ -71,26 +73,33 @@ function AlertsBanner() {
 const Overview: FC<Props> = ({ period }) => {
   const { data, loading } = useDocData<any>(`summaries/overview_${period}`);
   const { data: bl } = useDocData<any>("summaries/backlog_fy");
+  const { data: cfg } = useDocData<any>("config/periods");
+  const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   const canWrite = useCan("overview") === "write";
   const [url, setUrl] = useState<string | null>(null);
   const actions = (
     <div className="flex gap-2 items-center">
-      {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} />}
-      <Busy variant="ghost" label="Export CODIR" fn={async () => setUrl((await callExportReport(period)).url || null)} />
+      {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
+      <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />
       {url && <a className="text-gold text-xs underline" href={url} target="_blank" rel="noreferrer">Télécharger</a>}
     </div>
   );
-  if (loading && !data) return <KpiSkeletons n={6} />;
-  if (!data) return <div className="flex flex-col gap-3"><AlertsBanner /><EmptyState />{actions}</div>;
+  if (loading && !data) return <div className="flex flex-col gap-4"><KpiSkeletons n={4} /><CardSkeleton h={120} /></div>;
+  if (!data) return <div className="flex flex-col gap-3"><div className="flex justify-end">{actions}</div><AlertsBanner /><EmptyState /></div>;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">{actions}</div>
-      <div className={grid}>
-        <Kpi label="Certitudes" value={fmt(data.certitudes)} tone="gold" />
-        <Kpi label="Commandes (CAS)" value={fmt(data.commandes)} />
-        <Kpi label="Facturé" value={fmt(data.facture)} tone="emerald" />
-        <Kpi label="Backlog (RAF)" value={fmt(bl?.total ?? data.backlog)} tone="steel" sub={bl ? `${bl.count} cmd` : undefined} />
-        <Kpi label="Marge brute" value={fmt(data.mb)} sub={`%MB ${pct(data.ratios?.pmb)}`} />
+      {/* Chaîne de valeur */}
+      <Chain>
+        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} />
+        <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} />
+        <Stage idx={3} label="Facturé" accent={T.emerald} value={fmt(data.facture)} sub={`taux ${pct(data.ratios?.tauxFacturation)}`} />
+        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(bl?.total ?? data.backlog)} sub={bl ? `${bl.count} commandes` : undefined} />
+      </Chain>
+      <div className={grid4}>
+        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
+        <Kpi label="Facturé (FY)" value={fmt(att?.factureN ?? data.facture)} tone="emerald" delta={att?.croissanceFacture} sub="vs N-1" />
+        <Kpi label="Pipeline gagné" value={fmt(data.pipelineWon)} tone="steel" />
         <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
       </div>
       <AlertsBanner />
@@ -281,9 +290,9 @@ const PnlProjet: FC<Props> = () => {
   return (
     <Card title="Fiches affaire — coût / vente / marge">
       <Table columns={[
-        colText("FP", (r) => r.fp), colText("Client", (r) => r.client), colText("Affaire", (r) => r.affaire),
-        colNum("Revient", (r) => money(r.costTotal)), colNum("Vente", (r) => money(r.saleTotal)),
-        colNum("Marge", (r) => money(r.margin)), colNum("%MB", (r) => pct(r.marginPct)),
+        colText("FP", (r) => r.fp, (r) => r.fp), colText("Client", (r) => r.client, (r) => r.client), colText("Affaire", (r) => r.affaire),
+        colNum("Revient", (r) => money(r.costTotal), (r) => r.costTotal), colNum("Vente", (r) => money(r.saleTotal), (r) => r.saleTotal),
+        colNum("Marge", (r) => money(r.margin), (r) => r.margin), colNum("%MB", (r) => pct(r.marginPct), (r) => r.marginPct),
       ]} rows={rows} />
       <Tip>Contrôle vente vs CAS de la commande ; coût par type/fournisseur via les lignes BC.</Tip>
     </Card>
@@ -297,9 +306,9 @@ const Fournisseurs: FC<Props> = () => {
   if (!data) return <EmptyState />;
   const badge: any = { saturation: "clay", tension: "gold", ok: "emerald" };
   const cols = [
-    colText("Fournisseur", (s: any) => s.name), colNum("Expo.", (s: any) => money(s.expo)),
-    colNum("Ouvert", (s: any) => money(s.open)), colNum("Encours", (s: any) => money(s.encours)),
-    colNum("Couverture", (s: any) => money(s.coverage)), colNum("État", (s: any) => <Badge tone={badge[s.state]}>{s.state}</Badge>),
+    colText("Fournisseur", (s: any) => s.name, (s: any) => s.name), colNum("Expo.", (s: any) => money(s.expo), (s: any) => s.expo),
+    colNum("Ouvert", (s: any) => money(s.open), (s: any) => s.open), colNum("Encours", (s: any) => money(s.encours), (s: any) => s.encours),
+    colNum("Couverture", (s: any) => money(s.coverage), (s: any) => s.coverage), colNum("État", (s: any) => <Badge tone={badge[s.state]}>{s.state}</Badge>, (s: any) => s.state),
     ...(canWrite ? [colNum("Ligne crédit", (s: any) => <CreditEditor name={s.name} authorized={s.authorized} outstanding={s.encours} />)] : []),
   ];
   return (
@@ -376,9 +385,9 @@ function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) 
       </Card>
       <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
         <Table columns={[
-          colText(kind === "clients" ? "Client" : "BU", (r) => r.key),
-          colNum("CAS", (r) => money(r.cas)), colNum("Facturé", (r) => money(r.facture)),
-          colNum("Backlog", (r) => money(r.backlog)), colNum("Marge", (r) => money(r.mb)), colNum("%MB", (r) => pct(r.pmb)),
+          colText(kind === "clients" ? "Client" : "BU", (r) => r.key, (r) => r.key),
+          colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
+          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog), colNum("Marge", (r) => money(r.mb), (r) => r.mb), colNum("%MB", (r) => pct(r.pmb), (r) => r.pmb),
         ]} rows={rows} />
       </Card>
     </div>
@@ -476,20 +485,20 @@ function RoleSetter({ uid }: { uid: string }) {
   );
 }
 
-// Registre : id navigation unique + clé permission RBAC + libellé + composant.
-export const MODULES: { id: string; key: string; label: string; Component: FC<Props> }[] = [
-  { id: "overview", key: "overview", label: "Vue d'ensemble", Component: Overview },
-  { id: "pipeline", key: "pipeline", label: "Pipeline", Component: Pipeline },
-  { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", Component: Objectifs },
-  { id: "facturation", key: "facturation", label: "Facturation", Component: Facturation },
-  { id: "backlog", key: "backlog", label: "Suivi Backlog", Component: Backlog },
-  { id: "prevision", key: "prevision", label: "Prévision", Component: Prevision },
-  { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", Component: Rentabilite },
-  { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", Component: PnlProjet },
-  { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", Component: Fournisseurs },
-  { id: "bc", key: "bc", label: "Exécution BC", Component: BC },
-  { id: "clients", key: "clients", label: "Clients", Component: (p) => <EntityView {...p} kind="clients" /> },
-  { id: "domaines", key: "domaines", label: "Domaines", Component: (p) => <EntityView {...p} kind="domaines" /> },
-  { id: "fp360", key: "overview", label: "FP 360°", Component: Fp360 },
-  { id: "habilitations", key: "habilitations", label: "Habilitations", Component: Habilitations },
+// Registre : id navigation unique + clé permission RBAC + libellé + icône + composant.
+export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: FC<Props> }[] = [
+  { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
+  { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
+  { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", icon: Target, Component: Objectifs },
+  { id: "facturation", key: "facturation", label: "Facturation", icon: Receipt, Component: Facturation },
+  { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
+  { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
+  { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", icon: Percent, Component: Rentabilite },
+  { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", icon: FileText, Component: PnlProjet },
+  { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", icon: Truck, Component: Fournisseurs },
+  { id: "bc", key: "bc", label: "Exécution BC", icon: ClipboardList, Component: BC },
+  { id: "clients", key: "clients", label: "Clients", icon: Users, Component: (p) => <EntityView {...p} kind="clients" /> },
+  { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: (p) => <EntityView {...p} kind="domaines" /> },
+  { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
+  { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
 ];

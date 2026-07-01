@@ -33,6 +33,12 @@ export function fmt(v: number | null | undefined): string {
   return String(Math.round(n));
 }
 
+/** Montant complet avec séparateurs (tooltips, exports) : 1 085 668. */
+export function fmtFull(v: number | null | undefined): string {
+  const n = Math.round(Number(v) || 0);
+  return n.toLocaleString("fr-FR").replace(/ |,/g, " ");
+}
+
 /** Formatage pourcentage. */
 export function pct(v: number | null | undefined): string {
   const n = Number(v);
