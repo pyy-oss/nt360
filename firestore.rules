@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    // --- RBAC opposable : la matrice de droits est lue côté serveur ---
+    // Le front ne fait jamais autorité (BUILD_KIT §8).
+    function signedIn() { return request.auth != null; }
+    function role() { return request.auth.token.role; }
+    function matrix() { return get(/databases/$(db)/documents/config/permissions).data.matrix; }
+    function level(m) { return role() == 'direction' ? 'write' : matrix()[role()][m]; }
+    function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
+    function canWrite(m) { return signedIn() && level(m) == 'write'; }
+
+    // Collections sources : écriture réservée aux Functions (Admin SDK, contourne les rules).
+    match /orders/{id}        { allow read: if canRead('overview');     allow write: if false; }
+    match /invoices/{id}      { allow read: if canRead('facturation');  allow write: if false; }
+    match /projectSheets/{id} { allow read: if canRead('pnlprojet');    allow write: if false; }
+
+    // Opportunités : seules les saisies (source == 'saisie') sont modifiables par le client.
+    match /opportunities/{id} {
+      allow read: if canRead('pipeline');
+      allow create, update: if canWrite('pipeline') && request.resource.data.source == 'saisie';
+      allow delete: if canWrite('pipeline');
+    }
+
+    // Lignes BC : le client ne peut faire évoluer QUE le statut.
+    match /bcLines/{id} {
+      allow read: if canRead('bc');
+      allow update: if canWrite('bc')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+    }
+
+    match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if canWrite('fournisseurs'); }
+    match /objectives/{id}    { allow read: if canRead('objectifs');    allow write: if canWrite('objectifs'); }
+
+    // Agrégats : écrits par les Functions, lus par tout utilisateur connecté.
+    match /summaries/{id}     { allow read: if signedIn();              allow write: if false; }
+
+    // Config : la matrice de droits est éditable par 'habilitations' ; le reste est écrit par Functions.
+    match /config/permissions { allow read: if signedIn();              allow write: if canWrite('habilitations'); }
+    match /config/{id}        { allow read: if signedIn();              allow write: if false; }
+
+    match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
+    match /imports/{id}       { allow read: if signedIn();              allow write: if false; }
+    match /users/{uid}        { allow read: if canWrite('habilitations') || request.auth.uid == uid; allow write: if false; }
+  }
+}

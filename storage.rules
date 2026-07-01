@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Imports bruts : écriture par les rôles habilités ; lecture réservée aux Functions (Admin SDK).
+    match /imports/{allPaths=**} {
+      allow write: if request.auth != null
+        && request.auth.token.role in ['direction','pmo','achats','commercial_dir','commercial'];
+      allow read: if false;
+    }
+    // Exports générés par les Functions ; lecture pour tout utilisateur connecté (URL signée).
+    match /exports/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}

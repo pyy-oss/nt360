@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install functions deps
+        run: pnpm --filter functions install
+
+      - name: Tests parseurs & domaine (Vitest)
+        run: pnpm --filter functions test
+
+      - name: Tests front (Vitest)
+        run: pnpm --filter web test
+
+      - name: Build web
+        run: pnpm --filter web build
+
+      # F1+ : règles Firestore via l'émulateur.
+      # - name: Tests de règles (rules-unit-testing)
+      #   run: pnpm test:rules
