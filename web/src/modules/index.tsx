@@ -1,6 +1,6 @@
 // Les 13 modules (parité prototype, BUILD_KIT §2). Lecture temps réel des summaries/*,
 // détail à la demande, et écritures gardées (F5) refusées par les rules si rôle insuffisant.
-import { useState, type ReactNode, type CSSProperties } from "react";
+import { useState, type ReactNode, type CSSProperties, type FC } from "react";
 import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
@@ -473,7 +473,7 @@ function RoleSetter({ uid }: { uid: string }) {
 }
 
 // id = identifiant de navigation unique ; key = clé de permission RBAC (peut se répéter).
-export const MODULES: { id: string; key: string; label: string; Component: (p: Props) => ReactNode }[] = [
+export const MODULES: { id: string; key: string; label: string; Component: FC<Props> }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", Component: Overview },
   { id: "pipeline", key: "pipeline", label: "Pipeline", Component: () => <Pipeline /> },
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", Component: Objectifs },

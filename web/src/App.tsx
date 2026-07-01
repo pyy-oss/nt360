@@ -71,7 +71,7 @@ export default function App() {
           {allowed ? (
             <ErrorBoundary key={allowed.id}>
               <h2 style={{ fontFamily: fonts.display, marginTop: 0 }}>{allowed.label}</h2>
-              {allowed.Component({ period })}
+              <ActiveModule mod={allowed} period={period} />
             </ErrorBoundary>
           ) : (
             <div style={{ opacity: 0.6 }}>Aucun module accessible pour ce profil.</div>
@@ -80,6 +80,13 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+// Rend le module comme un VRAI composant (fiber isolé) — sinon ses hooks seraient
+// rattachés à App et provoqueraient l'erreur React #310 (incohérence de hooks).
+function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
+  const Comp = mod.Component;
+  return <Comp period={period} />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
