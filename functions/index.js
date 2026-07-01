@@ -124,9 +124,69 @@ exports.syncSalesDataNow = onCall(async (req) => {
   return await runSalesSync(req.data?.objectKey);
 });
 
+// --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
+exports.exportReport = onCall(async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  const ExcelJS = require("exceljs");
+  const period = req.data?.period || "all";
+  const get = async (p) => (await db.doc(p).get()).data() || {};
+  const [ov, bl, pl, fiscal] = await Promise.all([
+    get(`summaries/overview_${period}`), get("summaries/backlog_fy"),
+    get("summaries/pipeline"), get("config/fiscal"),
+  ]);
+  const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`);
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("CODIR");
+  ws.addRow(["Pilote Revenu NT CI — One-pager CODIR"]);
+  ws.addRow(["Période", period, "FY", fiscal.currentFy || ""]);
+  ws.addRow([]);
+  ws.addRow(["Indicateur", "Valeur"]);
+  [
+    ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
+    ["Backlog (RAF)", bl.total], ["Marge brute", ov.mb], ["Taux facturation", ov.ratios?.tauxFacturation],
+    ["Pipeline actif pondéré", pl.tot?.weighted], ["Atterrissage projeté", att.projete],
+    ["Objectif CAS", att.objectif], ["Écart", att.ecart],
+  ].forEach((r) => ws.addRow(r));
+
+  const buf = await wb.xlsx.writeBuffer();
+  const key = `exports/codir_${period}_${Date.now()}.xlsx`;
+  const file = getStorage().bucket(IMPORTS_BUCKET).file(key);
+  await file.save(Buffer.from(buf), { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "export", module: "overview", entity: "codir", entityId: key,
+    detail: { period }, ts: FieldValue.serverTimestamp(),
+  });
+  let url = null;
+  try {
+    [url] = await file.getSignedUrl({ action: "read", expires: Date.now() + 3600 * 1000 });
+  } catch (e) {
+    logger.warn("getSignedUrl indisponible (émulateur ?)", { msg: e.message });
+  }
+  return { ok: true, objectKey: `${IMPORTS_BUCKET}/${key}`, url };
+});
+
+// --- Migration prototype → Firestore (BUILD_KIT §13) ---
+exports.importLegacyBackup = onCall(async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const b = req.data?.backup || {};
+  const { safeId } = require("./lib/sheets");
+  const writes = [];
+  const push = (path, data) => writes.push({ path, data });
+  (b.uorders || []).forEach((o) => o.fp && push(`orders/${safeId(o.fp)}`, { ...o, source: o.source || "legacy" }));
+  (b.uinv || []).forEach((i) => i.numero && push(`invoices/${safeId(i.numero)}`, { ...i, source: "legacy" }));
+  (b.objectives || []).forEach((o, idx) => push(`objectives/${o.fiscalYear || 0}_${o.scope || "global"}_${o.scopeValue || idx}`, o));
+  (b.lines || []).forEach((c) => c.id && push(`creditLines/${safeId(c.id)}`, c));
+  (b.fiches || []).forEach((f) => f.fp && push(`projectSheets/${safeId(f.fp)}`, { ...f, source: "legacy" }));
+  (b.pipeOpps || []).forEach((o, idx) => push(`opportunities/${o.oppId ? safeId(o.oppId) : "legacy_" + idx}`, { ...o, source: o.source || "salesData" }));
+
+  let batch = db.batch(), n = 0;
+  for (const w of writes) { batch.set(db.doc(w.path), w.data, { merge: true }); if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); } }
+  await batch.commit();
+  const { recomputeAll } = require("./lib/aggregate");
+  await recomputeAll(db);
+  return { ok: true, written: writes.length };
+});
+
 // Exposé pour les tests / réutilisation.
 module.exports.IMPORTS_BUCKET = IMPORTS_BUCKET;
-
-// --- Stubs des phases suivantes ---
-// exports.exportReport   = onCall(...)              // F7 : export PDF/XLSX → URL signée
-// exports.importLegacyBackup = onCall(...)          // migration prototype → Firestore

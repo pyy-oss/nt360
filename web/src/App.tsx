@@ -13,11 +13,11 @@ function Nav({ active, onSelect, can }: { active: string; onSelect: (k: string) 
   return (
     <nav style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 210 }}>
       {visible.map((m) => {
-        const on = m.key === active;
+        const on = m.id === active;
         return (
           <button
-            key={m.key}
-            onClick={() => onSelect(m.key)}
+            key={m.id}
+            onClick={() => onSelect(m.id)}
             style={{
               textAlign: "left", padding: "8px 12px", borderRadius: 8, cursor: "pointer",
               border: "none", background: on ? colors.panel : "transparent",
@@ -42,7 +42,7 @@ export default function App() {
   const [active, setActive] = useState<string>("overview");
 
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
-  const current = MODULES.find((m) => m.key === active) || MODULES[0];
+  const current = MODULES.find((m) => m.id === active) || MODULES[0];
   const allowed = can(current.key) !== "none" ? current : MODULES.find((m) => can(m.key) !== "none");
 
   if (loading) {
@@ -66,10 +66,10 @@ export default function App() {
       </header>
 
       <div style={{ display: "flex", gap: 24, padding: 24, alignItems: "flex-start" }}>
-        <Nav active={allowed?.key || "overview"} onSelect={setActive} can={can} />
+        <Nav active={allowed?.id || "overview"} onSelect={setActive} can={can} />
         <main style={{ flex: 1, minWidth: 0 }}>
           {allowed ? (
-            <ErrorBoundary key={allowed.key}>
+            <ErrorBoundary key={allowed.id}>
               <h2 style={{ fontFamily: fonts.display, marginTop: 0 }}>{allowed.label}</h2>
               {allowed.Component({ period })}
             </ErrorBoundary>

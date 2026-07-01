@@ -59,3 +59,9 @@ export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});
   return res.data;
 }
+
+/** Génère l'export one-pager CODIR (XLSX) et renvoie l'URL signée. */
+export async function callExportReport(period: string) {
+  const res = await httpsCallable(functions, "exportReport")({ period });
+  return res.data as { ok: boolean; objectKey: string; url: string | null };
+}

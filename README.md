@@ -62,5 +62,5 @@ pnpm test:rules   # 23 tests de règles RBAC via l'émulateur Firestore
 | **F4** | Frontend parité 13 modules (lecture summaries/* + détail, RBAC, période) | ✅ |
 | **F5** | Écritures gardées (opp saisie, statut BC, crédit, objectifs, matrice, rôles) | ✅ |
 | **F6** | Sync Sales_DATA quotidien (Scheduler) — remplace le lot salesData, préserve les saisies | ✅ |
-| F7 | Bonifications (atterrissage, alertes, drill-down, exports PDF/XLSX) | ⬜ |
+| **F7** | Bonifications : atterrissage, centre d'alertes, drill-down FP 360°, export CODIR XLSX, N vs N-1, migration legacy | ✅ |
 | F8 | Durcissement (App Check, MFA, export Firestore planifié, tests ≥80%) | ⬜ |

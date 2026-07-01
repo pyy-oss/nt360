@@ -1,13 +1,14 @@
 // Les 13 modules (parité prototype, BUILD_KIT §2). Lecture temps réel des summaries/*,
 // détail à la demande, et écritures gardées (F5) refusées par les rules si rôle insuffisant.
 import { useState, type ReactNode, type CSSProperties } from "react";
+import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { colors, fmt, pct, buColors } from "../design/tokens";
 import { Card, Kpi, HBars, Stage, Tip, Empty } from "../design/components";
 import {
   addOpportunity, setBcStatus, upsertCreditLine, upsertObjective,
-  updateMatrix, callSetUserRole, callRecompute,
+  updateMatrix, callSetUserRole, callRecompute, callExportReport,
 } from "../lib/writes";
 
 type Props = { period: string };
@@ -46,18 +47,44 @@ function Busy({ fn, label }: { fn: () => Promise<any>; label: string }) {
   );
 }
 
+// Centre d'alertes (bonification F7).
+function AlertsBanner() {
+  const { data } = useDocData<any>("summaries/alerts");
+  const items = data?.items || [];
+  if (!items.length) return null;
+  const tone: any = { high: colors.clay, medium: colors.gold, low: colors.steel };
+  return (
+    <Card title={`Centre d'alertes (${items.length})`}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((a: any, i: number) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 8, background: tone[a.severity] || colors.steel }} />
+            <span>{a.message}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 // 1 — Vue d'ensemble
 function Overview({ period }: Props) {
   const { data } = useDocData<any>(`summaries/overview_${period}`);
   const canWrite = useCan("overview") === "write";
-  if (!data) return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Empty />
-      {canWrite && <div><Busy label="Recalculer les agrégats" fn={callRecompute} /></div>}
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const actions = (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      {canWrite && <Busy label="Recalculer les agrégats" fn={callRecompute} />}
+      <Busy label="Export CODIR (XLSX)" fn={async () => { const r = await callExportReport(period); setExportUrl(r.url || null); }} />
+      {exportUrl && <a href={exportUrl} target="_blank" rel="noreferrer" style={{ color: colors.gold, fontSize: 13 }}>Télécharger</a>}
     </div>
+  );
+  if (!data) return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}><AlertsBanner /><Empty />{actions}</div>
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <AlertsBanner />
       <div style={grid()}>
         <Kpi label="Certitudes" value={fmt(data.certitudes)} tone={colors.gold} />
         <Kpi label="Commandes (CAS)" value={fmt(data.commandes)} />
@@ -66,7 +93,7 @@ function Overview({ period }: Props) {
         <Kpi label="Marge brute" value={fmt(data.mb)} sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
       </div>
-      {canWrite && <div><Busy label="Recalculer les agrégats" fn={callRecompute} /></div>}
+      {actions}
       <Tip>Chaîne Certitudes → Commandes → Facturé → Backlog, jointe par N° FP. Backlog ancré FY.</Tip>
     </div>
   );
@@ -187,11 +214,14 @@ function Backlog() {
   );
 }
 
-// 6 — Prévision
+// 6 — Prévision (+ atterrissage annuel, N vs N-1)
 function Prevision({ period }: Props) {
   const { data: ov } = useDocData<any>(`summaries/overview_${period}`);
   const { data: bl } = useDocData<any>("summaries/backlog_fy");
   const { data: pl } = useDocData<any>("summaries/pipeline");
+  const { data: cfg } = useDocData<any>("config/periods");
+  const fy = cfg?.currentFy;
+  const { data: att } = useDocData<any>(fy ? `summaries/atterrissage_${fy}` : null);
   if (!ov && !bl && !pl) return <Empty />;
   const realise = ov?.facture || 0, backlog = bl?.total || 0, pond = pl?.tot?.weighted || 0;
   return (
@@ -202,7 +232,58 @@ function Prevision({ period }: Props) {
         <Kpi label="Pipeline pondéré" value={fmt(pond)} tone={colors.gold} />
         <Kpi label="Projeté" value={fmt(realise + backlog + pond)} />
       </div>
+      {att && (
+        <Card title={`Atterrissage ${att.fy}`}>
+          <div style={grid()}>
+            <Kpi label="Réalisé CAS" value={fmt(att.realiseCas)} />
+            <Kpi label="Pipeline pondéré (FY)" value={fmt(att.pipelinePondere)} tone={colors.gold} />
+            <Kpi label="Projeté CAS" value={fmt(att.projete)} />
+            <Kpi label="Objectif" value={fmt(att.objectif)} />
+            <Kpi label="Écart" value={fmt(att.ecart)} tone={att.ecart < 0 ? colors.clay : colors.emerald} />
+            <Kpi label="Proba atteinte" value={pct(att.probaAtteinte)} />
+          </div>
+          <Tip>Facturé N {fmt(att.factureN)} vs N-1 {fmt(att.factureN1)} — croissance {pct(att.croissanceFacture)}.</Tip>
+        </Card>
+      )}
       <Tip>Trajectoire réalisé → projeté (réalisé + écoulement backlog + pipeline pondéré).</Tip>
+    </div>
+  );
+}
+
+// FP 360° — drill-down par N° FP (bonification F7).
+function Fp360() {
+  const [q, setQ] = useState("");
+  const fp = q.trim().toUpperCase();
+  const cons = fp ? [where("fp", "==", fp)] : [where("fp", "==", "__none__")];
+  const { rows: orders } = useCollectionData<any>("orders", cons);
+  const { rows: invoices } = useCollectionData<any>("invoices", cons);
+  const { rows: sheets } = useCollectionData<any>("projectSheets", cons);
+  const { rows: bc } = useCollectionData<any>("bcLines", cons);
+  const { rows: opps } = useCollectionData<any>("opportunities", cons);
+  const o = orders[0];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card title="Recherche par N° FP">
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={field} placeholder="FP/2026/13542" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </Card>
+      {fp && (
+        <>
+          {o ? (
+            <div style={grid()}>
+              <Kpi label="Client" value={o.client || "—"} />
+              <Kpi label="CAS" value={fmt(o.cas)} />
+              <Kpi label="RAF" value={fmt(o.raf)} tone={colors.steel} />
+              <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} />
+            </div>
+          ) : <Empty>Aucune commande pour {fp}.</Empty>}
+          <Card title={`Factures (${invoices.length})`}><Table head={["Numéro", "Date", "Montant HT"]} rows={invoices.map((i) => [i.numero, i.date, fmt(i.amountHt)])} /></Card>
+          <Card title={`Fiche projet`}><Table head={["Affaire", "Revient", "Vente", "Marge", "%MB"]} rows={sheets.map((s) => [s.affaire, fmt(s.costTotal), fmt(s.saleTotal), fmt(s.margin), pct(s.marginPct)])} /></Card>
+          <Card title={`Lignes BC (${bc.length})`}><Table head={["Fournisseur", "Type", "XOF", "Statut"]} rows={bc.map((b) => [b.supplier, b.expenseType, fmt(b.amountXof), b.status])} /></Card>
+          <Card title={`Opportunités (${opps.length})`}><Table head={["Client", "AM", "Montant", "Étape"]} rows={opps.map((x) => [x.client, x.am, fmt(x.amount), x.stageLabel || x.stage])} /></Card>
+        </>
+      )}
     </div>
   );
 }
@@ -391,18 +472,20 @@ function RoleSetter({ uid }: { uid: string }) {
   );
 }
 
-export const MODULES: { key: string; label: string; Component: (p: Props) => ReactNode }[] = [
-  { key: "overview", label: "Vue d'ensemble", Component: Overview },
-  { key: "pipeline", label: "Pipeline", Component: () => <Pipeline /> },
-  { key: "objectifs", label: "Objectifs / R-O", Component: Objectifs },
-  { key: "facturation", label: "Facturation", Component: Facturation },
-  { key: "backlog", label: "Suivi Backlog", Component: () => <Backlog /> },
-  { key: "prevision", label: "Prévision", Component: Prevision },
-  { key: "rentabilite", label: "Rentabilité (P&L)", Component: Rentabilite },
-  { key: "pnlprojet", label: "P&L Projet", Component: () => <PnlProjet /> },
-  { key: "fournisseurs", label: "Crédit Fournisseurs", Component: () => <Fournisseurs /> },
-  { key: "bc", label: "Exécution BC", Component: () => <BC /> },
-  { key: "clients", label: "Clients", Component: (p) => <EntityView {...p} kind="clients" /> },
-  { key: "domaines", label: "Domaines", Component: (p) => <EntityView {...p} kind="domaines" /> },
-  { key: "habilitations", label: "Habilitations", Component: () => <Habilitations /> },
+// id = identifiant de navigation unique ; key = clé de permission RBAC (peut se répéter).
+export const MODULES: { id: string; key: string; label: string; Component: (p: Props) => ReactNode }[] = [
+  { id: "overview", key: "overview", label: "Vue d'ensemble", Component: Overview },
+  { id: "pipeline", key: "pipeline", label: "Pipeline", Component: () => <Pipeline /> },
+  { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", Component: Objectifs },
+  { id: "facturation", key: "facturation", label: "Facturation", Component: Facturation },
+  { id: "backlog", key: "backlog", label: "Suivi Backlog", Component: () => <Backlog /> },
+  { id: "prevision", key: "prevision", label: "Prévision", Component: Prevision },
+  { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", Component: Rentabilite },
+  { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", Component: () => <PnlProjet /> },
+  { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", Component: () => <Fournisseurs /> },
+  { id: "bc", key: "bc", label: "Exécution BC", Component: () => <BC /> },
+  { id: "clients", key: "clients", label: "Clients", Component: (p) => <EntityView {...p} kind="clients" /> },
+  { id: "domaines", key: "domaines", label: "Domaines", Component: (p) => <EntityView {...p} kind="domaines" /> },
+  { id: "fp360", key: "overview", label: "FP 360°", Component: () => <Fp360 /> },
+  { id: "habilitations", key: "habilitations", label: "Habilitations", Component: () => <Habilitations /> },
 ];
