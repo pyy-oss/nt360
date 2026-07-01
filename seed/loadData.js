@@ -69,6 +69,29 @@ async function main() {
   const fixed = enrichBu({ orders: arr("orders"), invoices: arr("invoices"), opportunities: arr("opportunities") });
   console.log(`✓ BU reconstruite : ${fixed.buFixedInvoices} factures, ${fixed.buFixedOpps} opportunités`);
 
+  // Purge des collections rechargées (état propre : supprime les docs périmés,
+  // ex. anciennes opportunités aux ids obsolètes). Ne touche qu'aux collections
+  // effectivement présentes dans l'import.
+  async function purge(coll) {
+    let removed = 0;
+    while (true) {
+      const snap = await db.collection(coll).limit(400).get();
+      if (snap.empty) break;
+      const b = db.batch();
+      snap.docs.forEach((d) => b.delete(d.ref));
+      await b.commit();
+      removed += snap.size;
+      if (snap.size < 400) break;
+    }
+    return removed;
+  }
+  for (const coll of COLLS) {
+    if (store[coll].size > 0) {
+      const removed = await purge(coll);
+      if (removed) console.log(`✓ ${coll} purgé (${removed} anciens docs)`);
+    }
+  }
+
   // Commit (dédup garantie par _id).
   let batch = db.batch(), n = 0, total = 0;
   for (const coll of COLLS) {
