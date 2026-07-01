@@ -1,5 +1,7 @@
-// Cœur d'ingestion pur (BUILD_KIT §9) : détection du type + construction des écritures
-// déterministes. Sans dépendance Firebase ⇒ testable (tests de non-régression §18).
+// Cœur d'ingestion pur (BUILD_KIT §9) : détection des sources présentes + construction
+// des écritures déterministes. Un classeur peut contenir PLUSIEURS sources
+// (PIPELINE_NT_CI_Inventory.xlsx regroupe P&L + LIVE + Facturation DF). Sans dépendance
+// Firebase ⇒ testable (tests de non-régression §18).
 const XLSX = require("xlsx");
 const { noAcc } = require("./ids");
 const { parsePnl } = require("../parsers/pnl");
@@ -9,65 +11,90 @@ const { parseSalesData } = require("../parsers/salesData");
 
 const PARSERS = { pnl: parsePnl, facturationDf: parseFacturationDf, fiche: parseFiche, salesData: parseSalesData };
 
-// En-têtes de la 1re ligne d'une feuille (normalisés).
 function headerSet(ws) {
   if (!ws) return new Set();
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 });
-  const first = (aoa[0] || []).map((v) => noAcc(v));
-  return new Set(first);
+  // Array.from densifie les tableaux creux (les trous → undefined → "" via noAcc),
+  // sinon new Set(sparse) matérialiserait des undefined et casserait h.includes().
+  return new Set(Array.from(aoa[0] || [], (v) => noAcc(v).trim()));
 }
 const has = (set, ...terms) => terms.some((t) => [...set].some((h) => h.includes(noAcc(t))));
 
-/**
- * Détecte le type de source par signatures de colonnes/cellules (§9, §17).
- * @returns {'pnl'|'facturationDf'|'fiche'|'salesData'|null}
- */
-function detectKind(wb) {
-  // fiche : formulaire cellulaire avec le label "N° DE FP".
-  const aoa0 = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-  const flat = aoa0.flat().filter((v) => typeof v === "string").map(noAcc);
-  if (flat.some((s) => s.includes("n° de fp") || s.includes("n de fp") || s.includes("prix de revient")))
-    return "fiche";
-
-  for (const name of wb.SheetNames) {
-    const h = headerSet(wb.Sheets[name]);
-    const nn = noAcc(name);
-    if ((nn.includes("p&l") || nn.includes("pnl")) && has(h, "opp id", "cas")) return "pnl";
-    if (has(h, "opp id") && has(h, "cas") && has(h, "raf total")) return "pnl";
-    if (has(h, "idc", "id c") || (has(h, "statut") && has(h, "d prev"))) return "salesData";
-    if (has(h, "numero", "numéro") && has(h, "montant ht", "total signe en devises", "reference", "n° fp"))
-      return "facturationDf";
-    if (has(h, "nom d'affichage du partenaire")) return "facturationDf";
-  }
-  return null;
+function isFiche(wb) {
+  const flat = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })
+    .flat().filter((v) => typeof v === "string").map(noAcc);
+  return flat.some((s) => s.includes("n° de fp") || s.includes("n de fp") || s.includes("prix de revient"));
+}
+function hasPnl(wb) {
+  return wb.SheetNames.some((n) => {
+    const h = headerSet(wb.Sheets[n]);
+    return has(h, "opp id") && has(h, "cas") && has(h, "raf total");
+  });
+}
+function hasLive(wb) {
+  return wb.SheetNames.some((n) => {
+    const h = headerSet(wb.Sheets[n]);
+    return has(h, "idc", "id c") || (has(h, "statut") && has(h, "d prev"));
+  });
+}
+function hasDf(wb) {
+  return wb.SheetNames.some((n) => {
+    const h = headerSet(wb.Sheets[n]);
+    return (has(h, "numero", "numéro") && has(h, "montant ht", "total signe en devises", "reference", "n° fp"))
+      || has(h, "nom d'affichage du partenaire");
+  });
 }
 
-/** Chemin Firestore déterministe par type. */
+/** Types de sources présents dans le classeur (fiche est exclusive). */
+function detectKinds(wb) {
+  if (isFiche(wb)) return ["fiche"];
+  const kinds = [];
+  if (hasPnl(wb)) kinds.push("pnl");
+  if (hasLive(wb)) kinds.push("salesData");
+  if (hasDf(wb)) kinds.push("facturationDf");
+  return kinds;
+}
+
+/** Compat : 1er type détecté (utilisé par certains tests). */
+function detectKind(wb) {
+  return detectKinds(wb)[0] || null;
+}
+
 function pathFor(kind, id) {
   return { pnl: `orders/${id}`, facturationDf: `invoices/${id}`, salesData: `opportunities/${id}` }[kind];
 }
 
 /**
- * Construit la liste d'écritures {path, data} + le rapport, sans toucher Firestore.
- * @returns {{kind:string, writes:{path:string,data:object}[], report:object}}
+ * Construit toutes les écritures {path, data} + rapport, sans toucher Firestore.
+ * @returns {{kinds:string[], writes:{path,data}[], report:object}}
  */
 function buildWrites(wb) {
-  const kind = detectKind(wb);
-  if (!kind) return { kind: null, writes: [], report: { rowsIn: 0, rowsOk: 0, rowsSkipped: 0, error: "type inconnu" } };
+  const kinds = detectKinds(wb);
+  const writes = [];
+  const byKind = {};
+  let rowsIn = 0, rowsOk = 0, rowsSkipped = 0;
 
-  if (kind === "fiche") {
-    const { sheet, bcLines } = parseFiche(wb);
-    if (!sheet.fp) return { kind, writes: [], report: { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" } };
-    const writes = [
-      { path: `projectSheets/${sheet._id}`, data: sheet },
-      ...bcLines.map((b) => ({ path: `bcLines/${b._id}`, data: b })),
-    ];
-    return { kind, writes, report: { rowsIn: bcLines.length + 1, rowsOk: writes.length, rowsSkipped: 0 } };
+  for (const kind of kinds) {
+    if (kind === "fiche") {
+      const { sheet, bcLines } = parseFiche(wb);
+      if (!sheet.fp) { byKind.fiche = { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" }; continue; }
+      writes.push({ path: `projectSheets/${sheet._id}`, data: sheet });
+      bcLines.forEach((b) => writes.push({ path: `bcLines/${b._id}`, data: b }));
+      const rep = { rowsIn: bcLines.length + 1, rowsOk: bcLines.length + 1, rowsSkipped: 0 };
+      byKind.fiche = rep; rowsIn += rep.rowsIn; rowsOk += rep.rowsOk;
+    } else {
+      const { rows, report } = PARSERS[kind](wb);
+      rows.forEach((r) => writes.push({ path: pathFor(kind, r._id), data: r }));
+      byKind[kind] = report;
+      rowsIn += report.rowsIn || 0; rowsOk += report.rowsOk || 0; rowsSkipped += report.rowsSkipped || 0;
+    }
   }
 
-  const { rows, report } = PARSERS[kind](wb);
-  const writes = rows.map((r) => ({ path: pathFor(kind, r._id), data: r }));
-  return { kind, writes, report };
+  return {
+    kinds,
+    writes,
+    report: { kinds, byKind, rowsIn, rowsOk, rowsSkipped, ...(kinds.length ? {} : { error: "aucune source reconnue" }) },
+  };
 }
 
 /** Année fiscale courante = max(yearPo) sur les commandes (§7). */
@@ -75,4 +102,4 @@ function fiscalYearFromOrders(orders) {
   return orders.reduce((mx, o) => Math.max(mx, o.yearPo || 0), 0);
 }
 
-module.exports = { detectKind, buildWrites, pathFor, fiscalYearFromOrders, PARSERS };
+module.exports = { detectKind, detectKinds, buildWrites, pathFor, fiscalYearFromOrders, PARSERS };

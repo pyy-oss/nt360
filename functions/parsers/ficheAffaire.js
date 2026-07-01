@@ -3,6 +3,7 @@
 // (SheetJS tolère les `sqref` mal formés, contrairement à openpyxl). §18.4.
 const XLSX = require("xlsx");
 const { fpKey, num, noAcc } = require("../lib/ids");
+const { safeId } = require("../lib/sheets");
 
 /**
  * @param {import('xlsx').WorkBook} wb classeur fiche affaire (1re feuille)
@@ -43,8 +44,9 @@ function parseFiche(wb) {
   };
 
   const fp = fpKey(rightOf("N° DE FP"));
+  const sid = safeId(fp); // FP contient des '/' → sanitisé pour les IDs Firestore
   const sheet = {
-    _id: fp,
+    _id: sid,
     fp,
     client: String(rightOf("CLIENT") || "").trim(),
     affaire: String(rightOf("AFFAIRE") || "").trim(),
@@ -87,7 +89,7 @@ function parseFiche(wb) {
       const xof = cX >= 0 ? num(row[cX]) : 0;
       if ((frn && frn !== "0") || xof > 0)
         bc.push({
-          _id: `${fp}_${bc.length}`,
+          _id: `${sid}_${bc.length}`,
           fp,
           lineIndex: bc.length,
           bcNumber: cB >= 0 ? String(row[cB] || "").trim() : "",

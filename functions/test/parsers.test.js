@@ -138,6 +138,6 @@ describe("parseFiche → projectSheets + bcLines (§18.4, contrôle PAM-BF)", ()
     expect(bcLines[0].supplier).toBe("AITEK");
     expect(bcLines[0].amountXof).toBe(1007500);
     expect(bcLines[0].status).toBe("a_emettre");
-    expect(bcLines[0]._id).toBe("FP/2026/13542_0");
+    expect(bcLines[0]._id).toBe("FP_2026_13542_0"); // FP sanitisé (pas de '/' dans l'ID)
   });
 });

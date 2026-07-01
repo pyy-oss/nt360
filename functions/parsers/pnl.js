@@ -1,40 +1,43 @@
 // Parseur feuille P&L → orders/{fp} + orders.suppliers (BUILD_KIT §17.2).
-// Module pur (aucune dépendance Firebase) ⇒ testable en non-régression (§18.2).
+// Module pur (testable). Matcher robuste (val) : les entêtes réels contiennent des
+// espaces (" CAS ", " MB TOTAL ") et des colonnes proches (" MB TOTAL Manuel ").
 const XLSX = require("xlsx");
 const { fpKey, num, cleanBu, NOISE } = require("../lib/ids");
+const { headerKeys, val, safeId } = require("../lib/sheets");
 
 /**
  * @param {import('xlsx').WorkBook} wb classeur contenant la feuille "P&L"
- * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number}}}
+ * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parsePnl(wb) {
   const rows = XLSX.utils.sheet_to_json(wb.Sheets["P&L"], { defval: null });
   const out = [];
   for (const r of rows) {
-    const fp = fpKey(r["Opp ID"]);
-    const cas = num(r["CAS"]);
+    const keys = headerKeys(r);
+    const fp = fpKey(val(r, keys, "opp id"));
+    const cas = num(val(r, keys, "cas"));
     if (!fp || cas <= 0) continue; // quarantaine : FP malformé / CAS non positif
     const suppliers = [];
     for (let i = 1; i <= 10; i++) {
-      const amt = num(r[`Frns${i}`]);
-      const nm = String(r[`Frns${i} N`] || "").trim().toUpperCase();
+      const amt = num(val(r, keys, `frns${i}`));
+      const nm = String(val(r, keys, `frns${i} n`) || "").trim().toUpperCase();
       if (amt > 0 && !NOISE.has(nm)) suppliers.push({ name: nm, amount: amt });
     }
     out.push({
-      _id: fp,
+      _id: safeId(fp), // FP contient des '/' → sanitisé pour l'ID Firestore (champ fp conservé)
       fp,
-      client: String(r["Customer"] || ""),
-      bu: cleanBu(r["BU"]),
-      yearPo: parseInt(r["Year PO"]) || 0,
+      client: String(val(r, keys, "customer") || ""),
+      bu: cleanBu(val(r, keys, "bu")),
+      yearPo: parseInt(val(r, keys, "year po")) || 0,
       cas,
-      raf: Math.max(num(r["RAF TOTAL"]), 0),
-      mb: num(r["MB TOTAL"]), // MB TOTAL, pas MB Réel (§18.2)
-      am: String(r["AM"] || ""),
+      raf: Math.max(num(val(r, keys, "raf total")), 0),
+      mb: num(val(r, keys, "mb total")), // MB TOTAL, pas MB Réel / Manuel (§18.2)
+      am: String(val(r, keys, "am") || ""),
       suppliers,
       source: "pnl",
     });
   }
-  return { rows: out, report: { rowsIn: rows.length, rowsOk: out.length } };
+  return { rows: out, report: { rowsIn: rows.length, rowsOk: out.length, rowsSkipped: rows.length - out.length } };
 }
 
 module.exports = { parsePnl };

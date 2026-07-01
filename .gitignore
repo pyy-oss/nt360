@@ -30,3 +30,7 @@ serviceAccountKey.json
 
 # Test coverage
 coverage/
+
+# Données réelles (confidentielles) — ne pas committer
+*.xlsx
+seed/data/

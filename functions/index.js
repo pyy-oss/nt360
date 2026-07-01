@@ -23,10 +23,10 @@ exports.ingest = onObjectFinalized(
     const [buf] = await getStorage().bucket(bucket).file(name).download();
     const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
 
-    const { kind, writes, report } = buildWrites(wb);
-    logger.info("ingest", { name, kind, ...report });
+    const { kinds, writes, report } = buildWrites(wb);
+    logger.info("ingest", { name, kinds, ...report });
 
-    if (kind && writes.length) {
+    if (writes.length) {
       let batch = db.batch(), n = 0;
       for (const w of writes) {
         batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
@@ -36,12 +36,12 @@ exports.ingest = onObjectFinalized(
     }
 
     await db.collection("imports").add({
-      uid: null, kind, filename: name, objectKey: `${bucket}/${name}`,
+      uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
       rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
       report, ts: FieldValue.serverTimestamp(),
     });
 
-    if (kind === "pnl" || kind === "fiche") await updateFiscalYearFromOrders();
+    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
     await recomputeSummaries(); // F3 : recalcul des agrégats impactés
   }
 );

@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+// Chargement de données réelles dans Firestore (seed initial, BUILD_KIT §9).
+// Lit un ou plusieurs classeurs (.xlsx), applique l'ingestion idempotente (buildWrites),
+// puis recalcule les agrégats. Fonctionne comme le trigger `ingest` mais hors Storage.
+//
+// Usage :
+//   Émulateur : FIRESTORE_EMULATOR_HOST=localhost:8080 GCLOUD_PROJECT=propulse-business-87f7a \
+//               node seed/loadData.js ./PIPELINE_NT_CI_Inventory.xlsx ./account.move.xlsx
+//   Prod :      GOOGLE_APPLICATION_CREDENTIALS=./sa.json node seed/loadData.js <fichiers...>
+const fs = require("node:fs");
+const path = require("node:path");
+const { createRequire } = require("node:module");
+// Résout les dépendances (xlsx, firebase-admin) depuis le codebase functions.
+const freq = createRequire(path.join(__dirname, "../functions/package.json"));
+const XLSX = freq("xlsx");
+const { initializeApp, applicationDefault } = freq("firebase-admin/app");
+const { getFirestore, FieldValue } = freq("firebase-admin/firestore");
+const { buildWrites, fiscalYearFromOrders } = require("../functions/lib/ingest");
+const { recomputeAll } = require("../functions/lib/aggregate");
+
+const projectId = process.env.GCLOUD_PROJECT || "propulse-business-87f7a";
+const useEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
+initializeApp(useEmulator ? { projectId } : { credential: applicationDefault(), projectId });
+const db = getFirestore();
+
+async function commitAll(writes) {
+  let batch = db.batch(), n = 0, total = 0;
+  for (const w of writes) {
+    batch.set(db.doc(w.path), w.data, { merge: true });
+    total++;
+    if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
+  }
+  await batch.commit();
+  return total;
+}
+
+async function main() {
+  const files = process.argv.slice(2);
+  if (!files.length) {
+    console.log("Usage : node seed/loadData.js <fichier.xlsx> [autre.xlsx ...]");
+    process.exit(1);
+  }
+  for (const f of files) {
+    const wb = XLSX.read(fs.readFileSync(f), { cellDates: true });
+    const { kinds, writes, report } = buildWrites(wb);
+    const written = await commitAll(writes);
+    await db.collection("imports").add({
+      uid: "seed", kinds, filename: path.basename(f), objectKey: `local/${path.basename(f)}`,
+      rowsIn: report.rowsIn, rowsOk: report.rowsOk, rowsSkipped: report.rowsSkipped, report,
+      ts: FieldValue.serverTimestamp(),
+    });
+    console.log(`✓ ${path.basename(f)} → [${kinds.join(", ")}] ${written} docs (ok ${report.rowsOk}, ignorés ${report.rowsSkipped})`);
+  }
+
+  // Ancrage FY + agrégats.
+  const orders = (await db.collection("orders").select("yearPo").get()).docs.map((d) => d.data());
+  const currentFy = fiscalYearFromOrders(orders);
+  if (currentFy > 0) await db.doc("config/fiscal").set({ currentFy }, { merge: true });
+  const res = await recomputeAll(db);
+  console.log(`✓ Agrégats recalculés (FY ${res.currentFy}, périodes ${res.periods.join("/")}) : ${res.written.length} summaries`);
+}
+
+main().then(() => process.exit(0)).catch((e) => { console.error("✗", e); process.exit(1); });

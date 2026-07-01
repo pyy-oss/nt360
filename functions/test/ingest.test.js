@@ -30,10 +30,11 @@ describe("detectKind — signatures de colonnes/cellules (§9)", () => {
 
 describe("buildWrites — écritures déterministes + idempotence", () => {
   it("P&L → orders/{fp}", () => {
-    const { kind, writes } = buildWrites(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]));
-    expect(kind).toBe("pnl");
-    expect(writes[0].path).toBe("orders/FP/2026/1");
+    const { kinds, writes } = buildWrites(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]));
+    expect(kinds).toEqual(["pnl"]);
+    expect(writes[0].path).toBe("orders/FP_2026_1"); // FP sanitisé
     expect(writes[0].data.cas).toBe(100);
+    expect(writes[0].data.fp).toBe("FP/2026/1"); // champ fp d'origine conservé
   });
   it("ré-exécution → mêmes chemins (upsert, aucun doublon)", () => {
     const mk = () => buildWrites(wb("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA" }])).writes.map((w) => w.path);
@@ -46,9 +47,20 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
       [null, "Commande Frns 1", "BC1", "x", "AITEK", "Matériel", "XOF", 500, 500],
       [null, "TOTAL Commandes Frns", null, null, null, null, null, null, 500],
     ];
-    const { kind, writes } = buildWrites(wbAoa("Fiche", aoa));
-    expect(kind).toBe("fiche");
-    expect(writes.map((w) => w.path)).toEqual(["projectSheets/FP/2026/9", "bcLines/FP/2026/9_0"]);
+    const { kinds, writes } = buildWrites(wbAoa("Fiche", aoa));
+    expect(kinds).toEqual(["fiche"]);
+    expect(writes.map((w) => w.path)).toEqual(["projectSheets/FP_2026_9", "bcLines/FP_2026_9_0"]);
+  });
+  it("classeur multi-feuilles (P&L + LIVE + Facturation DF) → toutes les sources", () => {
+    const b = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]), "P&L");
+    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA", IdC: 0.6 }]), "LIVE");
+    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ "Numéro": "A1", "N° FP": "FP/2026/1", "Montant HT": 600 }]), "Facturation DF");
+    const { kinds, writes } = buildWrites(b);
+    expect(kinds.sort()).toEqual(["facturationDf", "pnl", "salesData"]);
+    expect(writes.some((w) => w.path.startsWith("orders/"))).toBe(true);
+    expect(writes.some((w) => w.path.startsWith("opportunities/"))).toBe(true);
+    expect(writes.some((w) => w.path.startsWith("invoices/"))).toBe(true);
   });
 });
 

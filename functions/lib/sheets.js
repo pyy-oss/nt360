@@ -21,12 +21,19 @@ function pickKey(keys, ...terms) {
  * les valeurs vides (utile quand DF et Odoo exposent des colonnes concurrentes).
  */
 function val(row, keys, ...terms) {
+  // 1) Égalité normalisée (trim + sans accents) — évite " MB TOTAL Manuel " quand on veut " MB TOTAL ".
+  for (const t of terms) {
+    const nt = noAcc(t).trim();
+    const k = keys.find((key) => noAcc(key).trim() === nt);
+    if (k != null && row[k] != null && row[k] !== "") return row[k];
+  }
+  // 2) Inclusion, dans l'ordre de priorité des termes, valeur non vide.
   for (const t of terms) {
     const nt = noAcc(t);
     const k = keys.find((key) => noAcc(key).includes(nt));
     if (k != null && row[k] != null && row[k] !== "") return row[k];
   }
-  // Repli : 1re correspondance même vide (préserve le comportement pour clé unique).
+  // 3) Repli : 1re correspondance même vide (préserve le comportement pour clé unique).
   for (const t of terms) {
     const nt = noAcc(t);
     const k = keys.find((key) => noAcc(key).includes(nt));
