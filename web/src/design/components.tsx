@@ -1,6 +1,6 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, CheckCircle2, XCircle } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle } from "lucide-react";
 import { fmt, pct } from "./tokens";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -149,6 +149,71 @@ export function CardSkeleton({ h = 240 }: { h?: number }) {
 
 export function Tip({ children }: { children: ReactNode }) {
   return <div className="text-xs text-muted/80 mt-3">{children}</div>;
+}
+
+// --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
+export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…" }:
+  { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string }) {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    let r = !s ? rows : rows.filter((row) => searchKeys.some((k) => String(k(row) ?? "").toLowerCase().includes(s)));
+    if (sort && columns[sort.i]?.sort) {
+      const key = columns[sort.i].sort!;
+      r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
+    }
+    return r;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, q, sort, columns]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const cur = Math.min(page, pages - 1);
+  const slice = filtered.slice(cur * pageSize, (cur + 1) * pageSize);
+  const toggle = (i: number) => { setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 })); };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="relative">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <input className="field pl-8 w-64" placeholder={placeholder} value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
+        </div>
+        <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
+      </div>
+      {slice.length === 0 ? <EmptyState label="Aucun résultat." /> : (
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-muted">
+                {columns.map((c, i) => (
+                  <th key={i} className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left", c.sort && "cursor-pointer hover:text-ink")} onClick={() => c.sort && toggle(i)}>
+                    <span className="inline-flex items-center gap-1">{c.header}{c.sort && sort?.i === i && (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {slice.map((r, ri) => (
+                <tr key={ri} className="odd:bg-white/[.015] hover:bg-white/[.04] transition-colors">
+                  {columns.map((c, ci) => <td key={ci} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pages > 1 && (
+        <div className="flex items-center justify-end gap-2 text-sm">
+          <button className="btn-ghost !px-2.5 !py-1" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={16} /></button>
+          <span className="text-muted tabnum">Page {cur + 1} / {pages}</span>
+          <button className="btn-ghost !px-2.5 !py-1" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={16} /></button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // --- Toaster ---

@@ -4,12 +4,13 @@ import { useState, type FC } from "react";
 import { where } from "firebase/firestore";
 import {
   AlertTriangle, LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp,
-  Percent, FileText, Truck, ClipboardList, Users, Boxes, Search, Shield, type LucideIcon,
+  Percent, FileText, Truck, ClipboardList, Users, Boxes, Search, Shield,
+  ListChecks, ShoppingCart, FileSpreadsheet, type LucideIcon,
 } from "lucide-react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, ListView, colText, colNum, money, cx } from "../design/components";
 import { AreaTrend, DonutBU, Bars, GroupedBars, Gauge } from "../design/charts";
 import {
   addOpportunity, setBcStatus, upsertCreditLine, upsertObjective,
@@ -428,6 +429,80 @@ const Fp360: FC<Props> = () => {
   );
 };
 
+// --- Listes détaillées (drill-down collections) ---
+const buTone: any = { ICT: "emerald", CLOUD: "steel", FORMATION: "gold", AUTRE: "neutral" };
+const buBadge = (bu: string) => <Badge tone={buTone[bu] || "neutral"}>{bu || "—"}</Badge>;
+
+const OppList: FC<Props> = () => {
+  const { rows, loading } = useCollectionData<any>("opportunities");
+  if (loading && !rows.length) return <CardSkeleton />;
+  return (
+    <Card title={`Opportunités · ${rows.length.toLocaleString("fr-FR")}`}>
+      <ListView
+        rows={rows}
+        searchKeys={[(r) => r.client, (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
+        columns={[
+          colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+          colText("Client", (r) => r.client, (r) => r.client),
+          colText("AM", (r) => r.am, (r) => r.am),
+          colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
+          colNum("Montant", (r) => money(r.amount), (r) => r.amount),
+          colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
+          colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
+          colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
+          colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || ""),
+        ]}
+      />
+    </Card>
+  );
+};
+
+const OrderList: FC<Props> = () => {
+  const { rows, loading } = useCollectionData<any>("orders");
+  if (loading && !rows.length) return <CardSkeleton />;
+  return (
+    <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`}>
+      <ListView
+        rows={rows}
+        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am]}
+        columns={[
+          colText("FP", (r) => r.fp, (r) => r.fp),
+          colText("Client", (r) => r.client, (r) => r.client),
+          colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
+          colText("AM", (r) => r.am, (r) => r.am),
+          colNum("CAS", (r) => money(r.cas), (r) => r.cas),
+          colNum("RAF", (r) => money(r.raf), (r) => r.raf),
+          colNum("MB", (r) => money(r.mb), (r) => r.mb),
+          colNum("%MB", (r) => pct(r.cas ? r.mb / r.cas : 0), (r) => (r.cas ? r.mb / r.cas : 0)),
+          colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
+        ]}
+      />
+    </Card>
+  );
+};
+
+const InvoiceList: FC<Props> = () => {
+  const { rows, loading } = useCollectionData<any>("invoices");
+  if (loading && !rows.length) return <CardSkeleton />;
+  return (
+    <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`}>
+      <ListView
+        rows={rows}
+        searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
+        columns={[
+          colText("Numéro", (r) => r.numero, (r) => r.numero),
+          colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+          colText("Client", (r) => r.client, (r) => r.client),
+          colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
+          colText("Date", (r) => r.date || "—", (r) => r.date || ""),
+          colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
+          colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
+        ]}
+      />
+    </Card>
+  );
+};
+
 // 13 — Habilitations
 const Habilitations: FC<Props> = () => {
   const { data } = useDocData<any>("config/permissions");
@@ -489,9 +564,12 @@ function RoleSetter({ uid }: { uid: string }) {
 export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: FC<Props> }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
+  { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", icon: Target, Component: Objectifs },
   { id: "facturation", key: "facturation", label: "Facturation", icon: Receipt, Component: Facturation },
+  { id: "invoicelist", key: "facturation", label: "Factures", icon: FileSpreadsheet, Component: InvoiceList },
   { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
+  { id: "orderlist", key: "overview", label: "Commandes", icon: ShoppingCart, Component: OrderList },
   { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
   { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", icon: Percent, Component: Rentabilite },
   { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", icon: FileText, Component: PnlProjet },
