@@ -15,6 +15,7 @@ const freq = createRequire(path.join(__dirname, "../functions/package.json"));
 const XLSX = freq("xlsx");
 const { initializeApp, applicationDefault } = freq("firebase-admin/app");
 const { getFirestore, FieldValue } = freq("firebase-admin/firestore");
+const { getStorage } = freq("firebase-admin/storage");
 const { buildWrites, fiscalYearFromOrders } = require("../functions/lib/ingest");
 const { recomputeAll } = require("../functions/lib/aggregate");
 
@@ -22,6 +23,17 @@ const projectId = process.env.GCLOUD_PROJECT || "propulse-business-87f7a";
 const useEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
 initializeApp(useEmulator ? { projectId } : { credential: applicationDefault(), projectId });
 const db = getFirestore();
+
+// Lit un classeur depuis un chemin local OU une URI gs://bucket/clé (via compte de service).
+async function readWorkbook(ref) {
+  if (ref.startsWith("gs://")) {
+    const m = ref.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!m) throw new Error(`URI gs:// invalide : ${ref}`);
+    const [buf] = await getStorage().bucket(m[1]).file(m[2]).download();
+    return XLSX.read(buf, { cellDates: true });
+  }
+  return XLSX.read(fs.readFileSync(ref), { cellDates: true });
+}
 
 async function commitAll(writes) {
   let batch = db.batch(), n = 0, total = 0;
@@ -41,7 +53,7 @@ async function main() {
     process.exit(1);
   }
   for (const f of files) {
-    const wb = XLSX.read(fs.readFileSync(f), { cellDates: true });
+    const wb = await readWorkbook(f);
     const { kinds, writes, report } = buildWrites(wb);
     const written = await commitAll(writes);
     await db.collection("imports").add({

@@ -8,10 +8,13 @@
 //                GCLOUD_PROJECT=propulse-business-87f7a node seed/seed.js admin@nt.ci MotDePasse123
 //   Prod :       GOOGLE_APPLICATION_CREDENTIALS=./sa.json node seed/seed.js admin@nt.ci MotDePasse123
 const { readFileSync } = require("node:fs");
-const { resolve } = require("node:path");
-const { initializeApp, applicationDefault } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
-const { getAuth } = require("firebase-admin/auth");
+const { resolve, join } = require("node:path");
+const { createRequire } = require("node:module");
+// firebase-admin est résolu depuis le codebase functions (monorepo pnpm).
+const freq = createRequire(join(__dirname, "../functions/package.json"));
+const { initializeApp, applicationDefault } = freq("firebase-admin/app");
+const { getFirestore } = freq("firebase-admin/firestore");
+const { getAuth } = freq("firebase-admin/auth");
 
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
 const useEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
