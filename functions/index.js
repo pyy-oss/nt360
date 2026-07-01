@@ -16,36 +16,44 @@ initializeApp();
 const db = getFirestore();
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
-exports.ingest = onObjectFinalized(
-  { bucket: IMPORTS_BUCKET, memoryMiB: 1024, timeoutSeconds: 300 },
-  async (event) => {
-    const { bucket, name } = event.data;
-    if (!name || name.endsWith("/")) return; // dossier
-    const [buf] = await getStorage().bucket(bucket).file(name).download();
-    const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
+// Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
+// dual-region eur4 (non déployable comme région de fonction). Le trigger n'est donc exporté
+// que si INGEST_REGION est défini (région alignée sur le bucket) ; sinon l'ingestion passe
+// par seed/loadData.js (Admin SDK, sans contrainte de région).
+async function ingestHandler(event) {
+  const { bucket, name } = event.data;
+  if (!name || name.endsWith("/")) return; // dossier
+  const [buf] = await getStorage().bucket(bucket).file(name).download();
+  const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
 
-    const { kinds, writes, report } = buildWrites(wb);
-    logger.info("ingest", { name, kinds, ...report });
+  const { kinds, writes, report } = buildWrites(wb);
+  logger.info("ingest", { name, kinds, ...report });
 
-    if (writes.length) {
-      let batch = db.batch(), n = 0;
-      for (const w of writes) {
-        batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
-        if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-      }
-      await batch.commit();
+  if (writes.length) {
+    let batch = db.batch(), n = 0;
+    for (const w of writes) {
+      batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
+      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
     }
-
-    await db.collection("imports").add({
-      uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
-      rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
-      report, ts: FieldValue.serverTimestamp(),
-    });
-
-    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-    await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    await batch.commit();
   }
-);
+
+  await db.collection("imports").add({
+    uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
+    rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
+    report, ts: FieldValue.serverTimestamp(),
+  });
+
+  if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+  await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+}
+
+if (process.env.INGEST_REGION) {
+  exports.ingest = onObjectFinalized(
+    { bucket: IMPORTS_BUCKET, region: process.env.INGEST_REGION, memoryMiB: 1024, timeoutSeconds: 300 },
+    ingestHandler
+  );
+}
 
 /** Recalcule config/fiscal.currentFy = max(yearPo) des commandes (§7). */
 async function updateFiscalYearFromOrders() {
