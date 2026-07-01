@@ -23,8 +23,9 @@ function overview(orders, invoices, opps = []) {
     (o) => o.weighted
   );
   return {
-    // Certitudes = commandes signées + pipeline quasi-certain (à venir).
-    certitudes: commandes + pondCertain,
+    // Certitudes = pipeline quasi-certain à venir (actif, IdC ≥ 90 %, pas encore signé).
+    // Les commandes signées sont suivies à part (maillon COMMANDES) et NON incluses ici.
+    certitudes: pondCertain,
     pondCertain,
     commandes,
     facture,

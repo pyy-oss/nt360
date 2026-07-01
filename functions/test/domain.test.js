@@ -33,9 +33,9 @@ describe("overview — chaîne (§7)", () => {
     expect(ov.facture).toBe(1400);
     expect(ov.backlog).toBe(1200);
   });
-  it("certitudes = commandes + pondéré certain (IdC≥90%) ; gagné = commandes (non recompté)", () => {
+  it("certitudes = pondéré certain (IdC≥90%) seul ; commandes suivies à part", () => {
     expect(ov.pondCertain).toBe(950); // o6 éligible
-    expect(ov.certitudes).toBe(2300 + 950); // pas de double compte des gagnés
+    expect(ov.certitudes).toBe(950); // pondéré quasi-certain seul (hors commandes signées)
   });
   it("taux de facturation = (CAS−RAF)/CAS", () => {
     expect(ov.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);

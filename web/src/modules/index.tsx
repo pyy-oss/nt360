@@ -92,7 +92,7 @@ const Overview: FC<Props> = ({ period }) => {
       <div className="flex justify-end">{actions}</div>
       {/* Chaîne de valeur */}
       <Chain>
-        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} />
+        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · à venir" />
         <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} />
         <Stage idx={3} label="Facturé" accent={T.emerald} value={fmt(data.facture)} sub={`taux ${pct(data.ratios?.tauxFacturation)}`} />
         <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(bl?.total ?? data.backlog)} sub={bl ? `${bl.count} commandes` : undefined} />
