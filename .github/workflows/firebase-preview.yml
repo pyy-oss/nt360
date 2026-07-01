@@ -2,6 +2,7 @@ name: Firebase Hosting Preview
 
 # Déploie un canal de preview Firebase Hosting sur chaque PR et poste l'URL en commentaire.
 # Nécessite le secret FIREBASE_SERVICE_ACCOUNT (compte de service du projet).
+# Tant que le secret est absent, les étapes de build/deploy sont ignorées (job vert).
 on:
   pull_request:
 
@@ -16,22 +17,36 @@ jobs:
     # Ignore les PR issues de forks (pas d'accès aux secrets).
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
+      - name: Check service account secret
+        id: guard
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -n "$SA" ]; then echo "ok=true" >> "$GITHUB_OUTPUT";
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::FIREBASE_SERVICE_ACCOUNT absent — preview ignorée."; fi
+
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.ok == 'true'
 
       - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.ok == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ok == 'true'
         with:
           node-version: "20"
           cache: "pnpm"
 
       - name: Install
+        if: steps.guard.outputs.ok == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build web
+        if: steps.guard.outputs.ok == 'true'
         run: pnpm --filter web build
 
       - name: Deploy preview channel
+        if: steps.guard.outputs.ok == 'true'
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
