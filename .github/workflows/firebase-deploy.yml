@@ -31,10 +31,16 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy
+      - name: Deploy (hosting, firestore, functions)
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy
-          --only hosting,firestore,storage,functions
-          --project propulse-business-87f7a
-          --non-interactive
+          npx firebase deploy --only hosting,firestore,functions
+          --project propulse-business-87f7a --non-interactive
+
+      # Storage nécessite un bucket par défaut initialisé (console → Storage). Non bloquant.
+      - name: Deploy storage rules (non bloquant)
+        continue-on-error: true
+        run: >
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx firebase deploy --only storage
+          --project propulse-business-87f7a --non-interactive

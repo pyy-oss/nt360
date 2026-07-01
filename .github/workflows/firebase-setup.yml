@@ -56,12 +56,22 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy
+      - name: Deploy (hosting, firestore, functions)
         if: ${{ inputs.run_deploy }}
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
           npx firebase deploy
-          --only hosting,firestore,storage,functions
+          --only hosting,firestore,functions
+          --project "$GCLOUD_PROJECT" --non-interactive
+
+      # Storage nécessite un bucket par défaut initialisé (console Firebase → Storage).
+      # Non bloquant : le reste du déploiement reste valide s'il n'est pas encore prêt.
+      - name: Deploy storage rules (non bloquant)
+        if: ${{ inputs.run_deploy }}
+        continue-on-error: true
+        run: >
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx firebase deploy --only storage
           --project "$GCLOUD_PROJECT" --non-interactive
 
       - name: Seed 1er admin + matrice
