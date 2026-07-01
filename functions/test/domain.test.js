@@ -22,6 +22,8 @@ const OPPS = [
   { oppId: "o3", client: "GAMMA", am: "DATCHA", bu: "ICT", amount: 5000, stage: 8, probability: 0.05, weighted: 250 },
   { oppId: "o4", client: "D", am: "X", bu: "ICT", amount: 100, stage: 6, probability: 1, weighted: 100 },
   { oppId: "o5", client: "E", am: "Y", bu: "ICT", amount: 100, stage: 7, probability: 0, weighted: 0 },
+  // Éligible au pondéré : actif (stage 3) + IdC ≥ 90 %.
+  { oppId: "o6", client: "ACME", am: "DATCHA", bu: "ICT", amount: 1000, stage: 3, probability: 0.95, weighted: 950, closingDate: "2026-05-01" },
 ];
 
 describe("overview — chaîne (§7)", () => {
@@ -30,6 +32,11 @@ describe("overview — chaîne (§7)", () => {
     expect(ov.commandes).toBe(2300);
     expect(ov.facture).toBe(1400);
     expect(ov.backlog).toBe(1200);
+  });
+  it("certitudes = commandes + gagnés-non-commandés + pondéré certain (IdC≥90%)", () => {
+    // o4 gagné sans fp (100) + o6 éligible pondéré (950)
+    expect(ov.pondCertain).toBe(950);
+    expect(ov.certitudes).toBe(2300 + 100 + 950);
   });
   it("taux de facturation = (CAS−RAF)/CAS", () => {
     expect(ov.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);
@@ -50,11 +57,13 @@ describe("backlogFy — ancré FY, indépendant de la période (§7)", () => {
   });
 });
 
-describe("pipeline — pondéré = Σ(montant×proba), conversion (§18.5)", () => {
+describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () => {
   const p = pipeline(OPPS);
-  it("actif (1-5) brut & pondéré", () => {
-    expect(p.tot.brut).toBe(3000); // 1000 + 2000
-    expect(p.tot.weighted).toBe(1100); // 600 + 500
+  it("brut = toute la funnel active ; pondéré = éligibles ≥90%", () => {
+    expect(p.tot.brut).toBe(4000); // active 1-5 : 1000 + 2000 + 1000
+    expect(p.tot.weighted).toBe(950); // seul o6 (IdC 0.95) éligible
+    expect(p.tot.countConf).toBe(1);
+    expect(p.confianceMin).toBe(0.9);
   });
   it("suspendu (8) séparé", () => {
     expect(p.susp.brut).toBe(5000);
@@ -63,9 +72,9 @@ describe("pipeline — pondéré = Σ(montant×proba), conversion (§18.5)", () 
   it("conversion = gagné/(gagné+perdu)", () => {
     expect(p.conv).toBe(0.5);
   });
-  it("pondéré par AM", () => {
-    expect(p.byAM.DATCHA).toBe(600);
-    expect(p.byAM.KOUADIO).toBe(500);
+  it("pondéré par AM = éligibles seulement", () => {
+    expect(p.byAM.DATCHA).toBe(950); // o6
+    expect(p.byAM.KOUADIO).toBeUndefined(); // o2 non éligible (proba 0.25)
   });
 });
 

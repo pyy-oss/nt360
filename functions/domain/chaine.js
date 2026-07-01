@@ -15,12 +15,19 @@ function overview(orders, invoices, opps = []) {
   const mb = sum(orders, (o) => o.mb);
   const won = opps.filter((o) => o.stage === 6);
   const pipelineWon = sum(won, (o) => o.amount);
-  // Certitudes = commandes fermes + gagnés pas encore convertis en commande.
+  // Certitudes = commandes fermes + gagnés pas encore convertis + pipeline quasi-certain.
   const wonFps = new Set(won.map((o) => o.fp).filter(Boolean));
   const orderFps = new Set(orders.map((o) => o.fp));
   const wonNotOrdered = sum(won.filter((o) => !o.fp || !orderFps.has(o.fp)), (o) => o.amount);
+  // Pipeline quasi-certain : actif (non perdu/suspendu) avec IdC ≥ 90 %.
+  const CONFIANCE_MIN = 0.9;
+  const pondCertain = sum(
+    opps.filter((o) => o.stage >= 1 && o.stage <= 5 && (o.probability || 0) >= CONFIANCE_MIN),
+    (o) => o.weighted
+  );
   return {
-    certitudes: commandes + wonNotOrdered,
+    certitudes: commandes + wonNotOrdered + pondCertain,
+    pondCertain,
     commandes,
     facture,
     backlog,

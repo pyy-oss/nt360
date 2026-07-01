@@ -4,10 +4,15 @@
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
 
+// Indice de confiance minimum pour le pipeline PONDÉRÉ (règle métier).
+const CONFIANCE_MIN = 0.9;
 const isActive = (o) => o.stage >= 1 && o.stage <= 5;
+// Éligible au pondéré : actif (donc non perdu/annulé/suspendu) ET IdC ≥ 90 %.
+const isEligible = (o) => isActive(o) && (o.probability || 0) >= CONFIANCE_MIN;
 
 function pipeline(opps) {
   const active = opps.filter(isActive);
+  const eligible = opps.filter(isEligible);
   const suspended = opps.filter((o) => o.stage === 8);
   const won = opps.filter((o) => o.stage === 6);
   const lost = opps.filter((o) => o.stage === 7);
@@ -22,19 +27,22 @@ function pipeline(opps) {
   }
 
   const month = (o) => (o.closingDate ? String(o.closingDate).slice(0, 7) : "?");
-  const topOpps = [...active]
+  // Top opportunités : celles éligibles (IdC ≥ 90 %), triées par montant pondéré.
+  const topOpps = [...eligible]
     .sort((a, b) => (b.weighted || 0) - (a.weighted || 0))
     .slice(0, 10)
-    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: o.weighted, stage: o.stage }));
+    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: o.weighted, stage: o.stage, probability: o.probability }));
 
   const wonCount = won.length, lostCount = lost.length;
   return {
-    tot: { brut: sum(active, (o) => o.amount), weighted: sum(active, (o) => o.weighted), count: active.length },
+    // brut = toute la funnel active ; pondéré = éligibles (non perdu/suspendu, IdC ≥ 90 %).
+    tot: { brut: sum(active, (o) => o.amount), weighted: sum(eligible, (o) => o.weighted), count: active.length, countConf: eligible.length },
     susp: { brut: sum(suspended, (o) => o.amount), count: suspended.length },
+    confianceMin: CONFIANCE_MIN,
     byStage,
-    byAM: groupSum(active, (o) => o.am, (o) => o.weighted),
-    byBU: groupSum(active, (o) => o.bu, (o) => o.weighted),
-    byMonth: groupSum(active, month, (o) => o.weighted),
+    byAM: groupSum(eligible, (o) => o.am, (o) => o.weighted),
+    byBU: groupSum(eligible, (o) => o.bu, (o) => o.weighted),
+    byMonth: groupSum(eligible, month, (o) => o.weighted),
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
@@ -42,4 +50,4 @@ function pipeline(opps) {
   };
 }
 
-module.exports = { pipeline, isActive };
+module.exports = { pipeline, isActive, isEligible, CONFIANCE_MIN };

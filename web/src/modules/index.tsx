@@ -121,7 +121,7 @@ const Pipeline: FC<Props> = () => {
         <>
           <div className={grid4}>
             <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
-            <Kpi label="Actif (pondéré)" value={fmt(data.tot?.weighted)} tone="gold" />
+            <Kpi label="Pondéré (IdC ≥ 90 %)" value={fmt(data.tot?.weighted)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp.`} />
             <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
             <Kpi label="Conversion" value={pct(data.conv)} sub={`${data.wonCount}/${data.wonCount + data.lostCount}`} />
           </div>
@@ -248,7 +248,7 @@ const Prevision: FC<Props> = () => {
       <div className={grid4}>
         <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
         <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pipeline pondéré (clôture FY)" value={fmt(pond)} tone="gold" />
+        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
         <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pondéré" />
       </div>
       {att && (

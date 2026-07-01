@@ -12,8 +12,9 @@ const INVOICES = [
   { fp: "FP/2025/1", date: "2025-01-01", amountHt: 400 },
 ];
 const OPPS = [
-  { stage: 4, weighted: 500, closingDate: "2026-05-01" },
-  { stage: 4, weighted: 300, closingDate: "2025-05-01" }, // hors FY
+  { stage: 4, probability: 0.95, weighted: 500, closingDate: "2026-05-01" }, // éligible ≥90% + FY
+  { stage: 4, probability: 0.95, weighted: 300, closingDate: "2025-05-01" }, // hors FY
+  { stage: 4, probability: 0.4, weighted: 800, closingDate: "2026-06-01" }, // FY mais IdC<90% → exclu
 ];
 const OBJ = [{ fiscalYear: 2026, scope: "global", targetCas: 2000 }];
 

@@ -2,6 +2,7 @@
 // pipeline pondéré (closing FY) → vs objectifs, avec écart et probabilité d'atteinte.
 // + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
+const { isEligible } = require("./pipeline");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
@@ -15,8 +16,9 @@ const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 function atterrissage(orders, invoices, opps, objectives, fy) {
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
+  // Pondéré = opportunités éligibles (non perdu/suspendu, IdC ≥ 90 %) clôturant en FY.
   const pipelinePondere = sum(
-    opps.filter((o) => o.stage >= 1 && o.stage <= 5 && yearOf(o.closingDate) === String(fy)),
+    opps.filter((o) => isEligible(o) && yearOf(o.closingDate) === String(fy)),
     (o) => o.weighted
   );
   const objectif = sum(
