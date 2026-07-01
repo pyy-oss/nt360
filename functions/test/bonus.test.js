@@ -25,6 +25,10 @@ describe("atterrissage (§7)", () => {
     expect(a.pipelinePondere).toBe(500); // seule l'opp closing 2026
     expect(a.projete).toBe(1700);
   });
+  it("projeté CAF = facturé réalisé + backlog (RAF) + pondéré", () => {
+    expect(a.backlog).toBe(700); // RAF ouverts : 400 (FP/2026/1) + 300 (FP/2022/9)
+    expect(a.cafProjete).toBe(1800); // 600 (facturé FY) + 700 (backlog) + 500 (pondéré)
+  });
   it("écart vs objectif + N vs N-1", () => {
     expect(a.objectif).toBe(2000);
     expect(a.ecart).toBe(-300);

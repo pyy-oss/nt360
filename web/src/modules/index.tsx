@@ -243,6 +243,8 @@ const Prevision: FC<Props> = () => {
   const backlog = bl?.total || 0;
   const pond = att?.pipelinePondere ?? 0; // pondéré CLÔTURANT en FY
   const projete = att?.projete ?? (realiseCas + pond);
+  const factureN = att?.factureN || 0;
+  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond); // facturé + backlog + pondéré
   const fy = att?.fy || cfg?.currentFy;
   return (
     <div className="flex flex-col gap-4">
@@ -251,6 +253,12 @@ const Prevision: FC<Props> = () => {
         <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
         <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
         <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pondéré" />
+      </div>
+      <div className={grid4}>
+        <Kpi label={`Facturé réalisé (FY ${fy || ""})`} value={fmt(factureN)} tone="emerald" />
+        <Kpi label="Backlog à facturer (RAF)" value={fmt(backlog)} tone="steel" />
+        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pondéré" />
       </div>
       {att && (
         <div className={cols2}>
@@ -268,7 +276,7 @@ const Prevision: FC<Props> = () => {
           </Card>
         </div>
       )}
-      <Tip>Projeté CAS = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (les opportunités closing 2024/2025 sont exclues). Cohérent avec l'atterrissage ci-dessus.</Tip>
+      <Tip><b>Projeté CAS</b> = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (prise de commande). <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF, reste à facturer) + pipeline pondéré (facturation projetée — le backlog y entre, sans double compte). Opportunités closing 2024/2025 exclues.</Tip>
     </div>
   );
 };
