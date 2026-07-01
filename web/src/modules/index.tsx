@@ -489,23 +489,40 @@ const OrderList: FC<Props> = () => {
 
 const InvoiceList: FC<Props> = () => {
   const { rows, loading } = useCollectionData<any>("invoices");
+  const [f, setF] = useState<"all" | "linked" | "orphan">("all");
   if (loading && !rows.length) return <CardSkeleton />;
+  const orphan = rows.filter((r) => r.linked === false);
+  const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
+  const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked !== false);
+  const seg = (id: typeof f, label: string, n?: number) => (
+    <button onClick={() => setF(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", f === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>
+      {label}{n != null && <span className="ml-1 opacity-70">{n.toLocaleString("fr-FR")}</span>}
+    </button>
+  );
   return (
-    <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`}>
-      <ListView
-        rows={rows}
-        searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
-        columns={[
-          colText("Numéro", (r) => r.numero, (r) => r.numero),
-          colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
-          colText("Client", (r) => r.client, (r) => r.client),
-          colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
-          colText("Date", (r) => r.date || "—", (r) => r.date || ""),
-          colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
-          colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
-        ]}
-      />
-    </Card>
+    <div className="flex flex-col gap-3">
+      {orphan.length > 0 && (
+        <div className={grid4}>
+          <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />
+        </div>
+      )}
+      <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5">{seg("all", "Toutes")}{seg("linked", "Rattachées")}{seg("orphan", "Non rattachées", orphan.length)}</div>}>
+        <ListView
+          rows={filtered}
+          searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
+          columns={[
+            colText("Numéro", (r) => r.numero, (r) => r.numero),
+            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colText("Client", (r) => r.client, (r) => r.client),
+            colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
+            colText("Rattach.", (r) => (r.linked === false ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked === false ? 0 : 1)),
+            colText("Date", (r) => r.date || "—", (r) => r.date || ""),
+            colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
+            colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
+          ]}
+        />
+      </Card>
+    </div>
   );
 };
 
