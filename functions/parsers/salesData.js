@@ -38,6 +38,7 @@ function pickSheet(wb) {
 function parseSalesData(wb) {
   const rows = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
   const out = [];
+  const dupSeq = new Map(); // clé métier → nb d'occurrences déjà vues (idempotent, préserve les doublons légitimes)
   let rowsIn = 0;
   for (const r of rows) {
     rowsIn++;
@@ -57,11 +58,20 @@ function parseSalesData(wb) {
     const closingDate = (((d) => (d && +d.slice(0, 4) >= 2018 && +d.slice(0, 4) <= 2030 ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))); // rejet sentinelles 1899
 
     // ⚠️ NE PAS utiliser le terme "id" seul : il matche "IdC" (proba) → collisions massives.
-    // Sans extId : hash sur une clé MÉTIER stable (FP + closing + client/montant/étape/AM),
-    // indépendante de la position de ligne → idempotent même si des lignes LIVE sont
-    // insérées/réordonnées en amont. Deux lignes strictement identiques fusionnent (doublon).
+    // Sans extId : hash sur une clé MÉTIER stable (FP + closing + client/montant/étape/AM)
+    // + un index d'occurrence PARMI LES LIGNES IDENTIQUES. Indépendant de la position
+    // absolue (rowsIn) → idempotent si des lignes non-identiques sont insérées/réordonnées,
+    // tout en PRÉSERVANT les doublons légitimes (deux affaires identiques → seq 0,1 distincts).
     const extId = val(r, keys, "ext id", "extid", "opp id", "oppid");
-    const oppId = extId ? safeId(extId) : hashId(client, amount, stage, am, fp || "", closingDate || "");
+    let oppId;
+    if (extId) {
+      oppId = safeId(extId);
+    } else {
+      const mkey = [client, amount, stage, am, fp || "", closingDate || ""].join("|");
+      const seq = dupSeq.get(mkey) || 0;
+      dupSeq.set(mkey, seq + 1);
+      oppId = hashId(client, amount, stage, am, fp || "", closingDate || "", seq);
+    }
 
     out.push({
       _id: oppId,
