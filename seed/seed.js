@@ -12,17 +12,18 @@ const { resolve, join } = require("node:path");
 const { createRequire } = require("node:module");
 // firebase-admin est résolu depuis le codebase functions (monorepo pnpm).
 const freq = createRequire(join(__dirname, "../functions/package.json"));
-const { initializeApp, applicationDefault } = freq("firebase-admin/app");
+const { initializeApp, applicationDefault, getApp } = freq("firebase-admin/app");
 const { getFirestore } = freq("firebase-admin/firestore");
 const { getAuth } = freq("firebase-admin/auth");
 
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
 const useEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
+const FIRESTORE_DB = process.env.FIRESTORE_DATABASE || "nt360";
 
 // Sur émulateur, pas de credentials requis ; en prod, ADC (compte de service).
 initializeApp(useEmulator ? { projectId } : { credential: applicationDefault(), projectId });
 
-const db = getFirestore();
+const db = getFirestore(getApp(), FIRESTORE_DB);
 const auth = getAuth();
 
 async function main() {

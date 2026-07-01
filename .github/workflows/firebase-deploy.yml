@@ -31,18 +31,12 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      # firestore:rules uniquement (pas :indexes) pour ne pas supprimer d'index existants
-      # du projet en mode non-interactif. Nos index composites se créent à la demande.
-      - name: Deploy (hosting, firestore:rules, functions)
+      # Projet PARTAGÉ : déploiement scopé (site hosting dédié, base Firestore nommée
+      # nt360, nos functions par nom). Ne touche ni à la base (default) ni aux functions
+      # de l'autre app.
+      - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy --only hosting,firestore:rules,functions
-          --project propulse-business-87f7a --non-interactive
-
-      # Storage nécessite un bucket par défaut initialisé (console → Storage). Non bloquant.
-      - name: Deploy storage rules (non bloquant)
-        continue-on-error: true
-        run: >
-          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy --only storage
+          npx firebase deploy
+          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
           --project propulse-business-87f7a --non-interactive

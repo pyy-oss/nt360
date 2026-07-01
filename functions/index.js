@@ -9,11 +9,13 @@ const { getStorage } = require("firebase-admin/storage");
 const { getAuth } = require("firebase-admin/auth");
 const XLSX = require("xlsx");
 
-const { IMPORTS_BUCKET } = require("./lib/config");
+const { getApp } = require("firebase-admin/app");
+const { IMPORTS_BUCKET, FIRESTORE_DB } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
 
 initializeApp();
-const db = getFirestore();
+// Base Firestore nommée nt360 (projet partagé) — isole données et règles.
+const db = getFirestore(getApp(), FIRESTORE_DB);
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
@@ -202,7 +204,7 @@ exports.scheduledFirestoreExport = onSchedule("every sunday 03:00", async () => 
   const client = new firestore.v1.FirestoreAdminClient();
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
   const ts = new Date().toISOString().slice(0, 10);
-  const name = client.databasePath(projectId, "(default)");
+  const name = client.databasePath(projectId, FIRESTORE_DB);
   const [op] = await client.exportDocuments({
     name,
     outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,

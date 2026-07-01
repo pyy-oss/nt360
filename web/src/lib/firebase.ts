@@ -35,10 +35,14 @@ if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
   });
 }
 
-// Persistance offline (§1 local-first, §12).
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-});
+// Persistance offline (§1 local-first, §12). Base Firestore nommée nt360 (projet
+// partagé) → 3e argument databaseId, pour ne pas toucher à la base "(default)".
+export const FIRESTORE_DB = import.meta.env.VITE_FIRESTORE_DB ?? "nt360";
+export const db = initializeFirestore(
+  app,
+  { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) },
+  FIRESTORE_DB
+);
 export const auth = getAuth(app);
 export const functions = getFunctions(app);
 

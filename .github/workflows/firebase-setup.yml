@@ -56,25 +56,18 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      # firestore:rules uniquement (pas :indexes) : le projet peut héberger d'autres index
-      # qu'un déploiement non-interactif voudrait supprimer (--force). Nos 3 index composites
-      # sont optionnels (requêtes de détail) et se créent à la demande via le lien console.
-      - name: Deploy (hosting, firestore:rules, functions)
+      # Projet PARTAGÉ avec une autre app : on scope strictement le déploiement.
+      # - hosting : site dédié (firebase.json → hosting.site=nt360-cockpit)
+      # - firestore:rules : base nommée nt360 (firebase.json → firestore.database=nt360)
+      # - functions : NOS fonctions par nom (jamais --only functions global, qui
+      #   proposerait de supprimer les ~50 functions de l'autre app)
+      # - pas de storage / pas d'index (ne rien écraser sur la base (default)).
+      - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
         if: ${{ inputs.run_deploy }}
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
           npx firebase deploy
-          --only hosting,firestore:rules,functions
-          --project "$GCLOUD_PROJECT" --non-interactive
-
-      # Storage nécessite un bucket par défaut initialisé (console Firebase → Storage).
-      # Non bloquant : le reste du déploiement reste valide s'il n'est pas encore prêt.
-      - name: Deploy storage rules (non bloquant)
-        if: ${{ inputs.run_deploy }}
-        continue-on-error: true
-        run: >
-          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy --only storage
+          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
           --project "$GCLOUD_PROJECT" --non-interactive
 
       - name: Seed 1er admin + matrice

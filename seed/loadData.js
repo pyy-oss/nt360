@@ -13,7 +13,7 @@ const { createRequire } = require("node:module");
 // Résout les dépendances (xlsx, firebase-admin) depuis le codebase functions.
 const freq = createRequire(path.join(__dirname, "../functions/package.json"));
 const XLSX = freq("xlsx");
-const { initializeApp, applicationDefault } = freq("firebase-admin/app");
+const { initializeApp, applicationDefault, getApp } = freq("firebase-admin/app");
 const { getFirestore, FieldValue } = freq("firebase-admin/firestore");
 const { getStorage } = freq("firebase-admin/storage");
 const { buildWrites, fiscalYearFromOrders } = require("../functions/lib/ingest");
@@ -21,8 +21,9 @@ const { recomputeAll } = require("../functions/lib/aggregate");
 
 const projectId = process.env.GCLOUD_PROJECT || "propulse-business-87f7a";
 const useEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
+const FIRESTORE_DB = process.env.FIRESTORE_DATABASE || "nt360";
 initializeApp(useEmulator ? { projectId } : { credential: applicationDefault(), projectId });
-const db = getFirestore();
+const db = getFirestore(getApp(), FIRESTORE_DB);
 
 // Lit un classeur depuis un chemin local OU une URI gs://bucket/clé (via compte de service).
 async function readWorkbook(ref) {
