@@ -32,6 +32,13 @@ describe("overview — chaîne (§7)", () => {
     expect(ov.commandes).toBe(2300);
     expect(ov.facture).toBe(1400);
     expect(ov.backlog).toBe(1200);
+    expect(ov.backlogCount).toBe(2); // FP/2026/1 (raf 400) + FP/2026/3 (raf 800)
+  });
+  it("facturé = rattaché par N° FP ; orphelines exclues du maillon", () => {
+    const ov2 = overview(ORDERS, [...INVOICES, { numero: "X", fp: "FP/9999/9", amountHt: 777 }], OPPS);
+    expect(ov2.facture).toBe(1400); // orpheline (FP absent des commandes) exclue
+    expect(ov2.factureOrphelin).toBe(777);
+    expect(ov2.factureTotal).toBe(2177);
   });
   it("certitudes = pondéré certain (IdC≥90%) seul ; commandes suivies à part", () => {
     expect(ov.pondCertain).toBe(950); // o6 éligible
@@ -96,6 +103,12 @@ describe("suppliers — exposition/encours/couverture (§18.6)", () => {
     const wes = s.bySupplier.find((x) => x.name === "WESTCON");
     expect(hip.encours).toBe(250);
     expect(wes.encours).toBe(150);
+  });
+  it("sans ligne de crédit (authorized=0) → non_suivi (pas de faux saturation)", () => {
+    const hip = s.bySupplier.find((x) => x.name === "HIPERDIST");
+    expect(hip.state).toBe("non_suivi"); // aucune creditLine → non statué
+    const wes = s.bySupplier.find((x) => x.name === "WESTCON");
+    expect(wes.state).toBe("ok"); // authorized 1000, couverture positive
   });
 });
 

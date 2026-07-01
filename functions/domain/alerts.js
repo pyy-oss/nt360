@@ -25,9 +25,15 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy) {
   // --- Cohérence financière (identité CAS = Facturé + RAF) ---
   const invByFp = {};
   for (const i of invoices || []) if (i.fp) invByFp[i.fp] = (invByFp[i.fp] || 0) + (i.amountHt || 0);
-  const orphan = (invoices || []).filter((i) => i.linked === false);
+  // Non rattachée = tout ce qui n'est pas explicitement lié (linked !== true) : robuste même
+  // si une facture n'a pas été enrichie (drapeau absent).
+  const orphan = (invoices || []).filter((i) => i.linked !== true);
   const orphanAmt = orphan.reduce((s, i) => s + (i.amountHt || 0), 0);
   if (orphan.length) out.push({ type: "factures_non_rattachees", severity: "high", count: orphan.length, message: `${orphan.length} facture(s) non rattachées à une commande (${(orphanAmt / 1e9).toFixed(2)} Md)` });
+
+  // Facture rattachée mais antérieure à l'année du PO (anomalie chronologique, cf. enrichLinks.prePo).
+  const prePo = (invoices || []).filter((i) => i.prePo);
+  if (prePo.length) out.push({ type: "facture_pre_po", severity: "medium", count: prePo.length, message: `${prePo.length} facture(s) antérieure(s) à l'année du PO` });
 
   const surfac = orders.filter((o) => o.cas > 0 && (invByFp[o.fp] || 0) > o.cas * 1.005);
   if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });

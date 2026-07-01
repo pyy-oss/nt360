@@ -37,7 +37,7 @@ describe("atterrissage (§7)", () => {
 describe("alerts", () => {
   const sup = { bySupplier: [{ name: "HDF", state: "saturation" }, { name: "EXN", state: "tension" }] };
   const INV = [
-    { fp: "FP/2026/1", amountHt: 600, linked: true },
+    { fp: "FP/2026/1", amountHt: 600, linked: true, prePo: true }, // facturée avant l'année du PO
     { fp: "FP/2026/3", amountHt: 300, linked: true }, // Σ=300 > cas 200 → surfacturation
     { fp: "FP/9999/9", amountHt: 50, linked: false }, // orpheline
   ];
@@ -57,9 +57,10 @@ describe("alerts", () => {
   it("BC non soldés", () => {
     expect(byType.bc_en_attente.count).toBe(1);
   });
-  it("alertes financières : orphelines, surfacturation, RAF incohérent", () => {
-    expect(byType.factures_non_rattachees.count).toBe(1); // FP/9999/9
+  it("alertes financières : orphelines, surfacturation, RAF incohérent, pré-PO", () => {
+    expect(byType.factures_non_rattachees.count).toBe(1); // FP/9999/9 (linked !== true)
     expect(byType.surfacturation.count).toBe(1); // FP/2026/3 (300 > 200)
     expect(byType.raf_incoherent.count).toBeGreaterThanOrEqual(1); // FP/2022/9 (attendu 800 vs raf 300)
+    expect(byType.facture_pre_po.count).toBe(1); // FP/2026/1 prePo
   });
 });

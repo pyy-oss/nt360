@@ -1,6 +1,7 @@
-// Atterrissage annuel (BUILD_KIT §7) : Réalisé CAS(FY) + backlog facturable +
-// pipeline pondéré (closing FY) → vs objectifs, avec écart et probabilité d'atteinte.
-// + comparaison N vs N-1 sur la facturation.
+// Atterrissage annuel (BUILD_KIT §7) : projeté = Réalisé CAS(FY) + pipeline pondéré
+// (closing FY) → vs objectifs, avec écart et probabilité d'atteinte. Le backlog est
+// exposé séparément (informatif) mais N'ENTRE PAS dans le projeté (déjà couvert par le
+// CAS réalisé — l'ajouter double-compterait). + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
 const { isEligible } = require("./pipeline");
 

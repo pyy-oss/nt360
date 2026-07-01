@@ -73,7 +73,6 @@ function AlertsBanner() {
 // 1 — Vue d'ensemble
 const Overview: FC<Props> = ({ period }) => {
   const { data, loading } = useDocData<any>(`summaries/overview_${period}`);
-  const { data: bl } = useDocData<any>("summaries/backlog_fy");
   const { data: cfg } = useDocData<any>("config/periods");
   const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   const canWrite = useCan("overview") === "write";
@@ -94,17 +93,17 @@ const Overview: FC<Props> = ({ period }) => {
       <Chain>
         <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · à venir" />
         <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} />
-        <Stage idx={3} label="Facturé" accent={T.emerald} value={fmt(data.facture)} sub={`taux ${pct(data.ratios?.tauxFacturation)}`} />
-        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(bl?.total ?? data.backlog)} sub={bl ? `${bl.count} commandes` : undefined} />
+        <Stage idx={3} label="Facturé" accent={T.emerald} value={fmt(data.facture)} sub={`rattaché · taux ${pct(data.ratios?.tauxFacturation)}`} />
+        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes` : undefined} />
       </Chain>
       <div className={grid4}>
         <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
-        <Kpi label="Facturé (FY)" value={fmt(att?.factureN ?? data.facture)} tone="emerald" delta={att?.croissanceFacture} sub="vs N-1" />
+        <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
         <Kpi label="Pondéré certain (IdC ≥ 90 %)" value={fmt(data.pondCertain)} tone="steel" sub="à venir" />
         <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
       </div>
       <AlertsBanner />
-      <Tip>Chaîne Certitudes → Commandes → Facturé → Backlog, jointe par N° FP. Backlog ancré FY (indépendant de la période).</Tip>
+      <Tip>Chaîne Certitudes → Commandes → Facturé (rattaché par N° FP) → Backlog, cohérente sur la période sélectionnée (CAS = Facturé + RAF). Vue Backlog ancrée FY dans le module dédié. Certitudes = pipeline pondéré IdC ≥ 90 % (global, à venir).</Tip>
     </div>
   );
 };
@@ -170,11 +169,13 @@ const Objectifs: FC<Props> = ({ period }) => {
             colText("Périmètre", (x) => `${x.fiscalYear} ${x.scope || ""} ${x.scopeValue || ""}`.trim()),
             colNum("Cible CAS", (x) => money(x.targetCas)), colNum("Cible Facturé", (x) => money(x.targetInvoiced)),
             colNum("Cible Marge", (x) => money(x.targetMargin)),
-            colNum("R/O CAS", (x) => x.targetCas > 0 ? <Badge tone={realiseCas / x.targetCas >= 1 ? "emerald" : "gold"}>{pct(realiseCas / x.targetCas)}</Badge> : "—"),
+            // R/O = réalisé de la période SÉLECTIONNÉE / cible de la MÊME année (sinon "—",
+            // pour ne pas comparer un réalisé période à une cible d'une autre année).
+            colNum("R/O CAS", (x) => (x.targetCas > 0 && String(x.fiscalYear) === String(period)) ? <Badge tone={realiseCas / x.targetCas >= 1 ? "emerald" : "gold"}>{pct(realiseCas / x.targetCas)}</Badge> : "—"),
           ]}
           rows={rows}
         />
-        <Tip>Réalisé CAS période : {fmt(realiseCas)} · Facturé : {fmt(ov?.facture)} · Marge : {fmt(ov?.mb)}.</Tip>
+        <Tip>Réalisé CAS de la période {period} : {fmt(realiseCas)} · Facturé : {fmt(ov?.facture)} · Marge : {fmt(ov?.mb)}. Le R/O n'est affiché que pour l'objectif de l'année sélectionnée.</Tip>
       </Card>
       {canWrite && (
         <Card title="Ajouter / mettre à jour un objectif">
@@ -491,9 +492,9 @@ const InvoiceList: FC<Props> = () => {
   const { rows, loading } = useCollectionData<any>("invoices");
   const [f, setF] = useState<"all" | "linked" | "orphan">("all");
   if (loading && !rows.length) return <CardSkeleton />;
-  const orphan = rows.filter((r) => r.linked === false);
+  const orphan = rows.filter((r) => r.linked !== true);
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
-  const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked !== false);
+  const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
   const seg = (id: typeof f, label: string, n?: number) => (
     <button onClick={() => setF(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", f === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>
       {label}{n != null && <span className="ml-1 opacity-70">{n.toLocaleString("fr-FR")}</span>}
@@ -515,7 +516,7 @@ const InvoiceList: FC<Props> = () => {
             colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
-            colText("Rattach.", (r) => (r.linked === false ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked === false ? 0 : 1)),
+            colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1)),
             colText("Date", (r) => r.date || "—", (r) => r.date || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
             colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),

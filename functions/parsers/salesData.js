@@ -53,16 +53,20 @@ function parseSalesData(wb) {
     const probability =
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
+    const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
+    const closingDate = (((d) => (d && +d.slice(0, 4) >= 2018 && +d.slice(0, 4) <= 2030 ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))); // rejet sentinelles 1899
+
     // ⚠️ NE PAS utiliser le terme "id" seul : il matche "IdC" (proba) → collisions massives.
-    // Sans extId : hash incluant la position de ligne (rowsIn) → idempotent par fichier,
-    // sans écraser des opportunités distinctes qui partagent client/montant/étape/AM.
+    // Sans extId : hash sur une clé MÉTIER stable (FP + closing + client/montant/étape/AM),
+    // indépendante de la position de ligne → idempotent même si des lignes LIVE sont
+    // insérées/réordonnées en amont. Deux lignes strictement identiques fusionnent (doublon).
     const extId = val(r, keys, "ext id", "extid", "opp id", "oppid");
-    const oppId = extId ? safeId(extId) : hashId(client, amount, stage, am, rowsIn);
+    const oppId = extId ? safeId(extId) : hashId(client, amount, stage, am, fp || "", closingDate || "");
 
     out.push({
       _id: oppId,
       oppId,
-      fp: fpKey(val(r, keys, "n° fp", "n fp", "fp")),
+      fp,
       client,
       am,
       bu: cleanBu(val(r, keys, "domaine", "bu")),
@@ -71,7 +75,7 @@ function parseSalesData(wb) {
       stageLabel: STAGE_LABEL[stage] || String(val(r, keys, "statut", "stage") || ""),
       probability,
       weighted: amount * probability,
-      closingDate: (((d) => (d && +d.slice(0, 4) >= 2018 && +d.slice(0, 4) <= 2030 ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))), // rejet sentinelles 1899
+      closingDate,
       marginPct: num(val(r, keys, "mb%", "mb %", "% mb")),
       source: "salesData",
     });
