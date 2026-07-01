@@ -9,6 +9,7 @@ import {
   connectFirestoreEmulator,
 } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "AIzaSyBHxv2ThBh66hRc1Lp_boTlzeB8LA37FF8",
@@ -21,6 +22,18 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
+
+// App Check (F8) : protège les back-ends contre les appels non légitimes.
+// Clé reCAPTCHA v3 via VITE_APPCHECK_SITE_KEY ; jeton de debug en dev local.
+if (import.meta.env.VITE_USE_EMULATORS === "true") {
+  (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+}
+if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
+  initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(import.meta.env.VITE_APPCHECK_SITE_KEY),
+    isTokenAutoRefreshEnabled: true,
+  });
+}
 
 // Persistance offline (§1 local-first, §12).
 export const db = initializeFirestore(app, {

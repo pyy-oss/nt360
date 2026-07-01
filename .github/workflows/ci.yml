@@ -30,8 +30,8 @@ jobs:
       - name: Install functions deps
         run: pnpm --filter functions install
 
-      - name: Tests parseurs & domaine (Vitest)
-        run: pnpm --filter functions test
+      - name: Tests parseurs & domaine + couverture ≥80% (Vitest)
+        run: pnpm --filter functions test:coverage
 
       - name: Tests front (Vitest)
         run: pnpm --filter web test

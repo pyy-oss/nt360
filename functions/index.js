@@ -188,5 +188,21 @@ exports.importLegacyBackup = onCall(async (req) => {
   return { ok: true, written: writes.length };
 });
 
+// --- F8 : export Firestore managé planifié → gs://nt360/backups/ (sauvegarde) ---
+exports.scheduledFirestoreExport = onSchedule("every sunday 03:00", async () => {
+  const firestore = require("@google-cloud/firestore");
+  const client = new firestore.v1.FirestoreAdminClient();
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
+  const ts = new Date().toISOString().slice(0, 10);
+  const name = client.databasePath(projectId, "(default)");
+  const [op] = await client.exportDocuments({
+    name,
+    outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,
+    collectionIds: [], // toutes les collections
+  });
+  logger.info("scheduledFirestoreExport lancé", { op: op.name });
+  return { ok: true };
+});
+
 // Exposé pour les tests / réutilisation.
 module.exports.IMPORTS_BUCKET = IMPORTS_BUCKET;

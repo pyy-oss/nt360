@@ -63,4 +63,13 @@ pnpm test:rules   # 23 tests de règles RBAC via l'émulateur Firestore
 | **F5** | Écritures gardées (opp saisie, statut BC, crédit, objectifs, matrice, rôles) | ✅ |
 | **F6** | Sync Sales_DATA quotidien (Scheduler) — remplace le lot salesData, préserve les saisies | ✅ |
 | **F7** | Bonifications : atterrissage, centre d'alertes, drill-down FP 360°, export CODIR XLSX, N vs N-1, migration legacy | ✅ |
-| F8 | Durcissement (App Check, MFA, export Firestore planifié, tests ≥80%) | ⬜ |
+| **F8** | Durcissement : App Check, MFA (TOTP), export Firestore planifié, couverture ≥80% | ✅ |
+
+> **Roadmap F0→F8 complète.** Validation données réelles (§18) : P&L CAS 31.72 Md / RAF 3.66 Md / MB 6.75 Md ; LIVE actif 42.98 Md brut / 13.78 Md pondéré, conversion 62%.
+
+## Durcissement (F8)
+
+- **App Check** : reCAPTCHA v3 côté front (`VITE_APPCHECK_SITE_KEY`) ; jeton de debug en dev.
+- **MFA (TOTP)** : `web/src/lib/mfa.ts` (enrôlement authenticator) — à activer dans la console Firebase Auth ; recommandé pour `direction`/`achats`.
+- **Sauvegarde** : `scheduledFirestoreExport` (dimanche 03:00) → export Firestore managé vers `gs://nt360/backups/`.
+- **Couverture** : `pnpm --filter functions test:coverage` (seuil 80 %, actuel ~91 %).
