@@ -46,14 +46,22 @@ async function recomputeAll(db, only) {
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
 
-  const periods = ["all", String(currentFy)].filter((p, i, a) => p !== "0" && a.indexOf(p) === i);
+  const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
+  const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));
+  const filterOpps = (arr, p) => (p === "all" ? arr : arr.filter((o) => yearOf(o.closingDate) === p));
+
+  // Périodes disponibles = "Tout" + chaque année de commande (yearPo), la plus récente d'abord.
+  const years = [...new Set(orders.map((o) => o.yearPo).filter((y) => y > 0))].sort((a, b) => b - a).map(String);
+  const periods = ["all", ...years];
   for (const period of periods) {
     const inv = filterInvoices(invoices, period);
-    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(orders, inv, opps), ...stamp } });
+    const ord = filterOrders(orders, period); // commandes signées dans la période (yearPo)
+    const opp = filterOpps(opps, period);      // opportunités clôturant dans la période
+    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, opp), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
-    if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(orders), ...stamp } });
-    if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(orders, inv, (x) => x.client), ...stamp } });
-    if (want("domaines")) w.push({ path: `summaries/domaines_${period}`, data: { period, rows: byEntity(orders, inv, (x) => x.bu), ...stamp } });
+    if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord), ...stamp } });
+    if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.client), ...stamp } });
+    if (want("domaines")) w.push({ path: `summaries/domaines_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.bu), ...stamp } });
   }
 
   // Enregistre la liste des périodes disponibles (pour le sélecteur front).
