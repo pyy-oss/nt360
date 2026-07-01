@@ -68,9 +68,12 @@ function hashId(...parts) {
   return "h" + h.toString(36);
 }
 
-/** Sanitise un identifiant pour un doc Firestore (pas de '/'). */
+/** Sanitise un identifiant pour un doc Firestore (pas de '/').
+ * Injectif : on échappe d'abord les '_' littéraux de la source (%5F) pour éviter
+ * qu'un Numéro contenant déjà '_' (ex. "JV_2024_01") ne collisionne avec un Numéro
+ * à '/' (ex. "JV/2024/01") après remplacement '/'→'_'. */
 function safeId(v) {
-  return String(v || "").trim().replace(/\//g, "_").replace(/\s+/g, "");
+  return String(v || "").trim().replace(/_/g, "%5F").replace(/\//g, "_").replace(/\s+/g, "");
 }
 
 module.exports = { headerKeys, pickKey, val, toISO, hashId, safeId };

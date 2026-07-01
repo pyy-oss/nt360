@@ -11,7 +11,14 @@ const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 function overview(orders, invoices, opps = []) {
   const commandes = sum(orders, (o) => o.cas);
   const backlog = sum(orders, (o) => Math.max(o.raf || 0, 0));
-  const facture = sum(invoices, (i) => i.amountHt);
+  const backlogCount = orders.filter((o) => (o.raf || 0) > 0).length;
+  // Facturé de la chaîne = factures RATTACHÉES aux commandes (jointure N° FP) :
+  // homogène avec Commandes/Backlog. Les factures orphelines (FP absent des
+  // commandes) sont exposées à part et ne gonflent pas le maillon Facturé.
+  const orderFps = new Set(orders.map((o) => o.fp).filter(Boolean));
+  const facture = sum(invoices.filter((i) => i.fp && orderFps.has(i.fp)), (i) => i.amountHt);
+  const factureTotal = sum(invoices, (i) => i.amountHt);
+  const factureOrphelin = factureTotal - facture;
   const mb = sum(orders, (o) => o.mb);
   // Gagné = Commandes : une opportunité gagnée (stage 6) devient un PO/commande (CAS).
   // On ne recompte donc PAS les gagnés dans les certitudes (déjà dans les commandes).
@@ -23,12 +30,16 @@ function overview(orders, invoices, opps = []) {
     (o) => o.weighted
   );
   return {
-    // Certitudes = commandes signées + pipeline quasi-certain (à venir).
-    certitudes: commandes + pondCertain,
+    // Certitudes = pipeline quasi-certain à venir (actif, IdC ≥ 90 %, pas encore signé).
+    // Les commandes signées sont suivies à part (maillon COMMANDES) et NON incluses ici.
+    certitudes: pondCertain,
     pondCertain,
     commandes,
     facture,
+    factureOrphelin,
+    factureTotal,
     backlog,
+    backlogCount,
     mb,
     pipelineWon,
     ratios: {

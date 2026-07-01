@@ -47,13 +47,13 @@ function suppliers(orders, bcLines, creditLines) {
     .map((a) => {
       const coverage = (a.authorized - a.encours) - a.open; // <0 = Saturation
       const util = a.authorized > 0 ? (a.encours + a.open) / a.authorized : 0;
-      return {
-        ...a,
-        coverage,
-        util,
-        state: coverage < 0 ? "saturation" : util >= 0.9 ? "tension" : "ok",
-        reco: a.encours + a.open * 1.1,
-      };
+      // Sans ligne de crédit saisie (authorized=0), impossible de statuer sur la
+      // saturation/tension → "non_suivi" (évite un faux positif systématique sur
+      // les fournisseurs P&L sans creditLines, §18.6).
+      const state = a.authorized > 0
+        ? (coverage < 0 ? "saturation" : util >= 0.9 ? "tension" : "ok")
+        : "non_suivi";
+      return { ...a, coverage, util, state, reco: a.encours + a.open * 1.1 };
     })
     .sort((x, y) => y.expo - x.expo);
 

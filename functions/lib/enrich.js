@@ -11,7 +11,8 @@ function clientBuMap(orders) {
   }
   const map = {};
   for (const client of Object.keys(counts)) {
-    map[client] = Object.entries(counts[client]).sort((a, b) => b[1] - a[1])[0][0];
+    // BU majoritaire ; départage des égalités par ordre alphabétique (déterministe).
+    map[client] = Object.entries(counts[client]).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0];
   }
   return map;
 }

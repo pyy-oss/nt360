@@ -177,7 +177,7 @@ summaries/atterrissage_{fy}     { realiseCas, backlog, pipelinePondere, projete,
 - **P&L projet** : coût/vente/marge/%MB par `fp` ; coût par type & fournisseur (bcLines) ; contrôle vente vs `orders.cas`.
 - **Exécution BC** : cycle `a_emettre→emis→livre→facture→solde` ; taux exécution = part soldée ; délai/retard si dates présentes.
 - **Sourcing (signature DRO)** : charge d'achat anticipée = pondéré étapes 4-5 × ~0,90 ; à rapprocher de `creditLines` (anticiper extensions **avant** signature).
-- **Atterrissage** : Réalisé CAS(FY) + backlog facturable + pipeline pondéré(closing FY) → vs `objectives`, avec écart et probabilité d'atteinte.
+- **Atterrissage** : projeté **CAS** = Réalisé CAS(FY) + pipeline pondéré(closing FY) → vs `objectives`, avec écart et probabilité d'atteinte. Le backlog n'entre **pas** dans le projeté CAS (déjà couvert par le CAS réalisé). Projeté **CAF** (facturation) = Facturé réalisé(FY) + backlog écoulable (RAF, reste à facturer) + pipeline pondéré : le backlog **y entre** (part des commandes signées restant à facturer), sans double compte.
 
 ---
 

@@ -1,6 +1,7 @@
-// Atterrissage annuel (BUILD_KIT §7) : Réalisé CAS(FY) + backlog facturable +
-// pipeline pondéré (closing FY) → vs objectifs, avec écart et probabilité d'atteinte.
-// + comparaison N vs N-1 sur la facturation.
+// Atterrissage annuel (BUILD_KIT §7) : projeté = Réalisé CAS(FY) + pipeline pondéré
+// (closing FY) → vs objectifs, avec écart et probabilité d'atteinte. Le backlog est
+// exposé séparément (informatif) mais N'ENTRE PAS dans le projeté (déjà couvert par le
+// CAS réalisé — l'ajouter double-compterait). + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
 const { isEligible } = require("./pipeline");
 
@@ -30,12 +31,19 @@ function atterrissage(orders, invoices, opps, objectives, fy) {
   const factureN = sum(invoices.filter((i) => yearOf(i.date) === String(fy)), (i) => i.amountHt);
   const factureN1 = sum(invoices.filter((i) => yearOf(i.date) === String(fy - 1)), (i) => i.amountHt);
 
+  // Projection CAF (facturation) : ce qui sera in fine facturé = déjà facturé (CAF réalisé)
+  // + backlog écoulable (RAF des commandes signées, reste à facturer) + pipeline pondéré
+  // (futures commandes facturables). Le backlog Y ENTRE (contrairement au projeté CAS, où
+  // le CAS inclut déjà le RAF). Pas de double compte : facturé, RAF et futur sont disjoints.
+  const cafProjete = factureN + backlog + pipelinePondere;
+
   return {
     fy,
     realiseCas,
     backlog,
     pipelinePondere,
     projete,
+    cafProjete,
     objectif,
     ecart: projete - objectif,
     probaAtteinte: objectif > 0 ? Math.min(1, projete / objectif) : 0,
