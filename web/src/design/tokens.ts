@@ -1,8 +1,12 @@
-// Design "Forest & Gold" — tokens conservés du prototype (BUILD_KIT §12).
-export const colors = {
+// Design "Forest & Gold" — palette et helpers (BUILD_KIT §12, aligné au prototype).
+export const T = {
   bg: "#0E1613",
   panel: "#151F1A",
+  panel2: "#1B2721",
+  line: "#26352D",
   ink: "#EEF3EF",
+  dim: "#8FA89B",
+  faint: "#5E7268",
   gold: "#C9A24B",
   emerald: "#46C08A",
   clay: "#D9694C",
@@ -10,18 +14,13 @@ export const colors = {
   plum: "#A98AC4",
 } as const;
 
-// Couleurs par BU.
-export const buColors = {
-  ICT: colors.emerald,
-  CLOUD: colors.steel,
-  FORMATION: colors.gold,
-  AUTRE: colors.plum,
-} as const;
+export const colors = T; // alias historique
 
-export const fonts = {
-  display: "'Bricolage Grotesque', system-ui, sans-serif",
-  body: "'Inter', system-ui, sans-serif",
-} as const;
+// Couleurs par BU / étape pipeline / statut BC (identiques au prototype).
+export const BU_COL: Record<string, string> = { ICT: "#46C08A", CLOUD: "#6E9DC0", FORMATION: "#C9A24B", AUTRE: "#5E7268" };
+export const buColors = BU_COL;
+export const STAGE_COL: Record<number, string> = { 1: "#6E9DC0", 2: "#8FA89B", 3: "#C9A24B", 4: "#D9694C", 5: "#46C08A", 6: "#46C08A", 7: "#D9694C", 8: "#A98AC4", 9: "#5E7268" };
+export const BC_COL: Record<string, string> = { a_emettre: "#5E7268", emis: "#6E9DC0", livre: "#C9A24B", facture: "#A98AC4", solde: "#46C08A" };
 
 /** Formatage FCFA : Md / M / k (garde anti-NaN/zéro, §18.7). */
 export function fmt(v: number | null | undefined): string {

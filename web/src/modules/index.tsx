@@ -1,65 +1,65 @@
-// Les 13 modules (parité prototype, BUILD_KIT §2). Lecture temps réel des summaries/*,
-// détail à la demande, et écritures gardées (F5) refusées par les rules si rôle insuffisant.
-import { useState, type ReactNode, type CSSProperties, type FC } from "react";
+// Les 13 modules (parité prototype, BUILD_KIT §2) — refonte UI Forest & Gold :
+// primitives + graphes Recharts, lecture temps réel summaries/*, écritures gardées.
+import { useState, type FC } from "react";
 import { where } from "firebase/firestore";
+import { AlertTriangle } from "lucide-react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
-import { colors, fmt, pct, buColors } from "../design/tokens";
-import { Card, Kpi, HBars, Stage, Tip, Empty } from "../design/components";
+import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, Busy, colText, colNum, money, cx } from "../design/components";
+import { AreaTrend, DonutBU, Bars, GroupedBars, Gauge } from "../design/charts";
 import {
   addOpportunity, setBcStatus, upsertCreditLine, upsertObjective,
   updateMatrix, callSetUserRole, callRecompute, callExportReport,
 } from "../lib/writes";
 
 type Props = { period: string };
+const grid = "grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6";
+const grid4 = "grid gap-3 grid-cols-2 lg:grid-cols-4";
+const cols2 = "grid gap-3 md:grid-cols-2";
 
-const grid = (min = 150): CSSProperties => ({ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${min}px,1fr))`, gap: 12 });
-const cols2: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
-const field: CSSProperties = { padding: "6px 8px", borderRadius: 6, border: `1px solid ${colors.bg}`, background: colors.bg, color: colors.ink, fontSize: 13 };
-const btn: CSSProperties = { padding: "6px 12px", borderRadius: 6, border: "none", background: colors.gold, color: colors.bg, fontWeight: 600, cursor: "pointer", fontSize: 13 };
+const objToArr = (o: Record<string, number> = {}) =>
+  Object.entries(o).map(([name, v]) => ({ name, v: Number(v) || 0 })).sort((a, b) => b.v - a.v);
+const monthsAsc = (o: Record<string, number> = {}) =>
+  Object.entries(o).map(([name, v]) => ({ name, v: Number(v) || 0 })).sort((a, b) => a.name.localeCompare(b.name));
+const topArr = (a: { key: string; value: number }[] = []) => a.map((x) => ({ name: x.key, v: x.value }));
+const STAGE_SHORT: Record<number, string> = { 1: "Qualif", 2: "Montage", 3: "Transmise", 4: "Négo", 5: "Contrat", 6: "Gagné", 7: "Perdu", 8: "Suspendu", 9: "Annulé" };
 
-function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
-  if (!rows.length) return <Empty />;
+// Barres horizontales maison (listes AM / top clients / fournisseurs).
+function HBars({ rows, colorFn, max }: { rows: { name: string; v: number; sub?: string }[]; colorFn?: (r: any) => string; max?: number }) {
+  if (!rows.length) return <EmptyState />;
+  const mx = max ?? Math.max(1, ...rows.map((r) => r.v));
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-      <thead>
-        <tr>{head.map((h, i) => <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "6px 8px", opacity: 0.6, fontWeight: 500, borderBottom: `1px solid ${colors.bg}` }}>{h}</th>)}</tr>
-      </thead>
-      <tbody>
-        {rows.map((r, ri) => (
-          <tr key={ri}>{r.map((c, ci) => <td key={ci} style={{ textAlign: ci === 0 ? "left" : "right", padding: "6px 8px", fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${colors.bg}` }}>{c}</td>)}</tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="flex flex-col gap-2.5 mt-1">
+      {rows.map((r, i) => (
+        <div key={i}>
+          <div className="flex justify-between text-[12.5px] mb-1">
+            <span className="truncate max-w-[220px] text-ink">{r.name}</span>
+            <span className="text-muted tabnum">{fmt(r.v)}{r.sub != null && <span className="text-faint"> · {r.sub}</span>}</span>
+          </div>
+          <div className="h-[7px] rounded bg-panel2">
+            <div className="h-full rounded" style={{ width: `${Math.max((r.v / mx) * 100, 1)}%`, background: colorFn ? colorFn(r) : T.emerald }} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
-function Busy({ fn, label }: { fn: () => Promise<any>; label: string }) {
-  const [state, setState] = useState<"" | "busy" | "ok" | "err">("");
-  return (
-    <button
-      style={{ ...btn, opacity: state === "busy" ? 0.6 : 1 }}
-      disabled={state === "busy"}
-      onClick={async () => { setState("busy"); try { await fn(); setState("ok"); } catch { setState("err"); } }}
-    >
-      {state === "busy" ? "…" : state === "ok" ? "✓" : state === "err" ? "✗ refusé" : label}
-    </button>
-  );
-}
-
-// Centre d'alertes (bonification F7).
+// Centre d'alertes.
 function AlertsBanner() {
   const { data } = useDocData<any>("summaries/alerts");
   const items = data?.items || [];
   if (!items.length) return null;
-  const tone: any = { high: colors.clay, medium: colors.gold, low: colors.steel };
+  const tone: any = { high: "clay", medium: "gold", low: "steel" };
   return (
-    <Card title={`Centre d'alertes (${items.length})`}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <Card title={`Centre d'alertes · ${items.length}`}>
+      <div className="flex flex-col gap-2">
         {items.map((a: any, i: number) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 8, background: tone[a.severity] || colors.steel }} />
+          <div key={i} className="flex items-center gap-2 text-[13px]">
+            <AlertTriangle size={14} className={cx(a.severity === "high" ? "text-clay" : a.severity === "medium" ? "text-gold" : "text-steel")} />
             <span>{a.message}</span>
+            <Badge tone={tone[a.severity] || "neutral"}>{a.count}</Badge>
           </div>
         ))}
       </div>
@@ -68,321 +68,297 @@ function AlertsBanner() {
 }
 
 // 1 — Vue d'ensemble
-function Overview({ period }: Props) {
-  const { data } = useDocData<any>(`summaries/overview_${period}`);
+const Overview: FC<Props> = ({ period }) => {
+  const { data, loading } = useDocData<any>(`summaries/overview_${period}`);
+  const { data: bl } = useDocData<any>("summaries/backlog_fy");
   const canWrite = useCan("overview") === "write";
-  const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const actions = (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      {canWrite && <Busy label="Recalculer les agrégats" fn={callRecompute} />}
-      <Busy label="Export CODIR (XLSX)" fn={async () => { const r = await callExportReport(period); setExportUrl(r.url || null); }} />
-      {exportUrl && <a href={exportUrl} target="_blank" rel="noreferrer" style={{ color: colors.gold, fontSize: 13 }}>Télécharger</a>}
+    <div className="flex gap-2 items-center">
+      {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} />}
+      <Busy variant="ghost" label="Export CODIR" fn={async () => setUrl((await callExportReport(period)).url || null)} />
+      {url && <a className="text-gold text-xs underline" href={url} target="_blank" rel="noreferrer">Télécharger</a>}
     </div>
   );
-  if (!data) return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}><AlertsBanner /><Empty />{actions}</div>
-  );
+  if (loading && !data) return <KpiSkeletons n={6} />;
+  if (!data) return <div className="flex flex-col gap-3"><AlertsBanner /><EmptyState />{actions}</div>;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <AlertsBanner />
-      <div style={grid()}>
-        <Kpi label="Certitudes" value={fmt(data.certitudes)} tone={colors.gold} />
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">{actions}</div>
+      <div className={grid}>
+        <Kpi label="Certitudes" value={fmt(data.certitudes)} tone="gold" />
         <Kpi label="Commandes (CAS)" value={fmt(data.commandes)} />
-        <Kpi label="Facturé" value={fmt(data.facture)} tone={colors.emerald} />
-        <Kpi label="Backlog (RAF)" value={fmt(data.backlog)} tone={colors.steel} />
+        <Kpi label="Facturé" value={fmt(data.facture)} tone="emerald" />
+        <Kpi label="Backlog (RAF)" value={fmt(bl?.total ?? data.backlog)} tone="steel" sub={bl ? `${bl.count} cmd` : undefined} />
         <Kpi label="Marge brute" value={fmt(data.mb)} sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
       </div>
-      {actions}
-      <Tip>Chaîne Certitudes → Commandes → Facturé → Backlog, jointe par N° FP. Backlog ancré FY.</Tip>
+      <AlertsBanner />
+      <Tip>Chaîne Certitudes → Commandes → Facturé → Backlog, jointe par N° FP. Backlog ancré FY (indépendant de la période).</Tip>
     </div>
   );
-}
+};
 
-// 2 — Pipeline (+ saisie d'opportunité)
-function Pipeline() {
+// 2 — Pipeline
+const Pipeline: FC<Props> = () => {
   const { data } = useDocData<any>("summaries/pipeline");
   const canWrite = useCan("pipeline") === "write";
   const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
+  const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data?.byStage?.[s]?.amount || 0, "Pondéré": data?.byStage?.[s]?.weighted || 0 }));
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {data && (
+    <div className="flex flex-col gap-4">
+      {data ? (
         <>
-          <div style={grid()}>
+          <div className={grid4}>
             <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
-            <Kpi label="Actif (pondéré)" value={fmt(data.tot?.weighted)} tone={colors.gold} />
-            <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone={colors.clay} />
+            <Kpi label="Actif (pondéré)" value={fmt(data.tot?.weighted)} tone="gold" />
+            <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
             <Kpi label="Conversion" value={pct(data.conv)} sub={`${data.wonCount}/${data.wonCount + data.lostCount}`} />
           </div>
-          <div style={cols2}>
-            <Card title="Pondéré par AM"><HBars data={data.byAM || {}} /></Card>
-            <Card title="Pondéré par BU"><HBars data={data.byBU || {}} /></Card>
+          <Card title="Funnel pondéré par étape">
+            <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} />
+          </Card>
+          <div className={cols2}>
+            <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
+            <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
           </div>
           <Card title="Top opportunités (pondéré)">
-            <Table head={["Client", "AM", "Montant", "Pondéré"]} rows={(data.topOpps || []).map((o: any) => [o.client, o.am, fmt(o.amount), fmt(o.weighted)])} />
+            <Table columns={[colText("Client", (o) => o.client), colText("AM", (o) => o.am), colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(o.weighted))]} rows={data.topOpps || []} />
           </Card>
         </>
-      )}
-      {!data && <Empty />}
+      ) : <EmptyState />}
       {canWrite && (
         <Card title="Ajouter une opportunité (saisie)">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <input style={field} placeholder="Client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
-            <input style={field} placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
-            <select style={field} value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
-            <input style={field} placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-            <select style={field} value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>Étape {s}</option>)}</select>
-            <input style={field} placeholder="Proba (0..1)" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
-            <input style={field} type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
-            <Busy label="Ajouter" fn={() => addOpportunity({
-              client: f.client, am: f.am, bu: f.bu, amount: Number(f.amount) || 0, stage: Number(f.stage),
-              probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined,
-            })} />
+          <div className="flex flex-wrap gap-2 items-center">
+            <input className="field" placeholder="Client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
+            <input className="field" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
+            <select className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
+            <input className="field w-28" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+            <select className="field" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
+            <input className="field w-28" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
+            <input className="field" type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
+            <Busy label="Ajouter" fn={() => addOpportunity({ client: f.client, am: f.am, bu: f.bu, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined })} />
           </div>
         </Card>
       )}
     </div>
   );
-}
+};
 
-// 3 — Objectifs / R-O (+ saisie)
-function Objectifs({ period }: Props) {
+// 3 — Objectifs / R-O
+const Objectifs: FC<Props> = ({ period }) => {
   const { rows } = useCollectionData<any>("objectives");
   const { data: ov } = useDocData<any>(`summaries/overview_${period}`);
   const canWrite = useCan("objectifs") === "write";
   const realiseCas = ov?.commandes || 0;
   const [o, setO] = useState({ fiscalYear: "", scope: "global", scopeValue: "all", targetCas: "", targetInvoiced: "", targetMargin: "" });
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Card title="Objectifs annuels & Réalisé/Objectif">
+    <div className="flex flex-col gap-4">
+      <Card title="Objectifs annuels & Réalisé / Objectif">
         <Table
-          head={["Périmètre", "Cible CAS", "Cible Facturé", "Cible Marge", "R/O CAS"]}
-          rows={rows.map((x) => [`${x.fiscalYear} ${x.scope || ""} ${x.scopeValue || ""}`.trim(), fmt(x.targetCas), fmt(x.targetInvoiced), fmt(x.targetMargin), x.targetCas > 0 ? pct(realiseCas / x.targetCas) : "—"])}
+          columns={[
+            colText("Périmètre", (x) => `${x.fiscalYear} ${x.scope || ""} ${x.scopeValue || ""}`.trim()),
+            colNum("Cible CAS", (x) => money(x.targetCas)), colNum("Cible Facturé", (x) => money(x.targetInvoiced)),
+            colNum("Cible Marge", (x) => money(x.targetMargin)),
+            colNum("R/O CAS", (x) => x.targetCas > 0 ? <Badge tone={realiseCas / x.targetCas >= 1 ? "emerald" : "gold"}>{pct(realiseCas / x.targetCas)}</Badge> : "—"),
+          ]}
+          rows={rows}
         />
         <Tip>Réalisé CAS période : {fmt(realiseCas)} · Facturé : {fmt(ov?.facture)} · Marge : {fmt(ov?.mb)}.</Tip>
       </Card>
       {canWrite && (
         <Card title="Ajouter / mettre à jour un objectif">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <input style={field} placeholder="Année" value={o.fiscalYear} onChange={(e) => setO({ ...o, fiscalYear: e.target.value })} />
-            <input style={field} placeholder="Scope (global/bu/am)" value={o.scope} onChange={(e) => setO({ ...o, scope: e.target.value })} />
-            <input style={field} placeholder="Valeur scope" value={o.scopeValue} onChange={(e) => setO({ ...o, scopeValue: e.target.value })} />
-            <input style={field} placeholder="Cible CAS" value={o.targetCas} onChange={(e) => setO({ ...o, targetCas: e.target.value })} />
-            <input style={field} placeholder="Cible Facturé" value={o.targetInvoiced} onChange={(e) => setO({ ...o, targetInvoiced: e.target.value })} />
-            <input style={field} placeholder="Cible Marge" value={o.targetMargin} onChange={(e) => setO({ ...o, targetMargin: e.target.value })} />
-            <Busy label="Enregistrer" fn={() => upsertObjective({
-              fiscalYear: Number(o.fiscalYear) || 0, scope: o.scope, scopeValue: o.scopeValue,
-              targetCas: Number(o.targetCas) || 0, targetInvoiced: Number(o.targetInvoiced) || 0, targetMargin: Number(o.targetMargin) || 0,
-            })} />
+          <div className="flex flex-wrap gap-2 items-center">
+            <input className="field w-24" placeholder="Année" value={o.fiscalYear} onChange={(e) => setO({ ...o, fiscalYear: e.target.value })} />
+            <input className="field" placeholder="Scope" value={o.scope} onChange={(e) => setO({ ...o, scope: e.target.value })} />
+            <input className="field" placeholder="Valeur" value={o.scopeValue} onChange={(e) => setO({ ...o, scopeValue: e.target.value })} />
+            <input className="field w-32" placeholder="Cible CAS" value={o.targetCas} onChange={(e) => setO({ ...o, targetCas: e.target.value })} />
+            <input className="field w-32" placeholder="Cible Facturé" value={o.targetInvoiced} onChange={(e) => setO({ ...o, targetInvoiced: e.target.value })} />
+            <input className="field w-32" placeholder="Cible Marge" value={o.targetMargin} onChange={(e) => setO({ ...o, targetMargin: e.target.value })} />
+            <Busy label="Enregistrer" fn={() => upsertObjective({ fiscalYear: Number(o.fiscalYear) || 0, scope: o.scope, scopeValue: o.scopeValue, targetCas: Number(o.targetCas) || 0, targetInvoiced: Number(o.targetInvoiced) || 0, targetMargin: Number(o.targetMargin) || 0 })} />
           </div>
         </Card>
       )}
     </div>
   );
-}
+};
 
 // 4 — Facturation
-function Facturation({ period }: Props) {
+const Facturation: FC<Props> = ({ period }) => {
   const { data } = useDocData<any>(`summaries/facturation_${period}`);
-  if (!data) return <Empty />;
+  if (!data) return <EmptyState />;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid()}><Kpi label="Facturé (période)" value={fmt(data.total)} tone={colors.emerald} sub={`${data.count} factures`} /></div>
-      <Card title="Tendance mensuelle"><HBars data={data.monthly || {}} /></Card>
-      <div style={cols2}>
-        <Card title="Mix BU"><HBars data={data.byBu || {}} /></Card>
-        <Card title="Top clients"><HBars data={data.topClients || []} /></Card>
+    <div className="flex flex-col gap-4">
+      <div className={grid4}><Kpi label="Facturé (période)" value={fmt(data.total)} tone="emerald" sub={`${data.count} factures`} /></div>
+      <Card title="Tendance mensuelle"><AreaTrend data={monthsAsc(data.monthly)} color={T.emerald} name="Facturé" /></Card>
+      <div className={cols2}>
+        <Card title="Mix BU"><DonutBU data={objToArr(data.byBu).map((x) => ({ name: x.name, value: x.v }))} /></Card>
+        <Card title="Top clients"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.emerald} /></Card>
       </div>
     </div>
   );
-}
+};
 
 // 5 — Suivi Backlog
-function Backlog() {
+const Backlog: FC<Props> = () => {
   const { data } = useDocData<any>("summaries/backlog_fy");
-  if (!data) return <Empty />;
+  if (!data) return <EmptyState />;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid()}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(data.total)} tone={colors.steel} sub={`${data.count} commandes`} /></div>
-      <div style={cols2}>
-        <Card title="Par domaine"><HBars data={data.byBu || {}} /></Card>
-        <Card title="Par millésime"><HBars data={data.byVintage || {}} /></Card>
+    <div className="flex flex-col gap-4">
+      <div className={grid4}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(data.total)} tone="steel" sub={`${data.count} commandes`} /></div>
+      <div className={cols2}>
+        <Card title="Par millésime"><Bars data={objToArr(data.byVintage)} color={T.clay} name="Backlog" /></Card>
+        <Card title="Par domaine"><DonutBU data={objToArr(data.byBu).map((x) => ({ name: x.name, value: x.v }))} /></Card>
       </div>
-      <Card title="Top commandes"><Table head={["FP", "Client", "BU", "RAF"]} rows={(data.top || []).map((t: any) => [t.fp, t.client, t.bu, fmt(t.raf)])} /></Card>
+      <Card title="Top commandes ouvertes">
+        <Table columns={[colText("FP", (t) => t.fp), colText("Client", (t) => t.client), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
+      </Card>
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
     </div>
   );
-}
+};
 
-// 6 — Prévision (+ atterrissage annuel, N vs N-1)
-function Prevision({ period }: Props) {
+// 6 — Prévision (+ atterrissage, N vs N-1)
+const Prevision: FC<Props> = ({ period }) => {
   const { data: ov } = useDocData<any>(`summaries/overview_${period}`);
   const { data: bl } = useDocData<any>("summaries/backlog_fy");
   const { data: pl } = useDocData<any>("summaries/pipeline");
   const { data: cfg } = useDocData<any>("config/periods");
-  const fy = cfg?.currentFy;
-  const { data: att } = useDocData<any>(fy ? `summaries/atterrissage_${fy}` : null);
-  if (!ov && !bl && !pl) return <Empty />;
+  const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  if (!ov && !bl && !pl) return <EmptyState />;
   const realise = ov?.facture || 0, backlog = bl?.total || 0, pond = pl?.tot?.weighted || 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid()}>
-        <Kpi label="Réalisé (facturé)" value={fmt(realise)} tone={colors.emerald} />
-        <Kpi label="Backlog écoulable" value={fmt(backlog)} tone={colors.steel} />
-        <Kpi label="Pipeline pondéré" value={fmt(pond)} tone={colors.gold} />
+    <div className="flex flex-col gap-4">
+      <div className={grid4}>
+        <Kpi label="Réalisé (facturé)" value={fmt(realise)} tone="emerald" />
+        <Kpi label="Backlog écoulable" value={fmt(backlog)} tone="steel" />
+        <Kpi label="Pipeline pondéré" value={fmt(pond)} tone="gold" />
         <Kpi label="Projeté" value={fmt(realise + backlog + pond)} />
       </div>
       {att && (
-        <Card title={`Atterrissage ${att.fy}`}>
-          <div style={grid()}>
-            <Kpi label="Réalisé CAS" value={fmt(att.realiseCas)} />
-            <Kpi label="Pipeline pondéré (FY)" value={fmt(att.pipelinePondere)} tone={colors.gold} />
-            <Kpi label="Projeté CAS" value={fmt(att.projete)} />
-            <Kpi label="Objectif" value={fmt(att.objectif)} />
-            <Kpi label="Écart" value={fmt(att.ecart)} tone={att.ecart < 0 ? colors.clay : colors.emerald} />
-            <Kpi label="Proba atteinte" value={pct(att.probaAtteinte)} />
-          </div>
-          <Tip>Facturé N {fmt(att.factureN)} vs N-1 {fmt(att.factureN1)} — croissance {pct(att.croissanceFacture)}.</Tip>
-        </Card>
-      )}
-      <Tip>Trajectoire réalisé → projeté (réalisé + écoulement backlog + pipeline pondéré).</Tip>
-    </div>
-  );
-}
-
-// FP 360° — drill-down par N° FP (bonification F7).
-function Fp360() {
-  const [q, setQ] = useState("");
-  const fp = q.trim().toUpperCase();
-  const cons = fp ? [where("fp", "==", fp)] : [where("fp", "==", "__none__")];
-  const { rows: orders } = useCollectionData<any>("orders", cons);
-  const { rows: invoices } = useCollectionData<any>("invoices", cons);
-  const { rows: sheets } = useCollectionData<any>("projectSheets", cons);
-  const { rows: bc } = useCollectionData<any>("bcLines", cons);
-  const { rows: opps } = useCollectionData<any>("opportunities", cons);
-  const o = orders[0];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Card title="Recherche par N° FP">
-        <div style={{ display: "flex", gap: 8 }}>
-          <input style={field} placeholder="FP/2026/13542" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-      </Card>
-      {fp && (
-        <>
-          {o ? (
-            <div style={grid()}>
-              <Kpi label="Client" value={o.client || "—"} />
-              <Kpi label="CAS" value={fmt(o.cas)} />
-              <Kpi label="RAF" value={fmt(o.raf)} tone={colors.steel} />
-              <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} />
+        <div className={cols2}>
+          <Card title={`Atterrissage ${att.fy} — probabilité d'atteinte`}>
+            <Gauge value={att.probaAtteinte} color={att.ecart < 0 ? T.clay : T.emerald} />
+            <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+              <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
+              <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{fmt(att.objectif)}</div></div>
+              <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecart < 0 ? "text-clay" : "text-emerald")}>{fmt(att.ecart)}</div></div>
             </div>
-          ) : <Empty>Aucune commande pour {fp}.</Empty>}
-          <Card title={`Factures (${invoices.length})`}><Table head={["Numéro", "Date", "Montant HT"]} rows={invoices.map((i) => [i.numero, i.date, fmt(i.amountHt)])} /></Card>
-          <Card title={`Fiche projet`}><Table head={["Affaire", "Revient", "Vente", "Marge", "%MB"]} rows={sheets.map((s) => [s.affaire, fmt(s.costTotal), fmt(s.saleTotal), fmt(s.margin), pct(s.marginPct)])} /></Card>
-          <Card title={`Lignes BC (${bc.length})`}><Table head={["Fournisseur", "Type", "XOF", "Statut"]} rows={bc.map((b) => [b.supplier, b.expenseType, fmt(b.amountXof), b.status])} /></Card>
-          <Card title={`Opportunités (${opps.length})`}><Table head={["Client", "AM", "Montant", "Étape"]} rows={opps.map((x) => [x.client, x.am, fmt(x.amount), x.stageLabel || x.stage])} /></Card>
-        </>
+          </Card>
+          <Card title="Facturation N vs N-1">
+            <GroupedBars data={[{ name: `FY ${att.fy - 1}`, Facturé: att.factureN1 }, { name: `FY ${att.fy}`, Facturé: att.factureN }]} series={[{ key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={54} />
+            <Tip>Croissance : <span className={att.croissanceFacture >= 0 ? "text-emerald" : "text-clay"}>{pct(att.croissanceFacture)}</span></Tip>
+          </Card>
+        </div>
       )}
+      <Tip>Trajectoire réalisé → projeté (réalisé + écoulement backlog + pipeline pondéré closing FY).</Tip>
     </div>
   );
-}
+};
 
 // 7 — Rentabilité
-function Rentabilite({ period }: Props) {
+const Rentabilite: FC<Props> = ({ period }) => {
   const { data } = useDocData<any>(`summaries/rentabilite_${period}`);
-  if (!data) return <Empty />;
+  if (!data) return <EmptyState />;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid()}>
-        <Kpi label="Marge brute" value={fmt(data.mb)} tone={colors.gold} />
+    <div className="flex flex-col gap-4">
+      <div className={grid4}>
+        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" />
         <Kpi label="CAS" value={fmt(data.cas)} />
         <Kpi label="%MB" value={pct(data.pmb)} />
       </div>
       <Card title="CAS vs MB par domaine">
-        <Table head={["BU", "CAS", "MB", "%MB"]} rows={(data.byBu || []).map((b: any) => [<span style={{ color: (buColors as any)[b.bu] || colors.ink }}>{b.bu}</span>, fmt(b.cas), fmt(b.mb), pct(b.pmb)])} />
+        <GroupedBars data={(data.byBu || []).map((b: any) => ({ name: b.bu, CAS: b.cas, MB: b.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.plum, name: "MB" }]} />
       </Card>
-      <Card title="Top clients (marge)"><HBars data={data.topClients || []} /></Card>
+      <Card title="Top clients (marge)"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
     </div>
   );
-}
+};
 
 // 8 — P&L Projet
-function PnlProjet() {
+const PnlProjet: FC<Props> = () => {
   const { rows } = useCollectionData<any>("projectSheets");
   return (
     <Card title="Fiches affaire — coût / vente / marge">
-      <Table head={["FP", "Client", "Affaire", "Revient", "Vente", "Marge", "%MB"]} rows={rows.map((r) => [r.fp, r.client, r.affaire, fmt(r.costTotal), fmt(r.saleTotal), fmt(r.margin), pct(r.marginPct)])} />
+      <Table columns={[
+        colText("FP", (r) => r.fp), colText("Client", (r) => r.client), colText("Affaire", (r) => r.affaire),
+        colNum("Revient", (r) => money(r.costTotal)), colNum("Vente", (r) => money(r.saleTotal)),
+        colNum("Marge", (r) => money(r.margin)), colNum("%MB", (r) => pct(r.marginPct)),
+      ]} rows={rows} />
       <Tip>Contrôle vente vs CAS de la commande ; coût par type/fournisseur via les lignes BC.</Tip>
     </Card>
   );
-}
+};
 
-// 9 — Crédit Fournisseurs (+ édition ligne de crédit)
-function Fournisseurs() {
+// 9 — Crédit Fournisseurs
+const Fournisseurs: FC<Props> = () => {
   const { data } = useDocData<any>("summaries/suppliers");
   const canWrite = useCan("fournisseurs") === "write";
-  if (!data) return <Empty />;
-  const stateTone: any = { saturation: colors.clay, tension: colors.gold, ok: colors.emerald };
+  if (!data) return <EmptyState />;
+  const badge: any = { saturation: "clay", tension: "gold", ok: "emerald" };
+  const cols = [
+    colText("Fournisseur", (s: any) => s.name), colNum("Expo.", (s: any) => money(s.expo)),
+    colNum("Ouvert", (s: any) => money(s.open)), colNum("Encours", (s: any) => money(s.encours)),
+    colNum("Couverture", (s: any) => money(s.coverage)), colNum("État", (s: any) => <Badge tone={badge[s.state]}>{s.state}</Badge>),
+    ...(canWrite ? [colNum("Ligne crédit", (s: any) => <CreditEditor name={s.name} authorized={s.authorized} outstanding={s.encours} />)] : []),
+  ];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid()}>
+    <div className="flex flex-col gap-4">
+      <div className={grid4}>
         <Kpi label="Exposition totale" value={fmt(data.totalExpo)} />
-        <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone={colors.steel} />
+        <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone="steel" />
         <Kpi label="Encours" value={fmt(data.encoursTotal)} />
       </div>
-      <Card title="Par fournisseur">
-        <Table
-          head={["Fournisseur", "Expo.", "Ouvert", "Encours", "Couverture", "État", ...(canWrite ? ["Ligne crédit"] : [])]}
-          rows={(data.bySupplier || []).map((s: any) => {
-            const base = [s.name, fmt(s.expo), fmt(s.open), fmt(s.encours), fmt(s.coverage), <span style={{ color: stateTone[s.state] }}>{s.state}</span>];
-            return canWrite ? [...base, <CreditEditor name={s.name} authorized={s.authorized} outstanding={s.encours} />] : base;
-          })}
-        />
-      </Card>
+      <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s: any) => ({ name: s.name, v: s.expo }))} colorFn={() => T.steel} /></Card>
+      <Card title="Par fournisseur"><Table columns={cols} rows={data.bySupplier || []} /></Card>
     </div>
   );
-}
+};
 function CreditEditor({ name, authorized, outstanding }: { name: string; authorized: number; outstanding: number }) {
   const [a, setA] = useState(String(authorized || ""));
   const [o, setO] = useState(String(outstanding || ""));
   return (
-    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-      <input style={{ ...field, width: 90 }} value={a} onChange={(e) => setA(e.target.value)} placeholder="autorisé" />
-      <input style={{ ...field, width: 90 }} value={o} onChange={(e) => setO(e.target.value)} placeholder="encours" />
+    <span className="inline-flex gap-1.5 items-center">
+      <input className="field w-24 !py-1" value={a} onChange={(e) => setA(e.target.value)} placeholder="autorisé" />
+      <input className="field w-24 !py-1" value={o} onChange={(e) => setO(e.target.value)} placeholder="encours" />
       <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, outstanding: Number(o) || 0 })} />
     </span>
   );
 }
 
-// 10 — Exécution BC (+ changement de statut)
+// 10 — Exécution BC
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
-function BC() {
+const BC: FC<Props> = () => {
   const { rows } = useCollectionData<any>("bcLines");
   const canWrite = useCan("bc") === "write";
   const byStatus: Record<string, number> = {};
   for (const r of rows) byStatus[r.status || "a_emettre"] = (byStatus[r.status || "a_emettre"] || 0) + 1;
   const solde = byStatus["solde"] || 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={grid(120)}>{BC_STAGES.map((s) => <Stage key={s} label={s} value={String(byStatus[s] || 0)} />)}</div>
-      <Kpi label="Taux d'exécution (soldé)" value={pct(rows.length ? solde / rows.length : 0)} />
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
+        {BC_STAGES.map((s) => (
+          <div key={s} className="card p-4">
+            <div className="text-xs text-muted capitalize">{s.replace("_", " ")}</div>
+            <div className="font-display text-2xl tabnum mt-1" style={{ color: BC_COL[s] }}>{byStatus[s] || 0}</div>
+          </div>
+        ))}
+      </div>
+      <div className={grid4}><Kpi label="Taux d'exécution (soldé)" value={pct(rows.length ? solde / rows.length : 0)} tone="emerald" /></div>
       <Card title="Lignes BC">
-        <Table
-          head={["FP", "Fournisseur", "Type", "XOF", "Statut"]}
-          rows={rows.slice(0, 100).map((r) => [
-            r.fp, r.supplier, r.expenseType, fmt(r.amountXof),
-            canWrite ? <StatusSelect id={r.id} status={r.status || "a_emettre"} /> : (r.status || "a_emettre"),
-          ])}
-        />
+        <Table columns={[
+          colText("FP", (r) => r.fp), colText("Fournisseur", (r) => r.supplier), colText("Type", (r) => r.expenseType),
+          colNum("XOF", (r) => money(r.amountXof)),
+          colNum("Statut", (r) => canWrite ? <StatusSelect id={r.id} status={r.status || "a_emettre"} /> : <Badge>{r.status || "a_emettre"}</Badge>),
+        ]} rows={rows.slice(0, 200)} />
       </Card>
     </div>
   );
-}
+};
 function StatusSelect({ id, status }: { id: string; status: string }) {
   const [s, setS] = useState(status);
   return (
-    <select style={field} value={s} onChange={async (e) => { const v = e.target.value; setS(v); try { await setBcStatus(id, v); } catch { setS(status); } }}>
+    <select className="field !py-1" value={s} onChange={async (e) => { const v = e.target.value; setS(v); try { await setBcStatus(id, v); } catch { setS(status); } }}>
       {BC_STAGES.map((x) => <option key={x} value={x}>{x}</option>)}
     </select>
   );
@@ -391,16 +367,60 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
 // 11/12 — Clients / Domaines
 function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data } = useDocData<any>(`summaries/${kind}_${period}`);
-  if (!data) return <Empty />;
+  if (!data) return <EmptyState />;
+  const rows = data.rows || [];
   return (
-    <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
-      <Table head={[kind === "clients" ? "Client" : "BU", "CAS", "Facturé", "Backlog", "Marge", "%MB"]} rows={(data.rows || []).map((r: any) => [r.key, fmt(r.cas), fmt(r.facture), fmt(r.backlog), fmt(r.mb), pct(r.pmb)])} />
-    </Card>
+    <div className="flex flex-col gap-4">
+      <Card title={kind === "clients" ? "CAS par client (top 10)" : "CAS par domaine"}>
+        <HBars rows={rows.slice(0, 10).map((r: any) => ({ name: r.key, v: r.cas }))} colorFn={(r) => (kind === "domaines" ? (BU_COL[r.name] || T.faint) : T.gold)} />
+      </Card>
+      <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
+        <Table columns={[
+          colText(kind === "clients" ? "Client" : "BU", (r) => r.key),
+          colNum("CAS", (r) => money(r.cas)), colNum("Facturé", (r) => money(r.facture)),
+          colNum("Backlog", (r) => money(r.backlog)), colNum("Marge", (r) => money(r.mb)), colNum("%MB", (r) => pct(r.pmb)),
+        ]} rows={rows} />
+      </Card>
+    </div>
   );
 }
 
-// 13 — Habilitations (+ édition matrice & rôles)
-function Habilitations() {
+// FP 360°
+const Fp360: FC<Props> = () => {
+  const [q, setQ] = useState("");
+  const fp = q.trim().toUpperCase();
+  const cons = [where("fp", "==", fp || "__none__")];
+  const { rows: orders } = useCollectionData<any>("orders", cons);
+  const { rows: invoices } = useCollectionData<any>("invoices", cons);
+  const { rows: sheets } = useCollectionData<any>("projectSheets", cons);
+  const { rows: bc } = useCollectionData<any>("bcLines", cons);
+  const { rows: opps } = useCollectionData<any>("opportunities", cons);
+  const o = orders[0];
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title="Recherche par N° FP">
+        <input className="field w-full md:w-96" placeholder="FP/2026/13542" value={q} onChange={(e) => setQ(e.target.value)} />
+      </Card>
+      {fp && (o ? (
+        <>
+          <div className={grid4}>
+            <Kpi label="Client" value={o.client || "—"} />
+            <Kpi label="CAS" value={fmt(o.cas)} />
+            <Kpi label="RAF" value={fmt(o.raf)} tone="steel" />
+            <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" />
+          </div>
+          <Card title={`Factures · ${invoices.length}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
+          <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>
+          <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => b.status)]} rows={bc} /></Card>
+          <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("AM", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
+        </>
+      ) : <EmptyState label={`Aucune commande pour ${fp}.`} />)}
+    </div>
+  );
+};
+
+// 13 — Habilitations
+const Habilitations: FC<Props> = () => {
   const { data } = useDocData<any>("config/permissions");
   const { rows: users } = useCollectionData<any>("users");
   const canWrite = useCan("habilitations") === "write";
@@ -408,33 +428,23 @@ function Habilitations() {
   const matrix = draft || data?.matrix || {};
   const roles = Object.keys(matrix);
   const modules = roles.length ? Object.keys(matrix[roles[0]]) : [];
-  const cycle: any = { none: "read", read: "write", write: "none" };
+  const cyc: any = { none: "read", read: "write", write: "none" };
   const glyph: any = { write: "W", read: "R", none: "–" };
-  const tone: any = { write: colors.emerald, read: colors.steel, none: colors.bg };
-
-  const setCell = (r: string, m: string) => {
-    const base = JSON.parse(JSON.stringify(matrix));
-    base[r][m] = cycle[base[r][m]] || "read";
-    setDraft(base);
-  };
-
+  const tone: any = { write: "bg-emerald text-bg", read: "bg-steel text-bg", none: "bg-panel2 text-muted" };
+  const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Card title="Matrice droits (profil × module)">
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-            <thead><tr><th style={{ padding: 6, textAlign: "left", opacity: 0.6 }}>Module</th>{roles.map((r) => <th key={r} style={{ padding: 6, opacity: 0.6 }}>{r}</th>)}</tr></thead>
+    <div className="flex flex-col gap-4">
+      <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
+        <div className="overflow-x-auto">
+          <table className="text-xs">
+            <thead><tr><th className="px-2 py-1 text-left text-muted">Module</th>{roles.map((r) => <th key={r} className="px-2 py-1 text-muted font-medium">{r}</th>)}</tr></thead>
             <tbody>
               {modules.map((m) => (
                 <tr key={m}>
-                  <td style={{ padding: 6 }}>{m}</td>
+                  <td className="px-2 py-1">{m}</td>
                   {roles.map((r) => (
-                    <td key={r} style={{ padding: 4, textAlign: "center" }}>
-                      <button
-                        disabled={!canWrite}
-                        onClick={() => canWrite && setCell(r, m)}
-                        style={{ width: 28, height: 24, borderRadius: 4, border: "none", cursor: canWrite ? "pointer" : "default", background: tone[matrix[r][m]] || colors.bg, color: matrix[r][m] === "none" ? colors.ink : colors.bg, fontWeight: 600 }}
-                      >{glyph[matrix[r][m]] ?? "–"}</button>
+                    <td key={r} className="px-1 py-1 text-center">
+                      <button disabled={!canWrite} onClick={() => canWrite && setCell(r, m)} className={cx("w-7 h-6 rounded font-semibold", tone[matrix[r][m]] || "bg-panel2", canWrite && "hover:opacity-80")}>{glyph[matrix[r][m]] ?? "–"}</button>
                     </td>
                   ))}
                 </tr>
@@ -442,29 +452,23 @@ function Habilitations() {
             </tbody>
           </table>
         </div>
-        {canWrite && draft && <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-          <Busy label="Enregistrer la matrice" fn={async () => { await updateMatrix(draft); setDraft(null); }} />
-          <button style={{ ...btn, background: colors.panel, color: colors.ink }} onClick={() => setDraft(null)}>Annuler</button>
-        </div>}
       </Card>
       <Card title="Utilisateurs & rôles">
-        <Table
-          head={["Email", "Nom", "Actif", ...(canWrite ? ["Rôle"] : [])]}
-          rows={users.map((u) => {
-            const base = [u.email, u.name, u.active ? "oui" : "non"];
-            return canWrite ? [...base, <RoleSetter uid={u.id} />] : base;
-          })}
-        />
+        <Table columns={[
+          colText("Email", (u) => u.email), colText("Nom", (u) => u.name),
+          colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
+          ...(canWrite ? [colNum("Rôle", (u: any) => <RoleSetter uid={u.id} />)] : []),
+        ]} rows={users} />
         <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée).</Tip>
       </Card>
     </div>
   );
-}
+};
 function RoleSetter({ uid }: { uid: string }) {
   const [role, setRole] = useState("lecture");
   return (
-    <span style={{ display: "inline-flex", gap: 6 }}>
-      <select style={field} value={role} onChange={(e) => setRole(e.target.value)}>
+    <span className="inline-flex gap-1.5">
+      <select className="field !py-1" value={role} onChange={(e) => setRole(e.target.value)}>
         {["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"].map((r) => <option key={r}>{r}</option>)}
       </select>
       <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
@@ -472,20 +476,20 @@ function RoleSetter({ uid }: { uid: string }) {
   );
 }
 
-// id = identifiant de navigation unique ; key = clé de permission RBAC (peut se répéter).
+// Registre : id navigation unique + clé permission RBAC + libellé + composant.
 export const MODULES: { id: string; key: string; label: string; Component: FC<Props> }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", Component: Overview },
-  { id: "pipeline", key: "pipeline", label: "Pipeline", Component: () => <Pipeline /> },
+  { id: "pipeline", key: "pipeline", label: "Pipeline", Component: Pipeline },
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", Component: Objectifs },
   { id: "facturation", key: "facturation", label: "Facturation", Component: Facturation },
-  { id: "backlog", key: "backlog", label: "Suivi Backlog", Component: () => <Backlog /> },
+  { id: "backlog", key: "backlog", label: "Suivi Backlog", Component: Backlog },
   { id: "prevision", key: "prevision", label: "Prévision", Component: Prevision },
   { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", Component: Rentabilite },
-  { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", Component: () => <PnlProjet /> },
-  { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", Component: () => <Fournisseurs /> },
-  { id: "bc", key: "bc", label: "Exécution BC", Component: () => <BC /> },
+  { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", Component: PnlProjet },
+  { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", Component: Fournisseurs },
+  { id: "bc", key: "bc", label: "Exécution BC", Component: BC },
   { id: "clients", key: "clients", label: "Clients", Component: (p) => <EntityView {...p} kind="clients" /> },
   { id: "domaines", key: "domaines", label: "Domaines", Component: (p) => <EntityView {...p} kind="domaines" /> },
-  { id: "fp360", key: "overview", label: "FP 360°", Component: () => <Fp360 /> },
-  { id: "habilitations", key: "habilitations", label: "Habilitations", Component: () => <Habilitations /> },
+  { id: "fp360", key: "overview", label: "FP 360°", Component: Fp360 },
+  { id: "habilitations", key: "habilitations", label: "Habilitations", Component: Habilitations },
 ];
