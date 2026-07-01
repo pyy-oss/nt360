@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { enrichBu, clientBuMap } = require("../lib/enrich");
+const { enrichBu, enrichLinks, clientBuMap } = require("../lib/enrich");
 
 describe("enrichBu — reconstruction BU (jointure FP puis client)", () => {
   const orders = [
@@ -25,5 +25,22 @@ describe("enrichBu — reconstruction BU (jointure FP puis client)", () => {
     expect(opps[0].bu).toBe("CLOUD");
     expect(res.buFixedInvoices).toBe(2);
     expect(res.buFixedOpps).toBe(1);
+  });
+});
+
+describe("enrichLinks — rattachement facture↔commande", () => {
+  it("marque linked / prePo et compte les orphelines", () => {
+    const orders = [{ fp: "FP/2026/1", yearPo: 2026 }];
+    const invoices = [
+      { fp: "FP/2026/1", amountHt: 100, date: "2026-02-01" },  // rattachée
+      { fp: "FP/2026/1", amountHt: 50, date: "2025-02-01" },   // rattachée mais AVANT le PO
+      { fp: "FP/9999/9", amountHt: 200, date: "2026-01-01" },  // orpheline
+    ];
+    const res = enrichLinks({ orders, invoices });
+    expect(invoices[0].linked).toBe(true);
+    expect(invoices[1].prePo).toBe(true);
+    expect(invoices[2].linked).toBe(false);
+    expect(res.orphanCount).toBe(1);
+    expect(res.orphanAmount).toBe(200);
   });
 });

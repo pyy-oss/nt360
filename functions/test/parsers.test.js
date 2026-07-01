@@ -44,6 +44,17 @@ describe("parsePnl → orders + suppliers (§17.2)", () => {
   });
 });
 
+describe("dates sentinelles Excel rejetées", () => {
+  it("P&L yearPo=1900 → 0", () => {
+    const wb = wbFromRows("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 0, "Year PO": 1900 }]);
+    expect(parsePnl(wb).rows[0].yearPo).toBe(0);
+  });
+  it("LIVE closingDate 1899 → null", () => {
+    const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "D Prev": "1899-12-31" }]);
+    expect(parseSalesData(wb).rows[0].closingDate).toBeNull();
+  });
+});
+
 describe("parseFacturationDf → invoices (§17.3)", () => {
   it("dédup par Numéro et mappe Odoo", () => {
     const wb = wbFromRows("Facturation DF", [

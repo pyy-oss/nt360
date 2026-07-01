@@ -28,7 +28,7 @@ function parsePnl(wb) {
       fp,
       client: cleanName(val(r, keys, "customer")),
       bu: cleanBu(val(r, keys, "bu")),
-      yearPo: parseInt(val(r, keys, "year po")) || 0,
+      yearPo: (((y) => (y >= 2018 && y <= 2030 ? y : 0))(parseInt(val(r, keys, "year po")) || 0)), // rejet sentinelles 1900
       cas,
       raf: Math.max(num(val(r, keys, "raf total")), 0),
       mb: num(val(r, keys, "mb total")), // MB TOTAL, pas MB Réel / Manuel (§18.2)

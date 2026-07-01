@@ -44,7 +44,7 @@ async function recomputeAll(db, only) {
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } });
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy), ...stamp } });
-  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
+  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
 
   const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
   const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));

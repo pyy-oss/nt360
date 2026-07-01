@@ -38,4 +38,22 @@ function enrichBu(store) {
   return { buFixedInvoices, buFixedOpps };
 }
 
-module.exports = { enrichBu, clientBuMap };
+/**
+ * Marque chaque facture selon son rattachement à une commande (identité CAS=Facturé+RAF).
+ * invoice.linked = fp présent dans orders ; invoice.prePo = facturée avant l'année du PO.
+ * @returns {{orphanCount:number, orphanAmount:number}}
+ */
+function enrichLinks(store) {
+  const orderByFp = {};
+  for (const o of store.orders || []) if (o.fp) orderByFp[o.fp] = o;
+  let orphanCount = 0, orphanAmount = 0;
+  for (const inv of store.invoices || []) {
+    const ord = inv.fp ? orderByFp[inv.fp] : null;
+    inv.linked = !!ord;
+    inv.prePo = !!(ord && ord.yearPo && inv.date && +inv.date.slice(0, 4) < ord.yearPo);
+    if (!inv.linked) { orphanCount++; orphanAmount += inv.amountHt || 0; }
+  }
+  return { orphanCount, orphanAmount };
+}
+
+module.exports = { enrichBu, enrichLinks, clientBuMap };

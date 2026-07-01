@@ -71,7 +71,7 @@ function parseSalesData(wb) {
       stageLabel: STAGE_LABEL[stage] || String(val(r, keys, "statut", "stage") || ""),
       probability,
       weighted: amount * probability,
-      closingDate: toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")),
+      closingDate: (((d) => (d && +d.slice(0, 4) >= 2018 && +d.slice(0, 4) <= 2030 ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))), // rejet sentinelles 1899
       marginPct: num(val(r, keys, "mb%", "mb %", "% mb")),
       source: "salesData",
     });

@@ -7,15 +7,37 @@ const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
 
 /**
  * @param {object[]} orders
+ * @param {object[]} invoices
  * @param {object} suppliersSummary résultat de domain/fournisseurs.suppliers()
  * @param {object[]} bcLines
  * @param {number} fy année fiscale courante
  */
-function alerts(orders, suppliersSummary, bcLines, fy) {
+function alerts(orders, invoices, suppliersSummary, bcLines, fy) {
   const out = [];
 
   const neg = orders.filter((o) => (o.mb || 0) < 0);
   if (neg.length) out.push({ type: "marge_negative", severity: "high", count: neg.length, message: `${neg.length} commande(s) à marge négative`, refs: neg.slice(0, 10).map((o) => o.fp) });
+
+  // Achats fournisseurs > vente (Σsuppliers > CAS).
+  const achatSup = orders.filter((o) => (o.suppliers || []).reduce((s, x) => s + (x.amount || 0), 0) > (o.cas || 0) && o.cas > 0);
+  if (achatSup.length) out.push({ type: "achat_sup_vente", severity: "high", count: achatSup.length, message: `${achatSup.length} commande(s) où les achats dépassent la vente`, refs: achatSup.slice(0, 10).map((o) => o.fp) });
+
+  // --- Cohérence financière (identité CAS = Facturé + RAF) ---
+  const invByFp = {};
+  for (const i of invoices || []) if (i.fp) invByFp[i.fp] = (invByFp[i.fp] || 0) + (i.amountHt || 0);
+  const orphan = (invoices || []).filter((i) => i.linked === false);
+  const orphanAmt = orphan.reduce((s, i) => s + (i.amountHt || 0), 0);
+  if (orphan.length) out.push({ type: "factures_non_rattachees", severity: "high", count: orphan.length, message: `${orphan.length} facture(s) non rattachées à une commande (${(orphanAmt / 1e9).toFixed(2)} Md)` });
+
+  const surfac = orders.filter((o) => o.cas > 0 && (invByFp[o.fp] || 0) > o.cas * 1.005);
+  if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });
+
+  const rafIncoh = orders.filter((o) => {
+    if (!(o.cas > 0)) return false;
+    const attendu = Math.max(o.cas - (invByFp[o.fp] || 0), 0);
+    return Math.abs((o.raf || 0) - attendu) > 0.1 * o.cas;
+  });
+  if (rafIncoh.length) out.push({ type: "raf_incoherent", severity: "medium", count: rafIncoh.length, message: `${rafIncoh.length} commande(s) où le RAF s'écarte de >10 % de (CAS − Facturé)`, refs: rafIncoh.slice(0, 10).map((o) => o.fp) });
 
   const dormant = orders.filter((o) => (o.raf || 0) > 0 && (o.yearPo || 0) > 0 && o.yearPo <= fy - 2);
   if (dormant.length) out.push({ type: "backlog_dormant", severity: "medium", count: dormant.length, message: `${dormant.length} commande(s) ouverte(s) d'un millésime ≤ ${fy - 2}`, refs: dormant.slice(0, 10).map((o) => o.fp) });

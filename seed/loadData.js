@@ -36,7 +36,7 @@ async function readWorkbook(ref) {
   return XLSX.read(fs.readFileSync(ref), { cellDates: true });
 }
 
-const { enrichBu } = require("../functions/lib/enrich");
+const { enrichBu, enrichLinks } = require("../functions/lib/enrich");
 
 async function main() {
   const files = process.argv.slice(2);
@@ -68,6 +68,8 @@ async function main() {
   const arr = (c) => [...store[c].values()];
   const fixed = enrichBu({ orders: arr("orders"), invoices: arr("invoices"), opportunities: arr("opportunities") });
   console.log(`✓ BU reconstruite : ${fixed.buFixedInvoices} factures, ${fixed.buFixedOpps} opportunités`);
+  const links = enrichLinks({ orders: arr("orders"), invoices: arr("invoices") });
+  console.log(`✓ Rattachement factures : ${links.orphanCount} orphelines (${(links.orphanAmount / 1e9).toFixed(2)} Md)`);
 
   // Purge des collections rechargées (état propre : supprime les docs périmés,
   // ex. anciennes opportunités aux ids obsolètes). Ne touche qu'aux collections
