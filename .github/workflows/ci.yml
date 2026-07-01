@@ -20,6 +20,11 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
       - name: Install (workspace)
         run: pnpm install --frozen-lockfile
 
@@ -32,9 +37,8 @@ jobs:
       - name: Tests front (Vitest)
         run: pnpm --filter web test
 
+      - name: Tests de règles Firestore (rules-unit-testing via émulateur)
+        run: pnpm test:rules
+
       - name: Build web
         run: pnpm --filter web build
-
-      # F1+ : règles Firestore via l'émulateur.
-      # - name: Tests de règles (rules-unit-testing)
-      #   run: pnpm test:rules

@@ -9,7 +9,7 @@
     "build": "pnpm --filter web build",
     "test": "pnpm --filter web test && pnpm --filter functions test",
     "emulators": "firebase emulators:start",
-    "test:rules": "firebase emulators:exec \"pnpm --filter functions test:rules\""
+    "test:rules": "firebase emulators:exec --only firestore \"pnpm --filter functions test:rules\""
   },
   "devDependencies": {
     "firebase-tools": "^13"

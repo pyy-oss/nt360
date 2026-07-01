@@ -4,9 +4,9 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:rules": "vitest run test/rules.test.js"
+    "test": "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js",
+    "test:rules": "vitest run --config vitest.rules.config.js"
   },
   "dependencies": {
     "firebase-admin": "^12",
@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "vitest": "^2",
-    "@firebase/rules-unit-testing": "^3"
+    "@firebase/rules-unit-testing": "^3",
+    "firebase": "^10"
   }
 }

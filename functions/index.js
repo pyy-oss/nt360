@@ -6,6 +6,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 
+const { IMPORTS_BUCKET } = require("./lib/config");
 const { parsePnl } = require("./parsers/pnl");
 const { parseFiche } = require("./parsers/ficheAffaire");
 const { parseFacturationDf } = require("./parsers/facturationDf");
@@ -61,13 +62,31 @@ exports.setUserRole = onCall(async (req) => {
   return { ok: true };
 });
 
+// --- logLogin : audit de connexion (critère F1 « login audité ») ---
+// Appelé par le front après authentification ; écrit via Admin SDK (auditLog interdit au client).
+exports.logLogin = onCall(async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  await db.collection("auditLog").add({
+    uid: req.auth.uid,
+    action: "login",
+    module: "auth",
+    entity: "session",
+    entityId: req.auth.uid,
+    detail: { role: req.auth.token.role || null, email: req.auth.token.email || null },
+    ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+});
+
 // Exposés pour les tests unitaires des parseurs (§18) sans démarrer les Functions.
 module.exports.PARSERS = PARSERS;
 module.exports.docRef = docRef;
 module.exports.detectKind = detectKind;
+module.exports.IMPORTS_BUCKET = IMPORTS_BUCKET;
 
 // --- Stubs des phases suivantes (BUILD_KIT §9, §10, §11) ---
-// exports.ingest         = onObjectFinalized(...)   // F2 : ingestion SheetJS idempotente
+// Bucket imports/exports = IMPORTS_BUCKET (gs://nt360). Voir lib/config.js.
+// exports.ingest = onObjectFinalized({ bucket: IMPORTS_BUCKET, memoryMiB: 1024, timeoutSeconds: 300 }, ...) // F2
 // exports.aggregate      = onDocumentWritten(...)   // F3 : recalcul summaries/*
 // exports.syncSalesData  = onSchedule("every day 06:00", ...)  // F6 : sync Sales_DATA
 // exports.export         = onCall(...)              // F7 : export PDF/XLSX → URL signée

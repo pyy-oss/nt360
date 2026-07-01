@@ -38,12 +38,25 @@ pnpm dev                     # front Vite (VITE_USE_EMULATORS=true pour brancher
 
 Copier `web/.env.example` → `web/.env.local` au besoin (la config web Firebase est publique).
 
+**Bucket imports/exports** : `gs://nt360` (constante `IMPORTS_BUCKET`, `functions/lib/config.js`,
+surchargeable via `IMPORTS_BUCKET`). Utilisé par le trigger `ingest` (F2) et les exports (F7).
+
+### Amorçage (F1)
+
+```bash
+# Émulateur : matrice de droits + 1er admin 'direction'
+FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 \
+  GCLOUD_PROJECT=propulse-business-87f7a node seed/seed.js admin@nt.ci MotDePasse123
+
+pnpm test:rules   # 23 tests de règles RBAC via l'émulateur Firestore
+```
+
 ## Roadmap (BUILD_KIT §15)
 
 | Phase | Contenu | État |
 |-------|---------|------|
 | **F0** | Socle : config Firebase, Emulator Suite, SPA vide, seed `config/permissions` | ✅ |
-| F1 | Auth + custom claims + `setUserRole` + `firestore.rules` + tests de règles | ⬜ |
+| **F1** | Auth + custom claims + `setUserRole`/`logLogin` + `firestore.rules` + tests de règles (23) | ✅ |
 | F2 | Ingestion SheetJS (P&L, DF, fiche, Sales_DATA) idempotente + `imports` | ⬜ |
 | F3 | Agrégation `summaries/*` (backlog FY, pipeline, fournisseurs, overview…) | ⬜ |
 | F4 | Frontend parité 13 modules (valeurs de contrôle §18) | ⬜ |
