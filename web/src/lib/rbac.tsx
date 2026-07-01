@@ -73,3 +73,8 @@ export function useClaims() {
 export function useCan(module: string): Level {
   return useContext(AuthCtx).can(module);
 }
+
+/** Fonction can(module) stable (à appeler dans des boucles/rendus sans violer les règles des hooks). */
+export function useCanFn(): (module: string) => Level {
+  return useContext(AuthCtx).can;
+}

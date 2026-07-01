@@ -1,75 +1,87 @@
+import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./lib/firebase";
-import { useClaims, useCan } from "./lib/rbac";
+import { useClaims, useCanFn, type Level } from "./lib/rbac";
+import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
 import { colors, fonts } from "./design/tokens";
+import { ErrorBoundary } from "./design/components";
+import { MODULES } from "./modules";
 
-// Les 13 modules (parité prototype) arrivent en F4 ; F1 pose l'auth + le RBAC.
-const MODULES = [
-  "overview", "pipeline", "objectifs", "facturation", "backlog", "prevision",
-  "rentabilite", "pnlprojet", "fournisseurs", "bc", "clients", "domaines", "habilitations",
-];
-
-function AccessGrid() {
+function Nav({ active, onSelect, can }: { active: string; onSelect: (k: string) => void; can: (m: string) => Level }) {
+  const visible = MODULES.filter((m) => can(m.key) !== "none");
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px,1fr))", gap: 8 }}>
-      {MODULES.map((m) => (
-        <ModuleChip key={m} module={m} />
-      ))}
-    </div>
-  );
-}
-
-function ModuleChip({ module }: { module: string }) {
-  const level = useCan(module); // none | read | write
-  const bg = level === "write" ? colors.emerald : level === "read" ? colors.steel : colors.panel;
-  return (
-    <div style={{ background: colors.panel, borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <span style={{ fontSize: 13 }}>{module}</span>
-      <span style={{ fontSize: 11, background: bg, color: colors.bg, borderRadius: 6, padding: "2px 6px", fontWeight: 600 }}>
-        {level}
-      </span>
-    </div>
+    <nav style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 210 }}>
+      {visible.map((m) => {
+        const on = m.key === active;
+        return (
+          <button
+            key={m.key}
+            onClick={() => onSelect(m.key)}
+            style={{
+              textAlign: "left", padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+              border: "none", background: on ? colors.panel : "transparent",
+              color: on ? colors.gold : colors.ink, fontSize: 13, fontFamily: fonts.body,
+              borderLeft: `3px solid ${on ? colors.gold : "transparent"}`,
+            }}
+          >
+            {m.label}
+            <span style={{ float: "right", opacity: 0.4, fontSize: 10 }}>{can(m.key) === "write" ? "W" : "R"}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
 export default function App() {
   const { user, role, loading } = useClaims();
+  const can = useCanFn();
+  const { data: periods } = useDocData<any>("config/periods");
+  const [period, setPeriod] = useState<string>("all");
+  const [active, setActive] = useState<string>("overview");
+
+  const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
+  const current = MODULES.find((m) => m.key === active) || MODULES[0];
+  const allowed = can(current.key) !== "none" ? current : MODULES.find((m) => can(m.key) !== "none");
 
   if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", background: colors.bg, color: colors.ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: fonts.body }}>
-        Chargement…
-      </div>
-    );
+    return <Centered>Chargement…</Centered>;
   }
-
   if (!user) return <Login />;
 
   return (
-    <div style={{ minHeight: "100vh", background: colors.bg, color: colors.ink, fontFamily: fonts.body, padding: 24 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 style={{ fontFamily: fonts.display, color: colors.gold, margin: 0, fontSize: 22 }}>
-          Pilote Revenu NT CI
-        </h1>
+    <div style={{ minHeight: "100vh", background: colors.bg, color: colors.ink, fontFamily: fonts.body }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: `1px solid ${colors.panel}` }}>
+        <h1 style={{ fontFamily: fonts.display, color: colors.gold, margin: 0, fontSize: 20 }}>Pilote Revenu NT CI</h1>
         <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 13 }}>
+          <label style={{ opacity: 0.7 }}>Période</label>
+          <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ background: colors.panel, color: colors.ink, border: "none", borderRadius: 6, padding: "4px 8px" }}>
+            {available.map((p) => <option key={p} value={p}>{p === "all" ? "Tout" : p}</option>)}
+          </select>
           <span style={{ opacity: 0.8 }}>{user.email}</span>
-          <span style={{ background: colors.gold, color: colors.bg, borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>
-            {role ?? "sans rôle"}
-          </span>
-          <button
-            onClick={() => signOut(auth)}
-            style={{ background: "transparent", color: colors.ink, border: `1px solid ${colors.steel}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}
-          >
-            Déconnexion
-          </button>
+          <span style={{ background: colors.gold, color: colors.bg, borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>{role ?? "sans rôle"}</span>
+          <button onClick={() => signOut(auth)} style={{ background: "transparent", color: colors.ink, border: `1px solid ${colors.steel}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>Déconnexion</button>
         </div>
       </header>
 
-      <p style={{ opacity: 0.7, marginTop: 0 }}>
-        Socle F1 — Auth &amp; RBAC. Accès par module pour ton rôle (les 13 modules arrivent en F4) :
-      </p>
-      <AccessGrid />
+      <div style={{ display: "flex", gap: 24, padding: 24, alignItems: "flex-start" }}>
+        <Nav active={allowed?.key || "overview"} onSelect={setActive} can={can} />
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {allowed ? (
+            <ErrorBoundary key={allowed.key}>
+              <h2 style={{ fontFamily: fonts.display, marginTop: 0 }}>{allowed.label}</h2>
+              {allowed.Component({ period })}
+            </ErrorBoundary>
+          ) : (
+            <div style={{ opacity: 0.6 }}>Aucun module accessible pour ce profil.</div>
+          )}
+        </main>
+      </div>
     </div>
   );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return <div style={{ minHeight: "100vh", background: colors.bg, color: colors.ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: fonts.body }}>{children}</div>;
 }
