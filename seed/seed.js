@@ -40,11 +40,12 @@ async function main() {
     return;
   }
 
-  // 2) 1er utilisateur `direction`.
+  // 2) 1er utilisateur `direction` (idempotent : réinitialise le mot de passe si existant).
   let user;
   try {
     user = await auth.getUserByEmail(email);
-    console.log(`✓ Utilisateur existant réutilisé : ${email} (${user.uid})`);
+    await auth.updateUser(user.uid, { password, emailVerified: true });
+    console.log(`✓ Utilisateur existant : ${email} (${user.uid}) — mot de passe réinitialisé`);
   } catch {
     user = await auth.createUser({ email, password, emailVerified: true });
     console.log(`✓ Utilisateur créé : ${email} (${user.uid})`);
