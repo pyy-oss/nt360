@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # La version de pnpm est déterminée par le champ `packageManager` du package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install functions deps
+        run: pnpm --filter functions install
+
+      - name: Tests parseurs & domaine + couverture ≥80% (Vitest)
+        run: pnpm --filter functions test:coverage
+
+      - name: Tests front (Vitest)
+        run: pnpm --filter web test
+
+      - name: Tests de règles Firestore (rules-unit-testing via émulateur)
+        run: pnpm test:rules
+
+      - name: Build web
+        run: pnpm --filter web build

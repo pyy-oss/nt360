@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+  }
+  /* Scrollbars discrètes */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #26362e transparent;
+  }
+  *::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #26362e;
+    border-radius: 8px;
+  }
+  /* Focus visible cohérent */
+  :focus-visible {
+    @apply outline-none ring-2 ring-gold/60 ring-offset-2 ring-offset-bg;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-line rounded-xl2 shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-default;
+  }
+  .btn-gold {
+    @apply btn bg-gold text-bg hover:bg-gold/90;
+  }
+  .btn-ghost {
+    @apply btn border border-line text-ink hover:bg-panel2;
+  }
+  .field {
+    @apply rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink placeholder:text-muted/70 focus:border-gold/50;
+  }
+  .tabnum {
+    font-variant-numeric: tabular-nums;
+  }
+}

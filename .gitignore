@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+web/dist/
+web/*.tsbuildinfo
+functions/lib/*.js.map
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+storage-debug.log
+*-debug.log
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.local
+serviceAccountKey.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test coverage
+coverage/
+
+# Données réelles (confidentielles) — ne pas committer
+*.xlsx
+seed/data/

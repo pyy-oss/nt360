@@ -1,0 +1,88 @@
+name: Firebase Setup (manuel)
+
+# Déploiement back-end + amorçage, déclenché manuellement (Actions → Run workflow).
+# Réalise le point 2 : deploy (hosting/firestore/storage/functions), seed du 1er admin
+# + matrice de droits, et chargement optionnel de données depuis gs://.
+#
+# Secrets requis : FIREBASE_SERVICE_ACCOUNT (compte de service), SEED_ADMIN_PASSWORD.
+# Prérequis console : provider Email/Password activé + projet en plan Blaze (Functions).
+on:
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Déployer hosting/firestore/storage/functions"
+        type: boolean
+        default: true
+      run_seed:
+        description: "Créer le 1er admin (direction) + matrice de droits"
+        type: boolean
+        default: true
+      admin_email:
+        description: "Email du 1er administrateur"
+        type: string
+        required: true
+      data_files:
+        description: "Fichiers de données à charger (URIs gs:// séparées par des espaces, optionnel)"
+        type: string
+        default: ""
+
+concurrency:
+  group: firebase-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    env:
+      GCLOUD_PROJECT: propulse-business-87f7a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web
+        run: pnpm --filter web build
+
+      - name: Write service account
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      # Projet PARTAGÉ avec une autre app : on scope strictement le déploiement.
+      # - hosting : site dédié (firebase.json → hosting.site=nt360-cockpit)
+      # - firestore:rules : base nommée nt360 (firebase.json → firestore.database=nt360)
+      # - functions : NOS fonctions par nom (jamais --only functions global, qui
+      #   proposerait de supprimer les ~50 functions de l'autre app)
+      # - pas de storage / pas d'index (ne rien écraser sur la base (default)).
+      - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
+        if: ${{ inputs.run_deploy }}
+        run: >
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx firebase deploy
+          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
+          --project "$GCLOUD_PROJECT" --non-interactive
+
+      - name: Seed 1er admin + matrice
+        if: ${{ inputs.run_seed }}
+        env:
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          ADMIN_EMAIL: ${{ inputs.admin_email }}
+        run: |
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json" \
+          node seed/seed.js "$ADMIN_EMAIL" "$SEED_ADMIN_PASSWORD"
+
+      - name: Charger les données (gs://)
+        if: ${{ inputs.data_files != '' }}
+        env:
+          DATA_FILES: ${{ inputs.data_files }}
+        run: |
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json" \
+          node seed/loadData.js $DATA_FILES

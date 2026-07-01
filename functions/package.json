@@ -1,0 +1,26 @@
+{
+  "name": "functions",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js",
+    "test:coverage": "vitest run --config vitest.config.js --coverage",
+    "test:rules": "vitest run --config vitest.rules.config.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12",
+    "firebase-functions": "^5",
+    "@google-cloud/firestore": "^7",
+    "xlsx": "^0.18",
+    "exceljs": "^4",
+    "pdfkit": "^0.15"
+  },
+  "devDependencies": {
+    "vitest": "^2",
+    "@vitest/coverage-v8": "^2",
+    "@firebase/rules-unit-testing": "^3",
+    "firebase": "^10"
+  }
+}

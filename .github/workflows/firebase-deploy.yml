@@ -1,0 +1,42 @@
+name: Firebase Deploy (main)
+
+# Déploiement complet sur push vers main : Hosting + Firestore rules/indexes + Storage
+# rules + Cloud Functions. Nécessite le secret FIREBASE_SERVICE_ACCOUNT.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web
+        run: pnpm --filter web build
+
+      - name: Write service account
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      # Projet PARTAGÉ : déploiement scopé (site hosting dédié, base Firestore nommée
+      # nt360, nos functions par nom). Ne touche ni à la base (default) ni aux functions
+      # de l'autre app.
+      - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
+        run: >
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx firebase deploy
+          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
+          --project propulse-business-87f7a --non-interactive

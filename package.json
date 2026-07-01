@@ -1,0 +1,17 @@
+{
+  "name": "pilote-revenu-nt-ci",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cockpit Pilote Revenu NT CI — 100% Firebase serverless (voir docs/BUILD_KIT.md)",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "test": "pnpm --filter web test && pnpm --filter functions test",
+    "emulators": "firebase emulators:start",
+    "test:rules": "firebase emulators:exec --only firestore \"pnpm --filter functions test:rules\""
+  },
+  "devDependencies": {
+    "firebase-tools": "^13"
+  }
+}
