@@ -53,8 +53,11 @@ function parseSalesData(wb) {
     const probability =
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
-    const extId = val(r, keys, "extid", "ext id", "id opp", "oppid", "id");
-    const oppId = extId ? safeId(extId) : hashId(client, amount, stage, am);
+    // ⚠️ NE PAS utiliser le terme "id" seul : il matche "IdC" (proba) → collisions massives.
+    // Sans extId : hash incluant la position de ligne (rowsIn) → idempotent par fichier,
+    // sans écraser des opportunités distinctes qui partagent client/montant/étape/AM.
+    const extId = val(r, keys, "ext id", "extid", "opp id", "oppid");
+    const oppId = extId ? safeId(extId) : hashId(client, amount, stage, am, rowsIn);
 
     out.push({
       _id: oppId,
