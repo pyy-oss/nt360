@@ -57,7 +57,7 @@ pnpm test:rules   # 23 tests de règles RBAC via l'émulateur Firestore
 |-------|---------|------|
 | **F0** | Socle : config Firebase, Emulator Suite, SPA vide, seed `config/permissions` | ✅ |
 | **F1** | Auth + custom claims + `setUserRole`/`logLogin` + `firestore.rules` + tests de règles (23) | ✅ |
-| F2 | Ingestion SheetJS (P&L, DF, fiche, Sales_DATA) idempotente + `imports` | ⬜ |
+| **F2** | Ingestion SheetJS (P&L, DF, fiche, Sales_DATA) idempotente + `imports` + quarantaine + tests §18 | ✅ |
 | F3 | Agrégation `summaries/*` (backlog FY, pipeline, fournisseurs, overview…) | ⬜ |
 | F4 | Frontend parité 13 modules (valeurs de contrôle §18) | ⬜ |
 | F5 | Écritures gardées (opp, statut BC, crédit, objectifs, matrice) | ⬜ |
