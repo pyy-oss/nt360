@@ -170,8 +170,8 @@ summaries/atterrissage_{fy}     { realiseCas, backlog, pipelinePondere, projete,
 
 ## 7. Logique métier unifiée
 
-- **Chaîne** : `Opportunités(pondérées) → Certitudes → Commandes(CAS) → Facturé → Backlog(RAF)`, jointes par `fp`. Taux de facturation = (CAS−RAF)/CAS. Backlog d'un FP = CAS − Σ factures du FP.
-- **Backlog ancré FY** : `config/fiscal.currentFy` = max(yearPo). Total + ventilations sur **toutes** les commandes ouvertes (RAF>0), **indépendant de la période**.
+- **Chaîne** (grandeurs **NON additives** : `CAS ≠ Facturé + Backlog`) : `Opportunités(pondérées) → Certitudes → Commandes(CAS) → Facturé(CAF) → Backlog(RAF)`, jointes par `fp`. Périmètres distincts : **CAS** = prise de commande figée sur l'année de PO (peut venir d'années antérieures) ; **CAF** = facturation, **seule** grandeur figée sur l'exercice (Σ factures datées) ; **Backlog** (RAF) et **Certitudes** (pondéré ≥90 %) sont **glissants** (cumulés jusqu'à l'année en cours, indépendants de la période). Avancement de facturation d'une cohorte = (CAS−RAF de la période)/CAS.
+- **Backlog ancré FY (glissant)** : `config/fiscal.currentFy` = max(yearPo). Total + ventilations sur **toutes** les commandes ouvertes (RAF>0), **indépendant de la période sélectionnée**.
 - **Pipeline pondéré** : étapes 1..9 ; actif=1-5, veille=8, conversion=6 vs 7. Pondéré = Σ(montant×proba) ; proba = `IdC` sinon défaut `{1:.10,2:.25,3:.40,4:.60,5:.80,8:.05}`. Taux conversion = won/(won+lost). Phasage par mois de `closingDate`.
 - **Fournisseurs** : exposition = Σ `orders.suppliers.amount` ; achat commandes ouvertes = Σ sur RAF>0 ; encours = saisi (DF) **sinon calculé** = Σ `bcLines.amountXof` non soldés ; couverture = (autorisé−encours)−achat_ouvert (négatif=Saturation ; util≥90%=Tension) ; reco = encours + achat_ouvert×1,10.
 - **P&L projet** : coût/vente/marge/%MB par `fp` ; coût par type & fournisseur (bcLines) ; contrôle vente vs `orders.cas`.

@@ -47,7 +47,8 @@ async function recomputeAll(db, only) {
   const w = []; // écritures {path, data}
 
   const sup = suppliers(orders, bcLines, creditLines);
-  if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...backlogFy(orders, currentFy), ...stamp } });
+  const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
+  if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } });
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy), ...stamp } });
@@ -59,13 +60,11 @@ async function recomputeAll(db, only) {
   const years = [...new Set(orders.map((o) => o.yearPo).filter((y) => y > 0))].sort((a, b) => b - a).map(String);
   const periods = ["all", ...years];
   for (const period of periods) {
-    const inv = filterInvoices(invoices, period);
+    const inv = filterInvoices(invoices, period); // factures DATÉES dans la période = CAF figé sur l'exercice
     const ord = filterOrders(orders, period); // commandes signées dans la période (yearPo)
-    // overview() reçoit TOUTES les factures : le maillon "Facturé" est joint par N° FP
-    // aux commandes de la période (toutes dates) → chaîne homogène CAS→Facturé→Backlog.
-    // Pipeline pondéré (IdC≥90%) = FUTUR : opps globales, non découpées par année → Certitudes
-    // cohérentes avec le KPI "Pondéré (IdC≥90%)" du module Pipeline.
-    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, invoices, opps), ...stamp } });
+    // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
+    // (bf global, indépendant de la période) · Certitudes = pondéré global (opps non filtrées, à venir).
+    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, opps, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord), ...stamp } });
     if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.client), ...stamp } });

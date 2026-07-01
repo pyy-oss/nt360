@@ -28,23 +28,29 @@ const OPPS = [
 
 describe("overview — chaîne (§7)", () => {
   const ov = overview(ORDERS, INVOICES, OPPS);
-  it("commandes/facturé/backlog", () => {
+  it("commandes / facturé CAF (Σ factures, orphelines incluses) / RAF période", () => {
     expect(ov.commandes).toBe(2300);
-    expect(ov.facture).toBe(1400);
-    expect(ov.backlog).toBe(1200);
+    expect(ov.facture).toBe(1400); // CAF = Σ factures datées (non additif avec CAS/Backlog)
+    expect(ov.rafPeriode).toBe(1200);
+    expect(ov.backlog).toBe(1200); // sans opts → RAF période (rétro-compat)
     expect(ov.backlogCount).toBe(2); // FP/2026/1 (raf 400) + FP/2026/3 (raf 800)
   });
-  it("facturé = rattaché par N° FP ; orphelines exclues du maillon", () => {
+  it("facturé = CAF (Σ factures), orphelines incluses (facturation réelle)", () => {
     const ov2 = overview(ORDERS, [...INVOICES, { numero: "X", fp: "FP/9999/9", amountHt: 777 }], OPPS);
-    expect(ov2.facture).toBe(1400); // orpheline (FP absent des commandes) exclue
-    expect(ov2.factureOrphelin).toBe(777);
-    expect(ov2.factureTotal).toBe(2177);
+    expect(ov2.facture).toBe(2177); // 1400 + 777 : une facture orpheline reste du CA facturé
+  });
+  it("backlog GLISSANT fourni via opts (indépendant de la période)", () => {
+    const ov3 = overview(ORDERS, INVOICES, OPPS, { backlog: 9999, backlogCount: 42 });
+    expect(ov3.backlog).toBe(9999);
+    expect(ov3.backlogCount).toBe(42);
+    expect(ov3.rafPeriode).toBe(1200); // le taux reste sur la cohorte période
+    expect(ov3.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);
   });
   it("certitudes = pondéré certain (IdC≥90%) seul ; commandes suivies à part", () => {
     expect(ov.pondCertain).toBe(950); // o6 éligible
     expect(ov.certitudes).toBe(950); // pondéré quasi-certain seul (hors commandes signées)
   });
-  it("taux de facturation = (CAS−RAF)/CAS", () => {
+  it("avancement facturation = (CAS − RAF période)/CAS", () => {
     expect(ov.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);
   });
 });

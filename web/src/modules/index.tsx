@@ -91,19 +91,19 @@ const Overview: FC<Props> = ({ period }) => {
       <div className="flex justify-end">{actions}</div>
       {/* Chaîne de valeur */}
       <Chain>
-        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · à venir" />
-        <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} />
-        <Stage idx={3} label="Facturé" accent={T.emerald} value={fmt(data.facture)} sub={`rattaché · taux ${pct(data.ratios?.tauxFacturation)}`} />
-        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes` : undefined} />
+        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · glissant" />
+        <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} sub="prise de commande" />
+        <Stage idx={3} label="Facturé · CAF" accent={T.emerald} value={fmt(data.facture)} sub="figé sur l'exercice" />
+        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
       <div className={grid4}>
         <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
         <Kpi label="Pondéré certain (IdC ≥ 90 %)" value={fmt(data.pondCertain)} tone="steel" sub="à venir" />
-        <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
+        <Kpi label="Avancement facturation" value={pct(data.ratios?.tauxFacturation)} sub="commandes de la période" />
       </div>
       <AlertsBanner />
-      <Tip>Chaîne Certitudes → Commandes → Facturé (rattaché par N° FP) → Backlog, cohérente sur la période sélectionnée (CAS = Facturé + RAF). Vue Backlog ancrée FY dans le module dédié. Certitudes = pipeline pondéré IdC ≥ 90 % (global, à venir).</Tip>
+      <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Backlog</b> (RAF) et <b>Certitudes</b> (pondéré ≥ 90 %) sont <b>glissants</b> : ils cumulent toutes les commandes ouvertes / opportunités jusqu'à l'année en cours, indépendamment de la période.</Tip>
     </div>
   );
 };

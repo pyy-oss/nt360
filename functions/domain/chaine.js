@@ -1,24 +1,30 @@
-// Chaîne de valeur : Commandes(CAS) → Facturé → Backlog(RAF) (BUILD_KIT §7).
-// Fonctions pures (testables). Taux de facturation = (CAS−RAF)/CAS.
+// Chaîne de valeur : Certitudes / Commandes(CAS) / Facturé(CAF) / Backlog(RAF) (BUILD_KIT §7).
+// ⚠️ Ce ne sont PAS des grandeurs additives : CAS ≠ Facturé + Backlog. Les périmètres diffèrent.
+//   • CAS      : prise de commande, FIGÉE sur l'année de PO (peut venir d'années antérieures).
+//   • CAF      : facturation, seule grandeur FIGÉE sur l'exercice (Σ factures datées dans la période).
+//   • Backlog  : RAF, GLISSANT — toutes les commandes ouvertes, cumulé jusqu'à l'année en cours.
+//   • Certitudes : pipeline pondéré ≥90 %, GLISSANT (à venir), indépendant de l'année.
+// Fonctions pures (testables).
 
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 
 /**
- * @param {object[]} orders  commandes (orders/{fp})
- * @param {object[]} invoices factures de la période
- * @param {object[]} [opps]  opportunités (pour le maillon pondéré / gagné)
+ * @param {object[]} orders  commandes de la période (orders/{fp})
+ * @param {object[]} invoices factures DATÉES dans la période (CAF figé)
+ * @param {object[]} [opps]  opportunités globales (pour le maillon pondéré / gagné)
+ * @param {{backlog?:number, backlogCount?:number}} [opts] backlog GLISSANT global (sinon = RAF période)
  */
-function overview(orders, invoices, opps = []) {
+function overview(orders, invoices, opps = [], opts = {}) {
   const commandes = sum(orders, (o) => o.cas);
-  const backlog = sum(orders, (o) => Math.max(o.raf || 0, 0));
-  const backlogCount = orders.filter((o) => (o.raf || 0) > 0).length;
-  // Facturé de la chaîne = factures RATTACHÉES aux commandes (jointure N° FP) :
-  // homogène avec Commandes/Backlog. Les factures orphelines (FP absent des
-  // commandes) sont exposées à part et ne gonflent pas le maillon Facturé.
-  const orderFps = new Set(orders.map((o) => o.fp).filter(Boolean));
-  const facture = sum(invoices.filter((i) => i.fp && orderFps.has(i.fp)), (i) => i.amountHt);
-  const factureTotal = sum(invoices, (i) => i.amountHt);
-  const factureOrphelin = factureTotal - facture;
+  // RAF des commandes de la PÉRIODE : base de l'avancement de facturation (taux), cohorte.
+  const rafPeriode = sum(orders, (o) => Math.max(o.raf || 0, 0));
+  // Backlog GLISSANT : RAF de toutes les commandes ouvertes, cumulé jusqu'à l'année en cours
+  // (indépendant de la période). Fourni via opts ; à défaut = RAF période (rétro-compat tests).
+  const backlog = opts.backlog != null ? opts.backlog : rafPeriode;
+  const backlogCount = opts.backlogCount != null ? opts.backlogCount : orders.filter((o) => (o.raf || 0) > 0).length;
+  // Facturé = CAF, FIGÉ sur l'exercice = Σ factures datées dans la période (orphelines incluses :
+  // une facture est du CA facturé même sans commande retrouvée). Non additif avec CAS/Backlog.
+  const facture = sum(invoices, (i) => i.amountHt);
   const mb = sum(orders, (o) => o.mb);
   // Gagné = Commandes : une opportunité gagnée (stage 6) devient un PO/commande (CAS).
   // On ne recompte donc PAS les gagnés dans les certitudes (déjà dans les commandes).
@@ -30,20 +36,19 @@ function overview(orders, invoices, opps = []) {
     (o) => o.weighted
   );
   return {
-    // Certitudes = pipeline quasi-certain à venir (actif, IdC ≥ 90 %, pas encore signé).
-    // Les commandes signées sont suivies à part (maillon COMMANDES) et NON incluses ici.
+    // Certitudes = pipeline quasi-certain à venir (glissant), commandes signées suivies à part.
     certitudes: pondCertain,
     pondCertain,
     commandes,
     facture,
-    factureOrphelin,
-    factureTotal,
+    rafPeriode,
     backlog,
     backlogCount,
     mb,
     pipelineWon,
     ratios: {
-      tauxFacturation: commandes > 0 ? (commandes - backlog) / commandes : 0,
+      // Avancement de facturation des commandes de la PÉRIODE (cohorte) = (CAS − RAF période)/CAS.
+      tauxFacturation: commandes > 0 ? (commandes - rafPeriode) / commandes : 0,
       pmb: commandes > 0 ? mb / commandes : 0,
     },
   };
