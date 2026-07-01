@@ -36,16 +36,7 @@ async function readWorkbook(ref) {
   return XLSX.read(fs.readFileSync(ref), { cellDates: true });
 }
 
-async function commitAll(writes) {
-  let batch = db.batch(), n = 0, total = 0;
-  for (const w of writes) {
-    batch.set(db.doc(w.path), w.data, { merge: true });
-    total++;
-    if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-  }
-  await batch.commit();
-  return total;
-}
+const { enrichBu } = require("../functions/lib/enrich");
 
 async function main() {
   const files = process.argv.slice(2);
@@ -53,21 +44,45 @@ async function main() {
     console.log("Usage : node seed/loadData.js <fichier.xlsx> [autre.xlsx ...]");
     process.exit(1);
   }
+
+  // Accumulation dédupliquée par _id à travers tous les fichiers.
+  const COLLS = ["orders", "invoices", "opportunities", "projectSheets", "bcLines"];
+  const store = Object.fromEntries(COLLS.map((c) => [c, new Map()]));
   for (const f of files) {
     const wb = await readWorkbook(f);
     const { kinds, writes, report } = buildWrites(wb);
-    const written = await commitAll(writes);
+    for (const w of writes) {
+      const i = w.path.indexOf("/");
+      const coll = w.path.slice(0, i), id = w.path.slice(i + 1);
+      if (store[coll]) store[coll].set(id, w.data);
+    }
     await db.collection("imports").add({
       uid: "seed", kinds, filename: path.basename(f), objectKey: `local/${path.basename(f)}`,
       rowsIn: report.rowsIn, rowsOk: report.rowsOk, rowsSkipped: report.rowsSkipped, report,
       ts: FieldValue.serverTimestamp(),
     });
-    console.log(`✓ ${path.basename(f)} → [${kinds.join(", ")}] ${written} docs (ok ${report.rowsOk}, ignorés ${report.rowsSkipped})`);
+    console.log(`✓ ${path.basename(f)} → [${kinds.join(", ")}] ok ${report.rowsOk}, ignorés ${report.rowsSkipped}`);
   }
 
+  // Fiabilisation : reconstruction BU (jointure FP→orders puis client majoritaire).
+  const arr = (c) => [...store[c].values()];
+  const fixed = enrichBu({ orders: arr("orders"), invoices: arr("invoices"), opportunities: arr("opportunities") });
+  console.log(`✓ BU reconstruite : ${fixed.buFixedInvoices} factures, ${fixed.buFixedOpps} opportunités`);
+
+  // Commit (dédup garantie par _id).
+  let batch = db.batch(), n = 0, total = 0;
+  for (const coll of COLLS) {
+    for (const [id, data] of store[coll]) {
+      batch.set(db.doc(`${coll}/${id}`), data, { merge: true });
+      total++;
+      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
+    }
+  }
+  await batch.commit();
+  console.log(`✓ ${total} documents écrits (dédupliqués)`);
+
   // Ancrage FY + agrégats.
-  const orders = (await db.collection("orders").select("yearPo").get()).docs.map((d) => d.data());
-  const currentFy = fiscalYearFromOrders(orders);
+  const currentFy = fiscalYearFromOrders(arr("orders"));
   if (currentFy > 0) await db.doc("config/fiscal").set({ currentFy }, { merge: true });
   const res = await recomputeAll(db);
   console.log(`✓ Agrégats recalculés (FY ${res.currentFy}, périodes ${res.periods.join("/")}) : ${res.written.length} summaries`);

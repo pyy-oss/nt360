@@ -1,7 +1,7 @@
 // Parseur Facturation DF / Odoo account.move → invoices/{numero} (BUILD_KIT §17.3, §18.3).
 // Module pur (testable). Dé-doublonnage par Numéro ; Σ factures d'un FP = son CAF Total.
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu } = require("../lib/ids");
+const { fpKey, num, cleanBu, cleanName } = require("../lib/ids");
 const { headerKeys, val, toISO, safeId } = require("../lib/sheets");
 
 // Choisit la 1re feuille pertinente (feuille "Facturation DF" sinon la 1re).
@@ -33,9 +33,9 @@ function parseFacturationDf(wb) {
       _id: safeId(numero),
       numero,
       fp,
-      client: String(
-        val(r, keys, "client", "nom d'affichage du partenaire", "partenaire") || ""
-      ).trim(),
+      client: cleanName(
+        val(r, keys, "client", "nom d'affichage du partenaire", "partenaire")
+      ),
       bu: cleanBu(val(r, keys, "bu", "domaine")),
       date: toISO(val(r, keys, "date de facturation", "date")),
       amountHt,

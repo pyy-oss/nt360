@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { fpKey, num, cleanBu, noAcc } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName } = require("../lib/ids");
 
 // Socle F0 : garde-fous des helpers déterministes (BUILD_KIT §18.1).
 describe("fpKey — normalisation clé d'or N° FP", () => {
@@ -11,6 +11,19 @@ describe("fpKey — normalisation clé d'or N° FP", () => {
   it("renvoie null si aucun motif FP", () => {
     expect(fpKey("")).toBeNull();
     expect(fpKey("N/A")).toBeNull();
+  });
+  it("rejette les FP placeholder à séquence nulle (.../0000)", () => {
+    expect(fpKey("FP/2024/0000")).toBeNull();
+    expect(fpKey("FP/2026/00")).toBeNull();
+    expect(fpKey("FP/2026/013")).toBe("FP/2026/013"); // zéros non significatifs conservés
+  });
+});
+
+describe("cleanName — fusion des doublons logiques", () => {
+  it("trim, espaces, majuscules", () => {
+    expect(cleanName("  Orange   ci ")).toBe("ORANGE CI");
+    expect(cleanName("orange ci")).toBe("ORANGE CI");
+    expect(cleanName(null)).toBe("");
   });
 });
 

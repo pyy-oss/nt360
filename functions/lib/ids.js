@@ -1,10 +1,13 @@
 // Helpers déterministes partagés (BUILD_KIT §14, §17).
 // IDs déterministes ⇒ idempotence : set(..., {merge:true}) ne duplique jamais.
 
-/** Normalise une clé d'or N° FP → "FP/AAAA/NNNNN" en majuscules sans espaces (§18.1). */
+/** Normalise une clé d'or N° FP → forme canonique "FP/AAAA/NNNNN" (§18.1).
+ *  Rejette les placeholders à séquence nulle (ex. FP/2024/0000). */
 const fpKey = (v) => {
-  const m = String(v || "").match(/FP\/?\s*\d{4}\/?\s*\d+/i);
-  return m ? m[0].replace(/\s/g, "").toUpperCase() : null;
+  const m = String(v || "").match(/FP\/?\s*(\d{4})\/?\s*(\d+)/i);
+  if (!m) return null;
+  if (/^0+$/.test(m[2])) return null; // FP factice .../0000
+  return `FP/${m[1]}/${m[2]}`.toUpperCase();
 };
 
 /** Parse un nombre tolérant (espaces, virgule décimale, symboles). Renvoie 0 si NaN. */
@@ -31,4 +34,8 @@ const NOISE = new Set(["COM", "MISC", "DIVERS", "TBD", "ALL", "PS", "0", "NAN", 
 const COMBINING = new RegExp("[\\u0300-\\u036f]", "g");
 const noAcc = (s) => String(s || "").toLowerCase().normalize("NFD").replace(COMBINING, "");
 
-module.exports = { fpKey, num, cleanBu, NOISE, noAcc };
+/** Canonicalise un nom (client/AM) : espaces normalisés, trim, MAJUSCULES.
+ *  Fusionne les doublons logiques (casse/espaces). */
+const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
+
+module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName };

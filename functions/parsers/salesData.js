@@ -1,7 +1,7 @@
 // Parseur feuille LIVE / Sales_DATA → opportunities/{extId|hash} (BUILD_KIT §17.5, §18.5).
 // Module pur (testable). Étapes 1..9, proba défaut, actif=1-5 / veille=8 / conversion=6 vs 7.
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, noAcc } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName } = require("../lib/ids");
 const { headerKeys, val, toISO, hashId, safeId } = require("../lib/sheets");
 
 /** Probabilités par défaut si `IdC` absent (§18.5). */
@@ -44,10 +44,10 @@ function parseSalesData(wb) {
     const keys = headerKeys(r);
     const amount = num(val(r, keys, "montant (ht)", "montant ht", "montant", "amount"));
     const stage = normalizeStage(val(r, keys, "statut", "stage", "etape", "étape"));
-    const client = String(val(r, keys, "client", "customer") || "").trim();
+    const client = cleanName(val(r, keys, "client", "customer"));
     if (!stage || (!client && amount <= 0)) continue; // quarantaine : étape/ligne inexploitable
 
-    const am = String(val(r, keys, "new am", "sales", "am", "commercial") || "").trim();
+    const am = cleanName(val(r, keys, "new am", "sales", "am", "commercial"));
     const idc = val(r, keys, "idc", "id c");
     const idcNum = idc == null || idc === "" ? null : num(idc);
     const probability =
