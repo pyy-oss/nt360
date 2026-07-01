@@ -31,10 +31,12 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy (hosting, firestore, functions)
+      # firestore:rules uniquement (pas :indexes) pour ne pas supprimer d'index existants
+      # du projet en mode non-interactif. Nos index composites se créent à la demande.
+      - name: Deploy (hosting, firestore:rules, functions)
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy --only hosting,firestore,functions
+          npx firebase deploy --only hosting,firestore:rules,functions
           --project propulse-business-87f7a --non-interactive
 
       # Storage nécessite un bucket par défaut initialisé (console → Storage). Non bloquant.

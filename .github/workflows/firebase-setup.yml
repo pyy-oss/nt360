@@ -56,12 +56,15 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy (hosting, firestore, functions)
+      # firestore:rules uniquement (pas :indexes) : le projet peut héberger d'autres index
+      # qu'un déploiement non-interactif voudrait supprimer (--force). Nos 3 index composites
+      # sont optionnels (requêtes de détail) et se créent à la demande via le lien console.
+      - name: Deploy (hosting, firestore:rules, functions)
         if: ${{ inputs.run_deploy }}
         run: >
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
           npx firebase deploy
-          --only hosting,firestore,functions
+          --only hosting,firestore:rules,functions
           --project "$GCLOUD_PROJECT" --non-interactive
 
       # Storage nécessite un bucket par défaut initialisé (console Firebase → Storage).
