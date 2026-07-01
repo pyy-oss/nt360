@@ -100,7 +100,7 @@ const Overview: FC<Props> = ({ period }) => {
       <div className={grid4}>
         <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Facturé (FY)" value={fmt(att?.factureN ?? data.facture)} tone="emerald" delta={att?.croissanceFacture} sub="vs N-1" />
-        <Kpi label="Pipeline gagné" value={fmt(data.pipelineWon)} tone="steel" />
+        <Kpi label="Pondéré certain (IdC ≥ 90 %)" value={fmt(data.pondCertain)} tone="steel" sub="à venir" />
         <Kpi label="Taux facturation" value={pct(data.ratios?.tauxFacturation)} />
       </div>
       <AlertsBanner />
