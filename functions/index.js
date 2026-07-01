@@ -89,11 +89,18 @@ exports.logLogin = onCall(async (req) => {
   return { ok: true };
 });
 
+// --- F3 : recalcul des agrégats à la demande (admin) ---
+exports.recompute = onCall(async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { recomputeAll } = require("./lib/aggregate");
+  const res = await recomputeAll(db, req.data?.only);
+  return { ok: true, ...res };
+});
+
 // Exposé pour les tests / réutilisation.
 module.exports.IMPORTS_BUCKET = IMPORTS_BUCKET;
 
 // --- Stubs des phases suivantes ---
-// exports.aggregate      = onDocumentWritten(...)   // F3 : recalcul summaries/* sur écriture
 // exports.syncSalesData  = onSchedule(...)          // F6 : sync Sales_DATA
 // exports.exportReport   = onCall(...)              // F7 : export PDF/XLSX → URL signée
 // exports.importLegacyBackup = onCall(...)          // migration prototype → Firestore
