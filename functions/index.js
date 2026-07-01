@@ -1,6 +1,7 @@
 // Cloud Functions 2nd gen — Node.js 20 (codebase unique). BUILD_KIT §9, §10, §11, §14.
 const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -97,10 +98,35 @@ exports.recompute = onCall(async (req) => {
   return { ok: true, ...res };
 });
 
+// --- F6 : Sync Sales_DATA quotidien (Cloud Scheduler) ---
+async function runSalesSync(objectKey) {
+  const { applySalesSync } = require("./lib/sync");
+  const key = objectKey || "sync/sales_data.xlsx";
+  const file = getStorage().bucket(IMPORTS_BUCKET).file(key);
+  const [exists] = await file.exists();
+  if (!exists) { logger.warn("syncSalesData: fichier absent", { key }); return { skipped: true, key }; }
+  const [buf] = await file.download();
+  const wb = XLSX.read(buf, { cellDates: true });
+  const res = await applySalesSync(db, wb);
+  const { recomputeAll } = require("./lib/aggregate");
+  await recomputeAll(db, ["pipeline", "overview", "backlog", "atterrissage"]);
+  logger.info("syncSalesData", res);
+  return res;
+}
+
+exports.syncSalesData = onSchedule("every day 06:00", async () => {
+  await runSalesSync();
+});
+
+// Déclenchement manuel (admin) pour test / rejouabilité.
+exports.syncSalesDataNow = onCall(async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  return await runSalesSync(req.data?.objectKey);
+});
+
 // Exposé pour les tests / réutilisation.
 module.exports.IMPORTS_BUCKET = IMPORTS_BUCKET;
 
 // --- Stubs des phases suivantes ---
-// exports.syncSalesData  = onSchedule(...)          // F6 : sync Sales_DATA
 // exports.exportReport   = onCall(...)              // F7 : export PDF/XLSX → URL signée
 // exports.importLegacyBackup = onCall(...)          // migration prototype → Firestore
