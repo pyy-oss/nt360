@@ -228,22 +228,28 @@ const Backlog: FC<Props> = () => {
   );
 };
 
-// 6 — Prévision (+ atterrissage, N vs N-1)
-const Prevision: FC<Props> = ({ period }) => {
-  const { data: ov } = useDocData<any>(`summaries/overview_${period}`);
+// 6 — Prévision (ancrée FY, cohérente avec l'atterrissage)
+const Prevision: FC<Props> = () => {
   const { data: bl } = useDocData<any>("summaries/backlog_fy");
   const { data: pl } = useDocData<any>("summaries/pipeline");
   const { data: cfg } = useDocData<any>("config/periods");
   const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
-  if (!ov && !bl && !pl) return <EmptyState />;
-  const realise = ov?.facture || 0, backlog = bl?.total || 0, pond = pl?.tot?.weighted || 0;
+  if (!bl && !pl && !att) return <EmptyState />;
+  // Ancré sur l'année fiscale courante (une seule vérité = l'atterrissage) :
+  // Projeté CAS = Réalisé CAS(FY) + Pipeline pondéré clôturant en FY.
+  // Le backlog (RAF, déjà inclus dans le CAS signé) est montré à part pour contexte.
+  const realiseCas = att?.realiseCas || 0;
+  const backlog = bl?.total || 0;
+  const pond = att?.pipelinePondere ?? 0; // pondéré CLÔTURANT en FY
+  const projete = att?.projete ?? (realiseCas + pond);
+  const fy = att?.fy || cfg?.currentFy;
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}>
-        <Kpi label="Réalisé (facturé)" value={fmt(realise)} tone="emerald" />
-        <Kpi label="Backlog écoulable" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pipeline pondéré" value={fmt(pond)} tone="gold" />
-        <Kpi label="Projeté" value={fmt(realise + backlog + pond)} />
+        <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
+        <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
+        <Kpi label="Pipeline pondéré (clôture FY)" value={fmt(pond)} tone="gold" />
+        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pondéré" />
       </div>
       {att && (
         <div className={cols2}>
@@ -261,7 +267,7 @@ const Prevision: FC<Props> = ({ period }) => {
           </Card>
         </div>
       )}
-      <Tip>Trajectoire réalisé → projeté (réalisé + écoulement backlog + pipeline pondéré closing FY).</Tip>
+      <Tip>Projeté CAS = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (les opportunités closing 2024/2025 sont exclues). Cohérent avec l'atterrissage ci-dessus.</Tip>
     </div>
   );
 };
