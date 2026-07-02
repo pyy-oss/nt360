@@ -51,7 +51,7 @@ export interface SuppliersSummary {
   totalExpo?: number; openTotal?: number; encoursTotal?: number;
   bySupplier?: SupplierRow[];
 }
-export type SupplierRow = { name: string; expo?: number; open?: number; encours?: number; authorized?: number; coverage?: number; util?: number; state?: string };
+export type SupplierRow = { name: string; expo?: number; open?: number; encours?: number; authorized?: number; coverage?: number; util?: number; reco?: number; state?: string };
 
 export type AlertItem = { type: string; severity: "high" | "medium" | "low"; count: number; message: string; refs?: string[] };
 export interface AlertsSummary { items?: AlertItem[]; fy?: number }
@@ -60,7 +60,7 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
 export interface CommandesSummary { count?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string };
 export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string };
-export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string };
+export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
 export type Objective = {
   id?: string; label?: string; fiscalYear?: number; scope?: string; scopeValue?: string;

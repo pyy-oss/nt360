@@ -61,7 +61,7 @@ async function recomputeAll(db, only) {
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
-  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
+  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
   // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
   if (want("commandes") || want("overview")) w.push({ path: "summaries/commandes", data: {
     count: orders.length,
