@@ -16,7 +16,7 @@ const OPPS = [
   { stage: 4, probability: 0.95, weighted: 300, closingDate: "2025-05-01" }, // hors FY
   { stage: 4, probability: 0.4, weighted: 800, closingDate: "2026-06-01" }, // FY mais IdC<90% → exclu
 ];
-const OBJ = [{ fiscalYear: 2026, scope: "global", targetCas: 2000 }];
+const OBJ = [{ fiscalYear: 2026, scope: "global", targetCas: 2000, targetInvoiced: 2500 }];
 
 describe("atterrissage (§7)", () => {
   const a = atterrissage(ORDERS, INVOICES, OPPS, OBJ, 2026);
@@ -28,6 +28,11 @@ describe("atterrissage (§7)", () => {
   it("projeté CAF = facturé réalisé + backlog (RAF) + pondéré", () => {
     expect(a.backlog).toBe(700); // RAF ouverts : 400 (FP/2026/1) + 300 (FP/2022/9)
     expect(a.cafProjete).toBe(1800); // 600 (facturé FY) + 700 (backlog) + 500 (pondéré)
+  });
+  it("atterrissage CAF vs cible de facturation (targetInvoiced)", () => {
+    expect(a.objectifCaf).toBe(2500);
+    expect(a.ecartCaf).toBe(-700); // 1800 − 2500
+    expect(a.probaAtteinteCaf).toBeCloseTo(1800 / 2500, 6); // 0.72
   });
   it("écart vs objectif + N vs N-1", () => {
     expect(a.objectif).toBe(2000);

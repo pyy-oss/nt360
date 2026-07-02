@@ -261,20 +261,30 @@ const Prevision: FC<Props> = () => {
         <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pondéré" />
       </div>
       {att && (
-        <div className={cols2}>
-          <Card title={`Atterrissage ${att.fy} — probabilité d'atteinte`}>
-            <Gauge value={att.probaAtteinte} color={att.ecart < 0 ? T.clay : T.emerald} />
-            <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-              <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
-              <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{fmt(att.objectif)}</div></div>
-              <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecart < 0 ? "text-clay" : "text-emerald")}>{fmt(att.ecart)}</div></div>
-            </div>
-          </Card>
+        <>
+          <div className={cols2}>
+            <Card title={`Atterrissage CAS ${att.fy} — prise de commande`}>
+              <Gauge value={att.probaAtteinte} color={att.ecart < 0 ? T.clay : T.emerald} />
+              <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+                <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
+                <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{att.objectif > 0 ? fmt(att.objectif) : "—"}</div></div>
+                <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecart < 0 ? "text-clay" : "text-emerald")}>{att.objectif > 0 ? fmt(att.ecart) : "—"}</div></div>
+              </div>
+            </Card>
+            <Card title={`Atterrissage CAF ${att.fy} — facturation`}>
+              <Gauge value={att.probaAtteinteCaf} color={att.ecartCaf < 0 ? T.clay : T.emerald} />
+              <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+                <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(att.cafProjete)}</div></div>
+                <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{att.objectifCaf > 0 ? fmt(att.objectifCaf) : "—"}</div></div>
+                <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecartCaf < 0 ? "text-clay" : "text-emerald")}>{att.objectifCaf > 0 ? fmt(att.ecartCaf) : "—"}</div></div>
+              </div>
+            </Card>
+          </div>
           <Card title="Facturation N vs N-1">
             <GroupedBars data={[{ name: `FY ${att.fy - 1}`, Facturé: att.factureN1 }, { name: `FY ${att.fy}`, Facturé: att.factureN }]} series={[{ key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={54} />
             <Tip>Croissance : <span className={att.croissanceFacture >= 0 ? "text-emerald" : "text-clay"}>{pct(att.croissanceFacture)}</span></Tip>
           </Card>
-        </div>
+        </>
       )}
       <Tip><b>Projeté CAS</b> = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (prise de commande). <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF, reste à facturer) + pipeline pondéré (facturation projetée — le backlog y entre, sans double compte). Opportunités closing 2024/2025 exclues.</Tip>
     </div>

@@ -22,10 +22,9 @@ function atterrissage(orders, invoices, opps, objectives, fy) {
     opps.filter((o) => isEligible(o) && yearOf(o.closingDate) === String(fy)),
     (o) => o.weighted
   );
-  const objectif = sum(
-    objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global")),
-    (o) => o.targetCas
-  );
+  const objGlobal = objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global"));
+  const objectif = sum(objGlobal, (o) => o.targetCas);       // cible CAS (prise de commande)
+  const objectifCaf = sum(objGlobal, (o) => o.targetInvoiced); // cible CAF (facturation)
   const projete = realiseCas + pipelinePondere;
 
   const factureN = sum(invoices.filter((i) => yearOf(i.date) === String(fy)), (i) => i.amountHt);
@@ -47,6 +46,10 @@ function atterrissage(orders, invoices, opps, objectives, fy) {
     objectif,
     ecart: projete - objectif,
     probaAtteinte: objectif > 0 ? Math.min(1, projete / objectif) : 0,
+    // Atterrissage CAF (facturation) vs cible de facturation (targetInvoiced).
+    objectifCaf,
+    ecartCaf: cafProjete - objectifCaf,
+    probaAtteinteCaf: objectifCaf > 0 ? Math.min(1, cafProjete / objectifCaf) : 0,
     factureN,
     factureN1,
     croissanceFacture: factureN1 > 0 ? (factureN - factureN1) / factureN1 : 0,
