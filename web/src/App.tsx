@@ -6,6 +6,7 @@ import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
 import { ErrorBoundary, cx } from "./design/components";
+import { NavContext } from "./lib/nav";
 import { MODULES } from "./modules";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
@@ -24,6 +25,13 @@ export default function App() {
   const visible = MODULES.filter((m) => can(m.key) !== "none");
   const current = MODULES.find((m) => m.id === active) || visible[0];
   const allowed = current && can(current.key) !== "none" ? current : visible[0];
+
+  // Navigation inter-modules (centre d'alertes → module concerné), limitée aux modules visibles.
+  const visibleIds = useMemo(() => new Set(visible.map((m) => m.id)), [visible]);
+  const nav = useMemo(() => ({
+    canGo: (id: string) => visibleIds.has(id),
+    go: (id: string) => { if (visibleIds.has(id)) setActive(id); },
+  }), [visibleIds]);
 
   // Au lancement : sélectionner par défaut l'année fiscale en cours (si l'utilisateur
   // n'a pas encore choisi de période et qu'elle est disponible). Ne surcharge pas un choix manuel.
@@ -45,6 +53,7 @@ export default function App() {
   if (!user) return <Login />;
 
   return (
+    <NavContext.Provider value={nav}>
     <div className="min-h-screen">
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
         {/* Header */}
@@ -119,5 +128,6 @@ export default function App() {
         </footer>
       </div>
     </div>
+    </NavContext.Provider>
   );
 }
