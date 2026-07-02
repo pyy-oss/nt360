@@ -19,6 +19,12 @@ export interface AtterrissageSummary {
 }
 
 export type StageBucket = { amount?: number; weighted?: number; count?: number };
+export type ClosingBucket = { brut?: number; pond?: number; count?: number };
+export type StaleOpp = { oppId?: string; client?: string; am?: string; amount?: number; weighted?: number; closingDate?: string; stageLabel?: string };
+export interface ClosingAnalysis {
+  buckets?: { retard?: ClosingBucket; mois?: ClosingBucket; trim?: ClosingBucket; plus?: ClosingBucket; sans?: ClosingBucket };
+  staleCount?: number; staleBrut?: number; staleTop?: StaleOpp[];
+}
 export interface PipelineSummary {
   tot?: { brut?: number; weighted?: number; count?: number; countConf?: number };
   susp?: { brut?: number; count?: number };
@@ -26,6 +32,7 @@ export interface PipelineSummary {
   byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
+  closing?: ClosingAnalysis | null;
 }
 
 export interface BacklogSummary {

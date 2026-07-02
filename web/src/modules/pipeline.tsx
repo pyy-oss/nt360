@@ -3,19 +3,32 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { addOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton } from "./_shared";
-import type { PipelineSummary, Opportunity } from "../types";
+import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
 export const Pipeline: FC<Props> = ({ period }) => {
   // Pipeline de la période : opportunités dont la D Prev tombe dans l'année sélectionnée
   // (écarte les opps obsolètes / non mises à jour). « Tout » = tout le pipeline.
   const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
+  const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
+  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   if (!data) return <EmptyState />;
   const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
+  // Couverture du reste-à-faire : combien de fois le pipeline pondéré couvre l'écart à l'objectif CAS.
+  const gap = Math.max((att?.objectif || 0) - (att?.realiseCas || 0), 0);
+  const coverage = gap > 0 ? (data.tot?.weighted || 0) / gap : null;
+  const cb = data.closing?.buckets;
+  const closingRows = cb ? [
+    { name: "En retard", v: cb.retard?.pond || 0, sub: `${cb.retard?.count || 0} opp.` },
+    { name: "Ce mois", v: cb.mois?.pond || 0, sub: `${cb.mois?.count || 0} opp.` },
+    { name: "Ce trimestre", v: cb.trim?.pond || 0, sub: `${cb.trim?.count || 0} opp.` },
+    { name: "Plus tard", v: cb.plus?.pond || 0, sub: `${cb.plus?.count || 0} opp.` },
+    { name: "Sans date", v: cb.sans?.pond || 0, sub: `${cb.sans?.count || 0} opp.` },
+  ] : [];
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}>
@@ -43,6 +56,34 @@ export const Pipeline: FC<Props> = ({ period }) => {
           ]} rows={data.byAmConv || []} />
         ) : <EmptyState label="Pas de commercial renseigné." />}
       </Card>
+
+      {data.closing && (
+        <>
+          <div className={grid4}>
+            <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : "—"} tone={coverage != null && coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé CAS)" />
+            <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp. · D Prev dépassée`} />
+            <Kpi label="À clôturer ce mois" value={fmt(cb?.mois?.pond)} tone="gold" sub={`${cb?.mois?.count ?? 0} opp. (pondéré)`} />
+            <Kpi label="À clôturer ce trimestre" value={fmt(cb?.trim?.pond)} sub={`${cb?.trim?.count ?? 0} opp. (pondéré)`} />
+          </div>
+          <div className={cols2}>
+            <Card title="Échéancier du closing (pondéré, par horizon)">
+              <HBars rows={closingRows} colorFn={(r) => (r.name === "En retard" ? T.clay : r.name === "Sans date" ? T.faint : T.gold)} />
+            </Card>
+            <Card title={`Opportunités en retard de closing · ${data.closing.staleCount ?? 0}`}>
+              {(data.closing.staleTop || []).length ? (
+                <Table columns={[
+                  colText("Client", (o) => o.client, (o) => o.client),
+                  colText("AM", (o) => o.am, (o) => o.am),
+                  colText("Étape", (o) => o.stageLabel || "—", (o) => o.stageLabel || ""),
+                  colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
+                  colText("D Prev", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
+                ]} rows={data.closing.staleTop || []} />
+              ) : <EmptyState label="Aucune opportunité en retard de closing." />}
+            </Card>
+          </div>
+          <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
+        </>
+      )}
     </div>
   );
 };

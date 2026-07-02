@@ -97,6 +97,19 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
     expect(byAm.Y.lost).toBe(1); // o5 perdu
     expect(byAm.Y.conv).toBe(0);
   });
+  it("closing = null sans asOf (rétro-compat)", () => {
+    expect(p.closing).toBeNull();
+  });
+  it("analyse du closing (D Prev) : retard / trimestre + stale", () => {
+    const pc = pipeline(OPPS, "2026-04-15");
+    const b = pc.closing.buckets;
+    // Actives (1-5) : o1 (03-01, passé), o2 (04-01, passé), o6 (05-01, T2 futur)
+    expect(b.retard.count).toBe(2);
+    expect(b.retard.brut).toBe(3000); // 1000 + 2000
+    expect(b.trim.count).toBe(1);     // o6 (mai, même trimestre qu'avril)
+    expect(pc.closing.staleCount).toBe(2);
+    expect(pc.closing.staleTop[0].weighted).toBe(600); // o1 (600) avant o2 (500)
+  });
 });
 
 describe("suppliers — exposition/encours/couverture (§18.6)", () => {
