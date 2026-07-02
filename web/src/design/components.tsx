@@ -1,12 +1,12 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff } from "lucide-react";
 import { fmt, pct } from "./tokens";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
-export function Eyebrow({ children, color }: { children: ReactNode; color?: string }) {
-  return <div className="text-[11px] uppercase tracking-wider text-muted mb-2" style={color ? { color } : undefined}>{children}</div>;
+export function Eyebrow({ children, color, as: As = "div" }: { children: ReactNode; color?: string; as?: "div" | "h2" | "h3" }) {
+  return <As className="text-xs uppercase tracking-wider text-dim mb-2 font-semibold" style={color ? { color } : undefined}>{children}</As>;
 }
 
 export function Card({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
@@ -14,7 +14,7 @@ export function Card({ title, actions, children, className }: { title?: ReactNod
     <section className={cx("card p-4 animate-fade-in", className)}>
       {(title || actions) && (
         <div className="flex items-center justify-between gap-2 mb-3">
-          {title ? <Eyebrow>{title}</Eyebrow> : <span />}
+          {title ? <Eyebrow as="h3">{title}</Eyebrow> : <span />}
           {actions}
         </div>
       )}
@@ -103,8 +103,13 @@ export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; e
         <thead>
           <tr className="text-muted">
             {columns.map((c, i) => (
-              <th key={i} className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left", c.sort && "cursor-pointer hover:text-ink")} onClick={() => c.sort && toggle(i)}>
-                <span className="inline-flex items-center gap-1">{c.header}{c.sort && sort?.i === i && (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
+              <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
+                {c.sort ? (
+                  <button type="button" onClick={() => toggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
+                    {c.header}{sort?.i === i ? (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : <ChevronsUpDown size={12} className="text-faint" />}
+                  </button>
+                ) : <span className="inline-flex items-center gap-1">{c.header}</span>}
               </th>
             ))}
           </tr>
@@ -130,9 +135,30 @@ export function EmptyState({ label, icon }: { label?: string; icon?: ReactNode }
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-muted">
       <div className="text-muted/50">{icon || <Inbox size={28} />}</div>
-      <div className="text-sm">{label || "Aucune donnée — lancer une ingestion / un recalcul."}</div>
+      <div className="text-sm">{label || "Aucune donnée pour cette sélection."}</div>
     </div>
   );
+}
+
+/** État d'erreur de données (distinct du vide) : refus de droit / panne réseau. */
+export function ErrorState({ error }: { error: Error }) {
+  const denied = String((error as any)?.code || error?.message || "").includes("permission");
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+      <WifiOff size={26} className="text-clay/70" />
+      <div className="text-sm text-clay">{denied ? "Accès refusé à ces données (droits insuffisants)." : "Impossible de charger les données (réseau ou service)."}</div>
+      <div className="text-xs text-muted">Réessaie plus tard ou contacte un administrateur.</div>
+    </div>
+  );
+}
+
+/** Rend l'état d'un hook de données : erreur → vide → skeleton → contenu. */
+export function DataGate({ loading, error, empty, skeleton, children }:
+  { loading: boolean; error: Error | null; empty: boolean; skeleton?: ReactNode; children: ReactNode }) {
+  if (error) return <ErrorState error={error} />;
+  if (empty && loading) return <>{skeleton ?? <CardSkeleton />}</>;
+  if (empty) return <EmptyState />;
+  return <>{children}</>;
 }
 
 export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -148,7 +174,7 @@ export function CardSkeleton({ h = 240 }: { h?: number }) {
 }
 
 export function Tip({ children }: { children: ReactNode }) {
-  return <div className="text-xs text-muted/80 mt-3">{children}</div>;
+  return <div className="text-xs text-muted mt-3 leading-relaxed">{children}</div>;
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
@@ -177,9 +203,9 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-          <input className="field pl-8 w-64" placeholder={placeholder} value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
+        <div className="relative w-full sm:w-64">
+          <Search size={14} aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <input className="field pl-8 w-full" aria-label={placeholder} placeholder={placeholder} value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
         </div>
         <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
       </div>
@@ -189,8 +215,13 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             <thead>
               <tr className="text-muted">
                 {columns.map((c, i) => (
-                  <th key={i} className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left", c.sort && "cursor-pointer hover:text-ink")} onClick={() => c.sort && toggle(i)}>
-                    <span className="inline-flex items-center gap-1">{c.header}{c.sort && sort?.i === i && (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</span>
+                  <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                    className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
+                    {c.sort ? (
+                      <button type="button" onClick={() => toggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
+                        {c.header}{sort?.i === i ? (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : <ChevronsUpDown size={12} className="text-faint" />}
+                      </button>
+                    ) : <span className="inline-flex items-center gap-1">{c.header}</span>}
                   </th>
                 ))}
               </tr>
@@ -206,10 +237,10 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
         </div>
       )}
       {pages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm">
-          <button className="btn-ghost !px-2.5 !py-1" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={16} /></button>
+        <div className="flex items-center justify-end gap-3 text-sm">
+          <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page précédente" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={18} /></button>
           <span className="text-muted tabnum">Page {cur + 1} / {pages}</span>
-          <button className="btn-ghost !px-2.5 !py-1" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={16} /></button>
+          <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page suivante" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={18} /></button>
         </div>
       )}
     </div>
@@ -230,7 +261,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-[360px]">
+      <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-50 flex flex-col gap-2 sm:max-w-[360px]">
         {toasts.map((t) => (
           <div key={t.id} className={cx("card px-3 py-2 text-sm flex items-center gap-2 animate-fade-in border-l-2", t.type === "ok" && "border-l-emerald", t.type === "err" && "border-l-clay", t.type === "info" && "border-l-steel")}>
             {t.type === "ok" ? <CheckCircle2 size={16} className="text-emerald" /> : t.type === "err" ? <XCircle size={16} className="text-clay" /> : <AlertTriangle size={16} className="text-steel" />}

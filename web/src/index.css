@@ -9,22 +9,33 @@
   body {
     @apply bg-bg text-ink font-sans antialiased;
   }
-  /* Scrollbars discrètes */
+  /* Scrollbars discrètes (couleur = token line) */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #26362e transparent;
+    scrollbar-color: #26352d transparent;
   }
   *::-webkit-scrollbar {
     height: 8px;
     width: 8px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #26362e;
+    background: #26352d;
     border-radius: 8px;
   }
   /* Focus visible cohérent */
   :focus-visible {
     @apply outline-none ring-2 ring-gold/60 ring-offset-2 ring-offset-bg;
+  }
+  /* Respect des préférences de mouvement réduit (a11y) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -42,7 +53,7 @@
     @apply btn border border-line text-ink hover:bg-panel2;
   }
   .field {
-    @apply rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink placeholder:text-muted/70 focus:border-gold/50;
+    @apply rounded-lg border border-line bg-bg px-3 py-2 min-h-[40px] text-sm text-ink placeholder:text-muted focus:border-gold/50;
   }
   .tabnum {
     font-variant-numeric: tabular-nums;

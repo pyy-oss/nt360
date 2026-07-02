@@ -10,7 +10,12 @@ import {
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, ListView, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, ListView, colText, colNum, money, cx, useToast } from "../design/components";
+
+// Libellés FR des statuts techniques (ligne BC, état fournisseur) — jamais de code brut à l'écran.
+const BC_LABEL: Record<string, string> = { a_emettre: "À émettre", emis: "Émis", livre: "Livré", facture: "Facturé", solde: "Soldé" };
+const SUP_LABEL: Record<string, string> = { saturation: "Saturé", tension: "Tendu", ok: "OK", non_suivi: "Non suivi" };
+const bcLabel = (s?: string) => BC_LABEL[s || "a_emettre"] || (s || "a_emettre");
 import { AreaTrend, DonutBU, Bars, GroupedBars, Gauge } from "../design/charts";
 import {
   addOpportunity, setBcStatus, upsertCreditLine, upsertObjective,
@@ -141,9 +146,9 @@ const Pipeline: FC<Props> = () => {
           <div className="flex flex-wrap gap-2 items-center">
             <input className="field" placeholder="Client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
             <input className="field" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
-            <select className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
+            <select aria-label="Business Unit" className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
             <input className="field w-28" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-            <select className="field" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
+            <select aria-label="Étape du pipeline" className="field" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
             <input className="field w-28" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
             <input className="field" type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
             <Busy label="Ajouter" fn={() => addOpportunity({ client: f.client, am: f.am, bu: f.bu, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined })} />
@@ -196,7 +201,9 @@ const Objectifs: FC<Props> = ({ period }) => {
 
 // 4 — Facturation
 const Facturation: FC<Props> = ({ period }) => {
-  const { data } = useDocData<any>(`summaries/facturation_${period}`);
+  const { data, loading, error } = useDocData<any>(`summaries/facturation_${period}`);
+  if (error) return <ErrorState error={error} />;
+  if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   return (
     <div className="flex flex-col gap-4">
@@ -212,7 +219,9 @@ const Facturation: FC<Props> = ({ period }) => {
 
 // 5 — Suivi Backlog
 const Backlog: FC<Props> = () => {
-  const { data } = useDocData<any>("summaries/backlog_fy");
+  const { data, loading, error } = useDocData<any>("summaries/backlog_fy");
+  if (error) return <ErrorState error={error} />;
+  if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   return (
     <div className="flex flex-col gap-4">
@@ -292,7 +301,9 @@ const Prevision: FC<Props> = () => {
 
 // 7 — Rentabilité
 const Rentabilite: FC<Props> = ({ period }) => {
-  const { data } = useDocData<any>(`summaries/rentabilite_${period}`);
+  const { data, loading, error } = useDocData<any>(`summaries/rentabilite_${period}`);
+  if (error) return <ErrorState error={error} />;
+  if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   return (
     <div className="flex flex-col gap-4">
@@ -326,14 +337,16 @@ const PnlProjet: FC<Props> = () => {
 
 // 9 — Crédit Fournisseurs
 const Fournisseurs: FC<Props> = () => {
-  const { data } = useDocData<any>("summaries/suppliers");
+  const { data, loading, error } = useDocData<any>("summaries/suppliers");
   const canWrite = useCan("fournisseurs") === "write";
+  if (error) return <ErrorState error={error} />;
+  if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
-  const badge: any = { saturation: "clay", tension: "gold", ok: "emerald" };
+  const badge: any = { saturation: "clay", tension: "gold", ok: "emerald", non_suivi: "neutral" };
   const cols = [
     colText("Fournisseur", (s: any) => s.name, (s: any) => s.name), colNum("Expo.", (s: any) => money(s.expo), (s: any) => s.expo),
     colNum("Ouvert", (s: any) => money(s.open), (s: any) => s.open), colNum("Encours", (s: any) => money(s.encours), (s: any) => s.encours),
-    colNum("Couverture", (s: any) => money(s.coverage), (s: any) => s.coverage), colNum("État", (s: any) => <Badge tone={badge[s.state]}>{s.state}</Badge>, (s: any) => s.state),
+    colNum("Couverture", (s: any) => money(s.coverage), (s: any) => s.coverage), colNum("État", (s: any) => <Badge tone={badge[s.state]}>{SUP_LABEL[s.state] || s.state}</Badge>, (s: any) => s.state),
     ...(canWrite ? [colNum("Ligne crédit", (s: any) => <CreditEditor name={s.name} authorized={s.authorized} outstanding={s.encours} />)] : []),
   ];
   return (
@@ -373,7 +386,7 @@ const BC: FC<Props> = () => {
       <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
         {BC_STAGES.map((s) => (
           <div key={s} className="card p-4">
-            <div className="text-xs text-muted capitalize">{s.replace("_", " ")}</div>
+            <div className="text-xs text-muted">{bcLabel(s)}</div>
             <div className="font-display text-2xl tabnum mt-1" style={{ color: BC_COL[s] }}>{byStatus[s] || 0}</div>
           </div>
         ))}
@@ -383,7 +396,7 @@ const BC: FC<Props> = () => {
         <Table columns={[
           colText("FP", (r) => r.fp), colText("Fournisseur", (r) => r.supplier), colText("Type", (r) => r.expenseType),
           colNum("XOF", (r) => money(r.amountXof)),
-          colNum("Statut", (r) => canWrite ? <StatusSelect id={r.id} status={r.status || "a_emettre"} /> : <Badge>{r.status || "a_emettre"}</Badge>),
+          colNum("Statut", (r) => canWrite ? <StatusSelect id={r.id} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>),
         ]} rows={rows.slice(0, 200)} />
       </Card>
     </div>
@@ -391,16 +404,20 @@ const BC: FC<Props> = () => {
 };
 function StatusSelect({ id, status }: { id: string; status: string }) {
   const [s, setS] = useState(status);
+  const toast = useToast();
   return (
-    <select className="field !py-1" value={s} onChange={async (e) => { const v = e.target.value; setS(v); try { await setBcStatus(id, v); } catch { setS(status); } }}>
-      {BC_STAGES.map((x) => <option key={x} value={x}>{x}</option>)}
+    <select aria-label="Statut de la ligne BC" className="field !py-1" value={s}
+      onChange={async (e) => { const v = e.target.value; const prev = s; setS(v); try { await setBcStatus(id, v); toast("Statut mis à jour", "ok"); } catch { setS(prev); toast("Échec de la mise à jour du statut", "err"); } }}>
+      {BC_STAGES.map((x) => <option key={x} value={x}>{bcLabel(x)}</option>)}
     </select>
   );
 }
 
 // 11/12 — Clients / Domaines
 function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
-  const { data } = useDocData<any>(`summaries/${kind}_${period}`);
+  const { data, loading, error } = useDocData<any>(`summaries/${kind}_${period}`);
+  if (error) return <ErrorState error={error} />;
+  if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   const rows = data.rows || [];
   return (
@@ -424,11 +441,12 @@ const Fp360: FC<Props> = () => {
   const [q, setQ] = useState("");
   const fp = q.trim().toUpperCase();
   const cons = [where("fp", "==", fp || "__none__")];
-  const { rows: orders } = useCollectionData<any>("orders", cons);
-  const { rows: invoices } = useCollectionData<any>("invoices", cons);
-  const { rows: sheets } = useCollectionData<any>("projectSheets", cons);
-  const { rows: bc } = useCollectionData<any>("bcLines", cons);
-  const { rows: opps } = useCollectionData<any>("opportunities", cons);
+  // queryKey = fp : sans lui le hook ne se ré-abonne pas quand la recherche change.
+  const { rows: orders } = useCollectionData<any>("orders", cons, fp);
+  const { rows: invoices } = useCollectionData<any>("invoices", cons, fp);
+  const { rows: sheets } = useCollectionData<any>("projectSheets", cons, fp);
+  const { rows: bc } = useCollectionData<any>("bcLines", cons, fp);
+  const { rows: opps } = useCollectionData<any>("opportunities", cons, fp);
   const o = orders[0];
   return (
     <div className="flex flex-col gap-4">
@@ -445,7 +463,7 @@ const Fp360: FC<Props> = () => {
           </div>
           <Card title={`Factures · ${invoices.length}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
           <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>
-          <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => b.status)]} rows={bc} /></Card>
+          <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("AM", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
       ) : <EmptyState label={`Aucune commande pour ${fp}.`} />)}
@@ -569,7 +587,7 @@ const Habilitations: FC<Props> = () => {
                   <td className="px-2 py-1">{m}</td>
                   {roles.map((r) => (
                     <td key={r} className="px-1 py-1 text-center">
-                      <button disabled={!canWrite} onClick={() => canWrite && setCell(r, m)} className={cx("w-7 h-6 rounded font-semibold", tone[matrix[r][m]] || "bg-panel2", canWrite && "hover:opacity-80")}>{glyph[matrix[r][m]] ?? "–"}</button>
+                      <button disabled={!canWrite} aria-label={`Droit ${r} sur ${m} : ${matrix[r][m] || "aucun"}`} title={`${r} · ${m} : ${matrix[r][m] || "aucun"}`} onClick={() => canWrite && setCell(r, m)} className={cx("w-10 h-9 rounded font-semibold", tone[matrix[r][m]] || "bg-panel2", canWrite && "hover:opacity-80")}>{glyph[matrix[r][m]] ?? "–"}</button>
                     </td>
                   ))}
                 </tr>

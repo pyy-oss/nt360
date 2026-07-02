@@ -1,9 +1,11 @@
 // Graphes Recharts thématisés Forest & Gold (mirroir du prototype).
 import {
-  ResponsiveContainer, ComposedChart, BarChart, Bar, AreaChart, Area, Line,
-  PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, RadialBarChart, RadialBar, PolarAngleAxis,
+  ResponsiveContainer, BarChart, Bar, AreaChart, Area,
+  PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, RadialBarChart, RadialBar, PolarAngleAxis,
 } from "recharts";
 import { T, BU_COL, fmt, fmtFull } from "./tokens";
+
+const legendStyle = { fontSize: 12, color: T.dim } as const;
 
 export function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload || !payload.length) return null;
@@ -17,9 +19,9 @@ export function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
-const axis = { stroke: T.faint, fontSize: 11, tickLine: false, axisLine: false } as const;
-const H = ({ h = 230, children }: { h?: number; children: any }) => (
-  <div style={{ height: h }} className="mt-3">
+const axis = { stroke: T.dim, fontSize: 11, tickLine: false, axisLine: false } as const;
+const H = ({ h = 230, label, children }: { h?: number; label?: string; children: any }) => (
+  <div style={{ height: h }} className="mt-3" role="img" aria-label={label}>
     <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>
   </div>
 );
@@ -37,7 +39,7 @@ export function AreaTrend({ data, color = T.emerald, name = "Valeur", h }: { dat
           </linearGradient>
         </defs>
         <CartesianGrid stroke={T.line} vertical={false} />
-        <XAxis dataKey="name" {...axis} />
+        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={16} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip content={<ChartTooltip />} />
         <Area type="monotone" dataKey="v" name={name} stroke={color} strokeWidth={2} fill={`url(#${id})`} />
@@ -46,15 +48,18 @@ export function AreaTrend({ data, color = T.emerald, name = "Valeur", h }: { dat
   );
 }
 
-/** Donut par BU. data: [{name, value}] */
+/** Donut par BU. data: [{name, value}] — légende visible (lisible au tactile, sans survol). */
 export function DonutBU({ data, h = 230 }: { data: any[]; h?: number }) {
+  const total = data.reduce((s, d) => s + (d.value || 0), 0) || 1;
   return (
-    <H h={h}>
+    <H h={h} label={"Répartition par BU : " + data.map((d) => `${d.name} ${Math.round((d.value / total) * 100)}%`).join(", ")}>
       <PieChart>
         <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={86} paddingAngle={2}>
           {data.map((e, i) => <Cell key={i} fill={BU_COL[e.name] || T.faint} stroke="none" />)}
         </Pie>
         <Tooltip content={<ChartTooltip />} />
+        <Legend verticalAlign="bottom" height={28} iconType="circle" iconSize={9} wrapperStyle={legendStyle}
+          formatter={(name: string) => { const d = data.find((x) => x.name === name); return `${name} · ${Math.round(((d?.value || 0) / total) * 100)}%`; }} />
       </PieChart>
     </H>
   );
@@ -66,7 +71,7 @@ export function Bars({ data, color = T.clay, name = "Valeur", h = 200, size = 34
     <H h={h}>
       <BarChart data={data} margin={{ left: -8, right: 8 }}>
         <CartesianGrid stroke={T.line} vertical={false} />
-        <XAxis dataKey="name" {...axis} />
+        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={12} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip cursor={{ fill: T.panel2 }} content={<ChartTooltip />} />
         <Bar dataKey="v" name={name} fill={color} radius={[4, 4, 0, 0]} barSize={size} />
@@ -81,28 +86,12 @@ export function GroupedBars({ data, series, h = 230, size = 22 }: { data: any[];
     <H h={h}>
       <BarChart data={data} margin={{ left: -6, right: 8 }}>
         <CartesianGrid stroke={T.line} vertical={false} />
-        <XAxis dataKey="name" {...axis} />
+        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={12} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip cursor={{ fill: T.panel2 }} content={<ChartTooltip />} />
+        <Legend verticalAlign="top" height={24} iconType="square" iconSize={10} wrapperStyle={legendStyle} />
         {series.map((s) => <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[3, 3, 0, 0]} barSize={size} />)}
       </BarChart>
-    </H>
-  );
-}
-
-/** Composé : barres réalisé/projeté + ligne. (prévision) */
-export function Composed({ data, h = 300 }: { data: any[]; h?: number }) {
-  return (
-    <H h={h}>
-      <ComposedChart data={data} margin={{ left: -6, right: 8, top: 6 }}>
-        <CartesianGrid stroke={T.line} vertical={false} />
-        <XAxis dataKey="name" {...axis} />
-        <YAxis {...axis} tickFormatter={fmt} width={44} />
-        <Tooltip content={<ChartTooltip />} />
-        <Bar dataKey="actual" name="Réalisé" fill={T.emerald} radius={[3, 3, 0, 0]} barSize={16} />
-        <Bar dataKey="forecast" name="Projeté" fill={T.gold} radius={[3, 3, 0, 0]} barSize={16} />
-        <Line type="monotone" dataKey="reste" name="Reste" stroke={T.clay} strokeWidth={2} dot={false} />
-      </ComposedChart>
     </H>
   );
 }
