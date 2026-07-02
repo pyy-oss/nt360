@@ -56,7 +56,8 @@ export type SupplierRow = { name: string; expo?: number; open?: number; encours?
 export type AlertItem = { type: string; severity: "high" | "medium" | "low"; count: number; message: string; refs?: string[] };
 export interface AlertsSummary { items?: AlertItem[]; fy?: number }
 
-export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number };
+export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null };
+export interface CommandesSummary { count?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string };
 export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string };

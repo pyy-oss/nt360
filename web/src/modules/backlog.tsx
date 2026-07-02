@@ -1,11 +1,11 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { type FC } from "react";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData } from "../lib/hooks";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge } from "./_shared";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, Order } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -88,25 +88,31 @@ export const Prevision: FC<Props> = () => {
   );
 };
 
-// Liste Commandes (drill-down)
+// Liste Commandes — vue fusionnée (fiche affaire > opp gagnée > P&L), matérialisée
+// dans summaries/commandes par le recompute.
+const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagnée", pnl: "P&L", legacy: "Legacy" };
 export const OrderList: FC<Props> = () => {
-  const { rows, loading } = useCollectionData<Order>("orders");
-  if (loading && !rows.length) return <CardSkeleton />;
+  const { data, loading } = useDocData<CommandesSummary>("summaries/commandes");
+  const rows = data?.rows || [];
+  if (loading && !data) return <CardSkeleton />;
+  if (!rows.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." />;
   return (
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`}>
       <ListView
         rows={rows}
-        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am]}
+        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.affaire || ""]}
         columns={[
           colText("FP", (r) => r.fp, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
+          colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
           colText("AM", (r) => r.am, (r) => r.am),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas),
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
           colNum("MB", (r) => money(r.mb), (r) => r.mb),
-          colNum("%MB", (r) => pct(r.cas ? r.mb / r.cas : 0), (r) => (r.cas ? r.mb / r.cas : 0)),
+          colNum("%MB", (r) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r) => (r.cas ? (r.mb || 0) / r.cas : 0)),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
+          colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
         ]}
       />
     </Card>

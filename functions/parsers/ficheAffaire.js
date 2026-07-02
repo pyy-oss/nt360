@@ -25,7 +25,10 @@ function parseFiche(wb) {
   );
   const find = (lbl) => {
     const L = noAcc(lbl);
-    return cells.find((x) => typeof x.v === "string" && noAcc(x.v).includes(L));
+    // Priorité au libellé de CHAMP (cellule qui COMMENCE par le label, ex. "AFFAIRE :"),
+    // pour ne pas confondre avec un titre le contenant (ex. "IDENTIFICATION DE L'AFFAIRE").
+    return cells.find((x) => typeof x.v === "string" && noAcc(x.v).trimStart().startsWith(L))
+      || cells.find((x) => typeof x.v === "string" && noAcc(x.v).includes(L));
   };
   const rightOf = (lbl) => {
     const c = find(lbl);

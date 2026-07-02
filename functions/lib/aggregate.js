@@ -9,6 +9,7 @@ const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage } = require("../domain/atterrissage");
 const { alerts } = require("../domain/alerts");
+const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 
 async function readAll(db, name, withId = false) {
@@ -25,14 +26,20 @@ const filterInvoices = (invoices, period) =>
  * @param {string[]} [only] sous-ensemble d'agrégats (optionnel, sinon tout)
  */
 async function recomputeAll(db, only) {
-  const [orders, invoices, opps, bcLines, creditLines, objectives] = await Promise.all([
+  const [pnlOrders, invoices, opps, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices"),
     readAll(db, "opportunities"),
     readAll(db, "bcLines"),
     readAll(db, "creditLines", true),
     readAll(db, "objectives"),
+    readAll(db, "projectSheets"),
   ]);
+
+  // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
+  // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
+  const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
+
   const fiscal = (await db.doc("config/fiscal").get()).data() || {};
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, o.yearPo || 0), 0);
 
@@ -55,6 +62,16 @@ async function recomputeAll(db, only) {
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
+  // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
+  if (want("commandes") || want("overview")) w.push({ path: "summaries/commandes", data: {
+    count: orders.length,
+    rows: orders.map((o) => ({
+      fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
+      cas: o.cas || 0, raf: o.raf || 0, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null,
+      yearPo: o.yearPo || 0, source: o.source || null,
+    })),
+    ...stamp,
+  } });
 
   const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));
 
