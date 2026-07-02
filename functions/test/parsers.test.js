@@ -153,6 +153,33 @@ describe("parseFiche → projectSheets + bcLines (§18.4, contrôle PAM-BF)", ()
   });
 });
 
+describe("parsePnl : sélection de feuille + robustesse", () => {
+  it("lit la feuille P&L même nommée différemment (détection par entête)", () => {
+    const wb = wbFromRows("PnL 2026", [
+      { "Opp ID": "FP/2026/9", Customer: "ZED", BU: "ICT", "Year PO": 2026, CAS: 1000, "RAF TOTAL": 100, "MB TOTAL": 50 },
+    ]);
+    const { rows } = parsePnl(wb);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fp).toBe("FP/2026/9");
+    expect(rows[0].cas).toBe(1000);
+  });
+});
+
+describe("parseFacturationDf : factures multi-lignes sommées", () => {
+  it("somme le HT des lignes d'un même Numéro (au lieu d'écraser)", () => {
+    const wb = wbFromRows("Facturation DF", [
+      { "Numéro": "JVEXO/2026/0001", "Référence": "FP/2026/1", "Montant HT": 100, "Nom d'affichage du partenaire": "ACME" },
+      { "Numéro": "JVEXO/2026/0001", "Référence": "FP/2026/1", "Montant HT": 250, "Nom d'affichage du partenaire": "ACME" },
+      { "Numéro": "JVEXO/2026/0002", "Référence": "FP/2026/2", "Montant HT": 40, "Nom d'affichage du partenaire": "BETA" },
+    ]);
+    const { rows } = parseFacturationDf(wb);
+    expect(rows).toHaveLength(2);
+    const inv1 = rows.find((r) => r.numero === "JVEXO/2026/0001");
+    expect(inv1.amountHt).toBe(350); // 100 + 250
+    expect(inv1.lines).toBe(2);
+  });
+});
+
 describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
   const { parseLogistics, mapBcStatus } = require("../parsers/logistics");
   const wb = wbFromRows("PO List", [
