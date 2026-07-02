@@ -8,7 +8,7 @@ import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
-import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary, ReceivablesSummary, CashflowSummary } from "../types";
+import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -139,26 +139,13 @@ export const Objectifs: FC<Props> = ({ period }) => {
   );
 };
 
-// Balance âgée : libellés + couleur par ancienneté croissante.
-const AGING = [
-  { key: "notDue", label: "Non échu", color: T.steel },
-  { key: "b0_30", label: "0–30 j", color: T.gold },
-  { key: "b31_60", label: "31–60 j", color: T.gold },
-  { key: "b61_90", label: "61–90 j", color: T.clay },
-  { key: "b90p", label: "> 90 j", color: T.clay },
-] as const;
 
 // 4 — Facturation
 export const Facturation: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<FacturationSummary>(`summaries/facturation_${period}`);
-  const { data: rec } = useDocData<ReceivablesSummary>("summaries/receivables");
-  const { data: cash } = useDocData<CashflowSummary>("summaries/cashflow");
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
-  const b = rec?.buckets || {};
-  const agingRows = AGING.map((a) => ({ name: a.label, v: (b as any)[a.key] || 0, color: a.color }));
-  const agingColor = (r: any) => (AGING.find((a) => a.label === r.name)?.color || T.steel);
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}><Kpi label="Facturé (période)" value={fmt(data.total)} tone="emerald" sub={`${data.count} factures`} /></div>
@@ -167,43 +154,6 @@ export const Facturation: FC<Props> = ({ period }) => {
         <Card title="Mix BU"><DonutBU data={toDonut(data.byBu)} /></Card>
         <Card title="Top clients"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.emerald} /></Card>
       </div>
-      {rec && (rec.openCount || 0) > 0 && (
-        <>
-          <h2 className="font-display text-sm text-muted mt-2">Encaissement · créances clients</h2>
-          <div className={grid4}>
-            <Kpi label="Créances (AR)" value={fmt(rec.totalAR)} sub={`${rec.openCount} facture(s) ouverte(s)`} />
-            <Kpi label="En retard" value={fmt(rec.overdue)} tone="clay" sub={`${rec.overdueCount} facture(s)`} />
-            <Kpi label="DSO (indicatif)" value={`${rec.dso ?? 0} j`} tone="gold" sub="encours / cadence de facturation" />
-          </div>
-          <div className={cols2}>
-            <Card title="Balance âgée (par échéance)"><HBars rows={agingRows} colorFn={agingColor} /></Card>
-            <Card title="Top créances par client"><HBars rows={topArr(rec.topAR).slice(0, 10)} colorFn={() => T.clay} /></Card>
-          </div>
-        </>
-      )}
-      {cash && (cash.months || []).length > 0 && (
-        <>
-          <h2 className="font-display text-sm text-muted mt-2">Prévision de trésorerie NETTE · {cash.horizon} mois glissants</h2>
-          <div className={grid4}>
-            <Kpi label="Encaissements attendus (AR)" value={fmt(cash.arHorizon)} tone="emerald" sub={`échéancé sur ${cash.horizon} mois`} />
-            <Kpi label="Décaissements fournisseurs" value={fmt(cash.totalDecaissement)} tone="clay" sub={`${cash.bcOpenCount ?? 0} BC non soldé(s)`} />
-            <Kpi label="Position nette (horizon)" value={fmt((cash.months || []).reduce((s, m) => s + (m.net || 0), 0))} tone="gold" sub="AR − décaissements" />
-            <Kpi label="En retard (à recouvrer)" value={fmt(cash.overdue)} tone="clay" sub={`${cash.overdueCount} facture(s) échue(s)`} />
-          </div>
-          <Card title="Échéancier — encaissements vs décaissements (position nette)">
-            <GroupedBars
-              data={(cash.months || []).map((m) => ({ name: m.month, "Encaissements (AR)": m.ar, "Décaissements": -(m.decaissement || 0), "Net": m.net || 0 }))}
-              series={[
-                { key: "Encaissements (AR)", color: T.emerald, name: "Encaissements (AR)" },
-                { key: "Décaissements", color: T.clay, name: "Décaissements" },
-                { key: "Net", color: T.gold, name: "Net" },
-              ]}
-              h={260}
-            />
-            <Tip><b>Encaissements (AR)</b> = créances émises positionnées à leur <b>échéance</b> (échues isolées dans « en retard »). <b>Décaissements</b> = lignes BC <b>non soldées</b> positionnées à leur ETA (réelle sinon contractuelle ; ETA passée/inconnue → dû ce mois). <b>Net</b> = AR − décaissements. Le <b>backlog à facturer</b> ({fmt(cash.totalRaf)}, indicatif) n'entre pas dans le net (pas encore contractuel). Aucune date de règlement réelle en source : échéancier fondé sur les échéances et ETA.</Tip>
-          </Card>
-        </>
-      )}
     </div>
   );
 };

@@ -8,7 +8,7 @@ import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, St
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, grid4, cols2, AlertsBanner } from "./_shared";
-import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, ReceivablesSummary, TrendsSummary } from "../types";
+import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary } from "../types";
 
 // Bloc « atterrissage » : jauge de probabilité + Projeté / Objectif / Écart.
 function Landing({ title, proba, projete, objectif, ecart, sub }: {
@@ -32,7 +32,6 @@ export const Overview: FC<Props> = ({ period }) => {
   const { data, loading } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
-  const { data: rec } = useDocData<ReceivablesSummary>("summaries/receivables");
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const canWrite = useCan("overview") === "write";
   const canExport = useCanExport();
@@ -48,7 +47,6 @@ export const Overview: FC<Props> = ({ period }) => {
   if (!data) return <div className="flex flex-col gap-3"><div className="flex justify-end">{actions}</div><AlertsBanner /><EmptyState /></div>;
 
   const fy = att?.fy || cfg?.currentFy;
-  const overdue = rec?.overdue || 0;
   const points = (trends?.points || []).map((p) => ({
     name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
   }));
@@ -82,12 +80,11 @@ export const Overview: FC<Props> = ({ period }) => {
         <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
 
-      {/* KPIs de pilotage : marge, croissance facturation, cash (AR/DSO), avancement. */}
+      {/* KPIs de pilotage : marge, croissance facturation, pondéré certain, avancement. */}
       <div className={grid4}>
         <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
-        <Kpi label="Encours clients (AR)" value={rec ? fmt(rec.totalAR) : "—"}
-          tone={overdue > 0 ? "clay" : "steel"} sub={rec ? `${fmt(overdue)} échu · DSO ${rec.dso ?? 0} j` : "cash indispo."} />
+        <Kpi label="Pondéré certain (IdC ≥ 90 %)" value={fmt(data.pondCertain)} tone="steel" sub="à venir" />
         <Kpi label="Avancement facturation" value={pct(data.ratios?.tauxFacturation)} sub="commandes de la période" />
       </div>
 
