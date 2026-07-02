@@ -7,6 +7,8 @@ import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
 import { ErrorBoundary, cx } from "./design/components";
 import { NavContext } from "./lib/nav";
+import { FilterProvider } from "./lib/filters";
+import { FilterBar } from "./modules/_shared";
 import { MODULES, GROUPS } from "./modules";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
@@ -68,6 +70,7 @@ export default function App() {
 
   return (
     <NavContext.Provider value={nav}>
+    <FilterProvider>
     <div className="min-h-screen">
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
         {/* Header */}
@@ -142,6 +145,8 @@ export default function App() {
             </nav>
             <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 bottom-px w-8 bg-gradient-to-l from-bg to-transparent" />
           </div>
+          {/* Filtre transverse (BU / AM / client) — s'applique aux vues détaillées (listes). */}
+          <FilterBar />
         </div>
 
         {/* Content */}
@@ -162,6 +167,7 @@ export default function App() {
         </footer>
       </div>
     </div>
+    </FilterProvider>
     </NavContext.Provider>
   );
 }

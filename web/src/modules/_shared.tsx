@@ -1,12 +1,13 @@
 // Helpers et primitives partagés par les modules (extraits de index.tsx pour le découpage).
 import { useState, type ChangeEvent, type ReactNode } from "react";
-import { AlertTriangle, Upload } from "lucide-react";
+import { AlertTriangle, Upload, Filter, X } from "lucide-react";
 import { useDocData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
+import { useFilters } from "../lib/filters";
 import { T, fmt } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta } from "../lib/writes";
-import type { AlertsSummary } from "../types";
+import type { AlertsSummary, AmsSummary, EntitySummary } from "../types";
 
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable).
 const ALERT_TARGET: Record<string, string> = {
@@ -120,6 +121,41 @@ export function DataImportCard() {
       </ul>
     </Card>
   );
+}
+
+// Barre de filtre transverse (BU / AM / client) — options AM/clients issues des référentiels.
+// N'affecte que les listes détaillées (les agrégats restent globaux), d'où le libellé « listes ».
+export function FilterBar() {
+  const { f, set, clear, active } = useFilters();
+  const { data: ams } = useDocData<AmsSummary>("summaries/ams");
+  const { data: cli } = useDocData<EntitySummary>("summaries/clients_all");
+  const amOpts = (ams?.rows || []).map((r) => r.am).filter(Boolean);
+  const cliOpts = (cli?.rows || []).map((r) => r.key).filter(Boolean);
+  const BU = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+  const sel = "field !py-1 text-xs";
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-xs">
+      <span className="inline-flex items-center gap-1 text-faint"><Filter size={13} aria-hidden="true" /> Filtre <span className="hidden sm:inline">(listes)</span></span>
+      <select className={sel} aria-label="Filtrer par BU" value={f.bu} onChange={(e) => set({ bu: e.target.value })}>
+        <option value="">BU · toutes</option>{BU.map((b) => <option key={b} value={b}>{b}</option>)}
+      </select>
+      <select className={sel} aria-label="Filtrer par commercial" value={f.am} onChange={(e) => set({ am: e.target.value })}>
+        <option value="">AM · tous</option>{amOpts.map((a) => <option key={a} value={a}>{a}</option>)}
+      </select>
+      <select className={sel} aria-label="Filtrer par client" value={f.client} onChange={(e) => set({ client: e.target.value })}>
+        <option value="">Client · tous</option>{cliOpts.map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      {active && <button onClick={clear} className="inline-flex items-center gap-1 text-clay hover:underline" aria-label="Effacer le filtre"><X size={13} /> Effacer</button>}
+    </div>
+  );
+}
+
+// Bandeau discret rappelant qu'un filtre transverse est actif sur une vue liste.
+export function FilterNote({ dims }: { dims?: string }) {
+  const { f, active } = useFilters();
+  if (!active) return null;
+  const parts = [f.bu && `BU ${f.bu}`, f.am && `AM ${f.am}`, f.client && `Client ${f.client}`].filter(Boolean);
+  return <div className="text-[11px] text-gold">Filtre actif : {parts.join(" · ")}{dims ? ` — ${dims}` : ""}</div>;
 }
 
 // Centre d'alertes (bandeau) — actionnable : chaque alerte ouvre le module concerné

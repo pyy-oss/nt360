@@ -6,7 +6,8 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
-import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton } from "./_shared";
+import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
+import { useFilters } from "../lib/filters";
 import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary, ReceivablesSummary, CashflowSummary } from "../types";
 
 // 3 — Objectifs / R-O
@@ -209,10 +210,12 @@ export const Facturation: FC<Props> = ({ period }) => {
 
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
-  const { rows, loading } = useCollectionData<Invoice>("invoices");
+  const { rows: allRows, loading } = useCollectionData<Invoice>("invoices");
+  const { match } = useFilters();
+  const rows = allRows.filter((r) => match(r, ["bu", "client"])); // les factures ne portent pas d'AM
   const canImport = useCanImport();
   const [f, setF] = useState<"all" | "linked" | "orphan">("all");
-  if (loading && !rows.length) return <CardSkeleton />;
+  if (loading && !allRows.length) return <CardSkeleton />;
   const orphan = rows.filter((r) => r.linked !== true);
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
   const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
@@ -223,6 +226,7 @@ export const InvoiceList: FC<Props> = () => {
   );
   return (
     <div className="flex flex-col gap-3">
+      <FilterNote dims="BU / client" />
       {orphan.length > 0 && (
         <div className={grid4}>
           <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />
