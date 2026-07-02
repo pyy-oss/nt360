@@ -1,7 +1,7 @@
 // Modules finance : Objectifs / R-O, Facturation, liste Factures, Rentabilité.
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
@@ -186,7 +186,7 @@ export const Facturation: FC<Props> = ({ period }) => {
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
   const { rows, loading } = useCollectionData<Invoice>("invoices");
-  const canImport = useCan("facturation") === "write";
+  const canImport = useCanImport();
   const [f, setF] = useState<"all" | "linked" | "orphan">("all");
   if (loading && !rows.length) return <CardSkeleton />;
   const orphan = rows.filter((r) => r.linked !== true);

@@ -80,6 +80,24 @@ describe("parseFacturationDf → invoices (§17.3)", () => {
     const { rows } = parseFacturationDf(wb);
     expect(rows.reduce((s, r) => s + r.amountHt, 0)).toBe(1000);
   });
+  it("multi-lignes : 2 lignes DISTINCTES de même montant/date sont SOMMÉES (pas sous-comptées)", () => {
+    const wb = wbFromRows("Facturation DF", [
+      { "Numéro": "INV1", "N° FP": "FP/2026/1", "Montant HT": 100, "Date": "2026-01-10", "Désignation": "Licence A" },
+      { "Numéro": "INV1", "N° FP": "FP/2026/1", "Montant HT": 100, "Date": "2026-01-10", "Désignation": "Licence B" },
+    ]);
+    const { rows } = parseFacturationDf(wb);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amountHt).toBe(200); // 2 lignes distinctes → 100 + 100
+    expect(rows[0].lines).toBe(2);
+  });
+  it("multi-lignes : doublon d'export STRICTEMENT identique est ignoré (pas de double compte)", () => {
+    const wb = wbFromRows("Facturation DF", [
+      { "Numéro": "INV2", "N° FP": "FP/2026/1", "Montant HT": 100, "Date": "2026-01-10", "Désignation": "Licence A" },
+      { "Numéro": "INV2", "N° FP": "FP/2026/1", "Montant HT": 100, "Date": "2026-01-10", "Désignation": "Licence A" },
+    ]);
+    const { rows } = parseFacturationDf(wb);
+    expect(rows[0].amountHt).toBe(100); // ligne identique → dédupliquée
+  });
 });
 
 describe("parseSalesData → opportunities (§17.5)", () => {

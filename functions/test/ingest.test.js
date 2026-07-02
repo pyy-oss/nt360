@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 const XLSX = require("xlsx");
-const { detectKind, buildWrites, fiscalYearFromOrders } = require("../lib/ingest");
+const { detectKind, detectKinds, buildWrites, fiscalYearFromOrders } = require("../lib/ingest");
 
 function wb(sheetName, rows) {
   const b = XLSX.utils.book_new();
@@ -25,6 +25,15 @@ describe("detectKind — signatures de colonnes/cellules (§9)", () => {
   });
   it("fiche affaire (label cellulaire)", () => {
     expect(detectKind(wbAoa("Fiche", [[null, null, null, null, null, "N° DE FP :", "FP/2026/1"]]))).toBe("fiche");
+  });
+  it("« Prix de revient » SEUL (colonne P&L) ne reclasse PAS en fiche → P&L préservé", () => {
+    const kinds = detectKinds(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, "Prix de revient": 80 }]));
+    expect(kinds).toContain("pnl");
+    expect(kinds).not.toContain("fiche");
+  });
+  it("faux positif LIVE évité : « Valid Client » ne matche pas « id c »", () => {
+    const kinds = detectKinds(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, "Valid Client": "ACME" }]));
+    expect(kinds).toEqual(["pnl"]); // pas de salesData parasite
   });
 });
 

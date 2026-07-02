@@ -78,3 +78,18 @@ export function useCan(module: string): Level {
 export function useCanFn(): (module: string) => Level {
   return useContext(AuthCtx).can;
 }
+
+// Rôles autorisés à importer des fichiers — DOIT rester aligné sur IMPORT_ROLES côté serveur
+// (functions/index.js). Le front n'est qu'un garde-fou ; le serveur revérifie.
+export const IMPORT_ROLES: Role[] = ["direction", "commercial_dir", "pmo", "achats"];
+
+/** Le rôle courant peut-il importer des fichiers (aligné sur le serveur) ? */
+export function useCanImport(): boolean {
+  const role = useContext(AuthCtx).role;
+  return !!role && IMPORT_ROLES.includes(role);
+}
+
+/** Le rôle courant peut-il voir les marges (accès « Rentabilité ») ? Sinon on masque MB/%MB. */
+export function useCanSeeMargin(): boolean {
+  return useContext(AuthCtx).can("rentabilite") !== "none";
+}

@@ -27,4 +27,14 @@ describe("receivables — aging + DSO", () => {
   it("DSO indicatif calculé (> 0)", () => {
     expect(r.dso).toBeGreaterThan(0);
   });
+  it("échéance inconnue OU illisible → notDue (jamais comptée en retard)", () => {
+    const r2 = receivables([
+      { client: "NODATE", amountHt: 700, paid: false },                       // aucune date
+      { client: "BADDATE", amountHt: 300, dueDate: "à définir", paid: false }, // échéance illisible (NaN)
+    ], "2026-07-01");
+    expect(r2.totalAR).toBe(1000);
+    expect(r2.buckets.notDue).toBe(1000); // les deux → non exigibles
+    expect(r2.overdue).toBe(0);           // aucune en retard
+    expect(r2.buckets.b90p).toBe(0);      // pas de classement arbitraire en > 90 j
+  });
 });

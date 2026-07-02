@@ -34,7 +34,10 @@ function parseFacturationDf(wb) {
     const dueDate = toISO(val(r, keys, "date d'échéance", "date d echeance", "echeance", "due date"));
     const paymentStatus = String(val(r, keys, "statut en cours de paiement", "statut de paiement", "statut", "payment") || "").trim();
     const paid = /pay[ée]|régl|encaiss|sold/i.test(paymentStatus); // encaissée ?
-    const sig = `${amountHt}|${date}`; // signature de ligne (distingue ligne distincte vs doublon exact)
+    // Signature = LIGNE COMPLÈTE (toutes les colonnes). On ne fusionne QUE les doublons d'export
+    // strictement identiques ; deux lignes distinctes de même montant/date (ex. 2 licences au
+    // même prix) restent SOMMÉES → CAF = Σ factures non sous-évalué. (§18.3)
+    const sig = JSON.stringify(Object.values(r));
     const prev = byNumero.get(id);
     if (prev) {
       // Même Numéro : facture MULTI-LIGNES (export Odoo : 1 ligne par ligne) ⇒ on SOMME les

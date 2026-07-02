@@ -1,7 +1,7 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
@@ -51,6 +51,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
 export const OppList: FC<Props> = () => {
   const { rows, loading } = useCollectionData<Opportunity>("opportunities");
   const canWrite = useCan("pipeline") === "write";
+  const canImport = useCanImport();
   const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
   if (loading && !rows.length) return <CardSkeleton />;
   const top = [...rows].sort((a, b) => (b.weighted || 0) - (a.weighted || 0)).slice(0, 10);
@@ -92,7 +93,7 @@ export const OppList: FC<Props> = () => {
           colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(o.weighted)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
-      <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canWrite ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
+      <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
         <ListView
           rows={rows}
           searchKeys={[(r) => r.client, (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}

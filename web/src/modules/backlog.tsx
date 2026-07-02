@@ -1,12 +1,12 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton } from "./_shared";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary, Order } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -119,7 +119,8 @@ const pnlBadge = (s?: string | null) => {
 export const OrderList: FC<Props> = () => {
   const { data, loading } = useDocData<CommandesSummary>("summaries/commandes");
   const rows = data?.rows || [];
-  const canImport = useCan("overview") === "write";
+  const canImport = useCanImport();
+  const canMargin = useCanSeeMargin();
   if (loading && !data) return <CardSkeleton />;
   if (!rows.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />;
   return (
@@ -135,9 +136,12 @@ export const OrderList: FC<Props> = () => {
           colText("AM", (r) => r.am, (r) => r.am),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas),
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
-          colNum("MB", (r) => money(r.mb), (r) => r.mb),
-          colNum("%MB", (r) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r) => (r.cas ? (r.mb || 0) / r.cas : 0)),
-          colText("P&L", (r) => pnlBadge(r.pnlSource), (r) => r.pnlSource || ""),
+          // Marges masquées pour les rôles sans accès « Rentabilité » (confidentialité).
+          ...(canMargin ? [
+            colNum("MB", (r: Order) => money(r.mb), (r: Order) => r.mb),
+            colNum("%MB", (r: Order) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r: Order) => (r.cas ? (r.mb || 0) / r.cas : 0)),
+            colText("P&L", (r: Order) => pnlBadge(r.pnlSource), (r: Order) => r.pnlSource || ""),
+          ] : []),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
           colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
         ]}

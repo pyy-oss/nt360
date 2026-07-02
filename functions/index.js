@@ -188,10 +188,15 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   const kinds = [...kindsSet];
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
 
-  if (writes.length) {
+  // Déduplication par chemin : deux classeurs d'un ZIP peuvent viser le même document
+  // (même FP / même Numéro). On fusionne les champs (le dernier fichier l'emporte sur les
+  // conflits scalaires) pour éviter deux writes concurrents vers le même doc dans un même batch.
+  const byPath = new Map();
+  for (const w of writes) byPath.set(w.path, { ...(byPath.get(w.path) || {}), ...w.data });
+  if (byPath.size) {
     let batch = db.batch(), n = 0;
-    for (const w of writes) {
-      batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
+    for (const [path, data] of byPath) {
+      batch.set(db.doc(path), data, { merge: true }); // IDs déterministes ⇒ upsert
       if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
     }
     await batch.commit();
