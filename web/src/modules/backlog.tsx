@@ -3,9 +3,9 @@ import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
-import { Bars, DonutBU, GroupedBars, Gauge } from "../design/charts";
+import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge } from "./_shared";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -34,6 +34,7 @@ export const Prevision: FC<Props> = () => {
   const { data: pl } = useDocData<PipelineSummary>("summaries/pipeline");
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   if (!bl && !pl && !att) return <EmptyState />;
   const realiseCas = att?.realiseCas || 0;
   const backlog = bl?.total || 0;
@@ -82,6 +83,20 @@ export const Prevision: FC<Props> = () => {
             <Tip>Croissance : <span className={(att.croissanceFacture || 0) >= 0 ? "text-emerald" : "text-clay"}>{pct(att.croissanceFacture)}</span></Tip>
           </Card>
         </>
+      )}
+      {(trends?.points?.length || 0) >= 2 && (
+        <Card title="Tendances (historique des recalculs)">
+          <MultiLine
+            data={(trends!.points || []).map((p) => ({ name: p.date, Backlog: p.backlog || 0, "Pipeline projeté": p.pipeline || 0, "Projeté CAS": p.projeteCas || 0, "Facturé réalisé": p.caf || 0 }))}
+            series={[
+              { key: "Backlog", color: T.steel, name: "Backlog" },
+              { key: "Pipeline projeté", color: T.gold, name: "Pipeline projeté" },
+              { key: "Projeté CAS", color: T.ink, name: "Projeté CAS" },
+              { key: "Facturé réalisé", color: T.emerald, name: "Facturé réalisé" },
+            ]}
+          />
+          <Tip>Un point par recalcul (max 1/jour). Le <b>burn-down du backlog</b> et l'écart <b>projeté vs réalisé</b> se lisent dans le temps à mesure que les données sont mises à jour.</Tip>
+        </Card>
       )}
       <Tip><b>Pipeline projeté</b> (logique de projection moyen terme) = 100 % du CA des opportunités IdC ≥ 90 % + 20 % du CA des IdC ≥ 70 % (&lt; 90 %), dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
     </div>
