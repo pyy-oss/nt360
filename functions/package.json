@@ -15,7 +15,8 @@
     "@google-cloud/firestore": "^7",
     "xlsx": "^0.18",
     "exceljs": "^4",
-    "pdfkit": "^0.15"
+    "pdfkit": "^0.15",
+    "pdfjs-dist": "3.11.174"
   },
   "devDependencies": {
     "vitest": "^2",

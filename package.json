@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "firebase-tools": "^13"
+  },
+  "pnpm": {
+    "neverBuiltDependencies": ["canvas"]
   }
 }
