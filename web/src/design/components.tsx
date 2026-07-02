@@ -129,7 +129,7 @@ export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; e
 }
 export const colText = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any): Col => ({ header, align: "left", render, sort });
 export const colNum = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any): Col => ({ header, align: "right", render, sort });
-export const money = (v: number) => <span className="tabnum">{fmt(v)}</span>;
+export const money = (v: number | null | undefined) => <span className="tabnum">{fmt(v)}</span>;
 
 export function EmptyState({ label, icon }: { label?: string; icon?: ReactNode }) {
   return (
