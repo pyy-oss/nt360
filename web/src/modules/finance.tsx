@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton } from "./_shared";
-import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, Order } from "../types";
+import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -23,7 +23,8 @@ export const Objectifs: FC<Props> = ({ period }) => {
   const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: dom } = useDocData<EntitySummary>(`summaries/domaines_${period}`);
   const { data: cli } = useDocData<EntitySummary>(`summaries/clients_${period}`);
-  const { rows: orders } = useCollectionData<Order>("orders");
+  const { data: cmd } = useDocData<CommandesSummary>("summaries/commandes");
+  const orders = cmd?.rows || [];
   const canWrite = useCan("objectifs") === "write";
   const toast = useToast();
   const realiseCas = ov?.commandes || 0, realiseFact = ov?.facture || 0, realiseMb = ov?.mb || 0;
