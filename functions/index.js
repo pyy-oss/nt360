@@ -134,6 +134,51 @@ exports.syncSalesDataNow = onCall(async (req) => {
   return await runSalesSync(req.data?.objectKey);
 });
 
+// --- Import de delta à la demande : fichier XLSX (modèle Facturation DF / P&L / LIVE)
+// envoyé en base64 par l'UI. Réutilise le parsing testé (buildWrites), upsert idempotent
+// par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
+const IMPORT_ROLES = ["direction", "commercial_dir", "pmo", "achats"];
+
+exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import requis");
+  const b64 = req.data?.fileB64;
+  const filename = String(req.data?.filename || "delta.xlsx");
+  if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+
+  let wb;
+  try {
+    wb = XLSX.read(Buffer.from(b64, "base64"), { cellDates: true });
+  } catch (e) {
+    throw new HttpsError("invalid-argument", "fichier illisible (XLSX attendu)");
+  }
+  const { kinds, writes, report } = buildWrites(wb);
+  if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
+
+  if (writes.length) {
+    let batch = db.batch(), n = 0;
+    for (const w of writes) {
+      batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
+      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
+    }
+    await batch.commit();
+  }
+
+  await db.collection("imports").add({
+    uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",
+    rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
+    report, ts: FieldValue.serverTimestamp(),
+  });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "import_delta", module: "facturation", entity: "delta", entityId: filename,
+    detail: { kinds, rowsOk: report.rowsOk ?? 0 }, ts: FieldValue.serverTimestamp(),
+  });
+
+  if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+  await recomputeSummaries();
+  return { ok: true, kinds, rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0 };
+});
+
 // --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
 exports.exportReport = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");

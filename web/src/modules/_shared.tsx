@@ -1,9 +1,10 @@
 // Helpers et primitives partagés par les modules (extraits de index.tsx pour le découpage).
-import type { ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
+import { useState, type ChangeEvent, type ReactNode } from "react";
+import { AlertTriangle, Upload } from "lucide-react";
 import { useDocData } from "../lib/hooks";
 import { T, fmt } from "../design/tokens";
-import { Card, Badge, EmptyState, cx } from "../design/components";
+import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
+import { callImportDelta } from "../lib/writes";
 import type { AlertsSummary } from "../types";
 
 export type Props = { period: string };
@@ -46,6 +47,65 @@ export function HBars({ rows, colorFn, max }: { rows: { name: string; v: number;
         </div>
       ))}
     </div>
+  );
+}
+
+// Libellés FR des types de fichiers reconnus à l'import (mapping kind serveur → module alimenté).
+const IMPORT_KIND_LABEL: Record<string, string> = {
+  pnl: "Commandes (P&L)",
+  fiche: "Fiche affaire (P&L Projet + BC)",
+  facturationDf: "Factures",
+  salesData: "Pipeline / Opportunités",
+};
+
+// Bouton d'import d'un fichier XLSX (modèle reconnu automatiquement). L'upsert serveur est
+// idempotent par clé déterministe : un delta partiel se fusionne sans doublon, un ré-import
+// remplace. Le rôle est revérifié côté serveur (l'UI n'est qu'un garde-fou).
+export function ImportButton({ label = "Importer un fichier" }: { label?: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // autorise le ré-import du même fichier
+    if (!file) return;
+    setBusy(true);
+    try {
+      const r = await callImportDelta(file);
+      const kinds = (r.kinds || []).map((k) => IMPORT_KIND_LABEL[k] || k).join(", ") || "aucun";
+      toast(`Import réussi : ${r.rowsOk} ligne(s)${r.rowsSkipped ? ` · ${r.rowsSkipped} ignorée(s)` : ""} · ${kinds}`, "ok");
+    } catch (err: any) {
+      toast(err?.message ? `Import refusé : ${err.message}` : "Import refusé", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <label
+      title="Importer un XLSX (P&L, Fiche affaire, Facturation DF ou LIVE/Sales) — type détecté automatiquement"
+      className={cx("btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer", busy && "opacity-60 pointer-events-none")}
+    >
+      <Upload size={14} aria-hidden="true" />
+      {busy ? "Import…" : label}
+      <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX à importer" />
+    </label>
+  );
+}
+
+// Carte d'import complète (onglet Admin) : peuple tous les modules à partir des exports XLSX.
+export function DataImportCard() {
+  return (
+    <Card title="Import de données (XLSX)" actions={<ImportButton />}>
+      <p className="text-[13px] text-muted">
+        Chargez un export XLSX : le type est détecté automatiquement puis fusionné (upsert par clé,
+        ré-import sans doublon). Les agrégats sont recalculés dans la foulée.
+      </p>
+      <ul className="mt-2 text-[13px] text-muted grid gap-1 sm:grid-cols-2">
+        <li>• <b className="text-ink">P&amp;L</b> → Commandes · Rentabilité · Vue d'ensemble</li>
+        <li>• <b className="text-ink">Fiche affaire</b> → P&amp;L Projet · Exécution BC</li>
+        <li>• <b className="text-ink">Facturation DF</b> → Factures · Facturation</li>
+        <li>• <b className="text-ink">LIVE / Sales</b> → Pipeline · Opportunités</li>
+      </ul>
+    </Card>
   );
 }
 

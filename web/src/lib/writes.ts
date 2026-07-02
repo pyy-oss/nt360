@@ -68,6 +68,28 @@ export async function callRecompute() {
   return res.data;
 }
 
+/** Encode un File en base64 (sans le préfixe `data:...;base64,`). */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result || "");
+      resolve(s.slice(s.indexOf(",") + 1));
+    };
+    r.onerror = () => reject(r.error || new Error("lecture du fichier impossible"));
+    r.readAsDataURL(file);
+  });
+}
+
+export type ImportDeltaResult = { ok: boolean; kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number };
+
+/** Importe un delta (XLSX au modèle connu) : upsert idempotent côté serveur + recompute. */
+export async function callImportDelta(file: File): Promise<ImportDeltaResult> {
+  const fileB64 = await fileToBase64(file);
+  const res = await httpsCallable(functions, "importDelta")({ fileB64, filename: file.name });
+  return res.data as ImportDeltaResult;
+}
+
 /** Génère l'export one-pager CODIR (XLSX) et renvoie l'URL signée. */
 export async function callExportReport(period: string) {
   const res = await httpsCallable(functions, "exportReport")({ period });
