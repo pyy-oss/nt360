@@ -326,8 +326,12 @@ exports.dedupe = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => 
 });
 
 // --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
+// Le one-pager CODIR contient des données financières (P&L, atterrissage) → réservé aux
+// profils habilités à la rentabilité (direction / commercial_dir / lecture), pas à tout compte.
+const EXPORT_ROLES = ["direction", "commercial_dir", "lecture"];
 exports.exportReport = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!EXPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit de rapport requis");
   const ExcelJS = require("exceljs");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};

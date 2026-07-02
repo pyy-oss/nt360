@@ -10,6 +10,24 @@ service cloud.firestore {
     function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
     function canWrite(m) { return signedIn() && level(m) == 'write'; }
 
+    // Module d'appartenance d'un agrégat summaries/{id}, d'après le préfixe d'identifiant.
+    // Applique le cloisonnement de la matrice AUSSI aux summaries (sinon un rôle sans droit
+    // sur un module — ex. commercial sur fournisseurs — pourrait lire ses agrégats).
+    function summaryModule(id) {
+      return id.matches('overview.*') ? 'overview'
+        : id.matches('facturation.*') ? 'facturation'
+        : id.matches('rentabilite.*') ? 'rentabilite'
+        : id.matches('pipeline.*') ? 'pipeline'
+        : id.matches('suppliers.*') ? 'fournisseurs'
+        : id.matches('atterrissage.*') ? 'overview'
+        : id.matches('backlog.*') ? 'backlog'
+        : id.matches('clients.*') ? 'clients'
+        : id.matches('domaines.*') ? 'domaines'
+        : id.matches('commandes.*') ? 'overview'
+        : id.matches('alerts.*') ? 'overview'
+        : 'overview'; // défaut : agrégat général (Vue d'ensemble)
+    }
+
     // Collections sources : écriture réservée aux Functions (Admin SDK, contourne les rules).
     match /orders/{id}        { allow read: if canRead('overview');     allow write: if false; }
     match /invoices/{id}      { allow read: if canRead('facturation');  allow write: if false; }
@@ -32,8 +50,8 @@ service cloud.firestore {
     match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if canWrite('fournisseurs'); }
     match /objectives/{id}    { allow read: if canRead('objectifs');    allow write: if canWrite('objectifs'); }
 
-    // Agrégats : écrits par les Functions, lus par tout utilisateur connecté.
-    match /summaries/{id}     { allow read: if signedIn();              allow write: if false; }
+    // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat.
+    match /summaries/{id}     { allow read: if canRead(summaryModule(id)); allow write: if false; }
 
     // Config : la matrice de droits est éditable par 'habilitations' ; le reste est écrit par Functions.
     match /config/permissions { allow read: if signedIn();              allow write: if canWrite('habilitations'); }
