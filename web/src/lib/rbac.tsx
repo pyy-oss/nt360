@@ -93,3 +93,12 @@ export function useCanImport(): boolean {
 export function useCanSeeMargin(): boolean {
   return useContext(AuthCtx).can("rentabilite") !== "none";
 }
+
+// Rôles autorisés à exporter un rapport CODIR — aligné sur EXPORT_ROLES côté serveur.
+export const EXPORT_ROLES: Role[] = ["direction", "commercial_dir", "lecture"];
+
+/** Le rôle courant peut-il générer un export CODIR (aligné sur le serveur) ? */
+export function useCanExport(): boolean {
+  const role = useContext(AuthCtx).role;
+  return !!role && EXPORT_ROLES.includes(role);
+}

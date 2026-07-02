@@ -202,6 +202,26 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
     await batch.commit();
   }
 
+  // Nettoyage des lignes BC de fiche devenues ORPHELINES : une fiche régénère toutes ses lignes
+  // (IDs positionnels ${fp}_${i}) ; si le ré-import en compte moins, les anciennes lignes de fin
+  // resteraient en base et gonfleraient l'exposition. Pour chaque FP de fiche importé, on supprime
+  // ses lignes source=="fiche" absentes du nouvel ensemble. (Filtre par fp seul → pas d'index composite.)
+  const keepByFp = new Map();
+  for (const [path, data] of byPath) {
+    if (path.startsWith("bcLines/") && data.source === "fiche" && data.fp) {
+      (keepByFp.get(data.fp) || keepByFp.set(data.fp, new Set()).get(data.fp)).add(path.slice("bcLines/".length));
+    }
+  }
+  for (const [fp, keep] of keepByFp) {
+    const snap = await db.collection("bcLines").where("fp", "==", fp).get();
+    const stale = snap.docs.filter((d) => d.get("source") === "fiche" && !keep.has(d.id));
+    for (let i = 0; i < stale.length; i += 400) {
+      const batch = db.batch();
+      stale.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+
   const report = { kinds, files, rowsIn, rowsOk, rowsSkipped };
   await db.collection("imports").add({
     uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",

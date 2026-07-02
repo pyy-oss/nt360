@@ -49,4 +49,14 @@ const noAcc = (s) => String(s || "").toLowerCase().normalize("NFD").replace(COMB
  *  Fusionne les doublons logiques (casse/espaces). */
 const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
 
-module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName };
+/** Année plausible pour un PO / une clôture : fenêtre GLISSANTE [2015, année courante + 3].
+ *  Rejette les sentinelles (1899/1900/0) tout en restant valide dans le futur (pas de 2030 codé
+ *  en dur qui périmerait). Retourne le nombre si plausible, sinon 0. */
+const plausibleYear = (y) => {
+  const n = Math.trunc(Number(y));
+  if (!Number.isFinite(n)) return 0;
+  const max = new Date().getFullYear() + 3;
+  return n >= 2015 && n <= max ? n : 0;
+};
+
+module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, plausibleYear };

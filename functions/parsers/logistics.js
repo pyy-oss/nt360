@@ -47,7 +47,9 @@ function parseLogistics(wb) {
     const fp = fpKey(val(r, keys, "opp id", "n° fp", "n fp", "fp"));
     const statusRaw = String(val(r, keys, "statut", "status") || "").trim();
     const doc = {
-      _id: "bc_" + hashId(fp, poNumber, supplier, val(r, keys, "description")),
+      // Clé incluant le MONTANT : deux lignes d'un même BC (même fournisseur/description) mais de
+      // montants différents ne se confondent plus (évite le « dernier gagne » qui tronquait l'expo).
+      _id: "bc_" + hashId(fp, poNumber, supplier, val(r, keys, "description"), amountXof || amount || 0),
       fp,
       bcNumber: poNumber,
       supplier,

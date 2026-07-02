@@ -77,10 +77,12 @@ function parseBcText(rawText) {
   // Total : dernière occurrence « Total … <montant> <devise> » (le total TTC/net).
   let amount = 0, currency = "XOF";
   const totals = [...text.matchAll(/Total\s*(?:hors[-\s]?taxe|TTC|net|à\s+payer)?\s*[:]?\s*([\d][\d . ,]*\d|\d)\s*(€|\$|£|EUR|USD|FCFA|XOF|CFA)?/gi)];
-  if (totals.length) {
-    const last = totals[totals.length - 1];
-    amount = num(last[1]);
-    if (last[2]) currency = normCur(last[2]);
+  // On PRIVILÉGIE le total HORS TAXE (cohérent avec le CA/factures en HT) ; sinon dernier total (TTC/net).
+  const ht = text.match(/Total\s*(?:hors[-\s]?taxe|h\.?t\.?)\s*[:]?\s*([\d][\d.,\s]*\d|\d)\s*(€|\$|£|EUR|USD|FCFA|XOF|CFA)?/i);
+  const pick = ht || (totals.length ? totals[totals.length - 1] : null);
+  if (pick) {
+    amount = num(pick[1]);
+    if (pick[2]) currency = normCur(pick[2]);
   }
   // Devise de repli si le total n'a pas capté le symbole : 1re devise vue.
   if (currency === "XOF") {

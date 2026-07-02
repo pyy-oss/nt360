@@ -1,7 +1,7 @@
 // Parseur feuille LIVE / Sales_DATA → opportunities/{extId|hash} (BUILD_KIT §17.5, §18.5).
 // Module pur (testable). Étapes 1..9, proba défaut, actif=1-5 / veille=8 / conversion=6 vs 7.
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, noAcc, cleanName } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, toISO, hashId, safeId } = require("../lib/sheets");
 
 /** Probabilités par défaut si `IdC` absent (§18.5). */
@@ -55,7 +55,7 @@ function parseSalesData(wb) {
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
     const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
-    const closingDate = (((d) => (d && +d.slice(0, 4) >= 2018 && +d.slice(0, 4) <= 2030 ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))); // rejet sentinelles 1899
+    const closingDate = (((d) => (d && plausibleYear(d.slice(0, 4)) ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))); // fenêtre glissante, rejet sentinelles 1899
 
     // ⚠️ NE PAS utiliser le terme "id" seul : il matche "IdC" (proba) → collisions massives.
     // Sans extId : hash sur une clé MÉTIER stable (FP + closing + client/montant/étape/AM)

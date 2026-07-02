@@ -118,6 +118,7 @@ function parseFicheSheet(ws) {
           currency: "XOF",
           amountXof: xof,
           status: "a_emettre",
+          source: "fiche", // permet le nettoyage des lignes orphelines au ré-import
         });
     }
 
