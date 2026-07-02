@@ -15,6 +15,7 @@ const { am360 } = require("../domain/am360");
 const { dataQuality } = require("../domain/dataQuality");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
+const { fpKey } = require("./ids");
 
 async function readAll(db, name, withId = false) {
   const snap = await db.collection(name).get();
@@ -30,7 +31,7 @@ const filterInvoices = (invoices, period) =>
  * @param {string[]} [only] sous-ensemble d'agrégats (optionnel, sinon tout)
  */
 async function recomputeAll(db, only) {
-  const [pnlOrders, invoices, opps, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
+  const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices"),
     readAll(db, "opportunities"),
@@ -39,6 +40,12 @@ async function recomputeAll(db, only) {
     readAll(db, "objectives"),
     readAll(db, "projectSheets"),
   ]);
+
+  // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
+  // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
+  // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
+  const salesFps = new Set(oppsRaw.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
+  const opps = oppsRaw.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.

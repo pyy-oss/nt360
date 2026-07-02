@@ -4,25 +4,21 @@ import { doc, setDoc, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "./firebase";
 
-function uid() {
-  const c: any = globalThis.crypto;
-  return c?.randomUUID ? c.randomUUID() : "id" + Date.now() + Math.floor(Math.random() * 1e6);
+export type OppInput = {
+  id?: string; client: string; am: string; bu: string; amount: number; stage: number;
+  probability: number; closingDate?: string; fp?: string;
+};
+
+/** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
+ *  pondéré + l'étiquette d'étape, puis RECALCULE les agrégats — sinon l'opp reste invisible). */
+export async function upsertOpportunity(data: OppInput): Promise<{ ok: boolean; id: string }> {
+  const res = await httpsCallable(functions, "upsertOpportunity")(data);
+  return res.data as { ok: boolean; id: string };
 }
 
-/** Crée une opportunité de saisie (source='saisie' exigé par les rules). */
-export async function addOpportunity(data: {
-  client: string; am: string; bu: string; amount: number; stage: number;
-  probability: number; closingDate?: string; fp?: string;
-}) {
-  const id = "saisie_" + uid();
-  await setDoc(doc(db, "opportunities", id), {
-    oppId: id,
-    ...data,
-    weighted: (data.amount || 0) * (data.probability || 0),
-    source: "saisie",
-    updatedAt: new Date().toISOString(),
-  });
-  return id;
+/** Supprime une opportunité SAISIE (onCall : recalcule ensuite). */
+export async function deleteOpportunity(id: string) {
+  await httpsCallable(functions, "deleteOpportunity")({ id });
 }
 
 /** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */

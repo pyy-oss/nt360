@@ -5,7 +5,7 @@ import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { addOpportunity } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary } from "../types";
@@ -138,13 +138,22 @@ export const Am360: FC<Props> = () => {
 };
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
+const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "" };
+
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
   const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]));
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
-  const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
+  const [f, setF] = useState({ ...EMPTY_OPP });
+  const editOpp = (o: Opportunity) => setF({
+    id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
+    amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
+  });
+  // Changer d'étape pré-remplit la proba par défaut de l'étape si elle est vide (évite un pondéré à 0).
+  const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
   if (loading && !allRows.length) return <CardSkeleton />;
   const top = [...rows].sort((a, b) => (b.weighted || 0) - (a.weighted || 0)).slice(0, 10);
   // Certitudes = opportunités ACTIVES (étapes 1..5) quasi-certaines (IdC ≥ 90 %), pas encore signées.
@@ -156,17 +165,20 @@ export const OppList: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <FilterNote dims="BU / AM / client" />
       {canWrite && (
-        <Card title="Ajouter une opportunité (saisie)">
+        <Card title={f.id ? "Modifier l'opportunité (saisie)" : "Ajouter une opportunité (saisie)"} actions={f.id ? <button onClick={() => setF({ ...EMPTY_OPP })} className="btn-ghost !px-2.5 !py-1 text-xs">Nouvelle</button> : undefined}>
           <div className="flex flex-wrap gap-2 items-center">
             <input className="field" aria-label="Client" placeholder="Client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} />
             <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
+            <input className="field w-36" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
             <select aria-label="Business Unit" className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
             <input className="field w-28" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-            <select aria-label="Étape du pipeline" className="field" value={f.stage} onChange={(e) => setF({ ...f, stage: e.target.value })}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
+            <select aria-label="Étape du pipeline" className="field" value={f.stage} onChange={(e) => setStage(e.target.value)}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
             <input className="field w-28" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
             <input className="field" aria-label="Date de clôture prévue" type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
-            <Busy label="Ajouter" fn={() => addOpportunity({ client: f.client, am: f.am, bu: f.bu, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined })} />
+            <Busy label={f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
+              fn={async () => { await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined }); setF({ ...EMPTY_OPP }); }} />
           </div>
+          {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
         </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
@@ -200,6 +212,12 @@ export const OppList: FC<Props> = () => {
             colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
             colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
             colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || ""),
+            ...(canWrite ? [colText("", (r: Opportunity) => (r.source === "saisie" ? (
+              <span className="inline-flex gap-2">
+                <button onClick={() => { editOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs">Éditer</button>
+                <Busy variant="ghost" label="Suppr." okMsg="Supprimée" fn={() => deleteOpportunity(r.oppId || r.id || "")} />
+              </span>
+            ) : <span className="text-[11px] text-faint">import</span>))] : []),
           ]}
         />
       </Card>
