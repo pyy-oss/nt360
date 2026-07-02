@@ -1,10 +1,11 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
+import { useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge } from "./_shared";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton } from "./_shared";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary } from "../types";
 
 // 5 — Suivi Backlog
@@ -109,8 +110,9 @@ const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagn�
 export const OrderList: FC<Props> = () => {
   const { data, loading } = useDocData<CommandesSummary>("summaries/commandes");
   const rows = data?.rows || [];
+  const canImport = useCan("overview") === "write";
   if (loading && !data) return <CardSkeleton />;
-  if (!rows.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." />;
+  if (!rows.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />;
   return (
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`}>
       <ListView

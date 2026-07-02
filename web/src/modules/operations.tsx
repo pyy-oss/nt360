@@ -19,7 +19,8 @@ const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number)
 export const PnlProjet: FC<Props> = () => {
   const { rows } = useCollectionData<ProjectSheet>("projectSheets");
   const { rows: bc } = useCollectionData<BcLine>("bcLines");
-  if (!rows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." />;
+  const canImport = useCan("pnlprojet") === "write";
+  if (!rows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
   const marge = rows.reduce((s, r) => s + (r.margin || 0), 0);

@@ -131,11 +131,12 @@ export const colText = (header: string, render: (r: any) => ReactNode, sort?: (r
 export const colNum = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any): Col => ({ header, align: "right", render, sort });
 export const money = (v: number | null | undefined) => <span className="tabnum">{fmt(v)}</span>;
 
-export function EmptyState({ label, icon }: { label?: string; icon?: ReactNode }) {
+export function EmptyState({ label, icon, action }: { label?: string; icon?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-muted">
       <div className="text-muted/50">{icon || <Inbox size={28} />}</div>
       <div className="text-sm">{label || "Aucune donnée pour cette sélection."}</div>
+      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }
