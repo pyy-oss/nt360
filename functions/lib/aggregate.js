@@ -60,7 +60,7 @@ async function recomputeAll(db, only) {
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } }); // global (rétro-compat)
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps, asOf), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
@@ -112,7 +112,7 @@ async function recomputeAll(db, only) {
     // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
     // (bf global, indépendant de la période) · Certitudes = pondéré des opps de la période (D Prev).
     if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP), ...stamp } });
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord), ...stamp } });
     if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.client), ...stamp } });

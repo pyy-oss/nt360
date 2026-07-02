@@ -10,7 +10,34 @@ const isActive = (o) => o.stage >= 1 && o.stage <= 5;
 // Éligible au pondéré : actif (donc non perdu/annulé/suspendu) ET IdC ≥ 90 %.
 const isEligible = (o) => isActive(o) && (o.probability || 0) >= CONFIANCE_MIN;
 
-function pipeline(opps) {
+// Analyse temporelle du closing (D Prev) sur les opps ACTIVES — uniquement à partir de la
+// closingDate réelle (aucune date de création/étape en source → pas de vélocité/âge inventés).
+function closingAnalysis(active, asOf) {
+  const today = String(asOf);
+  const ym = today.slice(0, 7), yr = today.slice(0, 4);
+  const q = Math.floor((Number(today.slice(5, 7)) - 1) / 3);
+  const mk = () => ({ brut: 0, pond: 0, count: 0 });
+  const B = { retard: mk(), mois: mk(), trim: mk(), plus: mk(), sans: mk() };
+  const stale = [];
+  for (const o of active) {
+    const d = o.closingDate;
+    let key;
+    if (!d) key = "sans";
+    else if (d < today) key = "retard"; // clôture prévue déjà passée → à requalifier
+    else if (d.slice(0, 7) === ym) key = "mois";
+    else if (d.slice(0, 4) === yr && Math.floor((Number(d.slice(5, 7)) - 1) / 3) === q) key = "trim";
+    else key = "plus";
+    B[key].brut += o.amount || 0; B[key].pond += o.weighted || 0; B[key].count++;
+    if (key === "retard") stale.push(o);
+  }
+  const staleTop = stale
+    .sort((a, b) => (b.weighted || 0) - (a.weighted || 0))
+    .slice(0, 10)
+    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, amount: o.amount, weighted: o.weighted, closingDate: o.closingDate, stageLabel: o.stageLabel }));
+  return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop };
+}
+
+function pipeline(opps, asOf) {
   const active = opps.filter(isActive);
   const eligible = opps.filter(isEligible);
   const suspended = opps.filter((o) => o.stage === 8);
@@ -60,7 +87,9 @@ function pipeline(opps) {
     lostCount,
     byAmConv,
     topOpps,
+    // Analyse du closing (D Prev) : seulement si asOf fourni (sinon null, rétro-compat).
+    closing: asOf ? closingAnalysis(active, asOf) : null,
   };
 }
 
-module.exports = { pipeline, isActive, isEligible, CONFIANCE_MIN };
+module.exports = { pipeline, closingAnalysis, isActive, isEligible, CONFIANCE_MIN };
