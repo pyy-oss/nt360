@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 const XLSX = require("xlsx");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
@@ -127,6 +127,17 @@ describe("parseSalesData → opportunities (§17.5)", () => {
   it("oppId stable par hash quand extId absent (idempotence)", () => {
     const mk = () => parseSalesData(wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA" }])).rows[0]._id;
     expect(mk()).toBe(mk());
+  });
+  it("oppId INDÉPENDANT de l'année d'exécution (borne glissante découplée de l'ID)", () => {
+    const row = [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA", "D Prev": "2029-06-01" }];
+    vi.setSystemTime(new Date("2025-01-01T00:00:00Z")); // fenêtre max 2028 → 2029 HORS fenêtre
+    const a = parseSalesData(wbFromRows("LIVE", row)).rows[0];
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z")); // fenêtre max 2029 → 2029 DANS la fenêtre
+    const b = parseSalesData(wbFromRows("LIVE", row)).rows[0];
+    vi.useRealTimers();
+    expect(a._id).toBe(b._id);              // même ID malgré le changement de fenêtre (raw date hashée)
+    expect(a.closingDate).toBeNull();       // 2029 hors fenêtre en 2025 → date non stockée
+    expect(b.closingDate).toBe("2029-06-01"); // mais l'ID reste identique → pas de doublon au ré-import
   });
 });
 
