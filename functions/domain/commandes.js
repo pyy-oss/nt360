@@ -3,7 +3,9 @@
 //   • Sans fiche ni opp gagnée : on garde la commande P&L existante.
 //   • Opp gagnée (stage 6) → commande : CAS = montant de l'opp, marge inconnue (0).
 //   • Fiche affaire → écrase TOUT : CAS = prix de vente Neurones, marge/coût, client, AM, affaire.
-// RAF : la commande P&L garde son RAF ; sinon RAF = CAS − facturé (Σ factures du FP), borné ≥ 0.
+// RAF : DÉRIVÉ pour toutes les sources = max(CAS − facturé, 0), où facturé = Σ factures du FP
+// (tous exercices). Le CAS peut dater d'une année antérieure et la facturation s'étaler sur
+// plusieurs exercices : le RAF reste juste (glissant). On n'utilise plus le RAF figé de l'Excel.
 // Module PUR (testable).
 const { fpKey } = require("../lib/ids");
 
@@ -64,12 +66,16 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     });
   }
 
-  return [...byFp.values()].map((o) => {
-    const raf = (o.source === "pnl" && o.raf != null)
-      ? o.raf
-      : Math.max((o.cas || 0) - (billed[o.fp] || 0), 0);
-    return { ...o, raf };
-  });
+  // RAF DÉRIVÉ pour TOUTES les sources : RAF = max(CAS − Σfactures du FP, 0).
+  // `billed[fp]` somme les factures de TOUS les exercices → le RAF reste juste même quand le
+  // CAS date d'une année antérieure et que la facturation s'étale sur plusieurs exercices.
+  // On n'utilise plus le « RAF total » figé de l'Excel P&L (instantané pouvant précéder des
+  // factures → double-comptage Facturé+Backlog dans la projection CAF). L'identité
+  // CAS = Facturé + RAF est ainsi garantie pour chaque commande.
+  return [...byFp.values()].map((o) => ({
+    ...o,
+    raf: Math.max((o.cas || 0) - (billed[o.fp] || 0), 0),
+  }));
 }
 
 module.exports = { mergeCommandes };
