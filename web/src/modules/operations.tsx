@@ -6,9 +6,10 @@ import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
+import { Gauge } from "../design/charts";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
-import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity } from "../types";
+import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
@@ -296,6 +297,53 @@ export const Fp360: FC<Props> = () => {
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("AM", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
       ) : <EmptyState label={`Aucune commande pour ${fp}.`} />)}
+    </div>
+  );
+};
+
+// Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
+export const DataQuality: FC<Props> = () => {
+  const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  if (!data) return <EmptyState />;
+  const issues = data.issues || [];
+  const c = data.counts || {};
+  const score = data.score ?? 1;
+  const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className={cols2}>
+        <Card title="Score de complétude des données">
+          <Gauge value={score} color={score >= 0.9 ? T.emerald : score >= 0.7 ? T.gold : T.clay} />
+          <div className="text-[11px] text-faint text-center mt-1">1 − anomalies pondérées / enregistrements</div>
+        </Card>
+        <Card title="Volumes ingérés">
+          <div className="grid grid-cols-2 gap-2">
+            <Kpi label="Commandes" value={(c.orders || 0).toLocaleString("fr-FR")} />
+            <Kpi label="Factures" value={(c.invoices || 0).toLocaleString("fr-FR")} />
+            <Kpi label="Opportunités" value={(c.opportunities || 0).toLocaleString("fr-FR")} />
+            <Kpi label="Lignes BC" value={(c.bcLines || 0).toLocaleString("fr-FR")} />
+          </div>
+        </Card>
+      </div>
+      <Card title={`Anomalies de données · ${issues.length}`}>
+        {issues.length ? (
+          <div className="flex flex-col gap-2">
+            {issues.map((it, i) => (
+              <div key={i} className="flex items-start gap-2 text-[13px]">
+                <Badge tone={(tone[it.severity] || "neutral") as any}>{it.count}</Badge>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span>{it.label}</span>
+                  {(it.refs || []).slice(0, 6).map((r, j) => (
+                    <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
+                  ))}
+                  {(it.refs || []).length > 6 && <span className="text-[11px] text-faint">+{(it.refs || []).length - 6}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState label="Aucune anomalie détectée — données propres." />}
+      </Card>
+      <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> (champs manquants, rattachements rompus, incohérences) pour fiabiliser les imports — distinct du Centre d'alertes (alertes métier). Corrige les sources puis ré-importe : les anomalies se recalculent automatiquement.</Tip>
     </div>
   );
 };

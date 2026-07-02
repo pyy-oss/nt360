@@ -28,6 +28,7 @@ service cloud.firestore {
         : id.matches('domaines.*') ? 'domaines'
         : id.matches('commandes.*') ? 'overview'
         : id.matches('alerts.*') ? 'overview'
+        : id.matches('dataQuality.*') ? 'overview'
         : 'overview'; // défaut : agrégat général (Vue d'ensemble)
     }
 
