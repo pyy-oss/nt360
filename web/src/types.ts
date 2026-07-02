@@ -45,6 +45,8 @@ export interface RentabiliteSummary {
 }
 
 export interface EntitySummary { period?: string; rows?: EntityRow[] }
+export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; ar?: number; dso?: number; fy?: number };
+export interface TrendsSummary { points?: TrendPoint[] }
 export interface ReceivablesSummary {
   totalAR?: number; overdue?: number; overdueCount?: number; openCount?: number; dso?: number;
   buckets?: { notDue?: number; b0_30?: number; b31_60?: number; b61_90?: number; b90p?: number };

@@ -1,6 +1,6 @@
 // Graphes Recharts thématisés Forest & Gold (mirroir du prototype).
 import {
-  ResponsiveContainer, BarChart, Bar, AreaChart, Area,
+  ResponsiveContainer, BarChart, Bar, AreaChart, Area, LineChart, Line,
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, RadialBarChart, RadialBar, PolarAngleAxis,
 } from "recharts";
 import { T, BU_COL, fmt, fmtFull } from "./tokens";
@@ -92,6 +92,22 @@ export function GroupedBars({ data, series, h = 230, size = 22 }: { data: any[];
         <Legend verticalAlign="top" height={24} iconType="square" iconSize={10} wrapperStyle={legendStyle} />
         {series.map((s) => <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[3, 3, 0, 0]} barSize={size} />)}
       </BarChart>
+    </H>
+  );
+}
+
+/** Séries temporelles multi-lignes (tendances). data: [{name, <clé>...}] */
+export function MultiLine({ data, series, h = 240 }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number }) {
+  return (
+    <H h={h} label="Tendances">
+      <LineChart data={data} margin={{ left: -6, right: 8 }}>
+        <CartesianGrid stroke={T.line} vertical={false} />
+        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={24} />
+        <YAxis {...axis} tickFormatter={fmt} width={44} />
+        <Tooltip cursor={{ stroke: T.line }} content={<ChartTooltip />} />
+        <Legend verticalAlign="top" height={24} iconType="line" iconSize={12} wrapperStyle={legendStyle} />
+        {series.map((s) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} />)}
+      </LineChart>
     </H>
   );
 }

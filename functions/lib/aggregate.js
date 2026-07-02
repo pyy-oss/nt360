@@ -62,8 +62,10 @@ async function recomputeAll(db, only) {
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
-  if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...receivables(invoices, asOf), ...stamp } });
-  if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
+  const rec = receivables(invoices, asOf);
+  if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...rec, ...stamp } });
+  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf);
+  if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
   // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
   if (want("commandes") || want("overview")) w.push({ path: "summaries/commandes", data: {
@@ -75,6 +77,22 @@ async function recomputeAll(db, only) {
     })),
     ...stamp,
   } });
+
+  // Historisation : un INSTANTANÉ daté des grandeurs clés à chaque recompute (1 point/jour,
+  // ré-écrit si déjà présent). Fonde les tendances / burn-down du backlog / forecast-vs-réel.
+  if (want("overview") || want("trends")) {
+    const point = {
+      date: asOf,
+      casReel: att.realiseCas || 0, caf: att.factureN || 0, backlog: bf.total || 0,
+      pipeline: att.pipelinePondere || 0, projeteCas: att.projete || 0, projeteCaf: att.cafProjete || 0,
+      ar: rec.totalAR || 0, dso: rec.dso || 0, fy: currentFy,
+    };
+    const prev = (await db.doc("summaries/trends").get()).data();
+    const points = (prev?.points || []).filter((p) => p.date !== asOf);
+    points.push(point);
+    points.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    w.push({ path: "summaries/trends", data: { points: points.slice(-180), ...stamp } }); // ~6 mois d'historique
+  }
 
   const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));
 
