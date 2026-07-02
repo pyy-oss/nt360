@@ -9,10 +9,11 @@ describe("fmt — formatage FCFA", () => {
     expect(fmt(1_007_500)).toBe("1.0 M");
     expect(fmt(1_500)).toBe("2 k");
   });
-  it("garde anti-NaN/zéro", () => {
-    expect(fmt(0)).toBe("0");
-    expect(fmt(null)).toBe("0");
-    expect(fmt(NaN)).toBe("0");
+  it("distingue vrai zéro et absence de donnée", () => {
+    expect(fmt(0)).toBe("0");      // vrai zéro
+    expect(fmt(null)).toBe("—");   // donnée absente
+    expect(fmt(undefined)).toBe("—");
+    expect(fmt(NaN)).toBe("—");    // donnée invalide
   });
 });
 

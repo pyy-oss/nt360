@@ -17,15 +17,19 @@ export const T = {
 export const colors = T; // alias historique
 
 // Couleurs par BU / étape pipeline / statut BC (identiques au prototype).
-export const BU_COL: Record<string, string> = { ICT: "#46C08A", CLOUD: "#6E9DC0", FORMATION: "#C9A24B", AUTRE: "#5E7268" };
+export const BU_COL: Record<string, string> = { ICT: T.emerald, CLOUD: T.steel, FORMATION: T.gold, AUTRE: T.faint };
 export const buColors = BU_COL;
-export const STAGE_COL: Record<number, string> = { 1: "#6E9DC0", 2: "#8FA89B", 3: "#C9A24B", 4: "#D9694C", 5: "#46C08A", 6: "#46C08A", 7: "#D9694C", 8: "#A98AC4", 9: "#5E7268" };
-export const BC_COL: Record<string, string> = { a_emettre: "#5E7268", emis: "#6E9DC0", livre: "#C9A24B", facture: "#A98AC4", solde: "#46C08A" };
+// Une teinte DISTINCTE par étape : ne pas coder des sens opposés (Négo ≠ Perdu, Contrat ≠ Gagné)
+// avec la même couleur — lisibilité + daltonisme.
+export const STAGE_COL: Record<number, string> = { 1: T.steel, 2: T.dim, 3: T.plum, 4: T.gold, 5: "#5FB0A0", 6: T.emerald, 7: T.clay, 8: "#B07A3C", 9: T.faint };
+export const BC_COL: Record<string, string> = { a_emettre: T.faint, emis: T.steel, livre: T.gold, facture: T.plum, solde: T.emerald };
 
-/** Formatage FCFA : Md / M / k (garde anti-NaN/zéro, §18.7). */
+/** Formatage FCFA : Md / M / k. Distingue l'ABSENCE de donnée ("—") d'un vrai zéro ("0"). */
 export function fmt(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
   const n = Number(v);
-  if (!isFinite(n) || n === 0) return "0";
+  if (!isFinite(n)) return "—"; // NaN / Infinity = donnée invalide, pas un zéro
+  if (n === 0) return "0";
   const abs = Math.abs(n);
   if (abs >= 1e9) return (n / 1e9).toFixed(2) + " Md";
   if (abs >= 1e6) return (n / 1e6).toFixed(1) + " M";
@@ -39,9 +43,10 @@ export function fmtFull(v: number | null | undefined): string {
   return n.toLocaleString("fr-FR").replace(/ |,/g, " ");
 }
 
-/** Formatage pourcentage. */
+/** Formatage pourcentage. Absence de donnée → "—" (pas "0%"). */
 export function pct(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
   const n = Number(v);
-  if (!isFinite(n)) return "0%";
+  if (!isFinite(n)) return "—";
   return (n * 100).toFixed(1) + "%";
 }

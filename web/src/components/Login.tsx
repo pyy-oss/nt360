@@ -33,9 +33,11 @@ export default function Login() {
             <div className="text-[11px] text-muted mt-0.5">Neurones Technologies CI</div>
           </div>
         </div>
-        <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-        <input className="field" type="password" placeholder="Mot de passe" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        {error && <div className="text-clay text-[13px]">{error}</div>}
+        <label className="text-xs text-muted" htmlFor="login-email">Email</label>
+        <input id="login-email" className="field -mt-1" type="email" autoComplete="email" placeholder="prenom.nom@exemple.ci" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        <label className="text-xs text-muted" htmlFor="login-pwd">Mot de passe</label>
+        <input id="login-pwd" className="field -mt-1" type="password" autoComplete="current-password" placeholder="Mot de passe" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        {error && <div className="text-clay text-[13px]" role="alert">{error}</div>}
         <button type="submit" className="btn-gold mt-1" disabled={busy}>{busy ? "Connexion…" : "Se connecter"}</button>
       </form>
     </div>

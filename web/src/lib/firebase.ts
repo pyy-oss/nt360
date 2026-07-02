@@ -33,6 +33,10 @@ if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
     provider: new ReCaptchaV3Provider(import.meta.env.VITE_APPCHECK_SITE_KEY),
     isTokenAutoRefreshEnabled: true,
   });
+} else if (import.meta.env.PROD) {
+  // App Check est la protection anti-abus des back-ends : sa clé DOIT être fournie en prod.
+  // On alerte bruyamment plutôt que de démarrer silencieusement sans protection.
+  console.error("[App Check] VITE_APPCHECK_SITE_KEY manquante en production : les Cloud Functions et Firestore ne sont PAS protégés par App Check.");
 }
 
 // Persistance offline (§1 local-first, §12). Base Firestore nommée nt360 (projet
