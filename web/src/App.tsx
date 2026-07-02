@@ -25,6 +25,14 @@ export default function App() {
   const current = MODULES.find((m) => m.id === active) || visible[0];
   const allowed = current && can(current.key) !== "none" ? current : visible[0];
 
+  // Au lancement : sélectionner par défaut l'année fiscale en cours (si l'utilisateur
+  // n'a pas encore choisi de période et qu'elle est disponible). Ne surcharge pas un choix manuel.
+  const userPickedPeriod = useRef(false);
+  useEffect(() => {
+    const fy = periods?.currentFy ? String(periods.currentFy) : null;
+    if (!userPickedPeriod.current && fy && available.includes(fy)) setPeriod(fy);
+  }, [periods?.currentFy, available]);
+
   // Amène l'onglet actif dans la zone visible (barre scrollable horizontalement sur mobile).
   const activeTabRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -54,7 +62,7 @@ export default function App() {
               {available.map((p) => (
                 <button
                   key={p}
-                  onClick={() => setPeriod(p)}
+                  onClick={() => { userPickedPeriod.current = true; setPeriod(p); }}
                   aria-pressed={p === period}
                   className={cx("rounded-full border px-3 py-1.5 min-h-[36px] text-xs font-semibold transition-colors",
                     p === period ? "bg-gold border-gold text-bg" : "border-line bg-panel text-muted hover:border-gold/50")}
