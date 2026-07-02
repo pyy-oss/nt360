@@ -6,7 +6,7 @@ import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, colText, colNum, money, cx, useToast } from "../design/components";
-import { setBcStatus, upsertCreditLine, callAddBcLine } from "../lib/writes";
+import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, Order, Invoice, Opportunity } from "../types";
 
@@ -70,9 +70,38 @@ function BcImport() {
   const [mode, setMode] = useState<"batch" | "unitaire">("batch");
   const [f, setF] = useState(EMPTY_BC);
   const [pdf, setPdf] = useState<File | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const toast = useToast();
   const seg = (id: "batch" | "unitaire", label: string) => (
     <button onClick={() => setMode(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", mode === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>{label}</button>
   );
+  // À la sélection du PDF : extraction serveur (pdfjs) + pré-remplissage best-effort du formulaire.
+  const onPdf = async (file: File | null) => {
+    setPdf(file);
+    if (!file) return;
+    setAnalyzing(true);
+    try {
+      const x = await callParseBcPdf(file);
+      setF((prev) => ({
+        ...prev,
+        bcNumber: x.bcNumber || prev.bcNumber,
+        supplier: x.supplier || prev.supplier,
+        fp: x.fp || prev.fp,
+        expenseType: x.expenseType || prev.expenseType,
+        amountXof: x.amountXof ? String(x.amountXof) : prev.amountXof,
+        description: x.description || prev.description,
+        dateIn: x.dateIn || prev.dateIn,
+      }));
+      const conv = x.currency && x.currency !== "XOF" && x.amount
+        ? ` — montant détecté ${x.amount.toLocaleString("fr-FR")} ${x.currency}, à convertir en XOF`
+        : "";
+      toast(`PDF analysé : champs pré-remplis${conv}`, "ok");
+    } catch (e: any) {
+      toast(e?.message ? `Analyse PDF : ${e.message}` : "Analyse du PDF impossible", "err");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
   return (
     <Card title="Importer des BC fournisseurs" actions={<div className="flex gap-1.5">{seg("batch", "Batch (Excel)")}{seg("unitaire", "Unitaire (PDF)")}</div>}>
       {mode === "batch" ? (
@@ -82,7 +111,7 @@ function BcImport() {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <p className="text-[13px] text-muted">Saisissez un bon de commande et joignez son PDF (conservé pour traçabilité). Les champs ne sont pas extraits automatiquement du PDF — renseignez-les ci-dessous.</p>
+          <p className="text-[13px] text-muted">Joignez le PDF d'un bon de commande : les champs sont <b className="text-ink">extraits automatiquement</b> et pré-remplis (n° BC, fournisseur, montant, date…) — vérifiez puis enregistrez. Le PDF est conservé pour traçabilité.</p>
           <div className="flex flex-wrap gap-2 items-center">
             <input className="field" placeholder="N° BC" aria-label="Numéro de BC" value={f.bcNumber} onChange={(e) => setF({ ...f, bcNumber: e.target.value })} />
             <input className="field" placeholder="Fournisseur" aria-label="Fournisseur" value={f.supplier} onChange={(e) => setF({ ...f, supplier: e.target.value })} />
@@ -92,9 +121,9 @@ function BcImport() {
             <select className="field" aria-label="Statut du BC" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>{BC_STAGES.map((s) => <option key={s} value={s}>{bcLabel(s)}</option>)}</select>
             <input className="field" type="date" aria-label="Date du BC" value={f.dateIn} onChange={(e) => setF({ ...f, dateIn: e.target.value })} />
             <input className="field" placeholder="Description" aria-label="Description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
-            <label className="btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer">
-              <Upload size={14} aria-hidden="true" />{pdf ? pdf.name : "Joindre le PDF"}
-              <input type="file" accept="application/pdf,.pdf" className="sr-only" aria-label="Joindre le PDF du BC" onChange={(e) => setPdf(e.target.files?.[0] || null)} />
+            <label className={cx("btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer", analyzing && "opacity-60 pointer-events-none")}>
+              <Upload size={14} aria-hidden="true" />{analyzing ? "Analyse du PDF…" : pdf ? pdf.name : "Joindre le PDF (auto-remplit)"}
+              <input type="file" accept="application/pdf,.pdf" className="sr-only" aria-label="Joindre le PDF du BC" disabled={analyzing} onChange={(e) => onPdf(e.target.files?.[0] || null)} />
             </label>
             <Busy label="Enregistrer le BC" okMsg="BC enregistré" errMsg="Enregistrement refusé" fn={async () => {
               await callAddBcLine({

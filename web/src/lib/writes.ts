@@ -96,6 +96,13 @@ export type BcLineFields = {
   dateIn?: string;
 };
 
+/** Analyse un BC PDF (pdfjs côté serveur) et renvoie les champs pré-remplis (best-effort). */
+export async function callParseBcPdf(pdf: File): Promise<BcLineFields> {
+  const pdfB64 = await fileToBase64(pdf);
+  const res = await httpsCallable(functions, "parseBcPdf")({ pdfB64 });
+  return (res.data as { ok: boolean; fields: BcLineFields }).fields;
+}
+
 /** Ajoute un BC fournisseur unitaire (mode « Unitaire / PDF ») + PDF joint optionnel. */
 export async function callAddBcLine(fields: BcLineFields, pdf?: File | null) {
   const pdfB64 = pdf ? await fileToBase64(pdf) : undefined;

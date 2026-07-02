@@ -234,6 +234,26 @@ exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) 
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
+// --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis
+// mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
+// avant enregistrement via addBcLine. Ne persiste rien. ---
+exports.parseBcPdf = onCall({ memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  const b64 = req.data?.pdfB64;
+  if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "PDF requis (pdfB64)");
+  const { extractPdfText, parseBcText } = require("./parsers/bcPdf");
+  let text;
+  try {
+    text = await extractPdfText(Buffer.from(b64, "base64"));
+  } catch (e) {
+    logger.warn("parseBcPdf: extraction échouée", { msg: e.message });
+    throw new HttpsError("failed-precondition", "PDF illisible (texte non extractible)");
+  }
+  const fields = parseBcText(text);
+  return { ok: true, fields };
+});
+
 // --- Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Regroupe par clé
 // métier, garde le meilleur représentant, supprime les autres. `apply:false` = analyse seule. ---
 exports.dedupe = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
