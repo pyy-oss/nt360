@@ -5,11 +5,13 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
   const orders = [
     { fp: "FP/2026/1", client: "PNL", bu: "ICT", am: "X", cas: 500, raf: 200, mb: 50, yearPo: 2026, source: "pnl", suppliers: [{ name: "S", amount: 100 }] },
     { fp: "FP/2026/9", client: "PNLONLY", bu: "CLOUD", cas: 300, raf: 300, mb: 30, yearPo: 2026, source: "pnl" },
+    { fp: "FP/2026/5", client: "PNLMB", bu: "ICT", am: "Z", cas: 600, raf: 100, mb: 120, marginPct: 0.2, costTotal: 480, yearPo: 2026, source: "pnl" },
   ];
   const opps = [
     { fp: "FP/2026/1", client: "OPP", am: "AM1", bu: "ICT", amount: 800, stage: 6, closingDate: "2026-05-01" }, // gagnée → écrase P&L
     { fp: "FP/2026/2", client: "BETA", am: "AM2", bu: "CLOUD", amount: 1000, stage: 6, closingDate: "2026-06-01" }, // nouvelle commande
     { fp: "FP/2026/3", client: "GAMMA", amount: 400, stage: 4, closingDate: "2026-07-01" }, // pas gagnée → ignorée
+    { fp: "FP/2026/5", client: "OPP5", am: "AM5", bu: "ICT", amount: 700, stage: 6, closingDate: "2026-08-01" }, // gagnée sur un P&L : garde la marge P&L
   ];
   const sheets = [
     { fp: "FP/2026/1", client: "SAFINE", commercial: "AF", affaire: "RESEAUX", saleTotal: 900, margin: 90, costTotal: 810, marginPct: 0.1 }, // écrase tout
@@ -27,20 +29,32 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
     expect(c.am).toBe("AF");
     expect(c.affaire).toBe("RESEAUX");
   });
-  it("opp gagnée crée une commande (CAS=montant, marge 0)", () => {
+  it("opp gagnée crée une commande (CAS=montant, marge 0, sans provenance P&L)", () => {
     const c = byFp["FP/2026/2"];
     expect(c.source).toBe("opp_won");
     expect(c.cas).toBe(1000);
     expect(c.mb).toBe(0);
+    expect(c.pnlSource).toBe(null); // aucune donnée P&L d'origine
     expect(c.raf).toBe(750); // 1000 − 250 facturé
   });
+  it("opp gagnée sur un P&L : CAS=opp mais marge/coût P&L CONSERVÉS (pnlSource=manuel)", () => {
+    const c = byFp["FP/2026/5"];
+    expect(c.source).toBe("opp_won");
+    expect(c.cas).toBe(700); // CAS = montant de l'opp gagnée
+    expect(c.mb).toBe(120); // marge P&L conservée
+    expect(c.marginPct).toBe(0.2);
+    expect(c.costTotal).toBe(480);
+    expect(c.pnlSource).toBe("manuel");
+  });
   it("opp NON gagnée ignorée", () => expect(byFp["FP/2026/3"]).toBeUndefined());
-  it("P&L conservé si ni fiche ni opp gagnée (RAF P&L gardé)", () => {
+  it("P&L conservé si ni fiche ni opp gagnée (RAF P&L gardé, pnlSource=manuel)", () => {
     const c = byFp["FP/2026/9"];
     expect(c.source).toBe("pnl");
     expect(c.cas).toBe(300);
     expect(c.raf).toBe(300);
+    expect(c.pnlSource).toBe("manuel");
   });
+  it("fiche affaire → pnlSource=fiche", () => expect(byFp["FP/2026/1"].pnlSource).toBe("fiche"));
   it("RAF fiche = CAS − facturé (pas de facture ici → RAF = CAS)", () => {
     expect(byFp["FP/2026/1"].raf).toBe(900);
   });

@@ -3,7 +3,7 @@ import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton } from "./_shared";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary } from "../types";
@@ -107,6 +107,15 @@ export const Prevision: FC<Props> = () => {
 // Liste Commandes — vue fusionnée (fiche affaire > opp gagnée > P&L), matérialisée
 // dans summaries/commandes par le recompute.
 const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagnée", pnl: "P&L", legacy: "Legacy" };
+// Provenance des données P&L (marge/coût) : saisie manuelle (import P&L Excel) ou fiche affaire.
+const PNL_SRC: Record<string, { label: string; tone: "steel" | "gold" }> = {
+  manuel: { label: "Manuel", tone: "steel" },
+  fiche: { label: "Fiche affaire", tone: "gold" },
+};
+const pnlBadge = (s?: string | null) => {
+  const m = s ? PNL_SRC[s] : null;
+  return m ? <Badge tone={m.tone}>{m.label}</Badge> : <span className="text-faint">—</span>;
+};
 export const OrderList: FC<Props> = () => {
   const { data, loading } = useDocData<CommandesSummary>("summaries/commandes");
   const rows = data?.rows || [];
@@ -128,6 +137,7 @@ export const OrderList: FC<Props> = () => {
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
           colNum("MB", (r) => money(r.mb), (r) => r.mb),
           colNum("%MB", (r) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r) => (r.cas ? (r.mb || 0) / r.cas : 0)),
+          colText("P&L", (r) => pnlBadge(r.pnlSource), (r) => r.pnlSource || ""),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
           colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
         ]}
