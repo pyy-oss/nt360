@@ -3,13 +3,13 @@
 import { type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 import { Overview } from "./overview";
 import { Pipeline, OppList } from "./pipeline";
 import { Objectifs, Facturation, InvoiceList, Rentabilite } from "./finance";
-import { Backlog, Prevision, OrderList } from "./backlog";
+import { Backlog, Prevision, OrderList, Simulateur } from "./backlog";
 import { PnlProjet, Fournisseurs, BC, EntityView, Fp360 } from "./operations";
 import { Habilitations } from "./admin";
 
@@ -26,6 +26,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
   { id: "orderlist", key: "overview", label: "Commandes", icon: ShoppingCart, Component: OrderList },
   { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
+  { id: "simulator", key: "prevision", label: "Simulateur", icon: SlidersHorizontal, Component: Simulateur },
   { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", icon: Percent, Component: Rentabilite },
   { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", icon: FileText, Component: PnlProjet },
   { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", icon: Truck, Component: Fournisseurs },
@@ -41,7 +42,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Cockpit", ids: ["overview"] },
   { label: "Commercial", ids: ["pipeline", "opplist"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
-  { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "fp360"] },
+  { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["clients", "domaines"] },
   { label: "Admin", ids: ["habilitations"] },

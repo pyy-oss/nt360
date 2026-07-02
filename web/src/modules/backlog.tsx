@@ -1,5 +1,5 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
-import { type FC } from "react";
+import { useState, type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
@@ -100,6 +100,94 @@ export const Prevision: FC<Props> = () => {
         </Card>
       )}
       <Tip><b>Pipeline projeté</b> (logique de projection moyen terme) = 100 % du CA des opportunités IdC ≥ 90 % + 20 % du CA des IdC ≥ 70 % (&lt; 90 %), dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
+    </div>
+  );
+};
+
+// 6bis — Simulateur d'atterrissage (what-if) : leviers commerciaux → impact live sur
+// le Projeté CAS/CAF et la probabilité d'atteinte de l'objectif. 100 % client (aucune écriture).
+const M = 1_000_000;
+export const Simulateur: FC<Props> = () => {
+  const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
+  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const [addPipe, setAddPipe] = useState(0);   // pipeline pondéré additionnel (FCFA)
+  const [realiz, setRealiz] = useState(100);   // taux de réalisation du pipeline (%)
+  const [objOverride, setObjOverride] = useState<string>(""); // objectif CAS simulé (M FCFA), vide = réel
+  if (!att) return <EmptyState label="Atterrissage indisponible — importer données & objectifs, puis recalculer." />;
+
+  const realiseCas = att.realiseCas || 0;
+  const backlog = att.backlog || 0;
+  const factureN = att.factureN || 0;
+  const basePipe = att.pipelinePondere || 0;
+  const objectifCas = objOverride.trim() !== "" ? (Number(objOverride) || 0) * M : (att.objectif || 0);
+  const objectifCaf = att.objectifCaf || 0;
+
+  const pipeEff = (basePipe + addPipe) * (realiz / 100);
+  const projeteCas = realiseCas + pipeEff;
+  const projeteCaf = factureN + backlog + pipeEff;
+  const ecartCas = projeteCas - objectifCas;
+  const ecartCaf = projeteCaf - objectifCaf;
+  const probaCas = objectifCas > 0 ? Math.max(0, Math.min(1, projeteCas / objectifCas)) : 0;
+  const probaCaf = objectifCaf > 0 ? Math.max(0, Math.min(1, projeteCaf / objectifCaf)) : 0;
+
+  const baseProjeteCas = att.projete ?? (realiseCas + basePipe);
+  const baseProjeteCaf = att.cafProjete ?? (factureN + backlog + basePipe);
+  const maxAdd = Math.max(Math.round((basePipe || 100 * M) * 2), 200 * M);
+  const dirty = addPipe !== 0 || realiz !== 100 || objOverride.trim() !== "";
+  const reset = () => { setAddPipe(0); setRealiz(100); setObjOverride(""); };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title={`Leviers de simulation — exercice ${att.fy ?? cfg?.currentFy ?? ""}`} actions={dirty ? <button onClick={reset} className="btn-ghost !px-2.5 !py-1 text-xs">Réinitialiser</button> : undefined}>
+        <div className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted flex justify-between"><span>Pipeline pondéré additionnel (nouvelles affaires gagnées)</span><span className="text-ink font-semibold tabnum">+{fmt(addPipe)}</span></span>
+            <input type="range" min={0} max={maxAdd} step={Math.round(maxAdd / 100)} value={addPipe} onChange={(e) => setAddPipe(Number(e.target.value))} aria-label="Pipeline additionnel" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted flex justify-between"><span>Taux de réalisation du pipeline projeté</span><span className="text-ink font-semibold tabnum">{realiz} %</span></span>
+            <input type="range" min={0} max={150} step={5} value={realiz} onChange={(e) => setRealiz(Number(e.target.value))} aria-label="Taux de réalisation" />
+          </label>
+          <label className="flex flex-col gap-1 max-w-xs">
+            <span className="text-xs text-muted">Objectif CAS simulé (M FCFA) — vide = objectif réel {(att.objectif || 0) > 0 ? `(${fmt(att.objectif)})` : "(non défini)"}</span>
+            <input className="field" inputMode="numeric" placeholder="ex. 4000" value={objOverride} onChange={(e) => setObjOverride(e.target.value)} aria-label="Objectif CAS simulé" />
+          </label>
+        </div>
+      </Card>
+
+      <div className={cols2}>
+        <Card title="Atterrissage CAS simulé — prise de commande">
+          <Gauge value={probaCas} color={ecartCas < 0 ? T.clay : T.emerald} />
+          <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+            <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(projeteCas)}</div></div>
+            <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCas > 0 ? fmt(objectifCas) : "—"}</div></div>
+            <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", ecartCas < 0 ? "text-clay" : "text-emerald")}>{objectifCas > 0 ? fmt(ecartCas) : "—"}</div></div>
+          </div>
+        </Card>
+        <Card title="Atterrissage CAF simulé — facturation">
+          <Gauge value={probaCaf} color={ecartCaf < 0 ? T.clay : T.emerald} />
+          <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+            <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(projeteCaf)}</div></div>
+            <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCaf > 0 ? fmt(objectifCaf) : "—"}</div></div>
+            <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", ecartCaf < 0 ? "text-clay" : "text-emerald")}>{objectifCaf > 0 ? fmt(ecartCaf) : "—"}</div></div>
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Base (réel) vs simulé">
+        <Table columns={[
+          colText("Grandeur", (r) => r.label, (r) => r.label),
+          colNum("Base (réel)", (r) => money(r.base), (r) => r.base),
+          colNum("Simulé", (r) => money(r.sim), (r) => r.sim),
+          colNum("Δ", (r) => <span className={cx(r.sim - r.base < 0 ? "text-clay" : "text-emerald")}>{fmt(r.sim - r.base)}</span>, (r) => r.sim - r.base),
+        ]} rows={[
+          { label: "Pipeline projeté (effectif)", base: basePipe, sim: pipeEff },
+          { label: "Projeté CAS", base: baseProjeteCas, sim: projeteCas },
+          { label: "Projeté CAF", base: baseProjeteCaf, sim: projeteCaf },
+        ]} />
+      </Card>
+
+      <Tip>Simulateur <b>local</b> (aucune donnée modifiée). Il part de l'atterrissage réel et applique tes leviers : <b>pipeline additionnel</b> (affaires que tu penses gagner en plus), <b>taux de réalisation</b> (part du pipeline projeté effectivement convertie), et un <b>objectif simulé</b> optionnel. Projeté CAS = Réalisé CAS + pipeline effectif ; Projeté CAF = Facturé + Backlog + pipeline effectif.</Tip>
     </div>
   );
 };
