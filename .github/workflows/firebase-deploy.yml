@@ -34,9 +34,18 @@ jobs:
       # Projet PARTAGÉ : déploiement scopé (site hosting dédié, base Firestore nommée
       # nt360, nos functions par nom). Ne touche ni à la base (default) ni aux functions
       # de l'autre app.
+      # Retry : `firebase deploy` renvoie parfois une erreur transitoire à l'upload des fonctions.
       - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
-        run: >
-          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy
-          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
-          --project propulse-business-87f7a --non-interactive
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          attempt=1; max=4
+          while true; do
+            if npx firebase deploy \
+              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --project propulse-business-87f7a --non-interactive; then
+              echo "Déploiement OK (tentative $attempt)"; break
+            fi
+            if [ "$attempt" -ge "$max" ]; then echo "::error::firebase deploy a échoué après $max tentatives"; exit 1; fi
+            wait=$((attempt * 30)); echo "::warning::Déploiement échoué (tentative $attempt/$max) — retry dans ${wait}s"
+            sleep "$wait"; attempt=$((attempt + 1))
+          done

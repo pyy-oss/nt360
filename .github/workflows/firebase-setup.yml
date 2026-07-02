@@ -62,13 +62,27 @@ jobs:
       # - functions : NOS fonctions par nom (jamais --only functions global, qui
       #   proposerait de supprimer les ~50 functions de l'autre app)
       # - pas de storage / pas d'index (ne rien écraser sur la base (default)).
+      # `firebase deploy` renvoie parfois "An unexpected error has occurred" au moment
+      # de l'upload des fonctions (erreur transitoire côté backend GCP). On réessaie
+      # avec backoff plutôt que d'échouer le run.
       - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
         if: ${{ inputs.run_deploy }}
-        run: >
-          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx firebase deploy
-          --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport"
-          --project "$GCLOUD_PROJECT" --non-interactive
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          attempt=1; max=4
+          while true; do
+            if npx firebase deploy \
+              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --project "$GCLOUD_PROJECT" --non-interactive; then
+              echo "Déploiement OK (tentative $attempt)"; break
+            fi
+            if [ "$attempt" -ge "$max" ]; then
+              echo "::error::firebase deploy a échoué après $max tentatives"; exit 1
+            fi
+            wait=$((attempt * 30))
+            echo "::warning::Déploiement échoué (tentative $attempt/$max) — nouvelle tentative dans ${wait}s"
+            sleep "$wait"; attempt=$((attempt + 1))
+          done
 
       - name: Seed 1er admin + matrice
         if: ${{ inputs.run_seed }}
