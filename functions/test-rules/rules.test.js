@@ -44,6 +44,8 @@ beforeEach(async () => {
     await setDoc(doc(db, "creditLines/S1"), { authorized: 1000, outstanding: 0 });
     await setDoc(doc(db, "objectives/2026_global_all"), { fiscalYear: 2026, targetCas: 1 });
     await setDoc(doc(db, "summaries/overview_2026"), { certitudes: 1 });
+    await setDoc(doc(db, "summaries/suppliers"), { totalExpo: 1 });
+    await setDoc(doc(db, "summaries/facturation_2026"), { total: 1 });
     await setDoc(doc(db, "auditLog/A1"), { action: "seed" });
   });
 });
@@ -137,8 +139,17 @@ describe("Matrice de droits (habilitations)", () => {
 });
 
 describe("Agrégats & audit", () => {
-  it("tout connecté lit summaries", async () => {
+  it("summaries lisibles selon le module (lecture lit overview)", async () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/overview_2026")));
+  });
+  it("commercial (fournisseurs=none) ne lit PAS summaries/suppliers", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/suppliers")));
+  });
+  it("commercial (facturation=none) ne lit PAS summaries/facturation_2026", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/facturation_2026")));
+  });
+  it("achats (fournisseurs=write) lit summaries/suppliers", async () => {
+    await assertSucceeds(getDoc(doc(as("achats"), "summaries/suppliers")));
   });
   it("personne n'écrit summaries (Functions only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "summaries/overview_2026"), { certitudes: 2 }));
