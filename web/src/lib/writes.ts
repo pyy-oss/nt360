@@ -103,6 +103,15 @@ export async function callAddBcLine(fields: BcLineFields, pdf?: File | null) {
   return res.data as { ok: boolean; id: string; pdfStored: boolean };
 }
 
+export type DedupeStat = { total: number; duplicateGroups: number; duplicates: number };
+export type DedupeResult = { ok: boolean; applied: boolean; result: Record<string, DedupeStat> };
+
+/** Dédoublonne (admin) factures/opportunités/BC. `apply:false` = analyse seule (aperçu). */
+export async function callDedupe(collections?: string[], apply = true): Promise<DedupeResult> {
+  const res = await httpsCallable(functions, "dedupe")({ collections, apply });
+  return res.data as DedupeResult;
+}
+
 /** Génère l'export one-pager CODIR (XLSX) et renvoie l'URL signée. */
 export async function callExportReport(period: string) {
   const res = await httpsCallable(functions, "exportReport")({ period });

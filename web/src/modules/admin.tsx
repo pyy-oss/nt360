@@ -3,7 +3,7 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callDedupe, type DedupeResult } from "../lib/writes";
 import { Props, DataImportCard } from "./_shared";
 import type { PermissionsConfig, UserRow } from "../types";
 
@@ -23,6 +23,7 @@ export const Habilitations: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       {canWrite && <DataImportCard />}
+      {canWrite && <DedupeCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -53,6 +54,40 @@ export const Habilitations: FC<Props> = () => {
     </div>
   );
 };
+
+// Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Analyse d'abord (aperçu),
+// puis suppression des doublons (le meilleur représentant de chaque groupe est conservé).
+const DEDUPE_LABEL: Record<string, string> = { invoices: "Factures", opportunities: "Opportunités", bcLines: "BC fournisseurs" };
+function DedupeCard() {
+  const [res, setRes] = useState<DedupeResult | null>(null);
+  const totalDup = res ? Object.values(res.result).reduce((s, r) => s + r.duplicates, 0) : 0;
+  return (
+    <Card title="Dédoublonnage" actions={
+      <div className="flex gap-2">
+        <Busy variant="ghost" label="Analyser" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={async () => { setRes(await callDedupe(undefined, false)); }} />
+        {res && totalDup > 0 && (
+          <Busy label={`Supprimer ${totalDup} doublon${totalDup > 1 ? "s" : ""}`} okMsg="Doublons supprimés" errMsg="Suppression refusée" fn={async () => { setRes(await callDedupe(undefined, true)); }} />
+        )}
+      </div>
+    }>
+      {res ? (
+        <div className="flex flex-col gap-2">
+          <Table columns={[
+            colText("Collection", (r: any) => DEDUPE_LABEL[r.col] || r.col),
+            colNum("Total", (r: any) => r.total.toLocaleString("fr-FR")),
+            colNum("Groupes en doublon", (r: any) => r.duplicateGroups),
+            colNum("À supprimer", (r: any) => r.duplicates),
+          ]} rows={Object.entries(res.result).map(([col, s]) => ({ col, ...s }))} />
+          <Tip>{res.applied
+            ? "Doublons supprimés — le meilleur enregistrement de chaque groupe (source figée, plus récent) est conservé ; agrégats recalculés."
+            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — cliquez « Supprimer » pour nettoyer.` : "Aucun doublon détecté."}</Tip>
+        </div>
+      ) : (
+        <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement.</Tip>
+      )}
+    </Card>
+  );
+}
 
 function RoleSetter({ uid }: { uid: string }) {
   const [role, setRole] = useState("lecture");

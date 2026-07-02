@@ -234,6 +234,41 @@ exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) 
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
+// --- Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Regroupe par clé
+// métier, garde le meilleur représentant, supprime les autres. `apply:false` = analyse seule. ---
+exports.dedupe = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
+  const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
+  const only = (Array.isArray(req.data?.collections) ? req.data.collections : Object.keys(KEYS)).filter((c) => KEYS[c]);
+  const apply = req.data?.apply !== false; // défaut : applique (l'UI propose une analyse préalable)
+
+  const result = {};
+  const toDelete = [];
+  for (const col of only) {
+    const snap = await db.collection(col).get();
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const plan = planDedupe(docs, KEYS[col]);
+    result[col] = { total: plan.total, duplicateGroups: plan.duplicateGroups, duplicates: plan.duplicates };
+    if (apply) plan.remove.forEach((id) => toDelete.push(`${col}/${id}`));
+  }
+
+  if (apply && toDelete.length) {
+    let batch = db.batch(), nB = 0;
+    for (const path of toDelete) {
+      batch.delete(db.doc(path));
+      if (++nB % 400 === 0) { await batch.commit(); batch = db.batch(); }
+    }
+    await batch.commit();
+    await db.collection("auditLog").add({
+      uid: req.auth.uid, action: "dedupe", module: "habilitations", entity: "collections",
+      entityId: only.join(","), detail: result, ts: FieldValue.serverTimestamp(),
+    });
+    await recomputeSummaries();
+  }
+  return { ok: true, applied: apply, result };
+});
+
 // --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
 exports.exportReport = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
