@@ -7,21 +7,52 @@ import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
-import { Props, grid4, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, Order, Invoice, Opportunity } from "../types";
 
 // 8 — P&L Projet
+const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
+  const m: Record<string, number> = {};
+  for (const x of arr) { const k = keyFn(x) || "—"; m[k] = (m[k] || 0) + (valFn(x) || 0); }
+  return Object.entries(m).map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
+};
 export const PnlProjet: FC<Props> = () => {
   const { rows } = useCollectionData<ProjectSheet>("projectSheets");
+  const { rows: bc } = useCollectionData<BcLine>("bcLines");
+  if (!rows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." />;
+  const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
+  const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
+  const marge = rows.reduce((s, r) => s + (r.margin || 0), 0);
+  const pmb = vente > 0 ? marge / vente : 0;
   return (
-    <Card title="Fiches affaire — coût / vente / marge">
-      <Table columns={[
-        colText("FP", (r) => r.fp, (r) => r.fp), colText("Client", (r) => r.client, (r) => r.client), colText("Affaire", (r) => r.affaire),
-        colNum("Revient", (r) => money(r.costTotal), (r) => r.costTotal), colNum("Vente", (r) => money(r.saleTotal), (r) => r.saleTotal),
-        colNum("Marge", (r) => money(r.margin), (r) => r.margin), colNum("%MB", (r) => pct(r.marginPct), (r) => r.marginPct),
-      ]} rows={rows} />
-      <Tip>Contrôle vente vs CAS de la commande ; coût par type/fournisseur via les lignes BC.</Tip>
-    </Card>
+    <div className="flex flex-col gap-4">
+      <div className={grid4}>
+        <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
+        <Kpi label="Prix de vente" value={fmt(vente)} />
+        <Kpi label="Marge brute" value={fmt(marge)} tone="gold" />
+        <Kpi label="%MB global" value={pct(pmb)} tone={pmb < 0.1 ? "clay" : "emerald"} />
+      </div>
+      <Card title={`Fiches affaire — coût / vente / marge · ${rows.length}`}>
+        <ListView
+          rows={rows}
+          searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
+          columns={[
+            colText("FP", (r) => r.fp, (r) => r.fp),
+            colText("Client", (r) => r.client, (r) => r.client),
+            colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
+            colNum("Revient", (r) => money(r.costTotal), (r) => r.costTotal || 0),
+            colNum("Vente", (r) => money(r.saleTotal), (r) => r.saleTotal || 0),
+            colNum("Marge", (r) => money(r.margin), (r) => r.margin || 0),
+            colNum("%MB", (r) => <Badge tone={((r.marginPct || 0) < 0.1 ? "clay" : (r.marginPct || 0) < 0.2 ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r) => r.marginPct || 0),
+          ]}
+        />
+      </Card>
+      <div className={cols2}>
+        <Card title="Coût par type (lignes BC)">{bc.length ? <HBars rows={sumBy(bc, (b) => b.expenseType, (b) => b.amountXof || 0)} colorFn={() => T.steel} /> : <EmptyState label="Pas de lignes BC." />}</Card>
+        <Card title="Coût par fournisseur (top 10)">{bc.length ? <HBars rows={sumBy(bc, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} /> : <EmptyState label="Pas de lignes BC." />}</Card>
+      </div>
+      <Tip>Marge issue des fiches affaire. Coûts ventilés par type de dépense et par fournisseur à partir des lignes BC (mêmes N° FP).</Tip>
+    </div>
   );
 };
 
