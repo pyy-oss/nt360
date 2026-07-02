@@ -313,6 +313,17 @@ export const DataQuality: FC<Props> = () => {
   const c = data.counts || {};
   const score = data.score ?? 1;
   const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
+  // Export CSV des anomalies (à corriger à la source puis ré-importer).
+  const exportCsv = () => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const rows = [["type", "severite", "compte", "libelle", "references"].join(",")]
+      .concat(issues.map((i) => [i.type, i.severity, String(i.count), esc(i.label), esc((i.refs || []).join(" | "))].join(",")));
+    const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "anomalies_donnees.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <div className="flex flex-col gap-4">
       <div className={cols2}>
@@ -329,7 +340,7 @@ export const DataQuality: FC<Props> = () => {
           </div>
         </Card>
       </div>
-      <Card title={`Anomalies de données · ${issues.length}`}>
+      <Card title={`Anomalies de données · ${issues.length}`} actions={issues.length ? <button onClick={exportCsv} className="btn-ghost !px-2.5 !py-1 text-xs">Exporter (CSV)</button> : undefined}>
         {issues.length ? (
           <div className="flex flex-col gap-2">
             {issues.map((it, i) => (

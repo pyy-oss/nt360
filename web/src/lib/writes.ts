@@ -21,6 +21,11 @@ export async function deleteOpportunity(id: string) {
   await httpsCallable(functions, "deleteOpportunity")({ id });
 }
 
+/** Rattache une facture orpheline à sa commande en corrigeant son N° FP (onCall : recalcule). */
+export async function setInvoiceFp(id: string, fp: string) {
+  await httpsCallable(functions, "setInvoiceFp")({ id, fp });
+}
+
 /** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */
 export async function setBcStatus(id: string, status: string) {
   await httpsCallable(functions, "setBcStatus")({ id, status });

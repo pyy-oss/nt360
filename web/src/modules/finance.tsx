@@ -5,7 +5,7 @@ import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
-import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
+import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary } from "../types";
@@ -158,6 +158,17 @@ export const Facturation: FC<Props> = ({ period }) => {
   );
 };
 
+// Rattachement inline d'une facture orpheline : saisie du N° FP → recompute serveur.
+function FpFixer({ id }: { id: string }) {
+  const [v, setV] = useState("");
+  return (
+    <span className="inline-flex gap-1 items-center">
+      <input className="field w-32 !py-1 text-xs" aria-label="N° FP à rattacher" placeholder="FP/2026/…" value={v} onChange={(e) => setV(e.target.value)} />
+      <Busy variant="ghost" label="Rattacher" okMsg="Facture rattachée" fn={() => setInvoiceFp(id, v)} />
+    </span>
+  );
+}
+
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Invoice>("invoices");
@@ -195,6 +206,7 @@ export const InvoiceList: FC<Props> = () => {
             colText("Date", (r) => r.date || "—", (r) => r.date || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
             colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
+            ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id ? <FpFixer id={r.id} /> : null), () => 0)] : []),
           ]}
         />
       </Card>
