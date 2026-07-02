@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton } from "./_shared";
-import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary, ReceivablesSummary } from "../types";
+import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary, ReceivablesSummary, CashflowSummary } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -151,6 +151,7 @@ const AGING = [
 export const Facturation: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<FacturationSummary>(`summaries/facturation_${period}`);
   const { data: rec } = useDocData<ReceivablesSummary>("summaries/receivables");
+  const { data: cash } = useDocData<CashflowSummary>("summaries/cashflow");
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
@@ -177,6 +178,25 @@ export const Facturation: FC<Props> = ({ period }) => {
             <Card title="Balance âgée (par échéance)"><HBars rows={agingRows} colorFn={agingColor} /></Card>
             <Card title="Top créances par client"><HBars rows={topArr(rec.topAR).slice(0, 10)} colorFn={() => T.clay} /></Card>
           </div>
+        </>
+      )}
+      {cash && (cash.months || []).length > 0 && (
+        <>
+          <h2 className="font-display text-sm text-muted mt-2">Prévision de trésorerie · {cash.horizon} mois glissants</h2>
+          <div className={grid4}>
+            <Kpi label="Encaissements attendus (horizon)" value={fmt(cash.arHorizon)} tone="emerald" sub={`AR échéancé sur ${cash.horizon} mois`} />
+            <Kpi label="En retard (à recouvrer)" value={fmt(cash.overdue)} tone="clay" sub={`${cash.overdueCount} facture(s) échue(s)`} />
+            <Kpi label="Backlog à facturer (RAF)" value={fmt(cash.totalRaf)} tone="steel" sub="indicatif · étalé sur l'horizon" />
+            <Kpi label="Au-delà de l'horizon" value={fmt(cash.beyond)} sub="échéances lointaines" />
+          </div>
+          <Card title="Échéancier des encaissements attendus">
+            <GroupedBars
+              data={(cash.months || []).map((m) => ({ name: m.month, "AR contractuel": m.ar, "Backlog (indicatif)": m.backlog }))}
+              series={[{ key: "AR contractuel", color: T.emerald, name: "AR contractuel" }, { key: "Backlog (indicatif)", color: T.steel, name: "Backlog (indicatif)" }]}
+              h={240}
+            />
+            <Tip><b>AR contractuel</b> = créances déjà émises, positionnées au mois de leur <b>échéance</b> (les créances échues sont isolées dans « en retard », hors échéancier). <b>Backlog (indicatif)</b> = reste à facturer (RAF) étalé également sur l'horizon — c'est une <b>projection</b>, pas un encaissement contractuel. Aucune date de règlement réelle en source : l'AR est ancré sur les échéances, le backlog est explicitement indicatif.</Tip>
+          </Card>
         </>
       )}
     </div>

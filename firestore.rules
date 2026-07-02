@@ -17,6 +17,7 @@ service cloud.firestore {
       return id.matches('overview.*') ? 'overview'
         : id.matches('facturation.*') ? 'facturation'
         : id.matches('receivables.*') ? 'facturation'
+        : id.matches('cashflow.*') ? 'facturation'
         : id.matches('rentabilite.*') ? 'rentabilite'
         : id.matches('pipeline.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'

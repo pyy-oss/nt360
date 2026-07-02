@@ -55,6 +55,12 @@ export interface ReceivablesSummary {
   buckets?: { notDue?: number; b0_30?: number; b31_60?: number; b61_90?: number; b90p?: number };
   topAR?: { key: string; value: number }[];
 }
+export type CashMonth = { month: string; ar: number; backlog: number; cumulAr: number };
+export interface CashflowSummary {
+  asOf?: string; horizon?: number; months?: CashMonth[];
+  overdue?: number; overdueCount?: number; beyond?: number;
+  totalAR?: number; arHorizon?: number; totalRaf?: number; openCount?: number;
+}
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 
 export interface SuppliersSummary {

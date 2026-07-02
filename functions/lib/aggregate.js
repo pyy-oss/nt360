@@ -10,6 +10,7 @@ const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage } = require("../domain/atterrissage");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
+const { cashflow } = require("../domain/cashflow");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 
@@ -64,6 +65,8 @@ async function recomputeAll(db, only) {
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
   if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...rec, ...stamp } });
+  // Prévision de trésorerie : échéancier mensuel des encaissements attendus (AR + backlog indicatif).
+  if (want("facturation") || want("cashflow")) w.push({ path: "summaries/cashflow", data: { ...cashflow(invoices, orders, asOf), ...stamp } });
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf);
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
