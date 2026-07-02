@@ -24,8 +24,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center p-6">
-      <form onSubmit={onSubmit} className="card w-[340px] p-8 flex flex-col gap-3">
+    <div className="min-h-screen grid place-items-center p-4 sm:p-6">
+      <form onSubmit={onSubmit} className="card w-full max-w-[340px] p-6 sm:p-8 flex flex-col gap-3">
         <div className="flex items-center gap-3 mb-2">
           <div className="grid place-items-center w-9 h-9 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
           <div>

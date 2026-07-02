@@ -8,6 +8,9 @@
   }
   body {
     @apply bg-bg text-ink font-sans antialiased;
+    /* Filet de sécurité : aucune page ne doit scroller horizontalement (les tableaux larges
+       ont leur propre overflow-x isolé). Empêche un débordement résiduel de casser le mobile. */
+    overflow-x: hidden;
   }
   /* Scrollbars discrètes (couleur = token line) */
   * {

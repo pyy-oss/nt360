@@ -31,9 +31,9 @@ export function Kpi({ label, value, sub, tone = "ink", delta }: { label: string;
   const showDelta = delta != null && isFinite(delta);
   const up = (delta || 0) >= 0;
   return (
-    <div className="card p-4">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={cx("font-display text-[26px] leading-tight tabnum mt-1", TONES[tone] || "text-ink")}>{value}</div>
+    <div className="card p-4 min-w-0">
+      <div className="text-xs text-muted truncate" title={label}>{label}</div>
+      <div className={cx("font-display text-[26px] leading-tight tabnum mt-1 break-words", TONES[tone] || "text-ink")}>{value}</div>
       <div className="flex items-center gap-2 mt-1 min-h-[18px]">
         {showDelta && (
           <span className={cx("inline-flex items-center gap-0.5 text-xs font-medium", up ? "text-emerald" : "text-clay")}>

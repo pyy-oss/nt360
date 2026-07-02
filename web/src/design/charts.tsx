@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { T, BU_COL, fmt, fmtFull } from "./tokens";
 
-const legendStyle = { fontSize: 12, color: T.dim } as const;
+const legendStyle = { fontSize: 11, color: T.dim, lineHeight: "16px" } as const;
 
 export function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload || !payload.length) return null;
@@ -58,7 +58,7 @@ export function DonutBU({ data, h = 230 }: { data: any[]; h?: number }) {
           {data.map((e, i) => <Cell key={i} fill={BU_COL[e.name] || T.faint} stroke="none" />)}
         </Pie>
         <Tooltip content={<ChartTooltip />} />
-        <Legend verticalAlign="bottom" height={28} iconType="circle" iconSize={9} wrapperStyle={legendStyle}
+        <Legend verticalAlign="bottom" height={38} iconType="circle" iconSize={9} wrapperStyle={legendStyle}
           formatter={(name: string) => { const d = data.find((x) => x.name === name); return `${name} · ${Math.round(((d?.value || 0) / total) * 100)}%`; }} />
       </PieChart>
     </H>
@@ -89,7 +89,7 @@ export function GroupedBars({ data, series, h = 230, size = 22 }: { data: any[];
         <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={12} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip cursor={{ fill: T.panel2 }} content={<ChartTooltip />} />
-        <Legend verticalAlign="top" height={24} iconType="square" iconSize={10} wrapperStyle={legendStyle} />
+        <Legend verticalAlign="top" height={36} iconType="square" iconSize={10} wrapperStyle={legendStyle} />
         {series.map((s) => <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[3, 3, 0, 0]} barSize={size} />)}
       </BarChart>
     </H>
@@ -105,7 +105,7 @@ export function MultiLine({ data, series, h = 240 }: { data: any[]; series: { ke
         <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={24} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip cursor={{ stroke: T.line }} content={<ChartTooltip />} />
-        <Legend verticalAlign="top" height={24} iconType="line" iconSize={12} wrapperStyle={legendStyle} />
+        <Legend verticalAlign="top" height={36} iconType="line" iconSize={12} wrapperStyle={legendStyle} />
         {series.map((s) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} />)}
       </LineChart>
     </H>

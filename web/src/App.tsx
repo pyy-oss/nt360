@@ -83,7 +83,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5" role="group" aria-label="Période">
+            <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Période">
               <span className="text-[11px] uppercase tracking-wider text-faint mr-0.5">Période</span>
               {available.map((p) => (
                 <button
