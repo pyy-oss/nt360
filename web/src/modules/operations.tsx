@@ -4,9 +4,10 @@ import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, colText, colNum, money, useToast } from "../design/components";
-import { setBcStatus, upsertCreditLine } from "../lib/writes";
-import { Props, grid4, SUP_LABEL, BC_STAGES, bcLabel, HBars } from "./_shared";
+import { Upload } from "lucide-react";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, colText, colNum, money, cx, useToast } from "../design/components";
+import { setBcStatus, upsertCreditLine, callAddBcLine } from "../lib/writes";
+import { Props, grid4, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, Order, Invoice, Opportunity } from "../types";
 
 // 8 — P&L Projet
@@ -63,6 +64,53 @@ function CreditEditor({ name, authorized, outstanding }: { name: string; authori
   );
 }
 
+// Import BC fournisseurs — 2 modes : Batch (Excel « Logistics / PO List ») ou Unitaire (PDF).
+const EMPTY_BC = { bcNumber: "", supplier: "", fp: "", expenseType: "Hardware", amountXof: "", status: "a_emettre", description: "", dateIn: "" };
+function BcImport() {
+  const [mode, setMode] = useState<"batch" | "unitaire">("batch");
+  const [f, setF] = useState(EMPTY_BC);
+  const [pdf, setPdf] = useState<File | null>(null);
+  const seg = (id: "batch" | "unitaire", label: string) => (
+    <button onClick={() => setMode(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", mode === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>{label}</button>
+  );
+  return (
+    <Card title="Importer des BC fournisseurs" actions={<div className="flex gap-1.5">{seg("batch", "Batch (Excel)")}{seg("unitaire", "Unitaire (PDF)")}</div>}>
+      {mode === "batch" ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px] text-muted">Chargez le fichier de suivi logistique (feuille « PO List »). Les BC sont détectés puis fusionnés par clé métier — ré-import sans doublon, statuts logistiques mappés sur le cycle À émettre → Émis → Livré → Facturé → Soldé.</p>
+          <div><ImportButton label="Importer le suivi (Excel)" /></div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px] text-muted">Saisissez un bon de commande et joignez son PDF (conservé pour traçabilité). Les champs ne sont pas extraits automatiquement du PDF — renseignez-les ci-dessous.</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <input className="field" placeholder="N° BC" aria-label="Numéro de BC" value={f.bcNumber} onChange={(e) => setF({ ...f, bcNumber: e.target.value })} />
+            <input className="field" placeholder="Fournisseur" aria-label="Fournisseur" value={f.supplier} onChange={(e) => setF({ ...f, supplier: e.target.value })} />
+            <input className="field w-40" placeholder="N° FP (optionnel)" aria-label="Numéro FP" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
+            <select className="field" aria-label="Type de dépense" value={f.expenseType} onChange={(e) => setF({ ...f, expenseType: e.target.value })}>{["Hardware", "Licence", "Software", "Support", "Service Pro", "Mixte"].map((t) => <option key={t}>{t}</option>)}</select>
+            <input className="field w-32" placeholder="Montant XOF" aria-label="Montant XOF" value={f.amountXof} onChange={(e) => setF({ ...f, amountXof: e.target.value })} />
+            <select className="field" aria-label="Statut du BC" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>{BC_STAGES.map((s) => <option key={s} value={s}>{bcLabel(s)}</option>)}</select>
+            <input className="field" type="date" aria-label="Date du BC" value={f.dateIn} onChange={(e) => setF({ ...f, dateIn: e.target.value })} />
+            <input className="field" placeholder="Description" aria-label="Description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+            <label className="btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer">
+              <Upload size={14} aria-hidden="true" />{pdf ? pdf.name : "Joindre le PDF"}
+              <input type="file" accept="application/pdf,.pdf" className="sr-only" aria-label="Joindre le PDF du BC" onChange={(e) => setPdf(e.target.files?.[0] || null)} />
+            </label>
+            <Busy label="Enregistrer le BC" okMsg="BC enregistré" errMsg="Enregistrement refusé" fn={async () => {
+              await callAddBcLine({
+                bcNumber: f.bcNumber, supplier: f.supplier, fp: f.fp || undefined, expenseType: f.expenseType,
+                amountXof: Number(f.amountXof) || 0, amount: Number(f.amountXof) || 0, status: f.status,
+                description: f.description, dateIn: f.dateIn || undefined,
+              }, pdf);
+              setF(EMPTY_BC); setPdf(null);
+            }} />
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // 10 — Exécution BC
 export const BC: FC<Props> = () => {
   const { rows } = useCollectionData<BcLine>("bcLines");
@@ -72,6 +120,7 @@ export const BC: FC<Props> = () => {
   const solde = byStatus["solde"] || 0;
   return (
     <div className="flex flex-col gap-4">
+      {canWrite && <BcImport />}
       <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
         {BC_STAGES.map((s) => (
           <div key={s} className="card p-4">
