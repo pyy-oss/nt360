@@ -35,3 +35,14 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
 ];
+
+// Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
+export const GROUPS: { label: string; ids: string[] }[] = [
+  { label: "Cockpit", ids: ["overview"] },
+  { label: "Commercial", ids: ["pipeline", "opplist"] },
+  { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
+  { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "fp360"] },
+  { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
+  { label: "Référentiels", ids: ["clients", "domaines"] },
+  { label: "Admin", ids: ["habilitations"] },
+];

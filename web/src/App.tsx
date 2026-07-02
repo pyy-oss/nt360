@@ -7,7 +7,7 @@ import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
 import { ErrorBoundary, cx } from "./design/components";
 import { NavContext } from "./lib/nav";
-import { MODULES } from "./modules";
+import { MODULES, GROUPS } from "./modules";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
   const Comp = mod.Component;
@@ -22,9 +22,23 @@ export default function App() {
   const [active, setActive] = useState<string>("overview");
 
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
-  const visible = MODULES.filter((m) => can(m.key) !== "none");
+  const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none"), [can]);
   const current = MODULES.find((m) => m.id === active) || visible[0];
   const allowed = current && can(current.key) !== "none" ? current : visible[0];
+
+  // Navigation à 2 niveaux : domaines (groupes) → onglets. On n'affiche qu'un groupe
+  // s'il contient au moins un module visible pour le profil courant.
+  const groups = useMemo(() => {
+    const visibleIdsSet = new Set(visible.map((m) => m.id));
+    return GROUPS
+      .map((g) => ({
+        label: g.label,
+        mods: g.ids.map((id) => MODULES.find((m) => m.id === id)).filter((m): m is (typeof MODULES)[number] => !!m && visibleIdsSet.has(m.id)),
+      }))
+      .filter((g) => g.mods.length > 0);
+  }, [visible]);
+  // Groupe actif = celui qui contient le module affiché (repli sur le 1er groupe).
+  const activeGroup = groups.find((g) => g.mods.some((m) => m.id === allowed?.id)) || groups[0];
 
   // Navigation inter-modules (centre d'alertes → module concerné), limitée aux modules visibles.
   const visibleIds = useMemo(() => new Set(visible.map((m) => m.id)), [visible]);
@@ -86,28 +100,48 @@ export default function App() {
           </div>
         </header>
 
-        {/* Tabs — dégradé de bord pour signaler le débordement horizontal sur mobile */}
-        <div className="relative mb-6">
-          <nav aria-label="Modules" className="flex gap-1 border-b border-line overflow-x-auto [&::-webkit-scrollbar]:h-0">
-            {visible.map((m) => {
-              const on = m.id === (allowed?.id);
-              const Icon = m.icon;
+        {/* Navigation à 2 niveaux — niveau 1 : domaines ; niveau 2 : onglets du domaine actif. */}
+        <div className="mb-6 flex flex-col gap-2">
+          {/* Niveau 1 : domaines. Cliquer un domaine ouvre son 1er onglet (sauf s'il contient déjà l'actif). */}
+          <nav aria-label="Domaines" className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:h-0">
+            {groups.map((g) => {
+              const on = g.label === activeGroup?.label;
               return (
                 <button
-                  key={m.id}
-                  ref={on ? activeTabRef : undefined}
-                  onClick={() => setActive(m.id)}
-                  aria-current={on ? "page" : undefined}
-                  className={cx("inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors",
-                    on ? "text-ink border-gold" : "text-muted border-transparent hover:text-ink hover:bg-panel/50 rounded-t-lg")}
+                  key={g.label}
+                  onClick={() => { if (!g.mods.some((m) => m.id === allowed?.id)) setActive(g.mods[0].id); }}
+                  aria-pressed={on}
+                  className={cx("whitespace-nowrap rounded-full px-3.5 py-1.5 min-h-[34px] text-[13px] font-semibold transition-colors",
+                    on ? "bg-panel text-ink ring-1 ring-gold/60" : "text-muted hover:text-ink hover:bg-panel/50")}
                 >
-                  <Icon size={15} aria-hidden="true" className={on ? "text-gold" : ""} />
-                  {m.label}
+                  {g.label}
                 </button>
               );
             })}
           </nav>
-          <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 bottom-px w-8 bg-gradient-to-l from-bg to-transparent" />
+          {/* Niveau 2 : onglets du domaine actif — dégradé de bord si débordement horizontal (mobile). */}
+          <div className="relative">
+            <nav aria-label="Onglets" className="flex gap-1 border-b border-line overflow-x-auto [&::-webkit-scrollbar]:h-0">
+              {(activeGroup?.mods || []).map((m) => {
+                const on = m.id === (allowed?.id);
+                const Icon = m.icon;
+                return (
+                  <button
+                    key={m.id}
+                    ref={on ? activeTabRef : undefined}
+                    onClick={() => setActive(m.id)}
+                    aria-current={on ? "page" : undefined}
+                    className={cx("inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors",
+                      on ? "text-ink border-gold" : "text-muted border-transparent hover:text-ink hover:bg-panel/50 rounded-t-lg")}
+                  >
+                    <Icon size={15} aria-hidden="true" className={on ? "text-gold" : ""} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </nav>
+            <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 bottom-px w-8 bg-gradient-to-l from-bg to-transparent" />
+          </div>
         </div>
 
         {/* Content */}
