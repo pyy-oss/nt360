@@ -2,15 +2,30 @@
 // Module pur (testable). Matcher robuste (val) : les entêtes réels contiennent des
 // espaces (" CAS ", " MB TOTAL ") et des colonnes proches (" MB TOTAL Manuel ").
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, NOISE, cleanName } = require("../lib/ids");
+const { fpKey, num, cleanBu, NOISE, cleanName, noAcc } = require("../lib/ids");
 const { headerKeys, val, safeId } = require("../lib/sheets");
 
+// Choisit la feuille P&L en s'ALIGNANT sur la détection (ingest.hasPnl) plutôt que sur un
+// nom littéral "P&L" : 1re feuille dont l'entête porte opp id + cas + raf total ; repli sur
+// une feuille nommée P&L/PnL ; sinon 1re feuille. Évite un import silencieusement vide (§17.2).
+function pickSheet(wb) {
+  const hdrHas = (ws, ...terms) => {
+    if (!ws) return false;
+    const hdr = (XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || []).map((v) => noAcc(v).trim());
+    return terms.every((t) => hdr.some((h) => h.includes(noAcc(t))));
+  };
+  const byHeader = wb.SheetNames.find((n) => hdrHas(wb.Sheets[n], "opp id", "cas", "raf total"));
+  if (byHeader) return wb.Sheets[byHeader];
+  const byName = wb.SheetNames.find((n) => /p\s*&?\s*l|pnl/i.test(n));
+  return wb.Sheets[byName || wb.SheetNames[0]];
+}
+
 /**
- * @param {import('xlsx').WorkBook} wb classeur contenant la feuille "P&L"
+ * @param {import('xlsx').WorkBook} wb classeur contenant la feuille P&L
  * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parsePnl(wb) {
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets["P&L"], { defval: null });
+  const rows = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
   const byFp = new Map(); // dédup par FP (dernière ligne gagne)
   for (const r of rows) {
     const keys = headerKeys(r);

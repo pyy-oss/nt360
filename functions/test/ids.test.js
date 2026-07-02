@@ -37,6 +37,24 @@ describe("num — parsing tolérant", () => {
     expect(num(null)).toBe(0);
     expect(num("abc")).toBe(0);
   });
+  it("milliers avec point, décimale virgule (fr-FR)", () => {
+    expect(num("1.234.567")).toBe(1234567); // point = millier
+    expect(num("1.234.567,89")).toBeCloseTo(1234567.89, 2);
+    expect(num("435,04")).toBeCloseTo(435.04, 2);
+  });
+  it("format en-US (virgule millier, point décimal)", () => {
+    expect(num("1,234,567.89")).toBeCloseTo(1234567.89, 2);
+    expect(num("744.96")).toBeCloseTo(744.96, 2);
+  });
+  it("négatifs : parenthèses comptables et signe en queue", () => {
+    expect(num("(1 000)")).toBe(-1000);
+    expect(num("1 000-")).toBe(-1000);
+    expect(num("-2 500,50")).toBeCloseTo(-2500.5, 2);
+  });
+  it("entiers XOF sans décimale", () => {
+    expect(num("20000000")).toBe(20000000);
+    expect(num("1,234")).toBe(1234); // virgule = millier (3 chiffres) → entier
+  });
 });
 
 describe("cleanBu / noAcc", () => {

@@ -29,24 +29,41 @@ function parseFacturationDf(wb) {
     const amountHt = num(
       val(r, keys, "montant ht", "total signe en devises", "total signé en devises", "montant")
     );
-    const doc = {
-      _id: safeId(numero),
+    const id = safeId(numero);
+    const date = toISO(val(r, keys, "date de facturation", "date"));
+    const sig = `${amountHt}|${date}`; // signature de ligne (distingue ligne distincte vs doublon exact)
+    const prev = byNumero.get(id);
+    if (prev) {
+      // Même Numéro : facture MULTI-LIGNES (export Odoo : 1 ligne par ligne) ⇒ on SOMME les
+      // lignes DISTINCTES (l'ancien « dernier gagne » ne gardait que la dernière, faussait le
+      // montant et cassait CAF = Σ factures). Une ligne EXACTEMENT identique (même HT + date)
+      // est un artefact d'export → ignorée (pas de double compte).
+      if (prev._sigs.has(sig)) continue;
+      prev._sigs.add(sig);
+      prev.amountHt = (prev.amountHt || 0) + amountHt;
+      prev.lines = (prev.lines || 1) + 1;
+      continue;
+    }
+    byNumero.set(id, {
+      _id: id,
       numero,
       fp,
       client: cleanName(
         val(r, keys, "client", "nom d'affichage du partenaire", "partenaire")
       ),
       bu: cleanBu(val(r, keys, "bu", "domaine")),
-      date: toISO(val(r, keys, "date de facturation", "date")),
+      date,
       amountHt,
+      lines: 1,
       paymentStatus: String(
         val(r, keys, "statut de paiement", "statut", "payment") || ""
       ).trim(),
       source: "facturationDf",
-    };
-    byNumero.set(doc._id, doc); // dédup par Numéro (dernier gagne)
+      _sigs: new Set([sig]),
+    });
   }
   const out = [...byNumero.values()];
+  out.forEach((o) => delete o._sigs); // champ de travail (Set non persistable)
   return { rows: out, report: { rowsIn, rowsOk: out.length, rowsSkipped: rowsIn - out.length } };
 }
 

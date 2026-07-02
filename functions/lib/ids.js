@@ -10,15 +10,26 @@ const fpKey = (v) => {
   return `FP/${m[1]}/${m[2]}`.toUpperCase();
 };
 
-/** Parse un nombre tolérant (espaces, virgule décimale, symboles). Renvoie 0 si NaN. */
+/** Parse un nombre tolérant : gère milliers (espaces, ".", ","), décimale "." ou ",",
+ *  symboles/lettres, et négatifs comptables "(1 000)" ou "1000-". Renvoie 0 si non numérique. */
 const num = (v) => {
-  const n = parseFloat(
-    String(v ?? "")
-      .replace(/\s/g, "")
-      .replace(",", ".")
-      .replace(/[^\d.\-]/g, "")
-  );
-  return isNaN(n) ? 0 : n;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  let s = String(v ?? "").trim();
+  if (!s) return 0;
+  // Négatif : parenthèses comptables, ou signe '-' en tête ou en queue.
+  const negative = /^\(.*\)$/.test(s) || /^\s*-/.test(s) || /-\s*$/.test(s);
+  s = s.replace(/[^\d.,]/g, ""); // ne garde que chiffres et séparateurs
+  if (!s) return 0;
+  const c = s.lastIndexOf(","), d = s.lastIndexOf(".");
+  let dec = ""; // séparateur décimal retenu ("" = aucun, tout est millier)
+  if (c > -1 && d > -1) dec = c > d ? "," : "."; // le séparateur le plus à droite = décimal
+  else if (c > -1) dec = ((s.match(/,/g) || []).length === 1 && /,\d{1,2}$/.test(s)) ? "," : "";
+  else if (d > -1) dec = ((s.match(/\./g) || []).length === 1 && /\.\d{1,2}$/.test(s)) ? "." : "";
+  if (dec) s = s.replace(dec === "," ? /\./g : /,/g, "").replace(dec, ".");
+  else s = s.replace(/[.,]/g, ""); // aucun décimal ⇒ tous les séparateurs sont des milliers
+  const n = parseFloat(s);
+  if (!Number.isFinite(n)) return 0;
+  return negative ? -Math.abs(n) : n;
 };
 
 /** Normalise une BU vers ICT | CLOUD | FORMATION | AUTRE (§18.2). */
