@@ -33,6 +33,18 @@ function pipeline(opps) {
     .slice(0, 10)
     .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: o.weighted, stage: o.stage, probability: o.probability }));
 
+  // Conversion par commercial (AM) : gagné / perdu / taux de transformation + pipeline actif pondéré.
+  const ams = [...new Set(opps.map((o) => o.am).filter(Boolean))];
+  const byAmConv = ams
+    .map((am) => {
+      const w = won.filter((o) => o.am === am).length;
+      const l = lost.filter((o) => o.am === am).length;
+      const act = active.filter((o) => o.am === am);
+      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(eligible.filter((o) => o.am === am), (o) => o.weighted) };
+    })
+    .filter((x) => x.won + x.lost + x.activeCount > 0)
+    .sort((a, b) => (b.weighted - a.weighted) || (b.won - a.won));
+
   const wonCount = won.length, lostCount = lost.length;
   return {
     // brut = toute la funnel active ; pondéré = éligibles (non perdu/suspendu, IdC ≥ 90 %).
@@ -46,6 +58,7 @@ function pipeline(opps) {
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
+    byAmConv,
     topOpps,
   };
 }

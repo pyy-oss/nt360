@@ -88,6 +88,15 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
     expect(p.byAM.DATCHA).toBe(950); // o6
     expect(p.byAM.KOUADIO).toBeUndefined(); // o2 non éligible (proba 0.25)
   });
+  it("conversion par commercial (byAmConv)", () => {
+    const byAm = Object.fromEntries(p.byAmConv.map((x) => [x.am, x]));
+    expect(byAm.DATCHA.activeCount).toBe(2); // o1 + o6
+    expect(byAm.DATCHA.weighted).toBe(950);
+    expect(byAm.X.won).toBe(1); // o4 gagné
+    expect(byAm.X.conv).toBe(1);
+    expect(byAm.Y.lost).toBe(1); // o5 perdu
+    expect(byAm.Y.conv).toBe(0);
+  });
 });
 
 describe("suppliers — exposition/encours/couverture (§18.6)", () => {

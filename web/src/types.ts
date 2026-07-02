@@ -24,6 +24,7 @@ export interface PipelineSummary {
   susp?: { brut?: number; count?: number };
   conv?: number; wonCount?: number; lostCount?: number;
   byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
+  byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
 }
 
