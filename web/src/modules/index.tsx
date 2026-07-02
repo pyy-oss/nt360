@@ -237,46 +237,55 @@ const Prevision: FC<Props> = () => {
   const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   if (!bl && !pl && !att) return <EmptyState />;
   // Ancré sur l'année fiscale courante (une seule vérité = l'atterrissage) :
-  // Projeté CAS = Réalisé CAS(FY) + Pipeline pondéré clôturant en FY.
-  // Le backlog (RAF, déjà inclus dans le CAS signé) est montré à part pour contexte.
+  // Pipeline de PROJECTION = 100 % du CA (IdC ≥ 90 %) + 20 % (70 %≤IdC<90 %), fenêtré sur D Prev.
   const realiseCas = att?.realiseCas || 0;
   const backlog = bl?.total || 0;
-  const pond = att?.pipelinePondere ?? 0; // pondéré CLÔTURANT en FY
+  const pond = att?.pipelinePondere ?? 0; // pipeline de projection (tiéré, fenêtre D Prev)
   const projete = att?.projete ?? (realiseCas + pond);
   const factureN = att?.factureN || 0;
-  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond); // facturé + backlog + pondéré
+  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond); // facturé + backlog + pipeline projeté
   const fy = att?.fy || cfg?.currentFy;
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
         <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
-        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pondéré" />
+        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
+        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pipeline projeté" />
       </div>
       <div className={grid4}>
         <Kpi label={`Facturé réalisé (FY ${fy || ""})`} value={fmt(factureN)} tone="emerald" />
         <Kpi label="Backlog à facturer (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
-        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pondéré" />
+        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pipeline projeté" />
       </div>
       {att && (
-        <div className={cols2}>
-          <Card title={`Atterrissage ${att.fy} — probabilité d'atteinte`}>
-            <Gauge value={att.probaAtteinte} color={att.ecart < 0 ? T.clay : T.emerald} />
-            <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-              <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
-              <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{fmt(att.objectif)}</div></div>
-              <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecart < 0 ? "text-clay" : "text-emerald")}>{fmt(att.ecart)}</div></div>
-            </div>
-          </Card>
+        <>
+          <div className={cols2}>
+            <Card title={`Atterrissage CAS ${att.fy} — prise de commande`}>
+              <Gauge value={att.probaAtteinte} color={att.ecart < 0 ? T.clay : T.emerald} />
+              <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+                <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
+                <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{att.objectif > 0 ? fmt(att.objectif) : "—"}</div></div>
+                <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecart < 0 ? "text-clay" : "text-emerald")}>{att.objectif > 0 ? fmt(att.ecart) : "—"}</div></div>
+              </div>
+            </Card>
+            <Card title={`Atterrissage CAF ${att.fy} — facturation`}>
+              <Gauge value={att.probaAtteinteCaf} color={att.ecartCaf < 0 ? T.clay : T.emerald} />
+              <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+                <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(att.cafProjete)}</div></div>
+                <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{att.objectifCaf > 0 ? fmt(att.objectifCaf) : "—"}</div></div>
+                <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", att.ecartCaf < 0 ? "text-clay" : "text-emerald")}>{att.objectifCaf > 0 ? fmt(att.ecartCaf) : "—"}</div></div>
+              </div>
+            </Card>
+          </div>
           <Card title="Facturation N vs N-1">
             <GroupedBars data={[{ name: `FY ${att.fy - 1}`, Facturé: att.factureN1 }, { name: `FY ${att.fy}`, Facturé: att.factureN }]} series={[{ key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={54} />
             <Tip>Croissance : <span className={att.croissanceFacture >= 0 ? "text-emerald" : "text-clay"}>{pct(att.croissanceFacture)}</span></Tip>
           </Card>
-        </div>
+        </>
       )}
-      <Tip><b>Projeté CAS</b> = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (prise de commande). <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF, reste à facturer) + pipeline pondéré (facturation projetée — le backlog y entre, sans double compte). Opportunités closing 2024/2025 exclues.</Tip>
+      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme) = 100 % du CA des opportunités IdC ≥ 90 % + 20 % du CA des IdC ≥ 70 % (&lt; 90 %), <b>uniquement</b> celles dont la clôture prévue (D Prev) tombe entre aujourd'hui et fin {fy} — les projections obsolètes (D Prev passée) ou prévues en {fy ? Number(fy) + 1 : "N+1"}+ sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
     </div>
   );
 };

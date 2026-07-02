@@ -44,6 +44,7 @@ async function recomputeAll(db, only) {
 
   const want = (k) => !only || only.includes(k);
   const stamp = { updatedAt: FieldValue.serverTimestamp() };
+  const asOf = new Date().toISOString().slice(0, 10); // aujourd'hui : borne basse fenêtre D Prev (atterrissage)
   const w = []; // écritures {path, data}
 
   const sup = suppliers(orders, bcLines, creditLines);
@@ -51,7 +52,7 @@ async function recomputeAll(db, only) {
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } });
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
-  if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy), ...stamp } });
+  if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
 
   const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));
