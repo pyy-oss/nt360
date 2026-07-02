@@ -237,28 +237,27 @@ const Prevision: FC<Props> = () => {
   const { data: att } = useDocData<any>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   if (!bl && !pl && !att) return <EmptyState />;
   // Ancré sur l'année fiscale courante (une seule vérité = l'atterrissage) :
-  // Projeté CAS = Réalisé CAS(FY) + Pipeline pondéré clôturant en FY.
-  // Le backlog (RAF, déjà inclus dans le CAS signé) est montré à part pour contexte.
+  // Pipeline de PROJECTION = 100 % du CA (IdC ≥ 90 %) + 20 % (70 %≤IdC<90 %), fenêtré sur D Prev.
   const realiseCas = att?.realiseCas || 0;
   const backlog = bl?.total || 0;
-  const pond = att?.pipelinePondere ?? 0; // pondéré CLÔTURANT en FY
+  const pond = att?.pipelinePondere ?? 0; // pipeline de projection (tiéré, fenêtre D Prev)
   const projete = att?.projete ?? (realiseCas + pond);
   const factureN = att?.factureN || 0;
-  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond); // facturé + backlog + pondéré
+  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond); // facturé + backlog + pipeline projeté
   const fy = att?.fy || cfg?.currentFy;
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
         <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
-        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pondéré" />
+        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
+        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pipeline projeté" />
       </div>
       <div className={grid4}>
         <Kpi label={`Facturé réalisé (FY ${fy || ""})`} value={fmt(factureN)} tone="emerald" />
         <Kpi label="Backlog à facturer (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pondéré FY (IdC ≥ 90 %)" value={fmt(pond)} tone="gold" />
-        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pondéré" />
+        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pipeline projeté" />
       </div>
       {att && (
         <>
@@ -286,7 +285,7 @@ const Prevision: FC<Props> = () => {
           </Card>
         </>
       )}
-      <Tip><b>Projeté CAS</b> = Réalisé CAS(FY) + pipeline pondéré <b>clôturant en {fy}</b> (prise de commande). <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF, reste à facturer) + pipeline pondéré (facturation projetée — le backlog y entre, sans double compte). Opportunités closing 2024/2025 exclues.</Tip>
+      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme) = 100 % du CA des opportunités IdC ≥ 90 % + 20 % du CA des IdC ≥ 70 % (&lt; 90 %), <b>uniquement</b> celles dont la clôture prévue (D Prev) tombe entre aujourd'hui et fin {fy} — les projections obsolètes (D Prev passée) ou prévues en {fy ? Number(fy) + 1 : "N+1"}+ sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
     </div>
   );
 };

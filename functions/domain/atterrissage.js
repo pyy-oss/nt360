@@ -1,11 +1,21 @@
-// Atterrissage annuel (BUILD_KIT §7) : projeté = Réalisé CAS(FY) + pipeline pondéré
-// (closing FY) → vs objectifs, avec écart et probabilité d'atteinte. Le backlog est
-// exposé séparément (informatif) mais N'ENTRE PAS dans le projeté (déjà couvert par le
-// CAS réalisé — l'ajouter double-compterait). + comparaison N vs N-1 sur la facturation.
+// Atterrissage annuel (BUILD_KIT §7) : projeté = Réalisé CAS(FY) + pipeline de PROJECTION
+// (pondération tiérée par certitude, fenêtrée sur D Prev) → vs objectifs, écart, probabilité.
+// Le backlog est exposé séparément (informatif) mais N'ENTRE PAS dans le projeté CAS (déjà
+// couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
-const { isEligible } = require("./pipeline");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
+
+// Pondération de PROJECTION moyen terme (logique atterrissage, distincte du pondéré risque
+// = montant×proba du module Pipeline) : 100 % du CA si certitude ≥ 90 %, 20 % si 70 %≤IdC<90 %,
+// 0 sinon. On projette large au-delà du court terme, mais on tronque les basses certitudes.
+const CONF_FULL = 0.9, CONF_PARTIAL = 0.7, PARTIAL_RATE = 0.2;
+const projectionWeight = (o) => {
+  const p = o.probability || 0, amt = o.amount || 0;
+  if (p >= CONF_FULL) return amt;          // 100 %
+  if (p >= CONF_PARTIAL) return amt * PARTIAL_RATE; // 20 %
+  return 0;
+};
 
 /**
  * @param {object[]} orders
@@ -13,15 +23,19 @@ const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
  * @param {object[]} opps
  * @param {object[]} objectives
  * @param {number} fy année fiscale courante
+ * @param {string} [asOf] date du jour (YYYY-MM-DD) : borne basse de la fenêtre D Prev
  */
-function atterrissage(orders, invoices, opps, objectives, fy) {
+function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
-  // Pondéré = opportunités éligibles (non perdu/suspendu, IdC ≥ 90 %) clôturant en FY.
-  const pipelinePondere = sum(
-    opps.filter((o) => isEligible(o) && yearOf(o.closingDate) === String(fy)),
-    (o) => o.weighted
-  );
+  // Fenêtre D Prev : clôture prévue entre aujourd'hui (asOf) et la fin de l'exercice.
+  // → exclut les projections OBSOLÈTES (D Prev déjà passée) et celles prévues en N+1 ou plus.
+  const lo = asOf || `${fy}-01-01`;
+  const hi = `${fy}-12-31`;
+  const inWindow = (o) => o.closingDate && o.closingDate >= lo && o.closingDate <= hi;
+  const isActive = (o) => o.stage >= 1 && o.stage <= 5; // ni gagné (6), ni perdu (7), ni suspendu (8)
+  // Pipeline de projection : opps actives dans la fenêtre, pondérées 100 %/20 % par certitude.
+  const pipelinePondere = sum(opps.filter((o) => isActive(o) && inWindow(o)), projectionWeight);
   const objGlobal = objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global"));
   const objectif = sum(objGlobal, (o) => o.targetCas);       // cible CAS (prise de commande)
   const objectifCaf = sum(objGlobal, (o) => o.targetInvoiced); // cible CAF (facturation)
