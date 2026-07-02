@@ -16,6 +16,7 @@ service cloud.firestore {
     function summaryModule(id) {
       return id.matches('overview.*') ? 'overview'
         : id.matches('facturation.*') ? 'facturation'
+        : id.matches('receivables.*') ? 'facturation'
         : id.matches('rentabilite.*') ? 'rentabilite'
         : id.matches('pipeline.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'

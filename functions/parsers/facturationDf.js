@@ -31,6 +31,9 @@ function parseFacturationDf(wb) {
     );
     const id = safeId(numero);
     const date = toISO(val(r, keys, "date de facturation", "date"));
+    const dueDate = toISO(val(r, keys, "date d'échéance", "date d echeance", "echeance", "due date"));
+    const paymentStatus = String(val(r, keys, "statut en cours de paiement", "statut de paiement", "statut", "payment") || "").trim();
+    const paid = /pay[ée]|régl|encaiss|sold/i.test(paymentStatus); // encaissée ?
     const sig = `${amountHt}|${date}`; // signature de ligne (distingue ligne distincte vs doublon exact)
     const prev = byNumero.get(id);
     if (prev) {
@@ -53,11 +56,11 @@ function parseFacturationDf(wb) {
       ),
       bu: cleanBu(val(r, keys, "bu", "domaine")),
       date,
+      dueDate,
       amountHt,
       lines: 1,
-      paymentStatus: String(
-        val(r, keys, "statut de paiement", "statut", "payment") || ""
-      ).trim(),
+      paymentStatus,
+      paid,
       source: "facturationDf",
       _sigs: new Set([sig]),
     });
