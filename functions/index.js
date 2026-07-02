@@ -147,7 +147,7 @@ async function runSalesSync(objectKey) {
   const wb = XLSX.read(buf, { cellDates: true });
   const res = await applySalesSync(db, wb);
   const { recomputeAll } = require("./lib/aggregate");
-  await recomputeAll(db, ["pipeline", "overview", "backlog", "atterrissage"]);
+  await recomputeAll(db); // recalcul complet : une opp gagnée peut devenir commande (CAS/backlog/rentabilité)
   logger.info("syncSalesData", res);
   return res;
 }
@@ -235,6 +235,54 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
 
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
+// --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les
+// agrégats pipeline, sinon l'opp restait invisible des summaries jusqu'au recompute admin/quotidien. ---
+const PIPELINE_WRITE_ROLES = ["direction", "commercial_dir", "commercial"];
+
+exports.upsertOpportunity = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
+  const { fpKey } = require("./lib/ids");
+  const { DEFAULT_PROBA, STAGE_LABEL } = require("./parsers/salesData");
+  const d = req.data || {};
+  const client = String(d.client || "").trim();
+  if (!client) throw new HttpsError("invalid-argument", "client requis");
+  const stage = Math.min(9, Math.max(1, Math.trunc(Number(d.stage)) || 1));
+  const amount = Number(d.amount) || 0;
+  // Proba : valeur fournie (0..1) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
+  const pr = Number(d.probability);
+  const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
+  // Édition : id fourni préfixé « saisie_ » ; sinon nouvelle saisie. On ne touche QUE les saisies.
+  const id = (typeof d.id === "string" && d.id.startsWith("saisie_")) ? d.id
+    : ("saisie_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  const doc = {
+    oppId: id, source: "saisie",
+    client, am: String(d.am || "").trim(), bu: String(d.bu || "AUTRE").trim().toUpperCase(),
+    fp: fpKey(d.fp) || null,
+    amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
+    probability, weighted: amount * probability,
+    closingDate: d.closingDate || null,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  await db.doc(`opportunities/${id}`).set(doc, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
+    detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // saisie occasionnelle → recalcul complet (l'opp peut devenir commande, etc.)
+  return { ok: true, id };
+});
+
+exports.deleteOpportunity = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
+  const id = String(req.data?.id || "");
+  if (!id.startsWith("saisie_")) throw new HttpsError("failed-precondition", "seules les opportunités saisies sont supprimables");
+  await db.doc(`opportunities/${id}`).delete();
+  await recomputeSummaries(); // saisie occasionnelle → recalcul complet (l'opp peut devenir commande, etc.)
+  return { ok: true };
+});
+
 const BC_WRITE_ROLES = ["direction", "pmo", "achats"];
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 

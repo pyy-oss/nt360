@@ -15,7 +15,7 @@ describe("dataQuality — hygiène d'ingestion", () => {
   const opps = [
     { client: "GAMMA", stage: 3, amount: 1000, closingDate: "2026-05-01" },
     { client: "DELTA", stage: 4, amount: 0, closingDate: null }, // active sans D Prev + sans montant
-    { client: "OMEGA", stage: 6, amount: 500 }, // gagnée → hors « actives »
+    { client: "OMEGA", stage: 6, amount: 500 }, // gagnée SANS FP → non transformable
   ];
   const bcLines = [{ fp: "FP/2026/1", supplier: "HDF", amountXof: 100 }, { fp: "", supplier: "", bcNumber: "BC1" }];
   const sheets = [{ fp: "FP/2026/1", saleTotal: 900 }, { fp: "FP/2026/9", saleTotal: 0 }];
@@ -35,6 +35,10 @@ describe("dataQuality — hygiène d'ingestion", () => {
   it("opps actives sans D Prev / sans montant (gagnées exclues)", () => {
     expect(byType.opps_sans_dprev.count).toBe(1); // DELTA (OMEGA gagnée exclue)
     expect(byType.opps_sans_montant.count).toBe(1);
+  });
+  it("opp GAGNÉE sans N° FP signalée (sévérité haute)", () => {
+    expect(byType.opps_gagnees_sans_fp.count).toBe(1); // OMEGA (stage 6, pas de fp)
+    expect(byType.opps_gagnees_sans_fp.severity).toBe("high");
   });
   it("factures sans échéance + BC/fiches incomplets", () => {
     expect(byType.factures_sans_echeance.count).toBe(2); // A2 + OR
