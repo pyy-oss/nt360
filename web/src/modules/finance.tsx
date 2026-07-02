@@ -182,20 +182,24 @@ export const Facturation: FC<Props> = ({ period }) => {
       )}
       {cash && (cash.months || []).length > 0 && (
         <>
-          <h2 className="font-display text-sm text-muted mt-2">Prévision de trésorerie · {cash.horizon} mois glissants</h2>
+          <h2 className="font-display text-sm text-muted mt-2">Prévision de trésorerie NETTE · {cash.horizon} mois glissants</h2>
           <div className={grid4}>
-            <Kpi label="Encaissements attendus (horizon)" value={fmt(cash.arHorizon)} tone="emerald" sub={`AR échéancé sur ${cash.horizon} mois`} />
+            <Kpi label="Encaissements attendus (AR)" value={fmt(cash.arHorizon)} tone="emerald" sub={`échéancé sur ${cash.horizon} mois`} />
+            <Kpi label="Décaissements fournisseurs" value={fmt(cash.totalDecaissement)} tone="clay" sub={`${cash.bcOpenCount ?? 0} BC non soldé(s)`} />
+            <Kpi label="Position nette (horizon)" value={fmt((cash.months || []).reduce((s, m) => s + (m.net || 0), 0))} tone="gold" sub="AR − décaissements" />
             <Kpi label="En retard (à recouvrer)" value={fmt(cash.overdue)} tone="clay" sub={`${cash.overdueCount} facture(s) échue(s)`} />
-            <Kpi label="Backlog à facturer (RAF)" value={fmt(cash.totalRaf)} tone="steel" sub="indicatif · étalé sur l'horizon" />
-            <Kpi label="Au-delà de l'horizon" value={fmt(cash.beyond)} sub="échéances lointaines" />
           </div>
-          <Card title="Échéancier des encaissements attendus">
+          <Card title="Échéancier — encaissements vs décaissements (position nette)">
             <GroupedBars
-              data={(cash.months || []).map((m) => ({ name: m.month, "AR contractuel": m.ar, "Backlog (indicatif)": m.backlog }))}
-              series={[{ key: "AR contractuel", color: T.emerald, name: "AR contractuel" }, { key: "Backlog (indicatif)", color: T.steel, name: "Backlog (indicatif)" }]}
-              h={240}
+              data={(cash.months || []).map((m) => ({ name: m.month, "Encaissements (AR)": m.ar, "Décaissements": -(m.decaissement || 0), "Net": m.net || 0 }))}
+              series={[
+                { key: "Encaissements (AR)", color: T.emerald, name: "Encaissements (AR)" },
+                { key: "Décaissements", color: T.clay, name: "Décaissements" },
+                { key: "Net", color: T.gold, name: "Net" },
+              ]}
+              h={260}
             />
-            <Tip><b>AR contractuel</b> = créances déjà émises, positionnées au mois de leur <b>échéance</b> (les créances échues sont isolées dans « en retard », hors échéancier). <b>Backlog (indicatif)</b> = reste à facturer (RAF) étalé également sur l'horizon — c'est une <b>projection</b>, pas un encaissement contractuel. Aucune date de règlement réelle en source : l'AR est ancré sur les échéances, le backlog est explicitement indicatif.</Tip>
+            <Tip><b>Encaissements (AR)</b> = créances émises positionnées à leur <b>échéance</b> (échues isolées dans « en retard »). <b>Décaissements</b> = lignes BC <b>non soldées</b> positionnées à leur ETA (réelle sinon contractuelle ; ETA passée/inconnue → dû ce mois). <b>Net</b> = AR − décaissements. Le <b>backlog à facturer</b> ({fmt(cash.totalRaf)}, indicatif) n'entre pas dans le net (pas encore contractuel). Aucune date de règlement réelle en source : échéancier fondé sur les échéances et ETA.</Tip>
           </Card>
         </>
       )}

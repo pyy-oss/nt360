@@ -10,7 +10,7 @@ const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage } = require("../domain/atterrissage");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
-const { cashflow } = require("../domain/cashflow");
+const { cashflow, decaissements } = require("../domain/cashflow");
 const { am360 } = require("../domain/am360");
 const { dataQuality } = require("../domain/dataQuality");
 const { mergeCommandes } = require("../domain/commandes");
@@ -67,8 +67,25 @@ async function recomputeAll(db, only) {
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
   if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...rec, ...stamp } });
-  // Prévision de trésorerie : échéancier mensuel des encaissements attendus (AR + backlog indicatif).
-  if (want("facturation") || want("cashflow")) w.push({ path: "summaries/cashflow", data: { ...cashflow(invoices, orders, asOf), ...stamp } });
+  // Prévision de trésorerie NETTE : encaissements attendus (AR + backlog indicatif) − décaissements
+  // fournisseurs (BC non soldés). Position nette mensuelle + cumul.
+  if (want("facturation") || want("cashflow")) {
+    const cf = cashflow(invoices, orders, asOf);
+    const dec = decaissements(bcLines, asOf);
+    const decBy = Object.fromEntries(dec.months.map((m) => [m.month, m.out]));
+    let cumNet = 0;
+    const monthsNet = cf.months.map((m) => {
+      const decais = decBy[m.month] || 0;
+      const net = m.ar - decais;
+      cumNet += net;
+      return { ...m, decaissement: decais, net, cumulNet: cumNet };
+    });
+    w.push({ path: "summaries/cashflow", data: {
+      ...cf, months: monthsNet,
+      totalDecaissement: dec.total, decaissementBeyond: dec.beyond, bcOpenCount: dec.openCount,
+      ...stamp,
+    } });
+  }
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf);
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
