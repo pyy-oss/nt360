@@ -55,22 +55,24 @@ function parseSalesData(wb) {
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
     const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
-    const closingDate = (((d) => (d && plausibleYear(d.slice(0, 4)) ? d : null))(toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")))); // fenêtre glissante, rejet sentinelles 1899
+    // Date brute (pour la clé d'ID, STABLE dans le temps) vs date STOCKÉE (fenêtre glissante).
+    const rawClosing = toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")) || "";
+    const closingDate = rawClosing && plausibleYear(rawClosing.slice(0, 4)) ? rawClosing : null; // rejet sentinelles 1899
 
     // ⚠️ NE PAS utiliser le terme "id" seul : il matche "IdC" (proba) → collisions massives.
-    // Sans extId : hash sur une clé MÉTIER stable (FP + closing + client/montant/étape/AM)
-    // + un index d'occurrence PARMI LES LIGNES IDENTIQUES. Indépendant de la position
-    // absolue (rowsIn) → idempotent si des lignes non-identiques sont insérées/réordonnées,
-    // tout en PRÉSERVANT les doublons légitimes (deux affaires identiques → seq 0,1 distincts).
+    // Sans extId : hash sur une clé MÉTIER stable (FP + closing BRUT + client/montant/étape/AM)
+    // + un index d'occurrence PARMI LES LIGNES IDENTIQUES. On hashe la date BRUTE (pas la date
+    // fenêtrée) pour que l'oppId ne dépende PAS de l'horloge : une échéance en limite de fenêtre
+    // (année+3/+4) donne le même ID quelle que soit l'année de ré-import (pas de doublon).
     const extId = val(r, keys, "ext id", "extid", "opp id", "oppid");
     let oppId;
     if (extId) {
       oppId = safeId(extId);
     } else {
-      const mkey = [client, amount, stage, am, fp || "", closingDate || ""].join("|");
+      const mkey = [client, amount, stage, am, fp || "", rawClosing].join("|");
       const seq = dupSeq.get(mkey) || 0;
       dupSeq.set(mkey, seq + 1);
-      oppId = hashId(client, amount, stage, am, fp || "", closingDate || "", seq);
+      oppId = hashId(client, amount, stage, am, fp || "", rawClosing, seq);
     }
 
     out.push({

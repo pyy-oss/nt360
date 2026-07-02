@@ -22,6 +22,41 @@ const db = getFirestore(getApp(), FIRESTORE_DB);
 // dual-region eur4 (non déployable comme région de fonction). Le trigger n'est donc exporté
 // que si INGEST_REGION est défini (région alignée sur le bucket) ; sinon l'ingestion passe
 // par seed/loadData.js (Admin SDK, sans contrainte de région).
+// Applique un lot d'écritures {path,data} : déduplication par chemin (fusion des champs, dernier
+// gagne — utile en import ZIP multi-classeurs), upsert par batch, puis NETTOYAGE des lignes BC de
+// fiche devenues orphelines (une fiche régénère toutes ses lignes ; si le ré-import en compte moins,
+// les anciennes lignes de fin resteraient et gonfleraient l'exposition). Fail-safe : si une fiche
+// ne produit AUCUNE ligne, son FP n'est pas dans keepByFp → aucune suppression. Filtre par `fp`
+// seul (pas d'index composite) + garde `source === "fiche"` en mémoire → ne touche jamais les
+// lignes logistics/unitaires/manuelles. Partagé par importDelta ET le trigger Storage.
+async function applyWrites(writes) {
+  const byPath = new Map();
+  for (const w of writes) byPath.set(w.path, { ...(byPath.get(w.path) || {}), ...w.data });
+  if (byPath.size) {
+    let batch = db.batch(), n = 0;
+    for (const [path, data] of byPath) {
+      batch.set(db.doc(path), data, { merge: true }); // IDs déterministes ⇒ upsert
+      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
+    }
+    await batch.commit();
+  }
+  const keepByFp = new Map();
+  for (const [path, data] of byPath) {
+    if (path.startsWith("bcLines/") && data.source === "fiche" && data.fp) {
+      (keepByFp.get(data.fp) || keepByFp.set(data.fp, new Set()).get(data.fp)).add(path.slice("bcLines/".length));
+    }
+  }
+  for (const [fp, keep] of keepByFp) {
+    const snap = await db.collection("bcLines").where("fp", "==", fp).get();
+    const stale = snap.docs.filter((d) => d.get("source") === "fiche" && !keep.has(d.id));
+    for (let i = 0; i < stale.length; i += 400) {
+      const batch = db.batch();
+      stale.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+}
+
 async function ingestHandler(event) {
   const { bucket, name } = event.data;
   if (!name || name.endsWith("/")) return; // dossier
@@ -31,14 +66,7 @@ async function ingestHandler(event) {
   const { kinds, writes, report } = buildWrites(wb);
   logger.info("ingest", { name, kinds, ...report });
 
-  if (writes.length) {
-    let batch = db.batch(), n = 0;
-    for (const w of writes) {
-      batch.set(db.doc(w.path), w.data, { merge: true }); // IDs déterministes ⇒ upsert
-      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-    }
-    await batch.commit();
-  }
+  await applyWrites(writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
   await db.collection("imports").add({
     uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
@@ -188,39 +216,7 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   const kinds = [...kindsSet];
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
 
-  // Déduplication par chemin : deux classeurs d'un ZIP peuvent viser le même document
-  // (même FP / même Numéro). On fusionne les champs (le dernier fichier l'emporte sur les
-  // conflits scalaires) pour éviter deux writes concurrents vers le même doc dans un même batch.
-  const byPath = new Map();
-  for (const w of writes) byPath.set(w.path, { ...(byPath.get(w.path) || {}), ...w.data });
-  if (byPath.size) {
-    let batch = db.batch(), n = 0;
-    for (const [path, data] of byPath) {
-      batch.set(db.doc(path), data, { merge: true }); // IDs déterministes ⇒ upsert
-      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-    }
-    await batch.commit();
-  }
-
-  // Nettoyage des lignes BC de fiche devenues ORPHELINES : une fiche régénère toutes ses lignes
-  // (IDs positionnels ${fp}_${i}) ; si le ré-import en compte moins, les anciennes lignes de fin
-  // resteraient en base et gonfleraient l'exposition. Pour chaque FP de fiche importé, on supprime
-  // ses lignes source=="fiche" absentes du nouvel ensemble. (Filtre par fp seul → pas d'index composite.)
-  const keepByFp = new Map();
-  for (const [path, data] of byPath) {
-    if (path.startsWith("bcLines/") && data.source === "fiche" && data.fp) {
-      (keepByFp.get(data.fp) || keepByFp.set(data.fp, new Set()).get(data.fp)).add(path.slice("bcLines/".length));
-    }
-  }
-  for (const [fp, keep] of keepByFp) {
-    const snap = await db.collection("bcLines").where("fp", "==", fp).get();
-    const stale = snap.docs.filter((d) => d.get("source") === "fiche" && !keep.has(d.id));
-    for (let i = 0; i < stale.length; i += 400) {
-      const batch = db.batch();
-      stale.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-  }
+  await applyWrites(writes); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
   const report = { kinds, files, rowsIn, rowsOk, rowsSkipped };
   await db.collection("imports").add({
