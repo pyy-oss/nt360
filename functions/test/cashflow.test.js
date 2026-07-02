@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { cashflow, monthList } = require("../domain/cashflow");
+const { cashflow, decaissements, monthList } = require("../domain/cashflow");
 
 describe("cashflow — échéancier des encaissements", () => {
   const INV = [
@@ -56,5 +56,26 @@ describe("cashflow — échéancier des encaissements", () => {
     ], [], "2026-07-10", { horizon: 3 });
     expect(cf2.overdue).toBe(500);        // 07-05 < 07-10 → en retard (jour), pas « ce mois »
     expect(cf2.months[0].ar).toBe(300);   // seule la 07-20 reste attendue ce mois
+  });
+});
+
+describe("decaissements — sorties de cash (BC non soldés)", () => {
+  const BC = [
+    { amountXof: 1000, status: "emis", etaContrat: "2026-08-15" },  // mois +1
+    { amountXof: 500, status: "livre", etaReel: "2026-06-01" },     // ETA passée → mois courant
+    { amountXof: 300, status: "emis" },                             // sans ETA → mois courant
+    { amountXof: 200, status: "emis", etaContrat: "2027-06-01" },   // au-delà de l'horizon
+    { amountXof: 999, status: "solde", etaContrat: "2026-08-01" },  // soldé → exclu
+    { amountXof: 0, status: "emis", etaContrat: "2026-08-01" },     // montant nul → exclu
+  ];
+  const d = decaissements(BC, "2026-07-01", { horizon: 6 });
+  it("échéancier des sorties par ETA ; ETA passée/inconnue → mois courant", () => {
+    expect(d.months[0].out).toBe(800);  // 500 (ETA passée) + 300 (sans ETA)
+    expect(d.months[1].out).toBe(1000); // ETA 08-15
+  });
+  it("exclut les BC soldés et montants nuls ; au-delà de l'horizon à part", () => {
+    expect(d.total).toBe(2000);   // 1000 + 500 + 300 + 200 (soldé & 0 exclus)
+    expect(d.beyond).toBe(200);   // ETA 2027
+    expect(d.openCount).toBe(4);
   });
 });

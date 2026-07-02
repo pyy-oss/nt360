@@ -69,4 +69,35 @@ function cashflow(invoices, orders, asOf, opts = {}) {
   };
 }
 
-module.exports = { cashflow, monthList };
+/**
+ * Décaissements fournisseurs attendus : échéancier des sorties de cash à partir des lignes BC
+ * NON SOLDÉES (on doit encore payer), positionnées au mois de leur ETA (réel sinon contractuel).
+ * ETA passée ou inconnue → mois courant (dû sans délai). Au-delà de l'horizon compté à part.
+ * @param {object[]} bcLines lignes BC (amountXof, status, etaReel, etaContrat)
+ * @param {string} asOf date du jour (YYYY-MM-DD)
+ * @param {{horizon?: number}} [opts]
+ */
+function decaissements(bcLines, asOf, opts = {}) {
+  const horizon = Math.max(1, opts.horizon || 6);
+  const today = asOf || new Date().toISOString().slice(0, 10);
+  const months = monthList(today, horizon);
+  const curMonth = months[0];
+  const inHorizon = new Set(months);
+  const out = Object.fromEntries(months.map((m) => [m, 0]));
+  let beyond = 0, total = 0;
+
+  const open = (bcLines || []).filter((b) => b.status !== "solde" && (b.amountXof || 0) > 0);
+  for (const b of open) {
+    const amt = b.amountXof || 0;
+    total += amt;
+    const eta = b.etaReel || b.etaContrat;
+    if (!eta) { out[curMonth] += amt; continue; } // ETA inconnue → dû ce mois
+    const mk = String(eta).slice(0, 7);
+    if (String(eta) < today) out[curMonth] += amt; // ETA passée, non soldé → à régler maintenant
+    else if (inHorizon.has(mk)) out[mk] += amt;
+    else beyond += amt;
+  }
+  return { months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, openCount: open.length };
+}
+
+module.exports = { cashflow, decaissements, monthList };
