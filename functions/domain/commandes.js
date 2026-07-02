@@ -29,14 +29,17 @@ function mergeCommandes(orders, opps, sheets, invoices) {
 
   // 2. Opportunités GAGNÉES (stage 6) → commandes ; écrasent le CAS du P&L.
   //    On CONSERVE la marge P&L existante (elle n'est pas connue de l'opp) et sa provenance.
+  //    Garde-fou : une opp gagnée sans montant exploitable n'écrase PAS un CAS P&L valide et
+  //    ne crée pas de commande fantôme à 0 (sinon perte silencieuse du CA).
   for (const o of opps || []) {
     if ((o.stage || 0) !== 6) continue;
     const fp = fpKey(o.fp);
     if (!fp) continue;
     const prev = byFp.get(fp) || {};
+    if (!((o.amount || 0) > 0) && !((prev.cas || 0) > 0)) continue; // ni montant opp, ni CAS P&L → rien
     merge(fp, {
       fp, client: o.client, bu: o.bu || prev.bu, am: o.am,
-      cas: o.amount || 0,
+      cas: (o.amount || 0) > 0 ? o.amount : (prev.cas || 0),
       mb: prev.mb || 0, costTotal: prev.costTotal ?? null, marginPct: prev.marginPct ?? null,
       yearPo: Number(yearOf(o.closingDate)) || yearOfFp(fp) || prev.yearPo || 0,
       suppliers: prev.suppliers || [], source: "opp_won",
@@ -46,13 +49,16 @@ function mergeCommandes(orders, opps, sheets, invoices) {
 
   // 3. Fiches affaire → écrasent TOUT (client, AM, affaire, CAS = vente, marge, coût).
   //    pnlSource = "fiche" : la marge/coût vient de la fiche affaire.
+  //    Garde-fou : une fiche sans prix de vente exploitable (champ non parsé → 0) n'écrase PAS
+  //    la commande existante (P&L / opp gagnée) — on évite d'annuler un CA réel par un 0.
   for (const s of sheets || []) {
     const fp = fpKey(s.fp);
     if (!fp) continue;
+    if (!((s.saleTotal || 0) > 0)) continue; // fiche sans vente exploitable → conserve l'existant
     const prev = byFp.get(fp) || {};
     merge(fp, {
       fp, client: s.client || prev.client, affaire: s.affaire, am: s.commercial || prev.am,
-      cas: s.saleTotal || 0, mb: s.margin || 0, costTotal: s.costTotal, marginPct: s.marginPct,
+      cas: s.saleTotal, mb: s.margin || 0, costTotal: s.costTotal, marginPct: s.marginPct,
       bu: prev.bu, yearPo: prev.yearPo || yearOfFp(fp) || 0,
       suppliers: prev.suppliers || [], source: "fiche", pnlSource: "fiche",
     });

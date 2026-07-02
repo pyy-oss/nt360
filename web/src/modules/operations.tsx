@@ -2,13 +2,13 @@
 import { useState, type FC } from "react";
 import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
-import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, Order, Invoice, Opportunity } from "../types";
+import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity } from "../types";
 
 // 8 — P&L Projet
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
@@ -19,7 +19,7 @@ const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number)
 export const PnlProjet: FC<Props> = () => {
   const { rows } = useCollectionData<ProjectSheet>("projectSheets");
   const { rows: bc } = useCollectionData<BcLine>("bcLines");
-  const canImport = useCan("pnlprojet") === "write";
+  const canImport = useCanImport();
   if (!rows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
@@ -241,6 +241,7 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
 // 11/12 — Clients / Domaines
 export function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data, loading, error } = useDocData<EntitySummary>(`summaries/${kind}_${period}`);
+  const canMargin = useCanSeeMargin();
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
@@ -254,7 +255,9 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
         <Table columns={[
           colText(kind === "clients" ? "Client" : "BU", (r) => r.key, (r) => r.key),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
-          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog), colNum("Marge", (r) => money(r.mb), (r) => r.mb), colNum("%MB", (r) => pct(r.pmb), (r) => r.pmb),
+          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
+          // Marges masquées pour les rôles sans accès « Rentabilité ».
+          ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(r.mb), (r: EntityRow) => r.mb), colNum("%MB", (r: EntityRow) => pct(r.pmb), (r: EntityRow) => r.pmb)] : []),
         ]} rows={rows} />
       </Card>
     </div>
@@ -264,6 +267,7 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
 // FP 360°
 export const Fp360: FC<Props> = () => {
   const [q, setQ] = useState("");
+  const canMargin = useCanSeeMargin();
   const fp = q.trim().toUpperCase();
   const cons = [where("fp", "==", fp || "__none__")];
   // queryKey = fp : sans lui le hook ne se ré-abonne pas quand la recherche change.
@@ -284,10 +288,10 @@ export const Fp360: FC<Props> = () => {
             <Kpi label="Client" value={o.client || "—"} />
             <Kpi label="CAS" value={fmt(o.cas)} />
             <Kpi label="RAF" value={fmt(o.raf)} tone="steel" />
-            <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" />
+            {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
           </div>
           <Card title={`Factures · ${invoices.length}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
-          <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>
+          {canMargin && <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>}
           <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("AM", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>

@@ -59,3 +59,28 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
     expect(byFp["FP/2026/1"].raf).toBe(900);
   });
 });
+
+describe("mergeCommandes — garde-fous contre l'écrasement par 0", () => {
+  it("opp gagnée SANS montant n'écrase pas le CAS P&L existant", () => {
+    const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];
+    const opps = [{ fp: "FP/2026/1", client: "OPP", am: "AM1", amount: 0, stage: 6, closingDate: "2026-05-01" }];
+    const c = mergeCommandes(orders, opps, [], []);
+    const row = c.find((x) => x.fp === "FP/2026/1");
+    expect(row.cas).toBe(500); // CAS P&L conservé (pas remis à 0)
+    expect(row.mb).toBe(120);
+    expect(row.source).toBe("opp_won");
+  });
+  it("opp gagnée SANS montant NI P&L → aucune commande fantôme", () => {
+    const c = mergeCommandes([], [{ fp: "FP/2026/2", client: "X", amount: 0, stage: 6 }], [], []);
+    expect(c.find((x) => x.fp === "FP/2026/2")).toBeUndefined();
+  });
+  it("fiche SANS prix de vente (0) n'écrase pas la commande existante", () => {
+    const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];
+    const sheets = [{ fp: "FP/2026/1", client: "SAFINE", saleTotal: 0, margin: 0 }];
+    const c = mergeCommandes(orders, [], sheets, []);
+    const row = c.find((x) => x.fp === "FP/2026/1");
+    expect(row.cas).toBe(500); // CAS P&L préservé
+    expect(row.mb).toBe(120);
+    expect(row.source).toBe("pnl"); // fiche vide ignorée
+  });
+});

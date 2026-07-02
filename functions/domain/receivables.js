@@ -19,9 +19,10 @@ function receivables(invoices, asOf) {
     totalAR += amt;
     byClient[i.client || "—"] = (byClient[i.client || "—"] || 0) + amt;
     const ref = i.dueDate || i.date; // échéance sinon date de facture
-    if (!ref) { buckets.b0_30 += amt; continue; } // date inconnue → seau courant
-    const late = days(today, ref); // > 0 : en retard
-    if (late <= 0) buckets.notDue += amt;
+    const late = ref ? days(today, ref) : NaN; // > 0 : en retard
+    // Échéance inconnue OU illisible (NaN) → NON exigible (notDue) : ne pas la compter en
+    // retard (cohérence Σ seaux de retard = overdue), ni la classer arbitrairement en > 90 j.
+    if (!Number.isFinite(late) || late <= 0) buckets.notDue += amt;
     else {
       overdue += amt; overdueCount++;
       if (late <= 30) buckets.b0_30 += amt;

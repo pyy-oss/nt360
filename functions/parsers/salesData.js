@@ -86,7 +86,8 @@ function parseSalesData(wb) {
       probability,
       weighted: amount * probability,
       closingDate,
-      marginPct: num(val(r, keys, "mb%", "mb %", "% mb")),
+      marginPct: ((v) => (Math.abs(v) > 1.5 ? v / 100 : v))(num(val(r, keys, "mb%", "mb %", "% mb"))), // base 100→1, cohérent avec la fiche
+
       source: "salesData",
     });
   }

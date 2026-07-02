@@ -5,12 +5,18 @@ const XLSX = require("xlsx");
 const { fpKey, num, noAcc } = require("../lib/ids");
 const { safeId } = require("../lib/sheets");
 
-// Une feuille ressemble à une fiche affaire si elle porte « N° DE FP » ou « PRIX DE REVIENT ».
+// Une feuille est une fiche affaire si elle porte le marqueur CELLULAIRE distinctif « N° DE FP »
+// (≠ colonne « N° FP » d'un P&L/DF), OU le couple « prix de revient » + « prix de vente » propre
+// à la fiche. « Prix de revient » SEUL ne suffit PAS : un P&L peut avoir cette colonne et serait
+// alors reclassé « fiche » (exclusive) → perte silencieuse de tout le classeur.
 function sheetIsFiche(ws) {
   if (!ws) return false;
   const flat = XLSX.utils.sheet_to_json(ws, { header: 1 })
     .flat().filter((v) => typeof v === "string").map(noAcc);
-  return flat.some((s) => s.includes("n° de fp") || s.includes("n de fp") || s.includes("prix de revient"));
+  const hasFp = flat.some((s) => s.includes("n° de fp") || s.includes("n de fp"));
+  const hasRevient = flat.some((s) => s.includes("prix de revient"));
+  const hasVente = flat.some((s) => s.includes("prix de vente"));
+  return hasFp || (hasRevient && hasVente);
 }
 
 /**
@@ -66,7 +72,7 @@ function parseFicheSheet(ws) {
     costTotal: num(lastOf("PRIX DE REVIENT")),
     saleTotal: num(lastOf("PRIX DE VENTE NEURONES")),
     margin: num(lastOf("MARGE BRUTE NEURONES")),
-    marginPct: ((v) => (v > 1.5 ? v / 100 : v))(num(lastOf("% DE MARGE BRUTE"))),
+    marginPct: ((v) => (Math.abs(v) > 1.5 ? v / 100 : v))(num(lastOf("% DE MARGE BRUTE"))), // base 100→1 sur |v| (gère marges négatives / faibles)
     source: "fiche",
   };
 
@@ -75,7 +81,8 @@ function parseFicheSheet(ws) {
   let hr = -1;
   const col = {};
   aoa.forEach((row, ri) => {
-    if (row && row.some((v) => typeof v === "string" && noAcc(v).trim() === "fournisseur")) {
+    // En-tête = ligne dont une cellule CONTIENT « fournisseur » (tolère « FOURNISSEUR PRINCIPAL »…).
+    if (row && row.some((v) => typeof v === "string" && noAcc(v).includes("fournisseur"))) {
       hr = ri;
       row.forEach((v, ci) => {
         if (typeof v === "string") col[noAcc(v).trim()] = ci;
@@ -87,7 +94,7 @@ function parseFicheSheet(ws) {
     return -1;
   };
   const cF = pick("fournisseur");
-  const cX = pick("charges en xof");
+  const cX = pick("charges en xof", "montant xof", "mt xof"); // synonymes de la colonne montant XOF
   const cT = pick("type");
   const cB = pick("bc");
   const cD = pick("description");

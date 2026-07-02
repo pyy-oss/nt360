@@ -20,6 +20,9 @@ function headerSet(ws) {
   return new Set(Array.from(aoa[0] || [], (v) => noAcc(v).trim()));
 }
 const has = (set, ...terms) => terms.some((t) => [...set].some((h) => h.includes(noAcc(t))));
+// Correspondance EXACTE d'en-tête (token normalisé) — évite les faux positifs par sous-chaîne
+// (ex. « id c » ne doit PAS matcher « valid client »).
+const hasExact = (set, ...terms) => terms.some((t) => set.has(noAcc(t)));
 
 // Fiche détectée sur N'IMPORTE QUEL onglet → gère les classeurs multi-fiches (1 fiche/onglet).
 function isFiche(wb) {
@@ -34,7 +37,7 @@ function hasPnl(wb) {
 function hasLive(wb) {
   return wb.SheetNames.some((n) => {
     const h = headerSet(wb.Sheets[n]);
-    return has(h, "idc", "id c") || (has(h, "statut") && has(h, "d prev"));
+    return hasExact(h, "idc", "id c") || (has(h, "statut") && has(h, "d prev"));
   });
 }
 function hasDf(wb) {
