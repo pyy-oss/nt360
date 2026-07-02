@@ -42,8 +42,24 @@ export const OppList: FC<Props> = () => {
   const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
   if (loading && !rows.length) return <CardSkeleton />;
   const top = [...rows].sort((a, b) => (b.weighted || 0) - (a.weighted || 0)).slice(0, 10);
+  // Certitudes = opportunités ACTIVES (étapes 1..5) quasi-certaines (IdC ≥ 90 %), pas encore signées.
+  const certitudes = rows
+    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9)
+    .sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
+  const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
   return (
     <div className="flex flex-col gap-4">
+      <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
+        {certitudes.length ? (
+          <Table columns={[
+            colText("Client", (o) => o.client, (o) => o.client), colText("AM", (o) => o.am, (o) => o.am),
+            colText("BU", (o) => buBadge(o.bu), (o) => o.bu), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
+            colNum("Proba", (o) => pct(o.probability), (o) => o.probability),
+            colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
+            colText("Closing (D Prev)", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
+          ]} rows={certitudes} />
+        ) : <EmptyState label="Aucune opportunité IdC ≥ 90 %." />}
+      </Card>
       <Card title="Top opportunités (pondéré)">
         <Table columns={[
           colText("Client", (o) => o.client), colText("AM", (o) => o.am),
