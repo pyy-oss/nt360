@@ -254,6 +254,47 @@ exports.setInvoiceFp = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (re
   return { ok: true, id, fp };
 });
 
+// --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
+// Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
+exports.patchOrder = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const d = req.data || {};
+  const fp = fpKey(d.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  const ref = db.doc(`orders/${safeId(fp)}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("failed-precondition", "commande P&L introuvable (opp gagnée / fiche : corriger à la source)");
+
+  const patch = {};
+  if (d.yearPo != null && String(d.yearPo) !== "") {
+    const y = Math.trunc(Number(d.yearPo)) || 0;
+    if (y < 2015 || y > new Date().getFullYear() + 3) throw new HttpsError("invalid-argument", "année de PO invalide");
+    patch.yearPo = y;
+  }
+  const newFp = d.newFp ? fpKey(d.newFp) : null;
+  if (d.newFp && !newFp) throw new HttpsError("invalid-argument", "nouveau N° FP invalide");
+
+  if (newFp && newFp !== fp) {
+    // Ré-clé : le FP est la clé de jointure (factures, BC…). On copie sous le nouveau FP puis supprime.
+    const newId = safeId(newFp);
+    await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await ref.delete();
+  } else if (Object.keys(patch).length) {
+    await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } else {
+    throw new HttpsError("invalid-argument", "rien à modifier (année ou nouveau FP requis)");
+  }
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
+    detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, fp: newFp || fp };
+});
+
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
 // --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les

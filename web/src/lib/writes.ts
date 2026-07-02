@@ -26,6 +26,11 @@ export async function setInvoiceFp(id: string, fp: string) {
   await httpsCallable(functions, "setInvoiceFp")({ id, fp });
 }
 
+/** Corrige une commande P&L : année de PO manquante et/ou N° FP erroné (onCall : recalcule). */
+export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string }) {
+  await httpsCallable(functions, "patchOrder")(data);
+}
+
 /** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */
 export async function setBcStatus(id: string, status: string) {
   await httpsCallable(functions, "setBcStatus")({ id, status });

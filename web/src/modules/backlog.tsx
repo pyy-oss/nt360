@@ -3,10 +3,11 @@ import { useState, type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { patchOrder } from "../lib/writes";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary, Order } from "../types";
 
 // 5 — Suivi Backlog
@@ -195,6 +196,22 @@ export const Simulateur: FC<Props> = () => {
   );
 };
 
+// Correction inline d'une commande P&L : année de PO manquante et/ou N° FP erroné.
+function OrderFixer({ fp, yearMissing }: { fp: string; yearMissing: boolean }) {
+  const [y, setY] = useState("");
+  const [nf, setNf] = useState("");
+  return (
+    <span className="inline-flex gap-1 items-center flex-wrap">
+      {yearMissing && (
+        <><input className="field w-16 !py-1 text-xs" aria-label="Année de PO" placeholder="Année" value={y} onChange={(e) => setY(e.target.value)} />
+          <Busy variant="ghost" label="An" okMsg="Année fixée" fn={() => patchOrder({ fp, yearPo: Number(y) || 0 })} /></>
+      )}
+      <input className="field w-28 !py-1 text-xs" aria-label="Corriger le N° FP" placeholder="Corriger FP" value={nf} onChange={(e) => setNf(e.target.value)} />
+      <Busy variant="ghost" label="FP" okMsg="FP corrigé" fn={() => patchOrder({ fp, newFp: nf })} />
+    </span>
+  );
+}
+
 // Liste Commandes — vue fusionnée (fiche affaire > opp gagnée > P&L), matérialisée
 // dans summaries/commandes par le recompute.
 const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagnée", pnl: "P&L", legacy: "Legacy" };
@@ -239,6 +256,9 @@ export const OrderList: FC<Props> = () => {
           ] : []),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
           colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
+          ...(canImport ? [colText("Corriger", (r: Order) => (r.source === "pnl" && r.fp
+            ? <OrderFixer fp={r.fp} yearMissing={!(r.yearPo && r.yearPo > 0)} />
+            : <span className="text-[11px] text-faint">source</span>), () => 0)] : []),
         ]}
       />
     </Card>
