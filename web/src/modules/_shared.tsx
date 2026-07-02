@@ -2,10 +2,19 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import { AlertTriangle, Upload } from "lucide-react";
 import { useDocData } from "../lib/hooks";
+import { useNav } from "../lib/nav";
 import { T, fmt } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta } from "../lib/writes";
 import type { AlertsSummary } from "../types";
+
+// Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable).
+const ALERT_TARGET: Record<string, string> = {
+  marge_negative: "orderlist", achat_sup_vente: "orderlist", raf_incoherent: "orderlist",
+  factures_non_rattachees: "invoicelist", facture_pre_po: "invoicelist", surfacturation: "invoicelist",
+  backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
+  concentration_client: "clients", bc_en_attente: "bc", bc_en_retard: "bc",
+};
 
 export type Props = { period: string };
 export const grid4 = "grid gap-3 grid-cols-2 lg:grid-cols-4";
@@ -110,22 +119,37 @@ export function DataImportCard() {
   );
 }
 
-// Centre d'alertes (bandeau).
+// Centre d'alertes (bandeau) — actionnable : chaque alerte ouvre le module concerné
+// (si l'utilisateur y a accès) et affiche ses références (FP / fournisseurs).
 export function AlertsBanner() {
   const { data } = useDocData<AlertsSummary>("summaries/alerts");
+  const { go, canGo } = useNav();
   const items = data?.items || [];
   if (!items.length) return null;
   const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   return (
     <Card title={`Centre d'alertes · ${items.length}`}>
       <div className="flex flex-col gap-2">
-        {items.map((a, i) => (
-          <div key={i} className="flex items-center gap-2 text-[13px]">
-            <AlertTriangle size={14} aria-hidden="true" className={cx(a.severity === "high" ? "text-clay" : a.severity === "medium" ? "text-gold" : "text-steel")} />
-            <span>{a.message}</span>
-            <Badge tone={(tone[a.severity] || "neutral") as any}>{a.count}</Badge>
-          </div>
-        ))}
+        {items.map((a, i) => {
+          const target = ALERT_TARGET[a.type];
+          const actionable = !!target && canGo(target);
+          const refs = (a.refs || []).filter(Boolean);
+          return (
+            <div key={i} className="flex items-start gap-2 text-[13px]">
+              <AlertTriangle size={14} aria-hidden="true" className={cx("mt-0.5 shrink-0", a.severity === "high" ? "text-clay" : a.severity === "medium" ? "text-gold" : "text-steel")} />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {actionable
+                  ? <button onClick={() => go(target)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir le module concerné">{a.message}</button>
+                  : <span>{a.message}</span>}
+                <Badge tone={(tone[a.severity] || "neutral") as any}>{a.count}</Badge>
+                {refs.slice(0, 6).map((r, j) => (
+                  <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
+                ))}
+                {refs.length > 6 && <span className="text-[11px] text-faint">+{refs.length - 6}</span>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </Card>
   ) as ReactNode;
