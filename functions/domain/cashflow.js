@@ -42,9 +42,11 @@ function cashflow(invoices, orders, asOf, opts = {}) {
     const amt = i.amountHt || 0;
     const due = i.dueDate || i.date;
     if (!due) { ar[curMonth] += amt; continue; } // échéance inconnue → attendu ce mois
+    // « En retard » au JOUR (comme receivables) : une échéance déjà passée, même DANS le mois
+    // courant, compte comme échue → cohérence des deux tuiles « En retard » sur la même page.
+    if (String(due) < today) { overdue += amt; overdueCount++; continue; }
     const mk = monthOf(due);
-    if (mk < curMonth) { overdue += amt; overdueCount++; } // échue → en retard (isolé)
-    else if (inHorizon.has(mk)) ar[mk] += amt;
+    if (inHorizon.has(mk)) ar[mk] += amt;
     else beyond += amt; // au-delà de l'horizon
   }
 

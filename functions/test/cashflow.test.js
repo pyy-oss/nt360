@@ -49,4 +49,12 @@ describe("cashflow — échéancier des encaissements", () => {
   it("monthList gère le passage d'année", () => {
     expect(monthList("2026-11-15", 4)).toEqual(["2026-11", "2026-12", "2027-01", "2027-02"]);
   });
+  it("« en retard » au JOUR : une échéance passée DANS le mois courant est échue (pas ce mois)", () => {
+    const cf2 = cashflow([
+      { amountHt: 500, date: "2026-07-01", dueDate: "2026-07-05", paid: false }, // échue avant le 10
+      { amountHt: 300, date: "2026-07-01", dueDate: "2026-07-20", paid: false }, // à venir ce mois
+    ], [], "2026-07-10", { horizon: 3 });
+    expect(cf2.overdue).toBe(500);        // 07-05 < 07-10 → en retard (jour), pas « ce mois »
+    expect(cf2.months[0].ar).toBe(300);   // seule la 07-20 reste attendue ce mois
+  });
 });

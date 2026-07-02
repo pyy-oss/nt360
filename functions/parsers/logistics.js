@@ -33,6 +33,7 @@ function mapBcStatus(raw) {
 function parseLogistics(wb) {
   const raw = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
   const byId = new Map();
+  const dupSeq = new Map(); // clé métier → nb d'occurrences déjà vues (préserve les lignes distinctes)
   let rowsIn = 0;
   for (const r of raw) {
     rowsIn++;
@@ -46,17 +47,23 @@ function parseLogistics(wb) {
 
     const fp = fpKey(val(r, keys, "opp id", "n° fp", "n fp", "fp"));
     const statusRaw = String(val(r, keys, "statut", "status") || "").trim();
+    const description = String(val(r, keys, "description") || "").trim();
+    // ID = clé métier + INDEX D'OCCURRENCE parmi les lignes identiques (comme salesData). Deux lignes
+    // distinctes d'un même BC (même fournisseur/description) restent séparées (seq 0,1…), tandis
+    // qu'un RÉ-IMPORT (même corrigé sur le montant) réattribue le même seq → même ID → idempotent
+    // (pas d'orphelin qui gonflerait l'exposition). Le montant N'ENTRE PAS dans l'ID.
+    const mkey = [fp, poNumber, supplier, description].join("|");
+    const seq = dupSeq.get(mkey) || 0;
+    dupSeq.set(mkey, seq + 1);
     const doc = {
-      // Clé incluant le MONTANT : deux lignes d'un même BC (même fournisseur/description) mais de
-      // montants différents ne se confondent plus (évite le « dernier gagne » qui tronquait l'expo).
-      _id: "bc_" + hashId(fp, poNumber, supplier, val(r, keys, "description"), amountXof || amount || 0),
+      _id: "bc_" + hashId(fp, poNumber, supplier, description, seq),
       fp,
       bcNumber: poNumber,
       supplier,
       customer: cleanName(val(r, keys, "customer", "client")),
       country: String(val(r, keys, "pays") || "").trim(),
       expenseType: String(val(r, keys, "nature", "type") || "").trim(),
-      description: String(val(r, keys, "description") || "").trim(),
+      description,
       currency: String(val(r, keys, "currency", "devise") || "").trim() || "XOF",
       amount,
       amountXof: amountXof || (String(val(r, keys, "currency") || "").toUpperCase().includes("XOF") ? amount : 0),

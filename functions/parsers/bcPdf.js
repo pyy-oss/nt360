@@ -78,7 +78,9 @@ function parseBcText(rawText) {
   let amount = 0, currency = "XOF";
   const totals = [...text.matchAll(/Total\s*(?:hors[-\s]?taxe|TTC|net|à\s+payer)?\s*[:]?\s*([\d][\d . ,]*\d|\d)\s*(€|\$|£|EUR|USD|FCFA|XOF|CFA)?/gi)];
   // On PRIVILÉGIE le total HORS TAXE (cohérent avec le CA/factures en HT) ; sinon dernier total (TTC/net).
-  const ht = text.match(/Total\s*(?:hors[-\s]?taxe|h\.?t\.?)\s*[:]?\s*([\d][\d.,\s]*\d|\d)\s*(€|\$|£|EUR|USD|FCFA|XOF|CFA)?/i);
+  // « taxes? » gère le pluriel « Hors Taxes » (courant) ; le préfixe (?:^|[^-\w]) évite de capter
+  // « Sous-total HT » à la place du vrai total.
+  const ht = text.match(/(?:^|[^-\w])Total\s*(?:hors[-\s]?taxes?|h\.?t\.?)\s*[:]?\s*([\d][\d.,\s]*\d|\d)\s*(€|\$|£|EUR|USD|FCFA|XOF|CFA)?/i);
   const pick = ht || (totals.length ? totals[totals.length - 1] : null);
   if (pick) {
     amount = num(pick[1]);

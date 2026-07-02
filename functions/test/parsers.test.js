@@ -224,14 +224,18 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     expect(r.status).toBe("livre");
     expect(r.source).toBe("logistics");
   });
-  it("deux lignes d'un même BC de MONTANTS différents ne se confondent plus (clé inclut le montant)", () => {
-    const wb2 = wbFromRows("PO List", [
+  it("deux lignes d'un même BC de MONTANTS différents ne se confondent plus (index d'occurrence)", () => {
+    const rows2 = [
       { "Opp ID": "FP/2024/9", "PO N°": "BC/9", Fournisseur: "ACME", Description: "Switch", "Montant XOF": 100 },
       { "Opp ID": "FP/2024/9", "PO N°": "BC/9", Fournisseur: "ACME", Description: "Switch", "Montant XOF": 250 },
-    ]);
-    const out = parseLogistics(wb2).rows;
+    ];
+    const out = parseLogistics(wbFromRows("PO List", rows2)).rows;
     expect(out).toHaveLength(2); // conservées séparément (avant : « dernier gagne » → 1)
     expect(out.reduce((s, r) => s + r.amountXof, 0)).toBe(350);
+    // Idempotence : ré-import (même corrigé sur le montant) → mêmes IDs (pas d'orphelin).
+    const corrected = [{ ...rows2[0] }, { ...rows2[1], "Montant XOF": 999 }];
+    const out2 = parseLogistics(wbFromRows("PO List", corrected)).rows;
+    expect(out2.map((r) => r._id).sort()).toEqual(out.map((r) => r._id).sort());
   });
   it("mapBcStatus : cycle BC (a_emettre/emis/livre/facture/solde)", () => {
     expect(mapBcStatus("1- Non commandé")).toBe("a_emettre");

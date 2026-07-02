@@ -145,11 +145,13 @@ export const Simulateur: FC<Props> = () => {
             <input type="range" min={0} max={maxAdd} step={Math.round(maxAdd / 100)} value={addPipe} onChange={(e) => setAddPipe(Number(e.target.value))} aria-label="Pipeline additionnel" />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted flex justify-between"><span>Taux de réalisation du pipeline projeté</span><span className="text-ink font-semibold tabnum">{realiz} %</span></span>
-            <input type="range" min={0} max={150} step={5} value={realiz} onChange={(e) => setRealiz(Number(e.target.value))} aria-label="Taux de réalisation" />
+            <span className="text-xs text-muted flex justify-between"><span>Taux de réalisation du pipeline projeté (part convertie)</span><span className="text-ink font-semibold tabnum">{realiz} %</span></span>
+            {/* Borné à 100 % : le pipeline est DÉJÀ pondéré (100 %≥90 · 20 %≥70). L'upside passe par
+                le « pipeline additionnel » ci-dessus, pas par une réalisation > 100 % (biais optimiste). */}
+            <input type="range" min={0} max={100} step={5} value={realiz} onChange={(e) => setRealiz(Number(e.target.value))} aria-label="Taux de réalisation" />
           </label>
           <label className="flex flex-col gap-1 max-w-xs">
-            <span className="text-xs text-muted">Objectif CAS simulé (M FCFA) — vide = objectif réel {(att.objectif || 0) > 0 ? `(${fmt(att.objectif)})` : "(non défini)"}</span>
+            <span className="text-xs text-muted">Objectif CAS simulé (M FCFA) — vide = objectif réel {(att.objectif || 0) > 0 ? `(${Math.round((att.objectif || 0) / M).toLocaleString("fr-FR")} M)` : "(non défini)"}</span>
             <input className="field" inputMode="numeric" placeholder="ex. 4000" value={objOverride} onChange={(e) => setObjOverride(e.target.value)} aria-label="Objectif CAS simulé" />
           </label>
         </div>
