@@ -145,14 +145,47 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   const b64 = req.data?.fileB64;
   const filename = String(req.data?.filename || "delta.xlsx");
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+  const buf = Buffer.from(b64, "base64");
 
-  let wb;
-  try {
-    wb = XLSX.read(Buffer.from(b64, "base64"), { cellDates: true });
-  } catch (e) {
-    throw new HttpsError("invalid-argument", "fichier illisible (XLSX attendu)");
+  // Un import peut être : un XLSX (éventuellement multi-onglets), OU un ZIP de plusieurs
+  // classeurs (import groupé de fiches affaire). On agrège écritures et rapports par fichier.
+  const kindsSet = new Set();
+  const writes = [];
+  const files = [];
+  let rowsIn = 0, rowsOk = 0, rowsSkipped = 0;
+  const processWb = (wb, name) => {
+    const r = buildWrites(wb);
+    if (!r.kinds.length) { files.push({ file: name, error: "aucune source reconnue" }); return; }
+    r.kinds.forEach((k) => kindsSet.add(k));
+    writes.push(...r.writes);
+    rowsIn += r.report.rowsIn || 0; rowsOk += r.report.rowsOk || 0; rowsSkipped += r.report.rowsSkipped || 0;
+    files.push({ file: name, kinds: r.kinds, rowsOk: r.report.rowsOk || 0, byKind: r.report.byKind });
+  };
+
+  if (/\.zip$/i.test(filename)) {
+    const { unzipSync } = require("fflate");
+    let entries;
+    try { entries = unzipSync(new Uint8Array(buf)); }
+    catch (e) { throw new HttpsError("invalid-argument", "ZIP illisible"); }
+    const names = Object.keys(entries).filter((n) => {
+      const base = n.split("/").pop() || n;
+      return /\.xlsx?$/i.test(base) && !n.startsWith("__MACOSX/") && !base.startsWith("~$");
+    });
+    if (!names.length) throw new HttpsError("failed-precondition", "aucun classeur XLSX dans le ZIP");
+    for (const n of names) {
+      let wb;
+      try { wb = XLSX.read(Buffer.from(entries[n]), { cellDates: true }); }
+      catch (e) { files.push({ file: n, error: "classeur illisible" }); continue; }
+      processWb(wb, n);
+    }
+  } else {
+    let wb;
+    try { wb = XLSX.read(buf, { cellDates: true }); }
+    catch (e) { throw new HttpsError("invalid-argument", "fichier illisible (XLSX ou ZIP attendu)"); }
+    processWb(wb, filename);
   }
-  const { kinds, writes, report } = buildWrites(wb);
+
+  const kinds = [...kindsSet];
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
 
   if (writes.length) {
@@ -164,19 +197,19 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
     await batch.commit();
   }
 
+  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped };
   await db.collection("imports").add({
     uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",
-    rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
-    report, ts: FieldValue.serverTimestamp(),
+    rowsIn, rowsOk, rowsSkipped, report, ts: FieldValue.serverTimestamp(),
   });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "import_delta", module: "facturation", entity: "delta", entityId: filename,
-    detail: { kinds, rowsOk: report.rowsOk ?? 0 }, ts: FieldValue.serverTimestamp(),
+    detail: { kinds, rowsOk, files: files.length }, ts: FieldValue.serverTimestamp(),
   });
 
   if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
   await recomputeSummaries();
-  return { ok: true, kinds, rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0 };
+  return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, files: files.length };
 });
 
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,

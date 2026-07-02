@@ -82,7 +82,8 @@ export function ImportButton({ label = "Importer un fichier" }: { label?: string
     try {
       const r = await callImportDelta(file);
       const kinds = (r.kinds || []).map((k) => IMPORT_KIND_LABEL[k] || k).join(", ") || "aucun";
-      toast(`Import réussi : ${r.rowsOk} ligne(s)${r.rowsSkipped ? ` · ${r.rowsSkipped} ignorée(s)` : ""} · ${kinds}`, "ok");
+      const filesPart = (r.files || 0) > 1 ? ` · ${r.files} fichiers` : "";
+      toast(`Import réussi : ${r.rowsOk} ligne(s)${r.rowsSkipped ? ` · ${r.rowsSkipped} ignorée(s)` : ""}${filesPart} · ${kinds}`, "ok");
     } catch (err: any) {
       toast(err?.message ? `Import refusé : ${err.message}` : "Import refusé", "err");
     } finally {
@@ -91,12 +92,12 @@ export function ImportButton({ label = "Importer un fichier" }: { label?: string
   };
   return (
     <label
-      title="Importer un XLSX (P&L, Fiche affaire, Facturation DF ou LIVE/Sales) — type détecté automatiquement"
+      title="Importer un XLSX (P&L, Fiche affaire, Facturation DF ou LIVE/Sales) ou un ZIP de classeurs — type détecté automatiquement. Fiches affaire : plusieurs fiches par onglets ou par ZIP."
       className={cx("btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer", busy && "opacity-60 pointer-events-none")}
     >
       <Upload size={14} aria-hidden="true" />
       {busy ? "Import…" : label}
-      <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX à importer" />
+      <input type="file" accept=".xlsx,.xls,.zip" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX ou ZIP à importer" />
     </label>
   );
 }
@@ -106,8 +107,10 @@ export function DataImportCard() {
   return (
     <Card title="Import de données (XLSX)" actions={<ImportButton />}>
       <p className="text-[13px] text-muted">
-        Chargez un export XLSX : le type est détecté automatiquement puis fusionné (upsert par clé,
-        ré-import sans doublon). Les agrégats sont recalculés dans la foulée.
+        Chargez un export XLSX (ou un ZIP de plusieurs classeurs) : le type est détecté automatiquement
+        puis fusionné (upsert par clé, ré-import sans doublon). Les agrégats sont recalculés dans la foulée.
+        <br />Import groupé de <b className="text-ink">fiches affaire</b> : plusieurs fiches par onglets
+        d'un même classeur, ou plusieurs classeurs dans un ZIP.
       </p>
       <ul className="mt-2 text-[13px] text-muted grid gap-1 sm:grid-cols-2">
         <li>• <b className="text-ink">P&amp;L</b> → Commandes · Rentabilité · Vue d'ensemble</li>

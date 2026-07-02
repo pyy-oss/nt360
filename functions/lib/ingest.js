@@ -6,7 +6,7 @@ const XLSX = require("xlsx");
 const { noAcc } = require("./ids");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
-const { parseFiche } = require("../parsers/ficheAffaire");
+const { parseFiche, parseFicheAll, sheetIsFiche } = require("../parsers/ficheAffaire");
 const { parseSalesData } = require("../parsers/salesData");
 const { parseLogistics } = require("../parsers/logistics");
 
@@ -21,10 +21,9 @@ function headerSet(ws) {
 }
 const has = (set, ...terms) => terms.some((t) => [...set].some((h) => h.includes(noAcc(t))));
 
+// Fiche détectée sur N'IMPORTE QUEL onglet → gère les classeurs multi-fiches (1 fiche/onglet).
 function isFiche(wb) {
-  const flat = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })
-    .flat().filter((v) => typeof v === "string").map(noAcc);
-  return flat.some((s) => s.includes("n° de fp") || s.includes("n de fp") || s.includes("prix de revient"));
+  return wb.SheetNames.some((n) => sheetIsFiche(wb.Sheets[n]));
 }
 function hasPnl(wb) {
   return wb.SheetNames.some((n) => {
@@ -85,11 +84,15 @@ function buildWrites(wb) {
 
   for (const kind of kinds) {
     if (kind === "fiche") {
-      const { sheet, bcLines } = parseFiche(wb);
-      if (!sheet.fp) { byKind.fiche = { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" }; continue; }
-      writes.push({ path: `projectSheets/${sheet._id}`, data: sheet });
-      bcLines.forEach((b) => writes.push({ path: `bcLines/${b._id}`, data: b }));
-      const rep = { rowsIn: bcLines.length + 1, rowsOk: bcLines.length + 1, rowsSkipped: 0 };
+      const fiches = parseFicheAll(wb); // une fiche par onglet (import groupé)
+      if (!fiches.length) { byKind.fiche = { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" }; continue; }
+      let ok = 0;
+      for (const { sheet, bcLines } of fiches) {
+        writes.push({ path: `projectSheets/${sheet._id}`, data: sheet });
+        bcLines.forEach((b) => writes.push({ path: `bcLines/${b._id}`, data: b }));
+        ok += bcLines.length + 1;
+      }
+      const rep = { rowsIn: ok, rowsOk: ok, rowsSkipped: 0, fiches: fiches.length };
       byKind.fiche = rep; rowsIn += rep.rowsIn; rowsOk += rep.rowsOk;
     } else {
       const { rows, report } = PARSERS[kind](wb);
