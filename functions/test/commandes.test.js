@@ -47,11 +47,11 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
     expect(c.pnlSource).toBe("manuel");
   });
   it("opp NON gagnée ignorée", () => expect(byFp["FP/2026/3"]).toBeUndefined());
-  it("P&L conservé si ni fiche ni opp gagnée (RAF P&L gardé, pnlSource=manuel)", () => {
+  it("P&L conservé si ni fiche ni opp gagnée ; RAF DÉRIVÉ = CAS − facturé (pnlSource=manuel)", () => {
     const c = byFp["FP/2026/9"];
     expect(c.source).toBe("pnl");
     expect(c.cas).toBe(300);
-    expect(c.raf).toBe(300);
+    expect(c.raf).toBe(300); // aucune facture sur ce FP → RAF = CAS
     expect(c.pnlSource).toBe("manuel");
   });
   it("fiche affaire → pnlSource=fiche", () => expect(byFp["FP/2026/1"].pnlSource).toBe("fiche"));
@@ -82,5 +82,31 @@ describe("mergeCommandes — garde-fous contre l'écrasement par 0", () => {
     expect(row.cas).toBe(500); // CAS P&L préservé
     expect(row.mb).toBe(120);
     expect(row.source).toBe("pnl"); // fiche vide ignorée
+  });
+});
+
+describe("mergeCommandes — RAF dérivé (CAS − facturé), facturation multi-exercices", () => {
+  it("RAF P&L ne garde PLUS le RAF Excel figé : recalcule sur les factures réelles", () => {
+    // P&L avec RAF Excel = 1000 (instantané avant facturation), puis 600 facturés → RAF réel = 400.
+    const orders = [{ fp: "FP/2024/1", client: "ACME", cas: 1000, raf: 1000, yearPo: 2024, source: "pnl" }];
+    const invoices = [{ fp: "FP/2024/1", amountHt: 600, date: "2025-02-01" }];
+    const c = mergeCommandes(orders, [], [], invoices);
+    expect(c[0].raf).toBe(400); // 1000 − 600 (et non 1000 figé)
+  });
+  it("CAS d'une année antérieure, facturation étalée sur plusieurs exercices → RAF net global", () => {
+    const orders = [{ fp: "FP/2023/7", client: "BETA", cas: 1000, raf: 800, yearPo: 2023, source: "pnl" }];
+    const invoices = [
+      { fp: "FP/2023/7", amountHt: 300, date: "2023-11-01" },
+      { fp: "FP/2023/7", amountHt: 250, date: "2024-05-01" },
+      { fp: "FP/2023/7", amountHt: 200, date: "2025-03-01" },
+    ];
+    const c = mergeCommandes(orders, [], [], invoices);
+    expect(c[0].raf).toBe(250); // 1000 − (300+250+200), toutes années confondues
+  });
+  it("surfacturation (Σfactures > CAS) → RAF borné à 0", () => {
+    const orders = [{ fp: "FP/2026/8", client: "GAMMA", cas: 500, raf: 500, yearPo: 2026, source: "pnl" }];
+    const invoices = [{ fp: "FP/2026/8", amountHt: 700, date: "2026-04-01" }];
+    const c = mergeCommandes(orders, [], [], invoices);
+    expect(c[0].raf).toBe(0);
   });
 });
