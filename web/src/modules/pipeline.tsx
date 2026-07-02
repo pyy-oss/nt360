@@ -6,7 +6,8 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { addOpportunity } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
+import { useFilters } from "../lib/filters";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
@@ -138,11 +139,13 @@ export const Am360: FC<Props> = () => {
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 export const OppList: FC<Props> = () => {
-  const { rows, loading } = useCollectionData<Opportunity>("opportunities");
+  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
+  const { match } = useFilters();
+  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]));
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
   const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
-  if (loading && !rows.length) return <CardSkeleton />;
+  if (loading && !allRows.length) return <CardSkeleton />;
   const top = [...rows].sort((a, b) => (b.weighted || 0) - (a.weighted || 0)).slice(0, 10);
   // Certitudes = opportunités ACTIVES (étapes 1..5) quasi-certaines (IdC ≥ 90 %), pas encore signées.
   const certitudes = rows
@@ -151,6 +154,7 @@ export const OppList: FC<Props> = () => {
   const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
   return (
     <div className="flex flex-col gap-4">
+      <FilterNote dims="BU / AM / client" />
       {canWrite && (
         <Card title="Ajouter une opportunité (saisie)">
           <div className="flex flex-wrap gap-2 items-center">

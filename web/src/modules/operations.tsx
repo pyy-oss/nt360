@@ -8,7 +8,8 @@ import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote } from "./_shared";
+import { useFilters } from "../lib/filters";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
@@ -18,16 +19,19 @@ const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number)
   return Object.entries(m).map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
 };
 export const PnlProjet: FC<Props> = () => {
-  const { rows } = useCollectionData<ProjectSheet>("projectSheets");
+  const { rows: allRows } = useCollectionData<ProjectSheet>("projectSheets");
   const { rows: bc } = useCollectionData<BcLine>("bcLines");
+  const { match } = useFilters();
+  const rows = allRows.filter((r) => match(r, ["client"])); // fiches : filtre client uniquement
   const canImport = useCanImport();
-  if (!rows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
+  if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
   const marge = rows.reduce((s, r) => s + (r.margin || 0), 0);
   const pmb = vente > 0 ? marge / vente : 0;
   return (
     <div className="flex flex-col gap-4">
+      <FilterNote dims="client" />
       <div className={grid4}>
         <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
         <Kpi label="Prix de vente" value={fmt(vente)} />
