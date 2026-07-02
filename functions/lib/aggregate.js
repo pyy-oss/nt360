@@ -45,12 +45,13 @@ async function recomputeAll(db, only) {
   const want = (k) => !only || only.includes(k);
   const stamp = { updatedAt: FieldValue.serverTimestamp() };
   const asOf = new Date().toISOString().slice(0, 10); // aujourd'hui : borne basse fenêtre D Prev (atterrissage)
+  const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
   const w = []; // écritures {path, data}
 
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } });
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy), fy: currentFy, ...stamp } });
@@ -63,9 +64,14 @@ async function recomputeAll(db, only) {
   for (const period of periods) {
     const inv = filterInvoices(invoices, period); // factures DATÉES dans la période = CAF figé sur l'exercice
     const ord = filterOrders(orders, period); // commandes signées dans la période (yearPo)
+    // Opportunités de la période = celles dont la D Prev (closingDate) tombe dans l'année sélectionnée
+    // → écarte les projections OBSOLÈTES ou NON MISES À JOUR (D Prev d'une autre année / absente).
+    // "Tout" = toutes les opps. Le pipeline et les Certitudes de la période partagent ce périmètre.
+    const oppP = period === "all" ? opps : opps.filter((o) => yearOf(o.closingDate) === period);
     // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
-    // (bf global, indépendant de la période) · Certitudes = pondéré global (opps non filtrées, à venir).
-    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, opps, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });
+    // (bf global, indépendant de la période) · Certitudes = pondéré des opps de la période (D Prev).
+    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord), ...stamp } });
     if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.client), ...stamp } });

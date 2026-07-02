@@ -28,7 +28,7 @@ export const Overview: FC<Props> = ({ period }) => {
       <div className="flex justify-end">{actions}</div>
       {/* Chaîne de valeur */}
       <Chain>
-        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · glissant" />
+        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · D Prev période" />
         <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} sub="prise de commande" />
         <Stage idx={3} label="Facturé · CAF" accent={T.emerald} value={fmt(data.facture)} sub="figé sur l'exercice" />
         <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes · glissant` : "glissant"} />
@@ -40,7 +40,7 @@ export const Overview: FC<Props> = ({ period }) => {
         <Kpi label="Avancement facturation" value={pct(data.ratios?.tauxFacturation)} sub="commandes de la période" />
       </div>
       <AlertsBanner />
-      <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Backlog</b> (RAF) et <b>Certitudes</b> (pondéré ≥ 90 %) sont <b>glissants</b> : ils cumulent toutes les commandes ouvertes / opportunités jusqu'à l'année en cours, indépendamment de la période.</Tip>
+      <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Backlog</b> (RAF) est <b>glissant</b> (toutes les commandes ouvertes, indépendant de la période). <b>Certitudes</b> = pondéré ≥ 90 % des opportunités dont la <b>D Prev</b> tombe dans la période sélectionnée (« Tout » = tout le pipeline) — écarte les projections obsolètes / non mises à jour.</Tip>
     </div>
   );
 };
