@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { addOpportunity } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton } from "./_shared";
 import type { PipelineSummary, Opportunity } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
@@ -92,7 +92,7 @@ export const OppList: FC<Props> = () => {
           colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(o.weighted)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
-      <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`}>
+      <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canWrite ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
         <ListView
           rows={rows}
           searchKeys={[(r) => r.client, (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
