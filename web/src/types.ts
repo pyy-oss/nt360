@@ -42,6 +42,8 @@ export interface FacturationSummary {
 export interface RentabiliteSummary {
   period?: string; mb?: number; cas?: number; pmb?: number;
   byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
+  byAm?: { am: string; cas: number; mb: number; pmb: number }[];
+  bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number }[];
 }
 
 export interface EntitySummary { period?: string; rows?: EntityRow[] }

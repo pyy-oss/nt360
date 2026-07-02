@@ -26,7 +26,22 @@ function rentabilite(orders) {
     bu, cas: casByBu[bu] || 0, mb: mbByBu[bu] || 0,
     pmb: casByBu[bu] > 0 ? (mbByBu[bu] || 0) / casByBu[bu] : 0,
   }));
-  return { mb, cas, pmb: cas > 0 ? mb / cas : 0, byBu, topClients: topN(groupSum(orders, (o) => o.client, (o) => o.mb)) };
+
+  // Marge par commercial (AM) : CAS / MB / %MB, du plus gros CAS au plus petit.
+  const casByAm = groupSum(orders, (o) => o.am || "—", (o) => o.cas);
+  const mbByAm = groupSum(orders, (o) => o.am || "—", (o) => o.mb);
+  const byAm = Object.keys({ ...casByAm, ...mbByAm })
+    .map((am) => ({ am, cas: casByAm[am] || 0, mb: mbByAm[am] || 0, pmb: casByAm[am] > 0 ? (mbByAm[am] || 0) / casByAm[am] : 0 }))
+    .sort((a, b) => b.cas - a.cas);
+
+  // Affaires à FAIBLE marge (chasse aux marges) : %MB croissant, sur commandes à CAS > 0.
+  const bottomAffaires = orders
+    .filter((o) => (o.cas || 0) > 0)
+    .map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.cas || 0, mb: o.mb || 0, pmb: (o.mb || 0) / o.cas }))
+    .sort((a, b) => a.pmb - b.pmb)
+    .slice(0, 10);
+
+  return { mb, cas, pmb: cas > 0 ? mb / cas : 0, byBu, byAm, bottomAffaires, topClients: topN(groupSum(orders, (o) => o.client, (o) => o.mb)) };
 }
 
 /** Indicateurs par entité (client ou BU) : CAS/Facturé/Backlog/Marge/%MB (§ modules 11-12). */
