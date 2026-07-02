@@ -16,11 +16,17 @@ export const Pipeline: FC<Props> = ({ period }) => {
   const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  // Pipeline de l'EXERCICE (indépendant du sélecteur de période) pour une couverture cohérente
+  // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
+  const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
   if (!data) return <EmptyState />;
   const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
-  // Couverture du reste-à-faire : combien de fois le pipeline pondéré couvre l'écart à l'objectif CAS.
+  // Couverture du reste-à-faire : combien de fois le pipeline pondéré (exercice) couvre l'écart à
+  // l'objectif CAS. Numérateur et dénominateur au MÊME périmètre (currentFy). null si pas d'objectif.
+  const hasObj = (att?.objectif || 0) > 0;
   const gap = Math.max((att?.objectif || 0) - (att?.realiseCas || 0), 0);
-  const coverage = gap > 0 ? (data.tot?.weighted || 0) / gap : null;
+  const coverage = hasObj && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
+  const coverageLabel = coverage != null ? `${coverage.toFixed(2)}×` : hasObj ? "atteint" : "—";
   const cb = data.closing?.buckets;
   const closingRows = cb ? [
     { name: "En retard", v: cb.retard?.pond || 0, sub: `${cb.retard?.count || 0} opp.` },
@@ -60,7 +66,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
       {data.closing && (
         <>
           <div className={grid4}>
-            <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : "—"} tone={coverage != null && coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé CAS)" />
+            <Kpi label="Couverture reste-à-faire" value={coverageLabel} tone={coverage == null ? (hasObj ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré exercice / (objectif − réalisé CAS)" />
             <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp. · D Prev dépassée`} />
             <Kpi label="À clôturer ce mois" value={fmt(cb?.mois?.pond)} tone="gold" sub={`${cb?.mois?.count ?? 0} opp. (pondéré)`} />
             <Kpi label="À clôturer ce trimestre" value={fmt(cb?.trim?.pond)} sub={`${cb?.trim?.count ?? 0} opp. (pondéré)`} />

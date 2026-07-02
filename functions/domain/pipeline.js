@@ -20,7 +20,7 @@ function closingAnalysis(active, asOf) {
   const B = { retard: mk(), mois: mk(), trim: mk(), plus: mk(), sans: mk() };
   const stale = [];
   for (const o of active) {
-    const d = o.closingDate;
+    const d = o.closingDate ? String(o.closingDate) : "";
     let key;
     if (!d) key = "sans";
     else if (d < today) key = "retard"; // clôture prévue déjà passée → à requalifier
