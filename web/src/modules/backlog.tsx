@@ -44,17 +44,18 @@ export const Prevision: FC<Props> = () => {
   const fy = att?.fy || cfg?.currentFy;
   return (
     <div className="flex flex-col gap-4">
+      {/* Composantes (chacune une seule fois) : le Pipeline projeté et le Backlog alimentent
+          les DEUX atterrissages — on ne les duplique plus. */}
       <div className={grid4}>
         <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
-        <Kpi label="Backlog écoulable (RAF)" value={fmt(backlog)} tone="steel" />
-        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
-        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="réalisé + pipeline projeté" />
-      </div>
-      <div className={grid4}>
         <Kpi label={`Facturé réalisé (FY ${fy || ""})`} value={fmt(factureN)} tone="emerald" />
-        <Kpi label="Backlog à facturer (RAF)" value={fmt(backlog)} tone="steel" />
+        <Kpi label="Backlog (RAF)" value={fmt(backlog)} tone="steel" sub="reste à facturer, glissant" />
         <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
-        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="facturé + backlog + pipeline projeté" />
+      </div>
+      {/* Atterrissages : les deux projections issues des composantes ci-dessus. */}
+      <div className={cols2}>
+        <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="Réalisé CAS + Pipeline projeté" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="Facturé + Backlog + Pipeline projeté" />
       </div>
       {att && (
         <>

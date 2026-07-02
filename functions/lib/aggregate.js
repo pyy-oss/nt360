@@ -64,10 +64,15 @@ async function recomputeAll(db, only) {
   for (const period of periods) {
     const inv = filterInvoices(invoices, period); // factures DATÉES dans la période = CAF figé sur l'exercice
     const ord = filterOrders(orders, period); // commandes signées dans la période (yearPo)
-    // Opportunités de la période = celles dont la D Prev (closingDate) tombe dans l'année sélectionnée
-    // → écarte les projections OBSOLÈTES ou NON MISES À JOUR (D Prev d'une autre année / absente).
-    // "Tout" = toutes les opps. Le pipeline et les Certitudes de la période partagent ce périmètre.
-    const oppP = period === "all" ? opps : opps.filter((o) => yearOf(o.closingDate) === period);
+    // Opportunités de la période, par D Prev (closingDate) — écarte les projections OBSOLÈTES /
+    // NON MISES À JOUR. Pour la FY COURANTE : même FENÊTRE GLISSANTE que l'atterrissage
+    // [aujourd'hui → fin d'année] afin d'exclure les D Prev DÉJÀ PASSÉES (cohérence Certitudes ⇔
+    // Atterrissage). Années passées : filtre annuel. "Tout" : toutes les opps.
+    const oppP = period === "all"
+      ? opps
+      : period === String(currentFy)
+        ? opps.filter((o) => o.closingDate && o.closingDate >= asOf && o.closingDate <= `${period}-12-31`)
+        : opps.filter((o) => yearOf(o.closingDate) === period);
     // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
     // (bf global, indépendant de la période) · Certitudes = pondéré des opps de la période (D Prev).
     if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });

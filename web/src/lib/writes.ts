@@ -1,6 +1,6 @@
 // Écritures gardées (BUILD_KIT §12, F5). Les rules restent la barrière opposable :
 // ces écritures échouent côté serveur si le rôle est insuffisant (UI désactivée en amont).
-import { doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, setDoc, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "./firebase";
 
@@ -25,14 +25,14 @@ export async function addOpportunity(data: {
   return id;
 }
 
-/** Fait évoluer le statut d'une ligne BC (seul champ modifiable, cf. rules). */
+/** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */
 export async function setBcStatus(id: string, status: string) {
-  await updateDoc(doc(db, "bcLines", id), { status });
+  await httpsCallable(functions, "setBcStatus")({ id, status });
 }
 
-/** Crée/met à jour une ligne de crédit fournisseur. */
+/** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
 export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
-  await setDoc(doc(db, "creditLines", id), { ...data, updatedAt: new Date().toISOString() }, { merge: true });
+  await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });
 }
 
 /** Identifiant déterministe d'un objectif (année × périmètre × valeur). */
