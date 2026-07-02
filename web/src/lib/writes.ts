@@ -81,7 +81,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export type ImportDeltaResult = { ok: boolean; kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number };
+export type ImportDeltaResult = { ok: boolean; kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number; files?: number };
 
 /** Importe un delta (XLSX au modèle connu) : upsert idempotent côté serveur + recompute. */
 export async function callImportDelta(file: File): Promise<ImportDeltaResult> {

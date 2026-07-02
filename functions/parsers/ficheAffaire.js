@@ -5,12 +5,21 @@ const XLSX = require("xlsx");
 const { fpKey, num, noAcc } = require("../lib/ids");
 const { safeId } = require("../lib/sheets");
 
+// Une feuille ressemble à une fiche affaire si elle porte « N° DE FP » ou « PRIX DE REVIENT ».
+function sheetIsFiche(ws) {
+  if (!ws) return false;
+  const flat = XLSX.utils.sheet_to_json(ws, { header: 1 })
+    .flat().filter((v) => typeof v === "string").map(noAcc);
+  return flat.some((s) => s.includes("n° de fp") || s.includes("n de fp") || s.includes("prix de revient"));
+}
+
 /**
- * @param {import('xlsx').WorkBook} wb classeur fiche affaire (1re feuille)
+ * Parse UNE feuille de fiche affaire.
+ * @param {import('xlsx').WorkSheet} ws feuille fiche affaire
  * @returns {{sheet: object, bcLines: object[]}}
  */
-function parseFiche(wb) {
-  const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+function parseFicheSheet(ws) {
+  const aoa = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     raw: true,
     defval: null,
@@ -108,4 +117,35 @@ function parseFiche(wb) {
   return { sheet, bcLines: bc };
 }
 
-module.exports = { parseFiche };
+/**
+ * Compat : parse la 1re feuille (un classeur = une fiche).
+ * @param {import('xlsx').WorkBook} wb
+ * @returns {{sheet: object, bcLines: object[]}}
+ */
+function parseFiche(wb) {
+  return parseFicheSheet(wb.Sheets[wb.SheetNames[0]]);
+}
+
+/**
+ * Parse TOUTES les fiches d'un classeur : une fiche par onglet (import groupé).
+ * Ne retient que les feuilles ressemblant à une fiche et dont le FP est renseigné.
+ * @param {import('xlsx').WorkBook} wb
+ * @returns {{sheet: object, bcLines: object[]}[]}
+ */
+function parseFicheAll(wb) {
+  const out = [];
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!sheetIsFiche(ws)) continue;
+    const r = parseFicheSheet(ws);
+    if (r.sheet.fp) out.push(r);
+  }
+  // Repli : classeur détecté « fiche » mais aucun onglet marqué → tenter la 1re feuille.
+  if (!out.length) {
+    const r = parseFicheSheet(wb.Sheets[wb.SheetNames[0]]);
+    if (r.sheet.fp) out.push(r);
+  }
+  return out;
+}
+
+module.exports = { parseFiche, parseFicheAll, parseFicheSheet, sheetIsFiche };

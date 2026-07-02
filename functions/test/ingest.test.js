@@ -51,6 +51,24 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
     expect(kinds).toEqual(["fiche"]);
     expect(writes.map((w) => w.path)).toEqual(["projectSheets/FP_2026_9", "bcLines/FP_2026_9_0"]);
   });
+  it("classeur multi-fiches (une fiche par onglet) → toutes les fiches écrites", () => {
+    const fiche = (fp, frn) => [
+      [null, null, null, null, null, "N° DE FP :", fp],
+      [null, null, "N°BC FRNS", "DESCRIPTION", "FOURNISSEUR", "TYPE", "DEVISE", "CHARGES EN DEVISE", "CHARGES EN XOF"],
+      [null, "Commande Frns 1", "BC1", "x", frn, "Matériel", "XOF", 500, 500],
+      [null, "TOTAL Commandes Frns", null, null, null, null, null, null, 500],
+    ];
+    const b = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(fiche("FP/2026/9", "AITEK")), "Fiche A");
+    XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(fiche("FP/2026/10", "WESTCON")), "Fiche B");
+    const { kinds, writes, report } = buildWrites(b);
+    expect(kinds).toEqual(["fiche"]);
+    expect(report.byKind.fiche.fiches).toBe(2);
+    expect(writes.map((w) => w.path)).toEqual([
+      "projectSheets/FP_2026_9", "bcLines/FP_2026_9_0",
+      "projectSheets/FP_2026_10", "bcLines/FP_2026_10_0",
+    ]);
+  });
   it("classeur multi-feuilles (P&L + LIVE + Facturation DF) → toutes les sources", () => {
     const b = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]), "P&L");
