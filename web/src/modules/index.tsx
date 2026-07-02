@@ -3,14 +3,14 @@
 import { type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 import { Overview } from "./overview";
 import { Pipeline, OppList, Am360 } from "./pipeline";
 import { Objectifs, Facturation, InvoiceList, Rentabilite } from "./finance";
 import { Backlog, Prevision, OrderList, Simulateur } from "./backlog";
-import { PnlProjet, Fournisseurs, BC, EntityView, Fp360 } from "./operations";
+import { PnlProjet, Fournisseurs, BC, EntityView, Fp360, DataQuality } from "./operations";
 import { Habilitations } from "./admin";
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
@@ -34,6 +34,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "bc", key: "bc", label: "Exécution BC", icon: ClipboardList, Component: BC },
   { id: "clients", key: "clients", label: "Clients", icon: Users, Component: Clients },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
+  { id: "dataquality", key: "overview", label: "Qualité données", icon: ShieldCheck, Component: DataQuality },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
 ];
@@ -45,6 +46,6 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
-  { label: "Référentiels", ids: ["clients", "domaines"] },
+  { label: "Référentiels", ids: ["clients", "domaines", "dataquality"] },
   { label: "Admin", ids: ["habilitations"] },
 ];

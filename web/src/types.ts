@@ -84,6 +84,11 @@ export type SupplierRow = { name: string; expo?: number; open?: number; encours?
 
 export type AlertItem = { type: string; severity: "high" | "medium" | "low"; count: number; message: string; refs?: string[] };
 export interface AlertsSummary { items?: AlertItem[]; fy?: number }
+export type QualityIssue = { type: string; severity: "high" | "medium" | "low"; count: number; label: string; refs?: string[] };
+export interface DataQualitySummary {
+  issues?: QualityIssue[]; score?: number;
+  counts?: { orders?: number; invoices?: number; opportunities?: number; bcLines?: number; projectSheets?: number };
+}
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
 export interface CommandesSummary { count?: number; rows?: Order[] }
