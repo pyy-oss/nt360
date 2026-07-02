@@ -9,8 +9,10 @@ import { addOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge } from "./_shared";
 import type { PipelineSummary, Opportunity } from "../types";
 
-export const Pipeline: FC<Props> = () => {
-  const { data } = useDocData<PipelineSummary>("summaries/pipeline");
+export const Pipeline: FC<Props> = ({ period }) => {
+  // Pipeline de la période : opportunités dont la D Prev tombe dans l'année sélectionnée
+  // (écarte les opps obsolètes / non mises à jour). "Tout" = tout le pipeline.
+  const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
   const canWrite = useCan("pipeline") === "write";
   const [f, setF] = useState({ client: "", am: "", bu: "ICT", amount: "", stage: "1", probability: "", closingDate: "" });
   const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data?.byStage?.[s]?.amount || 0, "Pondéré": data?.byStage?.[s]?.weighted || 0 }));
