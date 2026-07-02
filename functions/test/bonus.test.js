@@ -11,12 +11,13 @@ const INVOICES = [
   { fp: "FP/2026/1", date: "2026-01-01", amountHt: 600 },
   { fp: "FP/2025/1", date: "2025-01-01", amountHt: 400 },
 ];
-// Pondération de projection tiérée + fenêtre D Prev (asOf = 2026-03-01, fenêtre [03-01 .. 12-31]).
+// Pondération de projection tiérée + fenêtre D Prev = EXERCICE (les certitudes glissent :
+// une D Prev passée DANS l'année compte ; seuls N-1 et N+1+ sont exclus).
 const OPPS = [
-  { stage: 4, probability: 0.95, amount: 1000, closingDate: "2026-05-01" }, // ≥90% + fenêtre → 100% = 1000
-  { stage: 4, probability: 0.80, amount: 2000, closingDate: "2026-06-01" }, // 70–90% + fenêtre → 20% = 400
+  { stage: 4, probability: 0.95, amount: 1000, closingDate: "2026-05-01" }, // ≥90% + année → 100% = 1000
+  { stage: 4, probability: 0.80, amount: 2000, closingDate: "2026-06-01" }, // 70–90% + année → 20% = 400
   { stage: 4, probability: 0.50, amount: 999, closingDate: "2026-07-01" },  // IdC<70% → 0
-  { stage: 4, probability: 0.95, amount: 300, closingDate: "2026-02-01" },  // D Prev passée (avant asOf) → obsolète, exclu
+  { stage: 4, probability: 0.95, amount: 300, closingDate: "2026-02-01" },  // ≥90% D Prev passée DANS l'année → glisse → 100% = 300
   { stage: 4, probability: 0.95, amount: 500, closingDate: "2025-12-01" },  // année N-1 → exclu
   { stage: 4, probability: 0.95, amount: 800, closingDate: "2027-01-15" },  // année N+1 → exclu
   { stage: 6, probability: 1.0, amount: 400, closingDate: "2026-08-01" },   // gagné (non actif) → exclu
@@ -27,23 +28,23 @@ const ASOF = "2026-03-01";
 
 describe("atterrissage (§7)", () => {
   const a = atterrissage(ORDERS, INVOICES, OPPS, OBJ, 2026, ASOF);
-  it("pipeline projeté tiéré (100%≥90 · 20%≥70) + fenêtre D Prev → projeté CAS", () => {
+  it("pipeline projeté tiéré (100%≥90 · 20%≥70) sur l'exercice → projeté CAS", () => {
     expect(a.realiseCas).toBe(1200); // 1000 + 200 (yearPo 2026)
-    expect(a.pipelinePondere).toBe(1400); // 1000 (100%) + 400 (20% de 2000) ; obsolètes/N±1/<70%/non-actifs exclus
-    expect(a.projete).toBe(2600); // 1200 + 1400
+    expect(a.pipelinePondere).toBe(1700); // 1000 + 300 (≥90% de l'année, dont D Prev passée) + 400 (20% de 2000) ; N±1/<70%/non-actifs exclus
+    expect(a.projete).toBe(2900); // 1200 + 1700
   });
   it("projeté CAF = facturé réalisé + backlog (RAF) + pipeline projeté", () => {
     expect(a.backlog).toBe(700); // RAF ouverts : 400 (FP/2026/1) + 300 (FP/2022/9)
-    expect(a.cafProjete).toBe(2700); // 600 (facturé FY) + 700 (backlog) + 1400 (pipeline projeté)
+    expect(a.cafProjete).toBe(3000); // 600 (facturé FY) + 700 (backlog) + 1700 (pipeline projeté)
   });
   it("atterrissage CAF vs cible de facturation (targetInvoiced)", () => {
     expect(a.objectifCaf).toBe(4000);
-    expect(a.ecartCaf).toBe(-1300); // 2700 − 4000
-    expect(a.probaAtteinteCaf).toBeCloseTo(2700 / 4000, 6);
+    expect(a.ecartCaf).toBe(-1000); // 3000 − 4000
+    expect(a.probaAtteinteCaf).toBeCloseTo(3000 / 4000, 6);
   });
   it("écart vs objectif CAS + N vs N-1", () => {
     expect(a.objectif).toBe(4000);
-    expect(a.ecart).toBe(-1400); // 2600 − 4000
+    expect(a.ecart).toBe(-1100); // 2900 − 4000
     expect(a.factureN).toBe(600);
     expect(a.factureN1).toBe(400);
     expect(a.croissanceFacture).toBeCloseTo(0.5, 6);

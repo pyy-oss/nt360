@@ -28,14 +28,14 @@ const projectionWeight = (o) => {
 function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
-  // Fenêtre D Prev : clôture prévue entre aujourd'hui (asOf) et la fin de l'exercice.
-  // → exclut les projections OBSOLÈTES (D Prev déjà passée) et celles prévues en N+1 ou plus.
-  const lo = asOf || `${fy}-01-01`;
-  const hi = `${fy}-12-31`;
-  const inWindow = (o) => o.closingDate && o.closingDate >= lo && o.closingDate <= hi;
+  // Fenêtre D Prev = l'EXERCICE (D Prev dans l'année {fy}). Les certitudes GLISSENT jusqu'à
+  // l'année en cours : une D Prev déjà PASSÉE dans l'exercice compte toujours (elle n'est pas
+  // obsolète — elle est en retard mais sur l'année). On exclut seulement l'obsolète hors année :
+  // D Prev en N-1 (année révolue) ou en N+1 et au-delà (non encore dans l'exercice).
+  const inYear = (o) => yearOf(o.closingDate) === String(fy);
   const isActive = (o) => o.stage >= 1 && o.stage <= 5; // ni gagné (6), ni perdu (7), ni suspendu (8)
-  // Pipeline de projection : opps actives dans la fenêtre, pondérées 100 %/20 % par certitude.
-  const pipelinePondere = sum(opps.filter((o) => isActive(o) && inWindow(o)), projectionWeight);
+  // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude.
+  const pipelinePondere = sum(opps.filter((o) => isActive(o) && inYear(o)), projectionWeight);
   const objGlobal = objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global"));
   const objectif = sum(objGlobal, (o) => o.targetCas);       // cible CAS (prise de commande)
   const objectifCaf = sum(objGlobal, (o) => o.targetInvoiced); // cible CAF (facturation)
