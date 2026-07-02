@@ -233,6 +233,27 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, files: files.length };
 });
 
+// --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.
+// Recalcule ensuite (rattachement, taux de facturation, RAF dérivé des commandes opp/fiche). ---
+exports.setInvoiceFp = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
+  const { fpKey } = require("./lib/ids");
+  const id = String(req.data?.id || "");
+  if (!id) throw new HttpsError("invalid-argument", "id facture requis");
+  const fp = fpKey(req.data?.fp) || null;
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP invalide (attendu FP/AAAA/NNNNN)");
+  const ref = db.doc(`invoices/${id}`);
+  if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
+  await ref.set({ fp, linked: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_invoice_fp", module: "facturation", entity: "invoice", entityId: id,
+    detail: { fp }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, id, fp };
+});
+
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
 // --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les
