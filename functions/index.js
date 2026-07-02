@@ -234,6 +234,42 @@ exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) 
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
+// --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
+// (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
+// « Recalculer » manuel. Le rôle est revérifié côté serveur. ---
+exports.setBcStatus = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  const { id, status } = req.data || {};
+  if (!id || !BC_STAGES.includes(status)) throw new HttpsError("invalid-argument", "id + statut (∈ cycle BC) requis");
+  await db.doc(`bcLines/${id}`).set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "bc_status", module: "bc", entity: "bcLine", entityId: id,
+    detail: { status }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["suppliers", "alerts"]);
+  return { ok: true };
+});
+
+const SUPPLIER_WRITE_ROLES = ["direction", "achats"];
+exports.upsertCreditLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!SUPPLIER_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit fournisseurs requis");
+  // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
+  const id = String(req.data?.id || "").trim().toUpperCase();
+  if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
+  await db.doc(`creditLines/${id}`).set({
+    name: id, authorized: Number(req.data?.authorized) || 0, outstanding: Number(req.data?.outstanding) || 0,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "credit_line", module: "fournisseurs", entity: "creditLine", entityId: id,
+    detail: { authorized: req.data?.authorized, outstanding: req.data?.outstanding }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["suppliers", "alerts"]);
+  return { ok: true };
+});
+
 // --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis
 // mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
 // avant enregistrement via addBcLine. Ne persiste rien. ---
