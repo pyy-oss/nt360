@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-const { fpKey, num, cleanBu, noAcc, cleanName } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear } = require("../lib/ids");
+
+describe("plausibleYear — fenêtre glissante (rejet sentinelles)", () => {
+  const cur = new Date().getFullYear();
+  it("rejette les sentinelles et hors plage", () => {
+    expect(plausibleYear(1900)).toBe(0);
+    expect(plausibleYear(1899)).toBe(0);
+    expect(plausibleYear(0)).toBe(0);
+    expect(plausibleYear("abc")).toBe(0);
+    expect(plausibleYear(2010)).toBe(0); // < 2015
+  });
+  it("accepte l'année courante et jusqu'à +3 ans (glissant, pas de 2030 codé en dur)", () => {
+    expect(plausibleYear(cur)).toBe(cur);
+    expect(plausibleYear(cur + 3)).toBe(cur + 3);
+    expect(plausibleYear(cur + 4)).toBe(0);
+    expect(plausibleYear("2015")).toBe(2015);
+  });
+});
 
 // Socle F0 : garde-fous des helpers déterministes (BUILD_KIT §18.1).
 describe("fpKey — normalisation clé d'or N° FP", () => {

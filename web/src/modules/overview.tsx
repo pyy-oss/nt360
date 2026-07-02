@@ -2,7 +2,7 @@
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
 import { useState, type FC } from "react";
 import { useDocData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useCanExport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
@@ -35,11 +35,12 @@ export const Overview: FC<Props> = ({ period }) => {
   const { data: rec } = useDocData<ReceivablesSummary>("summaries/receivables");
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const canWrite = useCan("overview") === "write";
+  const canExport = useCanExport();
   const [url, setUrl] = useState<string | null>(null);
   const actions = (
     <div className="flex gap-2 items-center">
       {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
-      <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />
+      {canExport && <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />}
       {url && <a className="text-gold text-xs underline" href={url} target="_blank" rel="noreferrer">Télécharger</a>}
     </div>
   );

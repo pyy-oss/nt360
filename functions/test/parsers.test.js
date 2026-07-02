@@ -224,6 +224,15 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     expect(r.status).toBe("livre");
     expect(r.source).toBe("logistics");
   });
+  it("deux lignes d'un même BC de MONTANTS différents ne se confondent plus (clé inclut le montant)", () => {
+    const wb2 = wbFromRows("PO List", [
+      { "Opp ID": "FP/2024/9", "PO N°": "BC/9", Fournisseur: "ACME", Description: "Switch", "Montant XOF": 100 },
+      { "Opp ID": "FP/2024/9", "PO N°": "BC/9", Fournisseur: "ACME", Description: "Switch", "Montant XOF": 250 },
+    ]);
+    const out = parseLogistics(wb2).rows;
+    expect(out).toHaveLength(2); // conservées séparément (avant : « dernier gagne » → 1)
+    expect(out.reduce((s, r) => s + r.amountXof, 0)).toBe(350);
+  });
   it("mapBcStatus : cycle BC (a_emettre/emis/livre/facture/solde)", () => {
     expect(mapBcStatus("1- Non commandé")).toBe("a_emettre");
     expect(mapBcStatus("2- Commande placée")).toBe("emis");
