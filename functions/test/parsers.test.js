@@ -152,3 +152,40 @@ describe("parseFiche → projectSheets + bcLines (§18.4, contrôle PAM-BF)", ()
     expect(bcLines[0]._id).toBe("FP_2026_13542_0"); // FP sanitisé (pas de '/' dans l'ID)
   });
 });
+
+describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
+  const { parseLogistics, mapBcStatus } = require("../parsers/logistics");
+  const wb = wbFromRows("PO List", [
+    { "Opp ID": "FP/2024/10855", Pays: "CI", Customer: "SICMA", "PO N°": "BC N° 06457", Fournisseur: "kukuza", Nature: "Hardware", Description: "Routeur", Montant: 370000, Currency: "XOF", Statut: "7-Livraison totale", "Montant XOF": 370000 },
+    { "Opp ID": "FP/2024/1", Customer: "X", "PO N°": "BC/2024/2", Fournisseur: "FOUR", Nature: "Licence", Statut: "2- Commande placée", "Montant XOF": 1000 },
+    { Pays: "CI" }, // ni n° BC, ni fournisseur, ni montant → ignorée
+  ]);
+  const { rows, report } = parseLogistics(wb);
+
+  it("détectée comme kind logistics via buildWrites", () => {
+    const { detectKinds } = require("../lib/ingest");
+    expect(detectKinds(wb)).toContain("logistics");
+  });
+  it("ignore les lignes totalement vides", () => {
+    expect(report.rowsIn).toBe(3);
+    expect(rows).toHaveLength(2);
+  });
+  it("mappe les champs clés + fournisseur en MAJ", () => {
+    const r = rows.find((x) => x.bcNumber === "BC N° 06457");
+    expect(r.fp).toBe("FP/2024/10855");
+    expect(r.supplier).toBe("KUKUZA");
+    expect(r.expenseType).toBe("Hardware");
+    expect(r.amountXof).toBe(370000);
+    expect(r.status).toBe("livre");
+    expect(r.source).toBe("logistics");
+  });
+  it("mapBcStatus : cycle BC (a_emettre/emis/livre/facture/solde)", () => {
+    expect(mapBcStatus("1- Non commandé")).toBe("a_emettre");
+    expect(mapBcStatus("2- Commande placée")).toBe("emis");
+    expect(mapBcStatus("6- Dedouanement")).toBe("emis");
+    expect(mapBcStatus("Livrée")).toBe("livre");
+    expect(mapBcStatus("2- Facturé")).toBe("facture");
+    expect(mapBcStatus("Solde")).toBe("solde");
+    expect(mapBcStatus("")).toBe("a_emettre");
+  });
+});

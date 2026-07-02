@@ -8,8 +8,9 @@ const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
 const { parseFiche } = require("../parsers/ficheAffaire");
 const { parseSalesData } = require("../parsers/salesData");
+const { parseLogistics } = require("../parsers/logistics");
 
-const PARSERS = { pnl: parsePnl, facturationDf: parseFacturationDf, fiche: parseFiche, salesData: parseSalesData };
+const PARSERS = { pnl: parsePnl, facturationDf: parseFacturationDf, fiche: parseFiche, salesData: parseSalesData, logistics: parseLogistics };
 
 function headerSet(ws) {
   if (!ws) return new Set();
@@ -44,6 +45,13 @@ function hasDf(wb) {
       || has(h, "nom d'affichage du partenaire");
   });
 }
+// Suivi logistique des BC fournisseurs (feuille « PO List ») : n° de BC + fournisseur + nature.
+function hasLogistics(wb) {
+  return wb.SheetNames.some((n) => {
+    const h = headerSet(wb.Sheets[n]);
+    return has(h, "po n", "n° bc", "n bc") && has(h, "fournisseur") && has(h, "nature", "montant xof");
+  });
+}
 
 /** Types de sources présents dans le classeur (fiche est exclusive). */
 function detectKinds(wb) {
@@ -52,6 +60,7 @@ function detectKinds(wb) {
   if (hasPnl(wb)) kinds.push("pnl");
   if (hasLive(wb)) kinds.push("salesData");
   if (hasDf(wb)) kinds.push("facturationDf");
+  if (hasLogistics(wb)) kinds.push("logistics");
   return kinds;
 }
 
@@ -61,7 +70,7 @@ function detectKind(wb) {
 }
 
 function pathFor(kind, id) {
-  return { pnl: `orders/${id}`, facturationDf: `invoices/${id}`, salesData: `opportunities/${id}` }[kind];
+  return { pnl: `orders/${id}`, facturationDf: `invoices/${id}`, salesData: `opportunities/${id}`, logistics: `bcLines/${id}` }[kind];
 }
 
 /**

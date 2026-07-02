@@ -179,6 +179,61 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   return { ok: true, kinds, rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0 };
 });
 
+// --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
+// PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
+const BC_WRITE_ROLES = ["direction", "pmo", "achats"];
+const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
+
+exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  const { fpKey } = require("./lib/ids");
+  const { hashId } = require("./lib/sheets");
+  const f = req.data?.fields || {};
+  const supplier = String(f.supplier || "").replace(/\s+/g, " ").trim().toUpperCase();
+  const bcNumber = String(f.bcNumber || "").replace(/\s+/g, " ").trim();
+  if (!supplier && !bcNumber) throw new HttpsError("invalid-argument", "fournisseur ou n° BC requis");
+
+  const fp = fpKey(f.fp) || null;
+  const description = String(f.description || "").trim();
+  const status = BC_STAGES.includes(f.status) ? f.status : "a_emettre";
+  const amount = Number(f.amount) || 0;
+  const id = "bc_" + hashId(fp, bcNumber, supplier, description);
+  const doc = {
+    fp, bcNumber, supplier,
+    customer: String(f.customer || "").replace(/\s+/g, " ").trim().toUpperCase(),
+    country: String(f.country || "").trim(),
+    expenseType: String(f.expenseType || "").trim(),
+    description,
+    currency: String(f.currency || "XOF").trim() || "XOF",
+    amount,
+    amountXof: Number(f.amountXof) || amount,
+    status, statusRaw: String(f.statusRaw || status),
+    dateIn: f.dateIn || null,
+    source: "bc_unitaire",
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  let pdfKey = null;
+  if (req.data?.pdfB64) {
+    try {
+      pdfKey = `bc/${id}.pdf`;
+      await getStorage().bucket(IMPORTS_BUCKET).file(pdfKey).save(Buffer.from(req.data.pdfB64, "base64"), { contentType: "application/pdf" });
+      doc.pdfKey = `${IMPORTS_BUCKET}/${pdfKey}`;
+    } catch (e) {
+      logger.warn("addBcLine: PDF non stocké", { msg: e.message }); pdfKey = null;
+    }
+  }
+
+  await db.doc(`bcLines/${id}`).set(doc, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "add_bc", module: "bc", entity: "bcLine", entityId: id,
+    detail: { bcNumber, supplier, fp }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["suppliers", "alerts"]);
+  return { ok: true, id, pdfStored: !!pdfKey };
+});
+
 // --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
 exports.exportReport = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");

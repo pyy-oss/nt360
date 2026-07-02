@@ -72,7 +72,7 @@ jobs:
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:syncSalesData,functions:scheduledFirestoreExport" \
               --project "$GCLOUD_PROJECT" --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi

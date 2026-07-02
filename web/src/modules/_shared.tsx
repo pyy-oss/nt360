@@ -56,6 +56,7 @@ const IMPORT_KIND_LABEL: Record<string, string> = {
   fiche: "Fiche affaire (P&L Projet + BC)",
   facturationDf: "Factures",
   salesData: "Pipeline / Opportunités",
+  logistics: "BC fournisseurs (Exécution BC)",
 };
 
 // Bouton d'import d'un fichier XLSX (modèle reconnu automatiquement). L'upsert serveur est

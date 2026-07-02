@@ -90,6 +90,19 @@ export async function callImportDelta(file: File): Promise<ImportDeltaResult> {
   return res.data as ImportDeltaResult;
 }
 
+export type BcLineFields = {
+  bcNumber?: string; supplier?: string; fp?: string; customer?: string; country?: string;
+  expenseType?: string; description?: string; currency?: string; amount?: number; amountXof?: number; status?: string;
+  dateIn?: string;
+};
+
+/** Ajoute un BC fournisseur unitaire (mode « Unitaire / PDF ») + PDF joint optionnel. */
+export async function callAddBcLine(fields: BcLineFields, pdf?: File | null) {
+  const pdfB64 = pdf ? await fileToBase64(pdf) : undefined;
+  const res = await httpsCallable(functions, "addBcLine")({ fields, pdfB64, filename: pdf?.name });
+  return res.data as { ok: boolean; id: string; pdfStored: boolean };
+}
+
 /** Génère l'export one-pager CODIR (XLSX) et renvoie l'URL signée. */
 export async function callExportReport(period: string) {
   const res = await httpsCallable(functions, "exportReport")({ period });
