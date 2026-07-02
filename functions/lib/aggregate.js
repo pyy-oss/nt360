@@ -11,6 +11,7 @@ const { atterrissage } = require("../domain/atterrissage");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
 const { cashflow } = require("../domain/cashflow");
+const { am360 } = require("../domain/am360");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 
@@ -69,6 +70,8 @@ async function recomputeAll(db, only) {
   if (want("facturation") || want("cashflow")) w.push({ path: "summaries/cashflow", data: { ...cashflow(invoices, orders, asOf), ...stamp } });
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf);
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
+  // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
+  if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
   // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
   if (want("commandes") || want("overview")) w.push({ path: "summaries/commandes", data: {

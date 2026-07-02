@@ -20,6 +20,7 @@ service cloud.firestore {
         : id.matches('cashflow.*') ? 'facturation'
         : id.matches('rentabilite.*') ? 'rentabilite'
         : id.matches('pipeline.*') ? 'pipeline'
+        : id.matches('ams.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'
         : id.matches('atterrissage.*') ? 'overview'
         : id.matches('backlog.*') ? 'backlog'

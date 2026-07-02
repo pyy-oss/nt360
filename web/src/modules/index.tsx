@@ -3,11 +3,11 @@
 import { type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 import { Overview } from "./overview";
-import { Pipeline, OppList } from "./pipeline";
+import { Pipeline, OppList, Am360 } from "./pipeline";
 import { Objectifs, Facturation, InvoiceList, Rentabilite } from "./finance";
 import { Backlog, Prevision, OrderList, Simulateur } from "./backlog";
 import { PnlProjet, Fournisseurs, BC, EntityView, Fp360 } from "./operations";
@@ -20,6 +20,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
   { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },
+  { id: "am360", key: "pipeline", label: "AM 360°", icon: UserRound, Component: Am360 },
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", icon: Target, Component: Objectifs },
   { id: "facturation", key: "facturation", label: "Facturation", icon: Receipt, Component: Facturation },
   { id: "invoicelist", key: "facturation", label: "Factures", icon: FileSpreadsheet, Component: InvoiceList },
@@ -40,7 +41,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
 export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Cockpit", ids: ["overview"] },
-  { label: "Commercial", ids: ["pipeline", "opplist"] },
+  { label: "Commercial", ids: ["pipeline", "opplist", "am360"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
