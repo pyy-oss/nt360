@@ -31,6 +31,18 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       </div>
+      <Card title="Conversion par commercial (AM)">
+        {(data.byAmConv || []).length ? (
+          <Table columns={[
+            colText("AM", (r) => r.am, (r) => r.am),
+            colNum("Actif", (r) => r.activeCount, (r) => r.activeCount),
+            colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
+            colNum("Gagné", (r) => r.won, (r) => r.won),
+            colNum("Perdu", (r) => r.lost, (r) => r.lost),
+            colNum("Taux transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
+          ]} rows={data.byAmConv || []} />
+        ) : <EmptyState label="Pas de commercial renseigné." />}
+      </Card>
     </div>
   );
 };
