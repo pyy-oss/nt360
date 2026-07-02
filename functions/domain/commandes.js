@@ -24,10 +24,11 @@ function mergeCommandes(orders, opps, sheets, invoices) {
   const byFp = new Map();
   const merge = (fp, data) => { if (!fp) return; byFp.set(fp, { ...(byFp.get(fp) || { fp }), ...data }); };
 
-  // 1. P&L (base la plus faible).
-  for (const o of orders || []) if (o.fp) merge(o.fp, { ...o });
+  // 1. P&L (base la plus faible). pnlSource = "manuel" : la marge/coût vient de l'import P&L Excel.
+  for (const o of orders || []) if (o.fp) merge(o.fp, { ...o, pnlSource: "manuel" });
 
-  // 2. Opportunités GAGNÉES (stage 6) → commandes ; écrasent le P&L.
+  // 2. Opportunités GAGNÉES (stage 6) → commandes ; écrasent le CAS du P&L.
+  //    On CONSERVE la marge P&L existante (elle n'est pas connue de l'opp) et sa provenance.
   for (const o of opps || []) {
     if ((o.stage || 0) !== 6) continue;
     const fp = fpKey(o.fp);
@@ -35,13 +36,16 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     const prev = byFp.get(fp) || {};
     merge(fp, {
       fp, client: o.client, bu: o.bu || prev.bu, am: o.am,
-      cas: o.amount || 0, mb: 0,
+      cas: o.amount || 0,
+      mb: prev.mb || 0, costTotal: prev.costTotal ?? null, marginPct: prev.marginPct ?? null,
       yearPo: Number(yearOf(o.closingDate)) || yearOfFp(fp) || prev.yearPo || 0,
       suppliers: prev.suppliers || [], source: "opp_won",
+      pnlSource: prev.pnlSource || null, // origine de la marge si un P&L existait
     });
   }
 
   // 3. Fiches affaire → écrasent TOUT (client, AM, affaire, CAS = vente, marge, coût).
+  //    pnlSource = "fiche" : la marge/coût vient de la fiche affaire.
   for (const s of sheets || []) {
     const fp = fpKey(s.fp);
     if (!fp) continue;
@@ -50,7 +54,7 @@ function mergeCommandes(orders, opps, sheets, invoices) {
       fp, client: s.client || prev.client, affaire: s.affaire, am: s.commercial || prev.am,
       cas: s.saleTotal || 0, mb: s.margin || 0, costTotal: s.costTotal, marginPct: s.marginPct,
       bu: prev.bu, yearPo: prev.yearPo || yearOfFp(fp) || 0,
-      suppliers: prev.suppliers || [], source: "fiche",
+      suppliers: prev.suppliers || [], source: "fiche", pnlSource: "fiche",
     });
   }
 

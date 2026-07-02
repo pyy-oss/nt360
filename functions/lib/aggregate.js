@@ -73,7 +73,7 @@ async function recomputeAll(db, only) {
     rows: orders.map((o) => ({
       fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
       cas: o.cas || 0, raf: o.raf || 0, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null,
-      yearPo: o.yearPo || 0, source: o.source || null,
+      yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
     })),
     ...stamp,
   } });
