@@ -98,6 +98,17 @@ describe("mergeCommandes — RAF P&L curaté (Excel) vs dérivé (opp/fiche)", (
     const c = mergeCommandes(orders, [], [], invoices);
     expect(c[0].raf).toBe(400);
   });
+  it("opp gagnée AYANT écrasé un P&L → garde le RAF Excel curaté (pas de recalcul)", () => {
+    const orders = [{ fp: "FP/2026/7", client: "PNL", cas: 600, raf: 100, mb: 120, yearPo: 2026, source: "pnl" }];
+    const opps = [{ fp: "FP/2026/7", client: "OPP", am: "AM", amount: 700, stage: 6, closingDate: "2026-08-01" }];
+    const invoices = [{ fp: "FP/2026/7", amountHt: 50 }]; // facturation partielle
+    const c = mergeCommandes(orders, opps, [], invoices);
+    const row = c.find((x) => x.fp === "FP/2026/7");
+    expect(row.source).toBe("opp_won");
+    expect(row.cas).toBe(700);         // CAS de l'opp
+    expect(row.raf).toBe(100);         // RAF Excel du P&L conservé (et non 700 − 50 = 650)
+    expect(row.pnlSource).toBe("manuel");
+  });
   it("opp gagnée / fiche (sans RAF Excel) → dérivé, borné à 0 si surfacturé", () => {
     const opps = [{ fp: "FP/2026/2", client: "BETA", amount: 1000, stage: 6, closingDate: "2026-06-01" }];
     const sheets = [{ fp: "FP/2026/9", client: "SAFINE", saleTotal: 500, margin: 50 }];

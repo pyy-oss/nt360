@@ -66,12 +66,12 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     });
   }
 
-  // RAF : commande P&L pure → « RAF total » CURATÉ de l'Excel (valeur métier fiable) ; sinon
-  // (opp gagnée / fiche, ou P&L sans RAF) → dérivé max(CAS − Σfactures du FP, 0). On ne recalcule
-  // PAS le RAF des P&L : le rattachement facturation→FP étant partiel, CAS − facturé gonflerait
-  // le backlog.
+  // RAF : dès qu'une BASE P&L existe pour le FP (pnlSource === "manuel"), on garde son « RAF total »
+  // CURATÉ de l'Excel — MÊME si une opp gagnée a écrasé le CAS (précédence opp > P&L). Sinon
+  // (opp gagnée SANS P&L, fiche, ou P&L sans RAF) → dérivé max(CAS − Σfactures du FP, 0). Le
+  // rattachement facturation→FP étant partiel, CAS − facturé gonflerait le backlog des P&L.
   return [...byFp.values()].map((o) => {
-    const raf = (o.source === "pnl" && o.raf != null)
+    const raf = (o.raf != null && o.pnlSource === "manuel")
       ? o.raf
       : Math.max((o.cas || 0) - (billed[o.fp] || 0), 0);
     return { ...o, raf };
