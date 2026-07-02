@@ -1,6 +1,6 @@
 // Écritures gardées (BUILD_KIT §12, F5). Les rules restent la barrière opposable :
 // ces écritures échouent côté serveur si le rôle est insuffisant (UI désactivée en amont).
-import { doc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "./firebase";
 
@@ -35,13 +35,21 @@ export async function upsertCreditLine(id: string, data: { authorized: number; o
   await setDoc(doc(db, "creditLines", id), { ...data, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
-/** Crée/met à jour un objectif annuel. */
+/** Identifiant déterministe d'un objectif (année × périmètre × valeur). */
+export const objectiveId = (o: { fiscalYear: number; scope?: string; scopeValue?: string }) =>
+  `${o.fiscalYear}_${o.scope || "global"}_${o.scopeValue || "all"}`;
+
+/** Crée/met à jour un objectif annuel (périmètre : global / bu / commercial / client). */
 export async function upsertObjective(o: {
-  fiscalYear: number; scope: string; scopeValue: string;
-  targetCas: number; targetInvoiced: number; targetMargin: number;
+  fiscalYear: number; scope: string; scopeValue: string; label?: string;
+  targetCas: number; targetInvoiced: number; targetMargin: number; targetMarginPct?: number;
 }) {
-  const id = `${o.fiscalYear}_${o.scope || "global"}_${o.scopeValue || "all"}`;
-  await setDoc(doc(db, "objectives", id), o, { merge: true });
+  await setDoc(doc(db, "objectives", objectiveId(o)), o, { merge: true });
+}
+
+/** Supprime un objectif. */
+export async function deleteObjective(id: string) {
+  await deleteDoc(doc(db, "objectives", id));
 }
 
 /** Met à jour la matrice de droits (profil habilitations). */

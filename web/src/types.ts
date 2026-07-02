@@ -61,7 +61,10 @@ export type Invoice = { id?: string; numero?: string; fp?: string; client?: stri
 export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
-export type Objective = { id?: string; fiscalYear?: number; scope?: string; scopeValue?: string; targetCas?: number; targetInvoiced?: number; targetMargin?: number };
+export type Objective = {
+  id?: string; label?: string; fiscalYear?: number; scope?: string; scopeValue?: string;
+  targetCas?: number; targetInvoiced?: number; targetMargin?: number; targetMarginPct?: number;
+};
 export type UserRow = { id?: string; email?: string; name?: string; active?: boolean };
 
 export type PeriodsConfig = { available?: string[]; currentFy?: number };
