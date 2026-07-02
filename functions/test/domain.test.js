@@ -131,6 +131,14 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(r.cas).toBe(2300);
     expect(r.pmb).toBeCloseTo(470 / 2300, 6);
   });
+  it("rentabilité byAm + bottomAffaires (marges croissantes)", () => {
+    const r = rentabilite(ORDERS);
+    expect(r.byAm.length).toBeGreaterThanOrEqual(1);
+    expect(r.byAm.reduce((s, a) => s + a.cas, 0)).toBe(2300);
+    expect(r.bottomAffaires).toHaveLength(3);
+    expect(r.bottomAffaires[0].pmb).toBeLessThanOrEqual(r.bottomAffaires[2].pmb); // trié marge croissante
+    expect(r.bottomAffaires[0].pmb).toBeCloseTo(0.20, 4); // FP/2025/2 ou FP/2026/3 (0.20)
+  });
   it("byEntity client agrège cas/facturé/backlog", () => {
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
     const acme = rows.find((r) => r.key === "ACME");

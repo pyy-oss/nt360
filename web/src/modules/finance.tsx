@@ -237,8 +237,25 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         <Kpi label="CAS" value={fmt(data.cas)} />
         <Kpi label="%MB" value={pct(data.pmb)} />
       </div>
-      <Card title="CAS vs MB par domaine">
-        <GroupedBars data={(data.byBu || []).map((b) => ({ name: b.bu, CAS: b.cas, MB: b.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.plum, name: "MB" }]} />
+      <div className={cols2}>
+        <Card title="CAS vs MB par domaine">
+          <GroupedBars data={(data.byBu || []).map((b) => ({ name: b.bu, CAS: b.cas, MB: b.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.plum, name: "MB" }]} />
+        </Card>
+        <Card title="CAS vs MB par commercial (AM)">
+          {(data.byAm || []).length
+            ? <GroupedBars data={(data.byAm || []).slice(0, 10).map((a) => ({ name: a.am, CAS: a.cas, MB: a.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.gold, name: "MB" }]} />
+            : <EmptyState label="Pas de commercial renseigné." />}
+        </Card>
+      </div>
+      <Card title="Affaires à faible marge (à surveiller)">
+        <Table columns={[
+          colText("FP", (a) => a.fp || "—", (a) => a.fp || ""),
+          colText("Client", (a) => a.client || "—", (a) => a.client || ""),
+          colText("AM", (a) => a.am || "—", (a) => a.am || ""),
+          colNum("CAS", (a) => money(a.cas), (a) => a.cas),
+          colNum("MB", (a) => money(a.mb), (a) => a.mb),
+          colNum("%MB", (a) => <Badge tone={(a.pmb < 0.1 ? "clay" : a.pmb < 0.2 ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
+        ]} rows={data.bottomAffaires || []} empty="Aucune commande à CAS positif." />
       </Card>
       <Card title="Top clients (marge)"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
     </div>
