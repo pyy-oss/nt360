@@ -58,7 +58,13 @@ describe("alerts", () => {
     { fp: "FP/2026/3", amountHt: 300, linked: true }, // Σ=300 > cas 200 → surfacturation
     { fp: "FP/9999/9", amountHt: 50, linked: false }, // orpheline
   ];
-  const items = alerts(ORDERS, INV, sup, [{ status: "emis" }, { status: "solde" }], 2026);
+  const BCL = [
+    { status: "emis" }, { status: "solde" },
+    { status: "emis", etaContrat: "2026-03-01", bcNumber: "BC1" }, // ETA dépassée (asOf 2026-06-01) + non livré → retard
+    { status: "livre", etaContrat: "2026-01-01", bcNumber: "BC2" }, // livré → pas en retard
+    { status: "a_emettre", etaContrat: "2026-12-01", bcNumber: "BC3" }, // ETA future → pas en retard
+  ];
+  const items = alerts(ORDERS, INV, sup, BCL, 2026, "2026-06-01");
   const byType = Object.fromEntries(items.map((i) => [i.type, i]));
   it("marge négative + backlog dormant détectés", () => {
     expect(byType.marge_negative.count).toBe(1);
@@ -72,7 +78,11 @@ describe("alerts", () => {
     expect(byType.concentration_client).toBeTruthy();
   });
   it("BC non soldés", () => {
-    expect(byType.bc_en_attente.count).toBe(1);
+    expect(byType.bc_en_attente.count).toBe(4); // emis, emis(BC1), a_emettre(BC3), livre(BC2) — tous ≠ solde
+  });
+  it("BC en retard (ETA dépassée, non livré)", () => {
+    expect(byType.bc_en_retard.count).toBe(1); // BC1 seulement (BC2 livré, BC3 ETA future)
+    expect(byType.bc_en_retard.refs).toContain("BC1");
   });
   it("alertes financières : orphelines, surfacturation, RAF incohérent, pré-PO", () => {
     expect(byType.factures_non_rattachees.count).toBe(1); // FP/9999/9 (linked !== true)

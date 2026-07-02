@@ -11,8 +11,9 @@ const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
  * @param {object} suppliersSummary résultat de domain/fournisseurs.suppliers()
  * @param {object[]} bcLines
  * @param {number} fy année fiscale courante
+ * @param {string} [asOf] date du jour (YYYY-MM-DD), pour les retards ETA des BC
  */
-function alerts(orders, invoices, suppliersSummary, bcLines, fy) {
+function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf) {
   const out = [];
 
   const neg = orders.filter((o) => (o.mb || 0) < 0);
@@ -62,6 +63,15 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy) {
 
   const pending = bcLines.filter((b) => b.status && b.status !== "solde").length;
   if (pending) out.push({ type: "bc_en_attente", severity: "low", count: pending, message: `${pending} ligne(s) BC non soldée(s)` });
+
+  // BC en retard : ETA (réelle sinon contractuelle) dépassée alors que non encore livré.
+  const today = asOf || `${fy}-12-31`;
+  const DELIVERED = new Set(["livre", "facture", "solde"]);
+  const lateBc = (bcLines || []).filter((b) => {
+    const eta = b.etaReel || b.etaContrat;
+    return eta && String(eta).slice(0, 10) < today && !DELIVERED.has(b.status);
+  });
+  if (lateBc.length) out.push({ type: "bc_en_retard", severity: "high", count: lateBc.length, message: `${lateBc.length} BC en retard (ETA dépassée, non livré)`, refs: lateBc.slice(0, 10).map((b) => b.bcNumber || b.supplier || b.fp) });
 
   return out;
 }

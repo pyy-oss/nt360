@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton } from "./_shared";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, Order, Invoice, Opportunity } from "../types";
@@ -37,6 +37,8 @@ export const Fournisseurs: FC<Props> = () => {
     colText("Fournisseur", (s: SupplierRow) => s.name, (s: SupplierRow) => s.name), colNum("Expo.", (s: SupplierRow) => money(s.expo), (s: SupplierRow) => s.expo),
     colNum("Ouvert", (s: SupplierRow) => money(s.open), (s: SupplierRow) => s.open), colNum("Encours", (s: SupplierRow) => money(s.encours), (s: SupplierRow) => s.encours),
     colNum("Couverture", (s: SupplierRow) => money(s.coverage), (s: SupplierRow) => s.coverage),
+    colNum("Util. %", (s: SupplierRow) => (s.authorized ? pct(s.util) : "—"), (s: SupplierRow) => s.util || 0),
+    colNum("Crédit reco.", (s: SupplierRow) => money(s.reco), (s: SupplierRow) => s.reco || 0),
     colNum("État", (s: SupplierRow) => <Badge tone={(badge[s.state || ""] || "neutral") as any}>{SUP_LABEL[s.state || ""] || s.state}</Badge>, (s: SupplierRow) => s.state || ""),
     ...(canWrite ? [colNum("Ligne crédit", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} outstanding={s.encours || 0} />)] : []),
   ];
@@ -141,12 +143,23 @@ function BcImport() {
 }
 
 // 10 — Exécution BC
+const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
 export const BC: FC<Props> = () => {
   const { rows } = useCollectionData<BcLine>("bcLines");
   const canWrite = useCan("bc") === "write";
+  const [flt, setFlt] = useState<"all" | "open" | "late">("all");
+  const today = new Date().toISOString().slice(0, 10);
+  const isLate = (r: BcLine) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
   const byStatus: Record<string, number> = {};
   for (const r of rows) byStatus[r.status || "a_emettre"] = (byStatus[r.status || "a_emettre"] || 0) + 1;
   const solde = byStatus["solde"] || 0;
+  const lateCount = rows.filter(isLate).length;
+  const filtered = flt === "late" ? rows.filter(isLate) : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
+  const seg = (id: typeof flt, label: string, n?: number) => (
+    <button onClick={() => setFlt(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", flt === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>
+      {label}{n != null && <span className="ml-1 opacity-70">{n.toLocaleString("fr-FR")}</span>}
+    </button>
+  );
   return (
     <div className="flex flex-col gap-4">
       {canWrite && <BcImport />}
@@ -158,13 +171,26 @@ export const BC: FC<Props> = () => {
           </div>
         ))}
       </div>
-      <div className={grid4}><Kpi label="Taux d'exécution (soldé)" value={pct(rows.length ? solde / rows.length : 0)} tone="emerald" /></div>
-      <Card title="Lignes BC">
-        <Table columns={[
-          colText("FP", (r) => r.fp), colText("Fournisseur", (r) => r.supplier), colText("Type", (r) => r.expenseType),
-          colNum("XOF", (r) => money(r.amountXof)),
-          colNum("Statut", (r) => canWrite ? <StatusSelect id={r.id} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>),
-        ]} rows={rows.slice(0, 200)} />
+      <div className={grid4}>
+        <Kpi label="Taux d'exécution (soldé)" value={pct(rows.length ? solde / rows.length : 0)} tone="emerald" />
+        <Kpi label="BC en retard" value={lateCount.toLocaleString("fr-FR")} tone={lateCount ? "clay" : "steel"} sub="ETA dépassée, non livré" />
+      </div>
+      <Card title={`Lignes BC · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5">{seg("all", "Toutes")}{seg("open", "Non soldés")}{seg("late", "En retard", lateCount)}</div>}>
+        <ListView
+          rows={filtered}
+          searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
+          columns={[
+            colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
+            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
+            colText("Type", (r) => r.expenseType, (r) => r.expenseType),
+            colNum("XOF", (r) => money(r.amountXof), (r) => r.amountXof || 0),
+            colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || ""),
+            colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
+            colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
+            colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
+          ]}
+        />
       </Card>
     </div>
   );
