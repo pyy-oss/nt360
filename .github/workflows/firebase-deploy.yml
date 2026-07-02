@@ -41,7 +41,7 @@ jobs:
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport" \
               --project propulse-business-87f7a --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi
