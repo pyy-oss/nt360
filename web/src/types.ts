@@ -45,6 +45,11 @@ export interface RentabiliteSummary {
 }
 
 export interface EntitySummary { period?: string; rows?: EntityRow[] }
+export interface ReceivablesSummary {
+  totalAR?: number; overdue?: number; overdueCount?: number; openCount?: number; dso?: number;
+  buckets?: { notDue?: number; b0_30?: number; b31_60?: number; b61_90?: number; b90p?: number };
+  topAR?: { key: string; value: number }[];
+}
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 
 export interface SuppliersSummary {
@@ -58,7 +63,7 @@ export interface AlertsSummary { items?: AlertItem[]; fy?: number }
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null };
 export interface CommandesSummary { count?: number; rows?: Order[] }
-export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string };
+export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number };
 export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };

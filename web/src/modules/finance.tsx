@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton } from "./_shared";
-import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary } from "../types";
+import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary, ReceivablesSummary } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -138,12 +138,25 @@ export const Objectifs: FC<Props> = ({ period }) => {
   );
 };
 
+// Balance âgée : libellés + couleur par ancienneté croissante.
+const AGING = [
+  { key: "notDue", label: "Non échu", color: T.steel },
+  { key: "b0_30", label: "0–30 j", color: T.gold },
+  { key: "b31_60", label: "31–60 j", color: T.gold },
+  { key: "b61_90", label: "61–90 j", color: T.clay },
+  { key: "b90p", label: "> 90 j", color: T.clay },
+] as const;
+
 // 4 — Facturation
 export const Facturation: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<FacturationSummary>(`summaries/facturation_${period}`);
+  const { data: rec } = useDocData<ReceivablesSummary>("summaries/receivables");
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
+  const b = rec?.buckets || {};
+  const agingRows = AGING.map((a) => ({ name: a.label, v: (b as any)[a.key] || 0, color: a.color }));
+  const agingColor = (r: any) => (AGING.find((a) => a.label === r.name)?.color || T.steel);
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}><Kpi label="Facturé (période)" value={fmt(data.total)} tone="emerald" sub={`${data.count} factures`} /></div>
@@ -152,6 +165,20 @@ export const Facturation: FC<Props> = ({ period }) => {
         <Card title="Mix BU"><DonutBU data={toDonut(data.byBu)} /></Card>
         <Card title="Top clients"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.emerald} /></Card>
       </div>
+      {rec && (rec.openCount || 0) > 0 && (
+        <>
+          <h2 className="font-display text-sm text-muted mt-2">Encaissement · créances clients</h2>
+          <div className={grid4}>
+            <Kpi label="Créances (AR)" value={fmt(rec.totalAR)} sub={`${rec.openCount} facture(s) ouverte(s)`} />
+            <Kpi label="En retard" value={fmt(rec.overdue)} tone="clay" sub={`${rec.overdueCount} facture(s)`} />
+            <Kpi label="DSO (indicatif)" value={`${rec.dso ?? 0} j`} tone="gold" sub="encours / cadence de facturation" />
+          </div>
+          <div className={cols2}>
+            <Card title="Balance âgée (par échéance)"><HBars rows={agingRows} colorFn={agingColor} /></Card>
+            <Card title="Top créances par client"><HBars rows={topArr(rec.topAR).slice(0, 10)} colorFn={() => T.clay} /></Card>
+          </div>
+        </>
+      )}
     </div>
   );
 };

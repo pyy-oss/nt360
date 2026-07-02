@@ -9,6 +9,7 @@ const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage } = require("../domain/atterrissage");
 const { alerts } = require("../domain/alerts");
+const { receivables } = require("../domain/receivables");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 
@@ -60,6 +61,8 @@ async function recomputeAll(db, only) {
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
+  // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
+  if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...receivables(invoices, asOf), ...stamp } });
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...atterrissage(orders, invoices, opps, objectives, currentFy, asOf), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
   // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
