@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colTex
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { addOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton } from "./_shared";
-import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig } from "../types";
+import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
 export const Pipeline: FC<Props> = ({ period }) => {
@@ -90,6 +90,48 @@ export const Pipeline: FC<Props> = ({ period }) => {
           <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
         </>
       )}
+    </div>
+  );
+};
+
+// Module AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
+export const Am360: FC<Props> = () => {
+  const { data } = useDocData<AmsSummary>("summaries/ams");
+  const rows = data?.rows || [];
+  const [am, setAm] = useState<string>("");
+  if (!rows.length) return <EmptyState label="Aucun commercial renseigné (importer Pipeline / Commandes)." />;
+  const sel = rows.find((r) => r.am === am) || rows[0];
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title="Commercial (Account Manager)">
+        <select className="field w-full md:w-80" aria-label="Choisir un commercial" value={sel.am} onChange={(e) => setAm(e.target.value)}>
+          {rows.map((r) => <option key={r.am} value={r.am}>{r.am}</option>)}
+        </select>
+      </Card>
+      <div className={grid4}>
+        <Kpi label="Prise de commande (CAS)" value={fmt(sel.cas)} tone="steel" sub={`${sel.orderCount} commande(s)`} />
+        <Kpi label="Facturé (CAF)" value={fmt(sel.facture)} tone="emerald" />
+        <Kpi label="Backlog (RAF)" value={fmt(sel.backlog)} tone="clay" />
+        <Kpi label={`R/O CAS ${data?.fy ?? ""}`} value={sel.roCas != null ? pct(sel.roCas) : "—"} tone="gold" sub={sel.targetCas > 0 ? `objectif ${fmt(sel.targetCas)}` : "pas d'objectif AM"} />
+      </div>
+      <div className={grid4}>
+        <Kpi label="Pipeline pondéré" value={fmt(sel.pipelinePondere)} tone="gold" sub={`${sel.activeCount} opp. active(s)`} />
+        <Kpi label="Gagné / Perdu" value={`${sel.won} / ${sel.lost}`} sub="opportunités" />
+        <Kpi label="Taux de transfo." value={sel.won + sel.lost > 0 ? pct(sel.conv) : "—"} />
+        <Kpi label="CAS exercice" value={fmt(sel.casFy)} sub={`année ${data?.fy ?? ""}`} />
+      </div>
+      <Card title="Classement des commerciaux">
+        <Table columns={[
+          colText("AM", (r) => (r.am === sel.am ? <b className="text-gold">{r.am}</b> : r.am), (r) => r.am),
+          colNum("CAS", (r) => money(r.cas), (r) => r.cas),
+          colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
+          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
+          colNum("Pipeline pond.", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
+          colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
+          colNum("R/O CAS", (r) => (r.roCas != null ? pct(r.roCas) : "—"), (r) => r.roCas ?? -1),
+        ]} rows={rows} />
+      </Card>
+      <Tip>Vue par commercial <b>sans marge</b> (la rentabilité par AM reste dans « Rentabilité »). Le <b>facturé</b> est rattaché au commercial via la clé N° FP de ses commandes. Le <b>R/O</b> compare le CAS de l'exercice à l'objectif CAS « commercial » de l'année.</Tip>
     </div>
   );
 };
