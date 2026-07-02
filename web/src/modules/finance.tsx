@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId } from "../lib/writes";
-import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge } from "./_shared";
+import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton } from "./_shared";
 import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice } from "../types";
 
 // 3 — Objectifs / R-O
@@ -139,6 +139,7 @@ export const Facturation: FC<Props> = ({ period }) => {
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
   const { rows, loading } = useCollectionData<Invoice>("invoices");
+  const canImport = useCan("facturation") === "write";
   const [f, setF] = useState<"all" | "linked" | "orphan">("all");
   if (loading && !rows.length) return <CardSkeleton />;
   const orphan = rows.filter((r) => r.linked !== true);
@@ -156,7 +157,7 @@ export const InvoiceList: FC<Props> = () => {
           <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />
         </div>
       )}
-      <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5">{seg("all", "Toutes")}{seg("linked", "Rattachées")}{seg("orphan", "Non rattachées", orphan.length)}</div>}>
+      <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap">{seg("all", "Toutes")}{seg("linked", "Rattachées")}{seg("orphan", "Non rattachées", orphan.length)}{canImport && <ImportButton label="Importer un delta" />}</div>}>
         <ListView
           rows={filtered}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}

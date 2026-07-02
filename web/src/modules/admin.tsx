@@ -4,7 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
 import { updateMatrix, callSetUserRole } from "../lib/writes";
-import { Props } from "./_shared";
+import { Props, DataImportCard } from "./_shared";
 import type { PermissionsConfig, UserRow } from "../types";
 
 export const Habilitations: FC<Props> = () => {
@@ -22,6 +22,7 @@ export const Habilitations: FC<Props> = () => {
   const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
   return (
     <div className="flex flex-col gap-4">
+      {canWrite && <DataImportCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
