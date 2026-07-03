@@ -48,4 +48,11 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(r.commandes).toBe(1800);   // FP/2026/1 + FP/2025/3
     expect(r.facture).toBe(1300);     // 600 + 700 (toutes dates)
   });
+
+  it("facture ORPHELINE attribuée au périmètre via son propre BU (pas de commande)", () => {
+    const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "ACME", cas: 100, raf: 0, mb: 10, yearPo: 2026 }];
+    const inv = [{ fp: "FP/9", bu: "ICT", client: "OTHER", amountHt: 500, date: "2026-01-01" }]; // orpheline, BU ICT
+    const r = computeFilteredOverview(ord as any, inv as any, [], "2026", mkMatch({ bu: "ICT" }));
+    expect(r.facture).toBe(500); // rattachée à ICT par le BU de la facture, faute de commande
+  });
 });

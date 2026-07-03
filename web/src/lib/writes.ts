@@ -73,6 +73,13 @@ export async function callSetUserRole(uidTarget: string, role: string) {
   await httpsCallable(functions, "setUserRole")({ uid: uidTarget, role });
 }
 
+export type AlertThresholds = { concentration: number; surfacturationPct: number; rafEcartPct: number; dormantYears: number };
+/** Enregistre les seuils d'alerte (admin) : recompute alertes + qualité côté serveur. */
+export async function callSetAlertThresholds(cfg: AlertThresholds) {
+  const res = await httpsCallable(functions, "setAlertThresholds")(cfg);
+  return res.data as AlertThresholds & { ok: boolean };
+}
+
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});

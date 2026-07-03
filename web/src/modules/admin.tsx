@@ -4,7 +4,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole, callDedupe, type DedupeResult } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, type DedupeResult, type AlertThresholds } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog } from "../types";
 
@@ -25,6 +25,7 @@ export const Habilitations: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       {canWrite && <DataImportCard />}
       {canWrite && <OpsHealthCard />}
+      {canWrite && <AlertThresholdsCard />}
       {canWrite && <DedupeCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
@@ -91,6 +92,45 @@ function OpsHealthCard() {
         </details>
       )}
       <Tip>Un recompute planifié tourne chaque jour à 05:00 (agrégats jamais datés). Les échecs sont tracés ici en plus des logs Cloud.</Tip>
+    </Card>
+  );
+}
+
+// Seuils d'alerte configurables (config/alerts) : pilotent le Centre d'alertes & la Qualité des
+// données. Enregistrer recalcule immédiatement côté serveur.
+const DEFAULT_THR: AlertThresholds = { concentration: 0.30, surfacturationPct: 0.005, rafEcartPct: 0.10, dormantYears: 2 };
+function AlertThresholdsCard() {
+  const { data, loading } = useDocData<AlertThresholds>("config/alerts");
+  if (loading && !data) return null;
+  return <AlertThresholdsForm key={JSON.stringify(data || {})} initial={{ ...DEFAULT_THR, ...(data || {}) }} />;
+}
+function ThrField({ label, hint, value, onChange }: { label: string; hint: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex flex-col gap-1 text-[13px]">
+      <span className="text-ink font-medium">{label}</span>
+      <input className="field !py-1" inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} />
+      <span className="text-[11px] text-faint">{hint}</span>
+    </label>
+  );
+}
+function AlertThresholdsForm({ initial }: { initial: AlertThresholds }) {
+  const p1 = (v: number) => String(+(v * 100).toFixed(2));
+  const [conc, setConc] = useState(p1(initial.concentration));
+  const [surf, setSurf] = useState(p1(initial.surfacturationPct));
+  const [raf, setRaf] = useState(p1(initial.rafEcartPct));
+  const [yrs, setYrs] = useState(String(initial.dormantYears));
+  const num = (s: string) => Number(String(s).replace(",", "."));
+  return (
+    <Card title="Seuils d'alerte" actions={<Busy label="Enregistrer" okMsg="Seuils appliqués (recalcul lancé)" fn={() => callSetAlertThresholds({
+      concentration: num(conc) / 100, surfacturationPct: num(surf) / 100, rafEcartPct: num(raf) / 100, dormantYears: Math.trunc(num(yrs)),
+    })} />}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ThrField label="Concentration client (%)" hint="Alerte si un client dépasse cette part du CAS" value={conc} onChange={setConc} />
+        <ThrField label="Surfacturation (%)" hint="Σ factures > CAS de plus de ce %" value={surf} onChange={setSurf} />
+        <ThrField label="Écart RAF (%)" hint="RAF s'écarte de (CAS − Facturé) de plus de ce %" value={raf} onChange={setRaf} />
+        <ThrField label="Backlog dormant (ans)" hint="Commande ouverte d'un millésime ≤ exercice − N" value={yrs} onChange={setYrs} />
+      </div>
+      <Tip>Pilotent le Centre d'alertes et la Qualité des données. L'enregistrement recalcule immédiatement.</Tip>
     </Card>
   );
 }

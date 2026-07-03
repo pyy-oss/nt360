@@ -59,6 +59,7 @@ async function recomputeAll(db, only) {
   const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
 
   const fiscal = (await db.doc("config/fiscal").get()).data() || {};
+  const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -109,9 +110,9 @@ async function recomputeAll(db, only) {
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy), ...stamp } });
-  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps), fy: currentFy, ...stamp } });
+  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr), fy: currentFy, ...stamp } });
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-  if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets), ...stamp } });
+  if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr), ...stamp } });
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
   // Découpées en CHUNKS (commandesRows/{i}) pour ne PAS dépasser la limite Firestore ~1 Mio/doc :
   // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).

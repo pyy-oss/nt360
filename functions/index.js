@@ -133,6 +133,28 @@ exports.setUserRole = onCall(async (req) => {
   return { ok: true };
 });
 
+// --- Seuils d'alerte configurables (config/alerts) : édités par la direction, recompute des
+// alertes + qualité des données pour appliquer immédiatement. Bornés pour éviter les valeurs absurdes. ---
+exports.setAlertThresholds = onCall(async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const pct = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
+  const years = (v, def) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 10 ? n : def; };
+  const cfg = {
+    concentration: pct(d.concentration, 0.30),
+    surfacturationPct: pct(d.surfacturationPct, 0.005),
+    rafEcartPct: pct(d.rafEcartPct, 0.10),
+    dormantYears: years(d.dormantYears, 2),
+  };
+  await db.doc("config/alerts").set(cfg, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "alert_thresholds", module: "habilitations",
+    entity: "config", entityId: "alerts", detail: cfg, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["alerts", "dataQuality"]);
+  return { ok: true, ...cfg };
+});
+
 // --- logLogin : audit de connexion (critère F1) ---
 exports.logLogin = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");

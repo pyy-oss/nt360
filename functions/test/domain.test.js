@@ -234,6 +234,13 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(ict.mb).toBeCloseTo(150, 6);       // 120 + 30
     expect(fac.bottomAffaires[0].pmb).toBeCloseTo(0.10, 6); // FP/2, marge la plus faible
   });
+  it("invariant inter-vues : Facturé (rentabilité) == total Facturation pour les mêmes factures", () => {
+    const orders = [{ fp: "FP/1", bu: "ICT", am: "X", client: "ACME", cas: 1000, mb: 200 }];
+    const invoices = [{ fp: "FP/1", amountHt: 600 }, { fp: "FP/2", amountHt: 400 }]; // FP/2 orpheline
+    const r = rentabilite(orders, invoices, orders);
+    const f = facturation(invoices);
+    expect(r.perspectives.facture.base).toBe(f.total); // 1000 — assiette Facturé cohérente avec la vue Facturation
+  });
   it("byEntity client agrège cas/facturé/backlog", () => {
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
     const acme = rows.find((r) => r.key === "ACME");

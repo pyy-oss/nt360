@@ -91,6 +91,12 @@ describe("alerts", () => {
     expect(byType.raf_incoherent.count).toBeGreaterThanOrEqual(1); // FP/2022/9 (attendu 800 vs raf 300)
     expect(byType.facture_pre_po.count).toBe(1); // FP/2026/1 prePo
   });
+  it("seuil dormantYears configurable (config/alerts)", () => {
+    const d0 = alerts(ORDERS, INV, sup, BCL, 2026, "2026-06-01");
+    expect(d0.find((x) => x.type === "backlog_dormant").message).toContain("2024"); // défaut fy-2
+    const d1 = alerts(ORDERS, INV, sup, BCL, 2026, "2026-06-01", [], { dormantYears: 1 });
+    expect(d1.find((x) => x.type === "backlog_dormant").message).toContain("2025"); // fy-1
+  });
   it("opportunités dormantes : actives à D Prev dépassée (ancienneté)", () => {
     const opps = [
       { client: "A", fp: "FP/2026/10", stage: 3, closingDate: "2026-01-15" }, // passée < asOf → dormante
