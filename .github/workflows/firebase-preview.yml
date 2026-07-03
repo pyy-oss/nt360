@@ -45,11 +45,44 @@ jobs:
         if: steps.guard.outputs.ok == 'true'
         run: pnpm --filter web build
 
+      # Firebase Hosting plafonne le nombre de canaux de preview par site. Chaque PR en crée un
+      # (rétention plusieurs jours) ; sans purge on finit par saturer le quota (429 RESOURCE_EXHAUSTED)
+      # et le déploiement échoue. On purge donc les plus anciens AVANT de déployer (on garde les 3
+      # plus récents). Étape 100 % tolérante : elle ne doit jamais casser la CI.
+      - name: Prune old preview channels (stay under quota)
+        if: steps.guard.outputs.ok == 'true'
+        continue-on-error: true
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          set +e
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx -y firebase-tools hosting:channel:list --site nt360 --project propulse-business-87f7a --json > channels.json 2>/dev/null
+          KEEP=3
+          ids=$(node -e '
+            try {
+              const d = JSON.parse(require("fs").readFileSync("channels.json","utf8"));
+              const ch = ((d.result && d.result.channels) || d.channels || [])
+                .filter((c) => !/\/channels\/live$/.test(c.name || ""));
+              ch.sort((a,b) => String(b.updateTime||"").localeCompare(String(a.updateTime||"")));
+              console.log(ch.slice('"$KEEP"').map((c) => (c.name||"").split("/").pop()).filter(Boolean).join("\n"));
+            } catch (e) { /* silencieux : pas de purge si le format change */ }
+          ')
+          for id in $ids; do
+            echo "Purge canal preview obsolète : $id"
+            npx -y firebase-tools hosting:channel:delete "$id" --site nt360 --project propulse-business-87f7a --force 2>/dev/null
+          done
+          exit 0
+
+      # best-effort : si le quota est encore atteint malgré la purge, on N'ÉCHOUE PAS la PR
+      # (la preview est un confort, pas une barrière). build-test reste le gate opposable.
       - name: Deploy preview channel
         if: steps.guard.outputs.ok == 'true'
+        continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: propulse-business-87f7a
-          expires: 7d
+          expires: 2d
