@@ -206,6 +206,28 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(r.bottomAffaires[0].pmb).toBeLessThanOrEqual(r.bottomAffaires[2].pmb); // trié marge croissante
     expect(r.bottomAffaires[0].pmb).toBeCloseTo(0.20, 4); // FP/2025/2 ou FP/2026/3 (0.20)
   });
+  it("rentabilité — perspectives Commande (CAS) et Facturé (marge au prorata du facturé)", () => {
+    const orders = [
+      { fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 1000, mb: 200, facture: 500 }, // taux 20% → mbFac 100 sur 500
+      { fp: "FP/2", client: "B", bu: "CLOUD", am: "Y", cas: 400, mb: 40, facture: 400 },  // taux 10% → mbFac 40 sur 400
+      { fp: "FP/3", client: "C", bu: "ICT", am: "X", cas: 0, mb: 0, marginPct: 0.3, facture: 100 }, // cas=0 → taux via marginPct
+    ];
+    const r = rentabilite(orders);
+    // Racine = perspective Commande (rétro-compat)
+    expect(r.cas).toBe(1400);
+    expect(r.mb).toBe(240);
+    const cmd = r.perspectives.commande, fac = r.perspectives.facture;
+    expect(cmd.base).toBe(1400);
+    expect(cmd.mb).toBe(240);
+    // Facturé : assiette = Σ facturé ; marge = taux commande × facturé
+    expect(fac.base).toBe(1000);              // 500 + 400 + 100
+    expect(fac.mb).toBeCloseTo(170, 6);       // 100 + 40 + 30 (fallback marginPct)
+    expect(fac.pmb).toBeCloseTo(170 / 1000, 6);
+    const ict = fac.byBu.find((b) => b.bu === "ICT");
+    expect(ict.base).toBe(600);               // FP/1 + FP/3
+    expect(ict.mb).toBeCloseTo(130, 6);       // 100 + 30
+    expect(fac.bottomAffaires[0].pmb).toBeCloseTo(0.10, 6); // FP/2, marge la plus faible
+  });
   it("byEntity client agrège cas/facturé/backlog", () => {
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
     const acme = rows.find((r) => r.key === "ACME");

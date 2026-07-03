@@ -184,26 +184,54 @@ export const InvoiceList: FC<Props> = () => {
   );
 };
 
-// 7 — Rentabilité
+// 7 — Rentabilité : deux perspectives de marge — Commande (assiette CAS) ou Facturé (assiette CAF).
 export const Rentabilite: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<RentabiliteSummary>(`summaries/rentabilite_${period}`);
+  const [view, setView] = useState<"commande" | "facture">("commande");
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
+
+  // Perspective générique (assiette = `base`). Repli sur les champs racine (perspective Commande)
+  // pour un ancien agrégat non encore recalculé.
+  const hasFac = !!data.perspectives;
+  const fallback = {
+    base: data.cas || 0, mb: data.mb || 0, pmb: data.pmb || 0,
+    byBu: (data.byBu || []).map((b: any) => ({ bu: b.bu, base: b.cas, mb: b.mb, pmb: b.pmb ?? (b.cas > 0 ? b.mb / b.cas : 0) })),
+    byAm: (data.byAm || []).map((a) => ({ am: a.am, base: a.cas, mb: a.mb, pmb: a.pmb })),
+    bottomAffaires: (data.bottomAffaires || []).map((o) => ({ fp: o.fp, client: o.client, am: o.am, base: o.cas, mb: o.mb, pmb: o.pmb })),
+    topClients: data.topClients || [],
+  };
+  const p = data.perspectives ? data.perspectives[view] : fallback;
+  const baseLbl = view === "commande" ? "CAS" : "Facturé";
+  const baseSub = view === "commande" ? "Marge P&L sur la prise de commande" : "Marge reconnue au prorata du facturé (CAF)";
+  const seg = (id: "commande" | "facture", label: string, disabled?: boolean) => (
+    <button
+      onClick={() => !disabled && setView(id)}
+      disabled={disabled}
+      title={disabled ? "Recalculer les agrégats pour activer cette perspective" : undefined}
+      className={cx("rounded-md px-3 py-1 text-xs font-semibold transition-colors", view === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink", disabled && "opacity-40 cursor-not-allowed")}
+    >{label}</button>
+  );
+
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-faint">Perspective</span>
+        <div className="flex gap-1.5">{seg("commande", "Commande")}{seg("facture", "Facturé", !hasFac)}</div>
+      </div>
       <div className={grid4}>
-        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" />
-        <Kpi label="CAS" value={fmt(data.cas)} />
-        <Kpi label="%MB" value={pct(data.pmb)} />
+        <Kpi label={view === "commande" ? "Marge brute (commande)" : "Marge brute (facturé)"} value={fmt(p.mb)} tone="gold" sub={baseSub} />
+        <Kpi label={baseLbl} value={fmt(p.base)} />
+        <Kpi label="%MB" value={pct(p.pmb)} />
       </div>
       <div className={cols2}>
-        <Card title="CAS vs MB par domaine">
-          <GroupedBars data={(data.byBu || []).map((b) => ({ name: b.bu, CAS: b.cas, MB: b.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.plum, name: "MB" }]} />
+        <Card title={`${baseLbl} vs MB par domaine`}>
+          <GroupedBars data={(p.byBu || []).map((b) => ({ name: b.bu, [baseLbl]: b.base, MB: b.mb }))} series={[{ key: baseLbl, color: T.steel, name: baseLbl }, { key: "MB", color: T.plum, name: "MB" }]} />
         </Card>
-        <Card title="CAS vs MB par commercial (AM)">
-          {(data.byAm || []).length
-            ? <GroupedBars data={(data.byAm || []).slice(0, 10).map((a) => ({ name: a.am, CAS: a.cas, MB: a.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.gold, name: "MB" }]} />
+        <Card title={`${baseLbl} vs MB par commercial (AM)`}>
+          {(p.byAm || []).length
+            ? <GroupedBars data={(p.byAm || []).slice(0, 10).map((a) => ({ name: a.am, [baseLbl]: a.base, MB: a.mb }))} series={[{ key: baseLbl, color: T.steel, name: baseLbl }, { key: "MB", color: T.gold, name: "MB" }]} />
             : <EmptyState label="Pas de commercial renseigné." />}
         </Card>
       </div>
@@ -212,12 +240,13 @@ export const Rentabilite: FC<Props> = ({ period }) => {
           colText("FP", (a) => a.fp || "—", (a) => a.fp || ""),
           colText("Client", (a) => a.client || "—", (a) => a.client || ""),
           colText("AM", (a) => a.am || "—", (a) => a.am || ""),
-          colNum("CAS", (a) => money(a.cas), (a) => a.cas),
+          colNum(baseLbl, (a) => money(a.base), (a) => a.base),
           colNum("MB", (a) => money(a.mb), (a) => a.mb),
           colNum("%MB", (a) => <Badge tone={(a.pmb < 0.1 ? "clay" : a.pmb < 0.2 ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
-        ]} rows={data.bottomAffaires || []} empty="Aucune commande à CAS positif." />
+        ]} rows={p.bottomAffaires || []} empty={`Aucune affaire à ${baseLbl} positif.`} />
       </Card>
-      <Card title="Top clients (marge)"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
+      <Card title="Top clients (marge)"><HBars rows={topArr(p.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
+      <Tip><b>Commande</b> : marge P&amp;L sur la prise de commande (CAS). <b>Facturé</b> : même taux de marge appliqué au montant réellement facturé (CAF) — la marge reconnue au prorata de l'avancement de la facturation.</Tip>
     </div>
   );
 };

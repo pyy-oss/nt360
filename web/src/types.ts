@@ -50,11 +50,22 @@ export interface FacturationSummary {
   topClients?: { key: string; value: number }[];
 }
 
+// Une perspective de rentabilité (assiette générique `base` = CAS ou Facturé).
+export interface RentabPerspective {
+  base: number; mb: number; pmb: number;
+  byBu: { bu: string; base: number; mb: number; pmb: number }[];
+  byAm: { am: string; base: number; mb: number; pmb: number }[];
+  bottomAffaires: { fp?: string; client?: string; am?: string; base: number; mb: number; pmb: number }[];
+  topClients: { key: string; value: number }[];
+}
 export interface RentabiliteSummary {
+  // Champs racine = perspective Commande (rétro-compat).
   period?: string; mb?: number; cas?: number; pmb?: number;
   byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
   byAm?: { am: string; cas: number; mb: number; pmb: number }[];
   bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number }[];
+  // Deux perspectives : Commande (CAS) et Facturé (CAF).
+  perspectives?: { commande: RentabPerspective; facture: RentabPerspective };
 }
 
 export interface EntitySummary { period?: string; rows?: EntityRow[] }
