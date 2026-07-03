@@ -23,7 +23,7 @@ function backlogFy(orders, fy) {
   const top = [...open]
     .sort((a, b) => raf(b) - raf(a))
     .slice(0, 10)
-    .map((o) => ({ fp: o.fp || "", client: o.client || "", bu: o.bu || "AUTRE", raf: raf(o) }));
+    .map((o) => ({ fp: o.fp || "", client: o.client || "", affaire: o.affaire || "", bu: o.bu || "AUTRE", raf: raf(o) }));
 
   // Diagnostic de fiabilité : ventile le RAF ouvert selon son origine.
   //   • « excel »  = RAF total curaté de l'Excel P&L (fiable).
@@ -35,7 +35,7 @@ function backlogFy(orders, fy) {
     .sort((a, b) => raf(b) - raf(a))
     .slice(0, 25)
     .map((o) => ({
-      fp: o.fp || "", client: o.client || "", bu: o.bu || "AUTRE", source: o.source || null,
+      fp: o.fp || "", client: o.client || "", affaire: o.affaire || "", bu: o.bu || "AUTRE", source: o.source || null,
       yearPo: o.yearPo || 0, cas: o.cas || 0, facture: o.facture || 0, raf: raf(o),
     }));
 

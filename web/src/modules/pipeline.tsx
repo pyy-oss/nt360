@@ -203,10 +203,11 @@ export const OppList: FC<Props> = () => {
       <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
         <ListView
           rows={rows}
-          searchKeys={[(r) => r.client, (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
+          searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
           columns={[
             colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
             colText("Client", (r) => r.client, (r) => r.client),
+            colText("Désignation", (r) => r.designation || "—", (r) => r.designation || ""),
             colText("AM", (r) => r.am, (r) => r.am),
             colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),

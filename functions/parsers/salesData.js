@@ -84,6 +84,8 @@ function parseSalesData(wb) {
       fp,
       client,
       am,
+      // Description / désignation de l'affaire (objet de l'opportunité).
+      designation: String(val(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "opportunité", "opportunite") || "").trim(),
       bu: cleanBu(val(r, keys, "domaine", "bu")),
       amount,
       stage,

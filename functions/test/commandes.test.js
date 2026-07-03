@@ -55,6 +55,23 @@ describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réco
   });
 });
 
+describe("mergeCommandes — désignation d'affaire (description)", () => {
+  it("affaire = fiche > désignation opp gagnée > désignation P&L", () => {
+    const c = mergeCommandes(
+      [
+        { fp: "FP/2026/1", cas: 500, designation: "P&L DESIGN", source: "pnl" },
+        { fp: "FP/2026/2", cas: 300, designation: "P&L ONLY", source: "pnl" },
+      ],
+      [{ fp: "FP/2026/1", client: "X", amount: 800, stage: 6, designation: "OPP DESIGN", closingDate: "2026-05-01" }],
+      [{ fp: "FP/2026/1", client: "X", saleTotal: 900, margin: 90, affaire: "FICHE AFFAIRE" }],
+      [],
+    );
+    const byFp = Object.fromEntries(c.map((x) => [x.fp, x]));
+    expect(byFp["FP/2026/1"].affaire).toBe("FICHE AFFAIRE"); // la fiche prime
+    expect(byFp["FP/2026/2"].affaire).toBe("P&L ONLY");      // désignation P&L conservée
+  });
+});
+
 describe("mergeCommandes — garde-fous", () => {
   it("opp gagnée SANS montant n'écrase pas le CAS P&L existant", () => {
     const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];
