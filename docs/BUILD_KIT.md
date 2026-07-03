@@ -573,4 +573,37 @@ Livré quand : 13 modules à parité chiffrée (tests §17) · droits opposables
 
 > **Cap inchangé : on ne retire rien. Firebase accélère et sécurise l'exploitation ; le périmètre des 13 modules et la logique métier sont intégralement préservés et renforcés.**
 
+---
+
+## 19. Évolutions post-kit — exploitation, sécurité, pilotage
+
+Ces évolutions renforcent le kit sans en changer le périmètre ni la logique métier. Regroupées ici pour la **maintenance / passation**.
+
+### 19.1 Fraîcheur & exploitation
+- **`scheduledRecompute`** (`onSchedule` « every day 05:00 ») : recalcul complet quotidien → agrégats jamais datés, indépendamment des imports / sync.
+- **`config/periods.lastRecomputeAt`** : horodatage du dernier recompute → bandeau **« Données à jour … »** sur la Vue d'ensemble.
+- **`opsLog`** (collection) : trace persistante des recomputes (manuels / planifiés / notifications) — statut, durée, nb d'agrégats, motif d'échec. Surfacé en Admin (« Exploitation — santé des recalculs »). Écrit par `logOps()`. Lecture réservée aux `habilitations`.
+
+### 19.2 Performance & scalabilité
+- **Commandes en chunks** : `summaries/commandes` ne porte que la **méta** (`count`, `chunks`) ; les lignes sont écrites dans `commandesRows/{i}` (~800 l./doc) → plus de plafond ~1 Mio/doc. Purge des chunks orphelins ; ancien champ `rows` supprimé (`FieldValue.delete()`). Front : hook `useCommandesRows()` (fusionne les chunks, repli sur l'inline en transition). Règle : `commandesRows` lisible module `overview`.
+- **Recompute partiel** : `recomputeAll(db, only)` ne lit `bcLines` / `creditLines` / `objectives` que si un summary demandé en a besoin.
+
+### 19.3 Sécurité (Security Rules)
+- `imports`, `opsLog`, `config/notifications` : **lecture réservée aux `habilitations`** (URL de webhook sensible).
+- `opportunities` : modif/suppression réservées aux opps **déjà `saisie`** (`resource.data.source`) — pas de détournement d'une opp importée.
+- `importDelta` : **plafond de charge serveur** (~22 Mo bruts) en défense en profondeur (garde-fou UI ~20 Mo contournable).
+
+### 19.4 Qualité des données & pilotage commercial
+- **`cleanPerson()`** (ids) : un libellé de commercial purement numérique (colonne mal mappée) est vidé, à l'import P&L & LIVE. Contrôle qualité **`am_invalide`** pour les données déjà importées.
+- **`valLabel()`** (sheets) : capture d'un libellé (désignation) qui ignore les colonnes identifiant/personne (« Chargé d'affaires », « N° Opportunité »).
+- Alerte **`opp_dormante`** : opportunités actives à D Prev dépassée (+ ancienneté).
+- **Vélocité — ancienneté du retard de closing** : `closingAnalysis.overdueAge` (≤30 j / 31-90 j / >90 j) + `avgOverdueDays`.
+
+### 19.5 Vue d'ensemble filtrée
+- Filtre transverse **BU/AM/client actif** sur la Vue d'ensemble : `computeFilteredOverview()` (web, fonction pure testée) recalcule la chaîne & les KPI par périmètre, en **miroir exact** du domaine serveur `overview()`. Atterrissage & trajectoire restent globaux.
+
+### 19.6 Alerting configurable & notifications
+- **Seuils d'alerte** dans `config/alerts` (concentration, surfacturation, écart RAF, backlog dormant) → lus par `alerts()` & `dataQuality()`. Callable **`setAlertThresholds`** (direction) + éditeur Admin (recalcul immédiat).
+- **Notifications** : `config/notifications` (`enabled`, `minSeverity`, `webhookUrl`) + callable **`setNotificationConfig`** (avec test). **`alertDigest`** (`onSchedule` 07:00) pousse les alertes ≥ seuil vers un **webhook entrant Slack/Teams** (POST JSON `{text}`), dédupliqué par hash. Sans URL / désactivé → no-op.
+
 *— Fin du kit final Firebase —*
