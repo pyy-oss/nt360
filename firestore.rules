@@ -60,6 +60,8 @@ service cloud.firestore {
 
     // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat.
     match /summaries/{id}     { allow read: if canRead(summaryModule(id)); allow write: if false; }
+    // Chunks des commandes matérialisées (module « overview », comme summaries/commandes).
+    match /commandesRows/{id} { allow read: if canRead('overview');       allow write: if false; }
 
     // Config : la matrice de droits est éditable par 'habilitations' ; le reste est écrit par Functions.
     match /config/permissions { allow read: if signedIn();              allow write: if canWrite('habilitations'); }

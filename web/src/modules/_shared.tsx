@@ -8,7 +8,7 @@ import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
-import type { AlertsSummary, AmsSummary, EntitySummary, Objective } from "../types";
+import type { AlertsSummary, AmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
 // Normalisation de périmètre pour le rapprochement objectif ↔ entité : trim + majuscules + SANS
@@ -32,6 +32,16 @@ export function useObjectives(fy: number | string | undefined) {
     map.set(`${o.scope || "global"}|${upScope(o.scopeValue) || "ALL"}`, o);
   }
   return { get: (scope: string, scopeValue?: string) => map.get(`${scope}|${upScope(scopeValue) || "ALL"}`) };
+}
+
+// Lignes de commandes matérialisées, LUES DEPUIS LES CHUNKS (commandesRows/{i}) pour s'affranchir
+// de la limite Firestore ~1 Mio/doc. Fusionne les chunks (ordre stable), avec repli sur les lignes
+// inline d'un ancien agrégat (transition avant le premier recompute chunké). count depuis la méta.
+export function useCommandesRows() {
+  const { data: meta, loading: l1 } = useDocData<CommandesSummary>("summaries/commandes");
+  const { rows: chunks, loading: l2 } = useCollectionData<CommandeChunk>("commandesRows", [orderBy("i", "asc")], "chunks");
+  const rows: Order[] = chunks.length ? chunks.flatMap((c) => c.rows || []) : (meta?.rows || []);
+  return { rows, count: meta?.count ?? rows.length, loading: l1 || l2 };
 }
 
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable).

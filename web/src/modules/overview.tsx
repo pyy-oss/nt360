@@ -8,9 +8,9 @@ import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
-import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime } from "./_shared";
+import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
-import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, CommandesSummary, Opportunity, Invoice } from "../types";
+import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice } from "../types";
 
 // Bloc « atterrissage » : jauge de probabilité + Réalisé / Projeté / Objectif / Écart, avec le
 // R/O (Réalisé / Objectif) mis en avant dans le coin (fusion de l'ancienne carte R/O isolée).
@@ -44,7 +44,7 @@ export const Overview: FC<Props> = ({ period }) => {
   // Filtre transverse : quand un BU/AM/client est sélectionné, on RECALCULE la chaîne & les KPI
   // par périmètre côté client (les collections dégradent proprement à vide si l'accès manque).
   const { active, f, match } = useFilters();
-  const { data: cmd } = useDocData<CommandesSummary>("summaries/commandes");
+  const { rows: cmdRows } = useCommandesRows();
   const { rows: allOpps } = useCollectionData<Opportunity>("opportunities");
   const { rows: allInvoices } = useCollectionData<Invoice>("invoices");
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
@@ -64,7 +64,7 @@ export const Overview: FC<Props> = ({ period }) => {
     name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
   }));
   // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur.
-  const filtered = active ? computeFilteredOverview(cmd?.rows || [], allInvoices, allOpps, period, match) : null;
+  const filtered = active ? computeFilteredOverview(cmdRows, allInvoices, allOpps, period, match) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
 

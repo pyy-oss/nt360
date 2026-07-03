@@ -5,10 +5,10 @@ import { useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote } from "./_shared";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { patchOrder } from "../lib/writes";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, CommandesSummary, TrendsSummary, Order } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -264,13 +264,12 @@ const pnlBadge = (s?: string | null) => {
   return m ? <Badge tone={m.tone}>{m.label}</Badge> : <span className="text-faint">—</span>;
 };
 export const OrderList: FC<Props> = () => {
-  const { data, loading } = useDocData<CommandesSummary>("summaries/commandes");
+  const { rows: all, loading } = useCommandesRows();
   const { match } = useFilters();
-  const all = data?.rows || [];
   const rows = all.filter((r) => match(r, ["bu", "am", "client"]));
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
-  if (loading && !data) return <CardSkeleton />;
+  if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />;
   return (
     <div className="flex flex-col gap-2">
