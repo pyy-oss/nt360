@@ -148,9 +148,10 @@ describe("suppliers — exposition/encours/couverture (§18.6)", () => {
   it("exposition = Σ suppliers.amount", () => {
     expect(s.totalExpo).toBe(600); // 300 + 200 + 100
   });
-  it("achat commandes ouvertes = Σ sur RAF>0", () => {
-    // HIPERDIST : 300 (FP/2026/1 raf>0) + 100 (FP/2026/3 raf>0) = 400 ; WESTCON raf=0 → 0
-    expect(s.openTotal).toBe(400);
+  it("achat commandes ouvertes (RAF>0) NETTÉ du BC déjà émis (pas de double compte)", () => {
+    // HIPERDIST FP/2026/1 : 300 − 250 (BC non soldé même FP/fournisseur) = 50 ; FP/2026/3 : 100
+    // (aucun BC) = 100 → open = 150. WESTCON raf=0 → 0.
+    expect(s.openTotal).toBe(150);
   });
   it("encours calculé = Σ BC non soldés (HIPERDIST=250) ; saisi prioritaire (WESTCON=150)", () => {
     const hip = s.bySupplier.find((x) => x.name === "HIPERDIST");
@@ -163,6 +164,16 @@ describe("suppliers — exposition/encours/couverture (§18.6)", () => {
     expect(hip.state).toBe("non_suivi"); // aucune creditLine → non statué
     const wes = s.bySupplier.find((x) => x.name === "WESTCON");
     expect(wes.state).toBe("ok"); // authorized 1000, couverture positive
+  });
+  it("expose les listes COMPLÈTES saturated/tension (pour alertes non tronquées)", () => {
+    // Fournisseur saturé à FAIBLE exposition : encours saisi 200 > autorisé 100 → saturation.
+    const s2 = suppliers(
+      [{ fp: "FP/2026/1", raf: 100, suppliers: [{ name: "PETIT", amount: 10 }] }],
+      [],
+      [{ id: "PETIT", authorized: 100, outstanding: 200 }],
+    );
+    expect(s2.saturated).toContain("PETIT");
+    expect(Array.isArray(s2.tension)).toBe(true);
   });
 });
 
