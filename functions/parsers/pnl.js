@@ -3,7 +3,7 @@
 // espaces (" CAS ", " MB TOTAL ") et des colonnes proches (" MB TOTAL Manuel ").
 const XLSX = require("xlsx");
 const { fpKey, num, cleanBu, NOISE, cleanName, noAcc, plausibleYear } = require("../lib/ids");
-const { headerKeys, val, safeId } = require("../lib/sheets");
+const { headerKeys, val, valLabel, safeId } = require("../lib/sheets");
 
 // Choisit la feuille P&L en s'ALIGNANT sur la détection (ingest.hasPnl) plutôt que sur un
 // nom littéral "P&L" : 1re feuille dont l'entête porte opp id + cas + raf total ; repli sur
@@ -43,7 +43,7 @@ function parsePnl(wb) {
       fp,
       client: cleanName(val(r, keys, "customer")),
       // Description / désignation de l'affaire (objet de la commande) — colonnes possibles variées.
-      designation: String(val(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description") || "").trim(),
+      designation: String(valLabel(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description") || "").trim(),
       bu: cleanBu(val(r, keys, "bu")),
       yearPo: plausibleYear(parseInt(val(r, keys, "year po")) || 0), // fenêtre glissante, rejet sentinelles 1900
       cas,

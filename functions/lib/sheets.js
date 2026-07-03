@@ -42,6 +42,18 @@ function val(row, keys, ...terms) {
   return null;
 }
 
+// Colonnes à EXCLURE d'une recherche de LIBELLÉ (désignation/objet) : identifiants et personnes
+// dont le nom contient par hasard un terme recherché — ex. « Chargé d'affaires » contient « affaire »,
+// « N° Opportunité » contient « opportunité ». Sans ce filtre, l'inclusion capte la mauvaise colonne.
+const LABEL_EXCLUDE = ["charge", "responsable", "commercial", "chef de", "numero", "n°", "n °", "code", "identifiant", " id", "id ", "statut", "etape"];
+
+/** Comme val(), mais en ignorant les colonnes ressemblant à un identifiant / une personne
+ *  (LABEL_EXCLUDE). Utile pour capter un LIBELLÉ descriptif sans aspirer un id ou un nom. */
+function valLabel(row, keys, ...terms) {
+  const allowed = keys.filter((k) => { const nk = noAcc(k); return !LABEL_EXCLUDE.some((b) => nk.includes(b)); });
+  return val(row, allowed, ...terms);
+}
+
 /** Convertit une valeur date (Date SheetJS, série Excel, ou chaîne) en ISO YYYY-MM-DD. */
 function toISO(v) {
   if (v == null || v === "") return null;
@@ -76,4 +88,4 @@ function safeId(v) {
   return String(v || "").trim().replace(/_/g, "%5F").replace(/\//g, "_").replace(/\s+/g, "");
 }
 
-module.exports = { headerKeys, pickKey, val, toISO, hashId, safeId };
+module.exports = { headerKeys, pickKey, val, valLabel, toISO, hashId, safeId };
