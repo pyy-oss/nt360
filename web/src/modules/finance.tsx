@@ -246,7 +246,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         ]} rows={p.bottomAffaires || []} empty={`Aucune affaire à ${baseLbl} positif.`} />
       </Card>
       <Card title="Top clients (marge)"><HBars rows={topArr(p.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
-      <Tip><b>Commande</b> : marge P&amp;L sur la prise de commande (CAS). <b>Facturé</b> : même taux de marge appliqué au montant réellement facturé (CAF) — la marge reconnue au prorata de l'avancement de la facturation.</Tip>
+      <Tip><b>Commande</b> : marge P&amp;L sur la prise de commande (CAS, cohorte par année de PO). <b>Facturé</b> : assiette = factures <b>datées</b> dans la période (identique à la vue Facturation), marge = taux de marge de la commande rattachée × montant facturé. L'attribution par date de facture évite les inversions entre exercices.</Tip>
     </div>
   );
 };

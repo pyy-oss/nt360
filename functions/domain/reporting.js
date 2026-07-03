@@ -1,6 +1,7 @@
 // Reporting facturation / rentabilité / clients / domaines (BUILD_KIT §6, §7).
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
+const { fpKey } = require("../lib/ids");
 
 const topN = (obj, n = 10) =>
   Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ key: k, value: v }));
@@ -44,16 +45,40 @@ function perspective(orders, baseFn, mbFn) {
   return { base, mb, pmb: base > 0 ? mb / base : 0, byBu, byAm, bottomAffaires, topClients: topN(groupSum(orders, (o) => o.client, mbFn)) };
 }
 
+// Taux de marge d'une commande (marge P&L / CAS), avec repli sur marginPct quand CAS = 0.
+const marginRate = (o) => ((o && (o.cas || 0) > 0) ? (o.mb || 0) / o.cas : (o && o.marginPct) || 0);
+
+// Lignes « affaire » de la perspective Facturé : on part des FACTURES DATÉES dans la période
+// (même assiette que la vue Facturation — source de vérité du facturé), agrégées par FP. La marge
+// est reconnue au taux de la commande (P&L) rattachée au FP, appliqué au montant facturé. Le
+// domaine/AM/client provient de la commande (sinon de la facture). Attribuer par DATE de facture
+// (et non par année de PO) évite l'inversion entre exercices d'un FP signé en N mais facturé en N+1.
+function factureLines(invoices, ordersByFp) {
+  const byFp = {};
+  for (const i of invoices || []) {
+    const k = fpKey(i.fp) || i.fp || "—";
+    const o = ordersByFp[k] || {};
+    const line = byFp[k] || (byFp[k] = { fp: k, base: 0, rate: marginRate(o), bu: o.bu || i.bu, am: o.am || i.am, client: o.client || i.client });
+    line.base += i.amountHt || 0;
+  }
+  return Object.values(byFp).map((l) => ({ ...l, mb: l.rate * l.base }));
+}
+
 /**
  * Rentabilité (P&L) : deux perspectives (§ module 7).
- *  • Commande : assiette = CAS (prise de commande), marge = marge P&L.
- *  • Facturé  : assiette = Facturé (CAF), marge = taux de marge de la commande × facturé.
+ *  • Commande : assiette = CAS (prise de commande, cohorte yearPo), marge = marge P&L.
+ *  • Facturé  : assiette = Facturé (factures DATÉES dans la période, comme la vue Facturation),
+ *    marge = taux de marge de la commande rattachée × montant facturé.
  * Champs racine = perspective Commande (rétro-compat : cas / byBu[cas] / bottomAffaires[cas]).
+ * @param {object[]} orders commandes de la cohorte (période, par yearPo) — perspective Commande
+ * @param {object[]} invoices factures DATÉES dans la période — perspective Facturé
+ * @param {object[]} allOrders toutes les commandes (rattachement FP→taux/BU/AM/client des factures)
  */
-function rentabilite(orders) {
-  const rate = (o) => ((o.cas || 0) > 0 ? (o.mb || 0) / o.cas : (o.marginPct || 0));
+function rentabilite(orders, invoices = [], allOrders = orders) {
+  const ordersByFp = {};
+  for (const o of allOrders || []) { const k = fpKey(o.fp) || o.fp; if (k) ordersByFp[k] = o; }
   const commande = perspective(orders, (o) => o.cas || 0, (o) => o.mb || 0);
-  const facture = perspective(orders, (o) => o.facture || 0, (o) => rate(o) * (o.facture || 0));
+  const facture = perspective(factureLines(invoices, ordersByFp), (l) => l.base, (l) => l.mb);
   return {
     // Rétro-compat : perspective Commande à plat, assiette nommée `cas`.
     mb: commande.mb, cas: commande.base, pmb: commande.pmb,
