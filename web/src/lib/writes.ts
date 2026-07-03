@@ -36,6 +36,11 @@ export async function setBcStatus(id: string, status: string) {
   await httpsCallable(functions, "setBcStatus")({ id, status });
 }
 
+/** Fiabilise une ligne BC : rattache un N° FP et/ou corrige le montant XOF (onCall : recalcule). */
+export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number }) {
+  await httpsCallable(functions, "patchBcLine")(data);
+}
+
 /** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
 export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
   await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });

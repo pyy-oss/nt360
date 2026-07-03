@@ -44,6 +44,9 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(byType.factures_sans_echeance.count).toBe(2); // A2 + OR
     expect(byType.bc_sans_fp.count).toBe(1);
     expect(byType.fiches_sans_vente.count).toBe(1);
+    // BC1 a un N° BC mais aucun montant XOF → BC émis à montant nul (devise à convertir ?).
+    expect(byType.bc_montant_zero.count).toBe(1);
+    expect(byType.bc_montant_zero.severity).toBe("medium");
   });
   it("opp GAGNÉE avec FP mais SANS ligne P&L → à réconcilier (sévérité haute)", () => {
     // FP/2026/1 est une commande (P&L) ; FP/2026/8 ne l'est pas → réconciliation à faire.
