@@ -1,12 +1,13 @@
 // Helpers et primitives partagés par les modules (extraits de index.tsx pour le découpage).
-import { useState, type ChangeEvent, type ReactNode } from "react";
-import { AlertTriangle, Upload, Filter, X } from "lucide-react";
+import { useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import { AlertTriangle, Upload, Filter, X, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
-import { callImportDelta } from "../lib/writes";
+import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
 import type { AlertsSummary, AmsSummary, EntitySummary, Objective } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
@@ -89,49 +90,197 @@ const IMPORT_KIND_LABEL: Record<string, string> = {
   salesData: "Pipeline / Opportunités",
   logistics: "BC fournisseurs (Exécution BC)",
 };
+const kindLabel = (k: string) => IMPORT_KIND_LABEL[k] || k;
+const MAX_MB = 25; // garde-fou : la charge base64 (~1,33×) doit rester sous la limite d'appel (~32 Mo).
 
-// Bouton d'import d'un fichier XLSX (modèle reconnu automatiquement). L'upsert serveur est
-// idempotent par clé déterministe : un delta partiel se fusionne sans doublon, un ré-import
-// remplace. Le rôle est revérifié côté serveur (l'UI n'est qu'un garde-fou).
+// Journal d'import (collection `imports`) pour l'ÉTAT durable « dernier import ».
+type ImportLog = { id?: string; filename?: string; kinds?: string[]; rowsOk?: number; rowsSkipped?: number; fileCount?: number; ts?: any };
+type ImportPhase = "" | "reading" | "processing";
+type ImportOutcome = { ok: true; res: ImportDeltaResult } | { ok: false; error: string } | null;
+
+const PHASE_LABEL: Record<Exclude<ImportPhase, "">, string> = {
+  reading: "Lecture du fichier…",
+  processing: "Envoi, traitement & recalcul…",
+};
+function relTime(ts: any): string {
+  const ms = ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : 0;
+  if (!ms) return "";
+  const d = Date.now() - ms;
+  const m = Math.floor(d / 60000);
+  if (m < 1) return "à l'instant";
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  return `il y a ${Math.floor(h / 24)} j`;
+}
+
+// Hook d'import partagé : garde-fou taille, phases de progression (lecture → traitement), et
+// résultat/erreur persistant. L'upsert serveur est idempotent (ré-import = remplace, pas de doublon).
+function useImport() {
+  const [phase, setPhase] = useState<ImportPhase>("");
+  const [outcome, setOutcome] = useState<ImportOutcome>(null);
+  const run = async (file: File): Promise<ImportOutcome> => {
+    setOutcome(null);
+    if (file.size > MAX_MB * 1024 * 1024) {
+      const o: ImportOutcome = { ok: false, error: `Fichier trop volumineux (${(file.size / 1048576).toFixed(0)} Mo, max ~${MAX_MB} Mo). Divise l'import — ex. un ZIP par lots de fiches.` };
+      setOutcome(o); return o;
+    }
+    try {
+      const res = await callImportDelta(file, setPhase);
+      const o: ImportOutcome = { ok: true, res }; setOutcome(o); return o;
+    } catch (err: any) {
+      const detail = String(err?.message || err?.code || "").replace(/^functions\//, "");
+      const o: ImportOutcome = { ok: false, error: detail || "Import refusé" }; setOutcome(o); return o;
+    } finally {
+      setPhase("");
+    }
+  };
+  return { run, phase, busy: phase !== "", outcome, reset: () => setOutcome(null) };
+}
+
+// Barre de progression par phase (indéterminée pendant le traitement serveur).
+function ImportProgress({ phase }: { phase: Exclude<ImportPhase, ""> }) {
+  const w = phase === "reading" ? "35%" : "80%";
+  return (
+    <div className="mt-3" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 text-xs text-muted"><Upload size={13} className="animate-pulse" aria-hidden="true" />{PHASE_LABEL[phase]}</div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-panel2">
+        <div className={cx("h-full rounded-full bg-gold transition-all duration-500", phase === "processing" && "animate-pulse")} style={{ width: w }} />
+      </div>
+      <div className="mt-1 text-[11px] text-faint">Un gros fichier / ZIP peut prendre plusieurs dizaines de secondes — ne ferme pas l'onglet.</div>
+    </div>
+  );
+}
+
+// Panneau de résultat persistant : ce qui a été reconnu (FORMAT), lignes traitées / ignorées, et
+// détail PAR fichier avec la CAUSE d'un éventuel échec (≠ toast éphémère).
+function ImportResult({ outcome }: { outcome: NonNullable<ImportOutcome> }) {
+  if (!outcome.ok) {
+    return (
+      <div className="mt-3 rounded-lg border border-clay/40 bg-clay/10 p-3 text-[13px]">
+        <div className="flex items-center gap-1.5 font-semibold text-clay"><AlertCircle size={15} aria-hidden="true" /> Import refusé</div>
+        <div className="mt-1 text-muted">{outcome.error}</div>
+      </div>
+    );
+  }
+  const r = outcome.res;
+  const files = r.files || [];
+  const failed = files.filter((f) => f.error);
+  const okFiles = files.filter((f) => !f.error);
+  return (
+    <div className="mt-3 rounded-lg border border-emerald/40 bg-emerald/10 p-3 text-[13px]">
+      <div className="flex items-center gap-1.5 font-semibold text-emerald"><CheckCircle2 size={15} aria-hidden="true" /> Import réussi</div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {(r.kinds || []).map((k) => <Badge key={k} tone="emerald">{kindLabel(k)}</Badge>)}
+        {!(r.kinds || []).length && <span className="text-muted">Aucun type reconnu</span>}
+      </div>
+      <div className="mt-2 text-muted">
+        <b className="text-ink tabnum">{(r.rowsOk || 0).toLocaleString("fr-FR")}</b> ligne(s) intégrée(s)
+        {(r.rowsSkipped || 0) > 0 && <> · <b className="text-ink tabnum">{r.rowsSkipped!.toLocaleString("fr-FR")}</b> ignorée(s)</>}
+        {(r.fileCount || 0) > 1 && <> · {r.fileCount} classeurs</>}
+      </div>
+      {(r.rowsSkipped || 0) > 0 && <div className="mt-1 text-[11px] text-faint">Lignes ignorées = doublons de clé, lignes vides ou champs clés manquants (ex. N° FP).</div>}
+      {files.length > 1 && (
+        <ul className="mt-2 flex flex-col gap-0.5 text-[12px]">
+          {okFiles.map((f) => (
+            <li key={f.file} className="flex items-center gap-1.5 text-muted"><CheckCircle2 size={12} className="text-emerald shrink-0" aria-hidden="true" /><span className="truncate">{f.file}</span><span className="text-faint">· {(f.kinds || []).map(kindLabel).join(", ") || "—"} · {(f.rowsOk || 0)} l.</span></li>
+          ))}
+          {failed.map((f) => (
+            <li key={f.file} className="flex items-center gap-1.5 text-clay"><AlertCircle size={12} className="shrink-0" aria-hidden="true" /><span className="truncate">{f.file}</span><span>· {f.error}</span></li>
+          ))}
+        </ul>
+      )}
+      {failed.length > 0 && files.length <= 1 && <div className="mt-1 text-clay text-[12px]">{failed.map((f) => `${f.file} : ${f.error}`).join(" · ")}</div>}
+    </div>
+  );
+}
+
+// Bouton d'import compact (barres d'action des vues). Feedback via toast + libellé de phase.
+// Le rôle est revérifié côté serveur (l'UI n'est qu'un garde-fou).
 export function ImportButton({ label = "Importer un fichier" }: { label?: string }) {
   const toast = useToast();
-  const [busy, setBusy] = useState(false);
+  const { run, phase, busy } = useImport();
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // autorise le ré-import du même fichier
     if (!file) return;
-    setBusy(true);
-    try {
-      const r = await callImportDelta(file);
-      const kinds = (r.kinds || []).map((k) => IMPORT_KIND_LABEL[k] || k).join(", ") || "aucun";
-      const filesPart = (r.files || 0) > 1 ? ` · ${r.files} fichiers` : "";
-      toast(`Import réussi : ${r.rowsOk} ligne(s)${r.rowsSkipped ? ` · ${r.rowsSkipped} ignorée(s)` : ""}${filesPart} · ${kinds}`, "ok");
-    } catch (err: any) {
-      toast(err?.message ? `Import refusé : ${err.message}` : "Import refusé", "err");
-    } finally {
-      setBusy(false);
-    }
+    const o = await run(file);
+    if (o?.ok) {
+      const kinds = (o.res.kinds || []).map(kindLabel).join(", ") || "aucun type";
+      const filesPart = (o.res.fileCount || 0) > 1 ? ` · ${o.res.fileCount} classeurs` : "";
+      toast(`Import réussi : ${o.res.rowsOk} ligne(s)${o.res.rowsSkipped ? ` · ${o.res.rowsSkipped} ignorée(s)` : ""}${filesPart} · ${kinds}`, "ok");
+    } else if (o) toast(`Import refusé : ${o.error}`, "err");
   };
   return (
     <label
-      title="Importer un XLSX (P&L, Fiche affaire, Facturation DF ou LIVE/Sales) ou un ZIP de classeurs — type détecté automatiquement. Fiches affaire : plusieurs fiches par onglets ou par ZIP."
+      title="Importer un XLSX (P&L, Fiche affaire, Facturation DF ou LIVE/Sales) ou un ZIP de classeurs — type détecté automatiquement."
       className={cx("btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer", busy && "opacity-60 pointer-events-none")}
     >
       <Upload size={14} aria-hidden="true" />
-      {busy ? "Import…" : label}
+      {busy ? (phase === "reading" ? "Lecture…" : "Traitement…") : label}
       <input type="file" accept=".xlsx,.xls,.zip" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX ou ZIP à importer" />
     </label>
   );
 }
 
-// Carte d'import complète (onglet Admin) : peuple tous les modules à partir des exports XLSX.
+// Carte d'import complète (onglet Habilitations) : dépôt (clic ou glisser-déposer), progression par
+// phase, résultat persistant (format reconnu / lignes / cause d'échec par fichier), état « dernier
+// import » (journal), et rappel des formats reconnus. Peuple tous les modules à partir des exports.
 export function DataImportCard() {
+  const { run, phase, busy, outcome } = useImport();
+  const [drag, setDrag] = useState(false);
+  const { rows: recent } = useCollectionData<ImportLog>("imports", [orderBy("ts", "desc"), limit(5)], "recent5");
+  const last = recent[0];
+
+  const handle = (file?: File | null) => { if (file) run(file); };
+  const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); if (!busy) handle(e.dataTransfer.files?.[0]); };
+
   return (
-    <Card title="Import de données" actions={<ImportButton />}>
-      <p className="text-[13px] text-muted">
-        Dépose un fichier <b className="text-ink">Excel</b> (ou un ZIP) : le type est reconnu
-        automatiquement et les chiffres se mettent à jour. Ré-importer ne crée jamais de doublon.
-      </p>
+    <Card title="Import de données">
+      <label
+        onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={onDrop}
+        className={cx(
+          "flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-6 text-center transition-colors",
+          busy ? "border-line opacity-70 pointer-events-none" : "cursor-pointer border-line hover:border-gold/50 hover:bg-panel2",
+          drag && "border-gold/70 bg-panel2"
+        )}
+      >
+        <Upload size={20} className="text-faint" aria-hidden="true" />
+        <div className="text-[13px] text-ink font-semibold">Dépose un fichier <b>Excel</b> ou un <b>ZIP</b>, ou clique pour choisir</div>
+        <div className="text-[11px] text-faint">Type détecté automatiquement · ré-importer ne crée jamais de doublon · max ~{MAX_MB} Mo</div>
+        <input type="file" accept=".xlsx,.xls,.zip" className="sr-only" disabled={busy}
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; handle(f); }}
+          aria-label="Choisir un fichier XLSX ou ZIP à importer" />
+      </label>
+
+      {busy && phase && <ImportProgress phase={phase} />}
+      {!busy && outcome && <ImportResult outcome={outcome} />}
+
+      {/* ÉTAT durable : dernier import (journal serveur), avec l'historique récent repliable. */}
+      {last && (
+        <div className="mt-3 flex items-center gap-1.5 text-[12px] text-muted">
+          <Clock size={13} className="text-faint shrink-0" aria-hidden="true" />
+          Dernier import : <b className="text-ink">{last.filename || "—"}</b>
+          <span className="text-faint">{relTime(last.ts)} · {(last.kinds || []).map(kindLabel).join(", ") || "aucun type"} · {(last.rowsOk || 0).toLocaleString("fr-FR")} l.</span>
+        </div>
+      )}
+      {recent.length > 1 && (
+        <details className="mt-1 text-[12px]">
+          <summary className="cursor-pointer select-none text-faint hover:text-ink">Historique récent</summary>
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {recent.map((r) => (
+              <li key={r.id} className="flex items-center gap-1.5 text-muted">
+                <span className="text-faint tabnum w-20 shrink-0">{relTime(r.ts)}</span>
+                <span className="truncate text-ink">{r.filename || "—"}</span>
+                <span className="text-faint">· {(r.kinds || []).map(kindLabel).join(", ") || "—"} · {(r.rowsOk || 0).toLocaleString("fr-FR")} l.{r.rowsSkipped ? ` · ${r.rowsSkipped} ign.` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       <details className="mt-2 text-[13px] text-muted">
         <summary className="cursor-pointer select-none text-faint hover:text-ink">Formats reconnus</summary>
         <ul className="mt-2 grid gap-1 sm:grid-cols-2">

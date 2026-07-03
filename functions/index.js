@@ -248,7 +248,9 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
 
   if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
   await recomputeSummaries();
-  return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, files: files.length };
+  // `files` = détail PAR fichier (kinds reconnus, lignes OK, erreur éventuelle, byKind) — permet à
+  // l'UI d'afficher précisément ce qui a été reconnu et la cause d'un éventuel échec par classeur.
+  return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, fileCount: files.length, files };
 });
 
 // --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.

@@ -92,11 +92,18 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export type ImportDeltaResult = { ok: boolean; kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number; files?: number };
+// Détail par fichier (classeur d'un ZIP ou fichier unique) : ce qui a été reconnu, lignes OK,
+// ventilation par type, et cause d'échec éventuelle ("aucune source reconnue", "classeur illisible"…).
+export type ImportKindReport = { rowsIn?: number; rowsOk?: number; rowsSkipped?: number; error?: string };
+export type ImportFileReport = { file: string; kinds?: string[]; rowsOk?: number; error?: string; byKind?: Record<string, ImportKindReport> };
+export type ImportDeltaResult = { ok: boolean; kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number; fileCount?: number; files?: ImportFileReport[] };
 
-/** Importe un delta (XLSX au modèle connu) : upsert idempotent côté serveur + recompute. */
-export async function callImportDelta(file: File): Promise<ImportDeltaResult> {
+/** Importe un delta (XLSX au modèle connu) : upsert idempotent côté serveur + recompute.
+ *  `onPhase` signale la progression : "reading" (encodage local) → "processing" (envoi + traitement). */
+export async function callImportDelta(file: File, onPhase?: (p: "reading" | "processing") => void): Promise<ImportDeltaResult> {
+  onPhase?.("reading");
   const fileB64 = await fileToBase64(file);
+  onPhase?.("processing");
   const res = await httpsCallable(functions, "importDelta")({ fileB64, filename: file.name });
   return res.data as ImportDeltaResult;
 }
