@@ -45,6 +45,22 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(byType.bc_sans_fp.count).toBe(1);
     expect(byType.fiches_sans_vente.count).toBe(1);
   });
+  it("opp GAGNÉE avec FP mais SANS ligne P&L → à réconcilier (sévérité haute)", () => {
+    // FP/2026/1 est une commande (P&L) ; FP/2026/8 ne l'est pas → réconciliation à faire.
+    const q2 = dataQuality(
+      [{ fp: "FP/2026/1", client: "ACME", cas: 1000, yearPo: 2026 }],
+      [],
+      [
+        { fp: "FP/2026/1", client: "ACME", stage: 6, amount: 1000 }, // réconciliée → OK
+        { fp: "FP/2026/8", client: "MTN", stage: 6, amount: 500 },   // sans P&L → signalée
+      ],
+      [], [],
+    );
+    const t = Object.fromEntries(q2.issues.map((i) => [i.type, i]));
+    expect(t.opps_gagnees_sans_pnl.count).toBe(1);
+    expect(t.opps_gagnees_sans_pnl.refs).toContain("FP/2026/8");
+    expect(t.opps_gagnees_sans_pnl.severity).toBe("high");
+  });
   it("issues triées par sévérité (high avant medium avant low)", () => {
     const ranks = q.issues.map((i) => ({ high: 0, medium: 1, low: 2 }[i.severity]));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));

@@ -2,6 +2,8 @@
 // fiabiliser les imports en continu : lignes en quarantaine implicite, champs manquants, ruptures
 // de rattachement, incohérences. Distinct du « Centre d'alertes » (alertes MÉTIER actionnables).
 // Module PUR (testable).
+const { fpKey } = require("../lib/ids");
+
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
 function dataQuality(orders, invoices, opps, bcLines, sheets) {
@@ -33,6 +35,10 @@ function dataQuality(orders, invoices, opps, bcLines, sheets) {
   add("opps_sans_montant", "low", active.filter((o) => !(o.amount > 0)), "Opportunités actives sans montant", (o) => o.client);
   // GAGNÉES sans N° FP : ne peuvent pas devenir commande (perte de CAS/backlog silencieuse).
   add("opps_gagnees_sans_fp", "high", opps.filter((o) => o.stage === 6 && !o.fp), "Opportunités GAGNÉES sans N° FP (non transformables en commande)", (o) => o.client);
+  // GAGNÉES avec N° FP mais SANS ligne P&L : règle P&L strict → non comptées en commande. Ce sont
+  // des réconciliations opp↔P&L à faire (saisir la ligne au P&L de l'Excel), sinon CAS/backlog absents.
+  const orderFps = new Set(orders.map((o) => fpKey(o.fp)).filter(Boolean));
+  add("opps_gagnees_sans_pnl", "high", opps.filter((o) => o.stage === 6 && o.fp && !orderFps.has(fpKey(o.fp))), "Opportunités GAGNÉES sans ligne P&L (à réconcilier au P&L — non comptées en commande)", (o) => o.fp || o.client);
 
   // Lignes BC
   add("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier);
