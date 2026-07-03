@@ -15,7 +15,7 @@ const { am360 } = require("../domain/am360");
 const { dataQuality } = require("../domain/dataQuality");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
-const { fpKey } = require("./ids");
+const { fpKey, plausibleYear } = require("./ids");
 
 async function readAll(db, name, withId = false) {
   const snap = await db.collection(name).get();
@@ -52,7 +52,9 @@ async function recomputeAll(db, only) {
   const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
 
   const fiscal = (await db.doc("config/fiscal").get()).data() || {};
-  const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, o.yearPo || 0), 0);
+  // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
+  // ancrer tout l'exercice sur une année fantôme).
+  const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
 
   // Rafraîchit l'enrichissement (BU par jointure FP/client, rattachement facture↔commande)
   // sur les données lues, pour que les agrégats/alertes ne dépendent pas de drapeaux
