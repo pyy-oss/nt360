@@ -18,10 +18,6 @@ function overview(orders, invoices, opps = [], opts = {}) {
   const commandes = sum(orders, (o) => o.cas);
   // RAF des commandes de la PÉRIODE (reste à faire, glissant) — sert au backlog de repli.
   const rafPeriode = sum(orders, (o) => Math.max(o.raf || 0, 0));
-  // Facturé RATTACHÉ à la cohorte de commandes (par N° FP) — base du TAUX DE FACTURATION réel.
-  // (≠ CAF total qui inclut les factures orphelines : ici on veut la part facturée DE CES commandes.)
-  const orderFps = new Set(orders.map((o) => o.fp).filter(Boolean));
-  const factureCohorte = sum((invoices || []).filter((i) => orderFps.has(i.fp)), (i) => i.amountHt);
   // Backlog GLISSANT : RAF de toutes les commandes ouvertes, cumulé jusqu'à l'année en cours
   // (indépendant de la période). Fourni via opts ; à défaut = RAF période (rétro-compat tests).
   const backlog = opts.backlog != null ? opts.backlog : rafPeriode;
@@ -37,10 +33,15 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // VALORISÉ À 100 % DU MONTANT (décision métier : une quasi-certitude ≥ 90 % ≈ une commande),
   // cohérent avec l'atterrissage. (Auparavant : montant × proba, ce qui sous-évaluait.)
   const CONFIANCE_MIN = 0.9;
-  const pondCertain = sum(
-    opps.filter((o) => o.stage >= 1 && o.stage <= 5 && (o.probability || 0) >= CONFIANCE_MIN),
-    (o) => o.amount
-  );
+  const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5);
+  const band = (lo, hi) => sum(active.filter((o) => (o.probability || 0) >= lo && (o.probability || 0) < hi), (o) => o.amount);
+  const pondCertain = sum(active.filter((o) => (o.probability || 0) >= CONFIANCE_MIN), (o) => o.amount);
+  // Bandes de confiance intermédiaires (pour le taux de conversion) et perdu de la période.
+  const opp70_90 = band(0.70, 0.90); // pondéré 20 %
+  const opp50_70 = band(0.50, 0.70); // pondéré 10 %
+  const perdu = sum(opps.filter((o) => o.stage === 7), (o) => o.amount);
+  // Dénominateur de conversion = Commande + Certitude (≥90 % à 100 %) + 20 %·[70-90 %[ + 10 %·[50-70 %[ + Perdu.
+  const convDenom = commandes + pondCertain + 0.20 * opp70_90 + 0.10 * opp50_70 + perdu;
   return {
     // Certitudes = pipeline quasi-certain à venir (glissant), commandes signées suivies à part.
     certitudes: pondCertain,
@@ -52,10 +53,14 @@ function overview(orders, invoices, opps = [], opts = {}) {
     backlogCount,
     mb,
     pipelineWon,
+    perdu,
     ratios: {
-      // TAUX DE FACTURATION réel = facturé rattaché à la cohorte / CAS, borné [0,1]. Mesure la
-      // part du CAS déjà facturée (et non l'avancement de LIVRAISON, qui est 1 − RAF/CAS).
-      tauxFacturation: commandes > 0 ? Math.max(0, Math.min(1, factureCohorte / commandes)) : 0,
+      // TAUX DE FACTURATION (période) = Facturé / (Facturé + Backlog) : part déjà facturée du
+      // « facturé + reste à facturer ». Borné [0,1] par construction (deux grandeurs positives).
+      tauxFacturation: (facture + backlog) > 0 ? facture / (facture + backlog) : 0,
+      // TAUX DE CONVERSION VENTE (période) = Commande / (Commande + Certitude + 20 %·opps[70-90 %[
+      // + 10 %·opps[50-70 %[ + Perdu). Part du potentiel adressable déjà transformée en commande.
+      tauxConversionVente: convDenom > 0 ? commandes / convDenom : 0,
       pmb: commandes > 0 ? mb / commandes : 0,
     },
   };
