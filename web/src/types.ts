@@ -106,7 +106,10 @@ export interface DataQualitySummary {
 }
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
-export interface CommandesSummary { count?: number; rows?: Order[] }
+// Méta des commandes matérialisées. Les lignes sont désormais dans les chunks commandesRows/{i}
+// (rows conservé optionnel pour lire un ancien agrégat pré-chunking en transition).
+export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }
+export interface CommandeChunk { i?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number };
 export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };

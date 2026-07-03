@@ -31,13 +31,20 @@ const filterInvoices = (invoices, period) =>
  * @param {string[]} [only] sous-ensemble d'agrégats (optionnel, sinon tout)
  */
 async function recomputeAll(db, only) {
+  // Recompute PARTIEL : orders/invoices/opps/projectSheets alimentent toujours mergeCommandes ;
+  // bcLines/creditLines/objectives ne sont lus QUE si un summary demandé en a besoin. Un recompute
+  // ciblé (ex. après un changement de statut BC → ["suppliers","alerts"]) évite ainsi des lectures.
+  const need = (keys) => !only || keys.some((k) => only.includes(k));
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality"]);
+  const needCredit = need(["suppliers", "alerts"]);
+  const needObj = need(["atterrissage", "ams"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices"),
     readAll(db, "opportunities"),
-    readAll(db, "bcLines"),
-    readAll(db, "creditLines", true),
-    readAll(db, "objectives"),
+    needBc ? readAll(db, "bcLines") : Promise.resolve([]),
+    needCredit ? readAll(db, "creditLines", true) : Promise.resolve([]),
+    needObj ? readAll(db, "objectives") : Promise.resolve([]),
     readAll(db, "projectSheets"),
   ]);
 
@@ -105,16 +112,22 @@ async function recomputeAll(db, only) {
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps), fy: currentFy, ...stamp } });
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets), ...stamp } });
-  // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).
-  if (want("commandes") || want("overview")) w.push({ path: "summaries/commandes", data: {
-    count: orders.length,
-    rows: orders.map((o) => ({
+  // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
+  // Découpées en CHUNKS (commandesRows/{i}) pour ne PAS dépasser la limite Firestore ~1 Mio/doc :
+  // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).
+  let commandeChunks = null;
+  if (want("commandes") || want("overview")) {
+    const rows = orders.map((o) => ({
       fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
       cas: o.cas || 0, raf: o.raf || 0, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null,
       yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
-    })),
-    ...stamp,
-  } });
+    }));
+    const CHUNK = 800; // ~800 lignes/doc reste très en deçà de la limite 1 Mio
+    commandeChunks = Math.max(1, Math.ceil(rows.length / CHUNK));
+    // rows: delete() purge l'ancien champ inline (écritures merge) — sinon la méta resterait ~1 Mio.
+    w.push({ path: "summaries/commandes", data: { count: orders.length, chunks: commandeChunks, rows: FieldValue.delete(), ...stamp } });
+    for (let i = 0; i < commandeChunks; i++) w.push({ path: `commandesRows/${i}`, data: { i, rows: rows.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
+  }
 
   // Historisation : un INSTANTANÉ daté des grandeurs clés à chaque recompute (1 point/jour,
   // ré-écrit si déjà présent). Fonde les tendances / burn-down du backlog / forecast-vs-réel.
@@ -176,6 +189,17 @@ async function recomputeAll(db, only) {
     if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
   }
   await batch.commit();
+
+  // Purge des chunks de commandes ORPHELINS (si le nombre de chunks a diminué depuis le dernier
+  // recompute), sinon d'anciennes lignes resteraient lues par le front.
+  if (commandeChunks != null) {
+    const snap = await db.collection("commandesRows").get();
+    let del = db.batch(), d = 0;
+    for (const doc of snap.docs) {
+      if (Number(doc.id) >= commandeChunks) { del.delete(doc.ref); if (++d % 400 === 0) { await del.commit(); del = db.batch(); } }
+    }
+    if (d % 400 !== 0) await del.commit();
+  }
   return { written: w.map((x) => x.path), currentFy, periods };
 }
 
