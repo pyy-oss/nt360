@@ -84,7 +84,7 @@ export function HBars({ rows, colorFn, max }: { rows: { name: string; v: number;
 // Libellés FR des types de fichiers reconnus à l'import (mapping kind serveur → module alimenté).
 const IMPORT_KIND_LABEL: Record<string, string> = {
   pnl: "Commandes (P&L)",
-  fiche: "Fiche affaire (P&L Projet + BC)",
+  fiche: "Fiche affaire (P&L Projet)",
   facturationDf: "Factures",
   salesData: "Pipeline / Opportunités",
   logistics: "BC fournisseurs (Exécution BC)",
@@ -136,7 +136,8 @@ export function DataImportCard() {
         <summary className="cursor-pointer select-none text-faint hover:text-ink">Formats reconnus</summary>
         <ul className="mt-2 grid gap-1 sm:grid-cols-2">
           <li>• <b className="text-ink">P&amp;L</b> → Commandes · Rentabilité</li>
-          <li>• <b className="text-ink">Fiche affaire</b> → P&amp;L Projet · Exécution BC</li>
+          <li>• <b className="text-ink">Fiche affaire</b> → P&amp;L Projet</li>
+          <li>• <b className="text-ink">Import BC</b> (Logistics / PDF) → Exécution BC</li>
           <li>• <b className="text-ink">Facturation DF</b> → Factures</li>
           <li>• <b className="text-ink">LIVE / Sales</b> → Pipeline · Opportunités</li>
         </ul>
