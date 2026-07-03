@@ -7,7 +7,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
-import { Props, grid4, cols2, AlertsBanner } from "./_shared";
+import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge } from "./_shared";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary } from "../types";
 
 // Bloc « atterrissage » : jauge de probabilité + Projeté / Objectif / Écart.
@@ -33,6 +33,7 @@ export const Overview: FC<Props> = ({ period }) => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
+  const objGlobal = useObjectives(period).get("global", "all"); // R/O global (si objectif de l'année sélectionnée)
   const canWrite = useCan("overview") === "write";
   const canExport = useCanExport();
   const [url, setUrl] = useState<string | null>(null);
@@ -87,6 +88,26 @@ export const Overview: FC<Props> = ({ period }) => {
         <Kpi label="Taux de facturation" value={pct(data.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(data.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
       </div>
+
+      {/* R/O global (Réalisé / Objectif) — objectif GLOBAL de l'exercice sélectionné. */}
+      {objGlobal && (
+        <Card title={`Réalisé / Objectif — global ${period}`}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              { label: "R/O CAS", real: data.commandes, target: objGlobal.targetCas },
+              { label: "R/O Facturé", real: data.facture, target: objGlobal.targetInvoiced },
+              { label: "R/O Marge", real: data.mb, target: objGlobal.targetMargin },
+            ].map((r) => (
+              <div key={r.label} className="card p-4 min-w-0">
+                <div className="text-xs text-muted truncate">{r.label}</div>
+                <div className="mt-1 text-lg">{roBadge(r.real, r.target)}</div>
+                <div className="text-[11px] text-faint mt-1 break-words">réalisé {fmt(r.real)} · cible {fmt(r.target)}</div>
+              </div>
+            ))}
+          </div>
+          <Tip>R/O = Réalisé de la période / Objectif de l'exercice {period}. Le suivi par BU, client et commercial est sur leurs vues respectives (Domaines, Clients, AM 360°).</Tip>
+        </Card>
+      )}
 
       {/* Tendance : burn-down du backlog et écart projeté vs réalisé dans le temps. */}
       {points.length >= 2 && (

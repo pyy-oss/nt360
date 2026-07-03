@@ -1,13 +1,34 @@
 // Helpers et primitives partagés par les modules (extraits de index.tsx pour le découpage).
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import { AlertTriangle, Upload, Filter, X } from "lucide-react";
-import { useDocData } from "../lib/hooks";
+import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
-import { T, fmt } from "../design/tokens";
+import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta } from "../lib/writes";
-import type { AlertsSummary, AmsSummary, EntitySummary } from "../types";
+import type { AlertsSummary, AmsSummary, EntitySummary, Objective } from "../types";
+
+// --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
+const upScope = (s?: string) => (s || "").trim().toUpperCase();
+
+/** Badge R/O : vert si ≥ 100 %, or sinon ; « — » si pas de cible ou réalisé indisponible. */
+export function roBadge(real: number | undefined, target: number | undefined) {
+  if (!target || target <= 0 || real == null || !Number.isFinite(real)) return <span className="text-faint">—</span>;
+  return <Badge tone={real / target >= 1 ? "emerald" : "gold"}>{pct(real / target)}</Badge>;
+}
+
+/** Objectifs de l'année {fy} indexés par périmètre. `.get(scope, scopeValue)` → objectif ou undefined.
+ *  Les objectifs étant ANNUELS, le R/O n'a de sens que si la période sélectionnée est cette année-là. */
+export function useObjectives(fy: number | string | undefined) {
+  const { rows } = useCollectionData<Objective>("objectives");
+  const map = new Map<string, Objective>();
+  for (const o of rows || []) {
+    if (fy == null || String(o.fiscalYear) !== String(fy)) continue;
+    map.set(`${o.scope || "global"}|${upScope(o.scopeValue) || "ALL"}`, o);
+  }
+  return { get: (scope: string, scopeValue?: string) => map.get(`${scope}|${upScope(scopeValue) || "ALL"}`) };
+}
 
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable).
 const ALERT_TARGET: Record<string, string> = {
