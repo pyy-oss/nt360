@@ -39,6 +39,9 @@ export interface BacklogSummary {
   fy?: number; total?: number; count?: number;
   byVintage?: Record<string, number>; byBu?: Record<string, number>;
   top?: { fp?: string; client?: string; bu?: string; raf?: number }[];
+  // Diagnostic de fiabilité : RAF curaté Excel vs RAF dérivé (CAS − facturé, surévalué).
+  totalExcel?: number; totalDerive?: number; countExcel?: number; countDerive?: number;
+  deriveTop?: { fp?: string; client?: string; bu?: string; source?: string | null; yearPo?: number; cas?: number; facture?: number; raf?: number }[];
 }
 
 export interface FacturationSummary {
