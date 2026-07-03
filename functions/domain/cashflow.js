@@ -8,6 +8,11 @@
 // Aucune date de règlement réelle en source → on n'invente pas de précision : l'AR est ancré sur
 // les échéances réelles, le backlog est explicitement indicatif.
 
+// Jour de comparaison « en retard » (lexical, chaînes ISO). Une échéance au MOIS seul
+// (« 2026-07 ») est ramenée à la fin du mois : sinon une facture due en juillet serait déclarée
+// en retard dès le 1er juillet. (Comparaison de chaînes uniquement → « -31 » factice sans risque.)
+const cmpDay = (d) => { const s = String(d); return s.length <= 7 ? s + "-31" : s.slice(0, 10); };
+
 function monthList(asOf, horizon) {
   const [y0, m0] = String(asOf).split("-").map(Number); // m0 : 1..12
   const out = [];
@@ -44,7 +49,7 @@ function cashflow(invoices, orders, asOf, opts = {}) {
     if (!due) { ar[curMonth] += amt; continue; } // échéance inconnue → attendu ce mois
     // « En retard » au JOUR (comme receivables) : une échéance déjà passée, même DANS le mois
     // courant, compte comme échue → cohérence des deux tuiles « En retard » sur la même page.
-    if (String(due) < today) { overdue += amt; overdueCount++; continue; }
+    if (cmpDay(due) < today) { overdue += amt; overdueCount++; continue; }
     const mk = monthOf(due);
     if (inHorizon.has(mk)) ar[mk] += amt;
     else beyond += amt; // au-delà de l'horizon
@@ -72,7 +77,9 @@ function cashflow(invoices, orders, asOf, opts = {}) {
 /**
  * Décaissements fournisseurs attendus : échéancier des sorties de cash à partir des lignes BC
  * NON SOLDÉES (on doit encore payer), positionnées au mois de leur ETA (réel sinon contractuel).
- * ETA passée ou inconnue → mois courant (dû sans délai). Au-delà de l'horizon compté à part.
+ * SYMÉTRIQUE avec l'AR (cashflow) : ETA inconnue → mois courant ; ETA PASSÉE → isolée « en retard »
+ * (overdue), HORS échéancier futur — sinon la position nette (AR − décaissements) serait biaisée
+ * (elle nettait des payables échus empilés sur le mois courant contre un AR échu, lui, sorti).
  * @param {object[]} bcLines lignes BC (amountXof, status, etaReel, etaContrat)
  * @param {string} asOf date du jour (YYYY-MM-DD)
  * @param {{horizon?: number}} [opts]
@@ -84,20 +91,20 @@ function decaissements(bcLines, asOf, opts = {}) {
   const curMonth = months[0];
   const inHorizon = new Set(months);
   const out = Object.fromEntries(months.map((m) => [m, 0]));
-  let beyond = 0, total = 0;
+  let beyond = 0, total = 0, overdue = 0, overdueCount = 0;
 
   const open = (bcLines || []).filter((b) => b.status !== "solde" && (b.amountXof || 0) > 0);
   for (const b of open) {
     const amt = b.amountXof || 0;
     total += amt;
     const eta = b.etaReel || b.etaContrat;
-    if (!eta) { out[curMonth] += amt; continue; } // ETA inconnue → dû ce mois
+    if (!eta) { out[curMonth] += amt; continue; } // ETA inconnue → dû ce mois (comme AR sans échéance)
+    if (cmpDay(eta) < today) { overdue += amt; overdueCount++; continue; } // ETA passée → isolée (comme AR échu)
     const mk = String(eta).slice(0, 7);
-    if (String(eta) < today) out[curMonth] += amt; // ETA passée, non soldé → à régler maintenant
-    else if (inHorizon.has(mk)) out[mk] += amt;
+    if (inHorizon.has(mk)) out[mk] += amt;
     else beyond += amt;
   }
-  return { months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, openCount: open.length };
+  return { months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, overdue, overdueCount, openCount: open.length };
 }
 
 module.exports = { cashflow, decaissements, monthList };

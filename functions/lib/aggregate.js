@@ -76,8 +76,10 @@ async function recomputeAll(db, only) {
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
   if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...rec, ...stamp } });
-  // Prévision de trésorerie NETTE : encaissements attendus (AR + backlog indicatif) − décaissements
-  // fournisseurs (BC non soldés). Position nette mensuelle + cumul.
+  // Prévision de trésorerie NETTE : position mensuelle = encaissements AR attendus (échéancier)
+  // − décaissements fournisseurs attendus (échéancier). SYMÉTRIQUE : de part et d'autre, les échus
+  // sont isolés (cf.overdue / dec.overdue), donc le net mensuel ne compare que du FUTUR contre du
+  // FUTUR (plus de biais pessimiste). Le backlog reste INDICATIF, hors du net (jamais mêlé à l'AR).
   if (want("facturation") || want("cashflow")) {
     const cf = cashflow(invoices, orders, asOf);
     const dec = decaissements(bcLines, asOf);
@@ -91,7 +93,8 @@ async function recomputeAll(db, only) {
     });
     w.push({ path: "summaries/cashflow", data: {
       ...cf, months: monthsNet,
-      totalDecaissement: dec.total, decaissementBeyond: dec.beyond, bcOpenCount: dec.openCount,
+      totalDecaissement: dec.total, decaissementBeyond: dec.beyond,
+      decaissementOverdue: dec.overdue, decaissementOverdueCount: dec.overdueCount, bcOpenCount: dec.openCount,
       ...stamp,
     } });
   }

@@ -62,20 +62,25 @@ describe("cashflow — échéancier des encaissements", () => {
 describe("decaissements — sorties de cash (BC non soldés)", () => {
   const BC = [
     { amountXof: 1000, status: "emis", etaContrat: "2026-08-15" },  // mois +1
-    { amountXof: 500, status: "livre", etaReel: "2026-06-01" },     // ETA passée → mois courant
+    { amountXof: 500, status: "livre", etaReel: "2026-06-01" },     // ETA passée → ISOLÉE (overdue)
     { amountXof: 300, status: "emis" },                             // sans ETA → mois courant
     { amountXof: 200, status: "emis", etaContrat: "2027-06-01" },   // au-delà de l'horizon
     { amountXof: 999, status: "solde", etaContrat: "2026-08-01" },  // soldé → exclu
     { amountXof: 0, status: "emis", etaContrat: "2026-08-01" },     // montant nul → exclu
   ];
   const d = decaissements(BC, "2026-07-01", { horizon: 6 });
-  it("échéancier des sorties par ETA ; ETA passée/inconnue → mois courant", () => {
-    expect(d.months[0].out).toBe(800);  // 500 (ETA passée) + 300 (sans ETA)
+  it("échéancier des sorties par ETA ; ETA inconnue → mois courant, ETA passée → isolée (overdue)", () => {
+    expect(d.months[0].out).toBe(300);  // sans ETA seulement (l'ETA passée est isolée en overdue)
     expect(d.months[1].out).toBe(1000); // ETA 08-15
+    expect(d.overdue).toBe(500);        // ETA passée (2026-06) → en retard, hors échéancier
+    expect(d.overdueCount).toBe(1);
   });
-  it("exclut les BC soldés et montants nuls ; au-delà de l'horizon à part", () => {
+  it("exclut les BC soldés et montants nuls ; au-delà de l'horizon à part ; additivité", () => {
     expect(d.total).toBe(2000);   // 1000 + 500 + 300 + 200 (soldé & 0 exclus)
     expect(d.beyond).toBe(200);   // ETA 2027
     expect(d.openCount).toBe(4);
+    // Additivité : Σ échéancier + au-delà + en retard = total.
+    const sumMonths = d.months.reduce((s, m) => s + m.out, 0);
+    expect(sumMonths + d.beyond + d.overdue).toBe(d.total);
   });
 });
