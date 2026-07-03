@@ -70,7 +70,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <>
           <div className={grid4}>
             <Kpi label="Couverture reste-à-faire" value={coverageLabel} tone={coverage == null ? (hasObj ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré exercice / (objectif − réalisé CAS)" />
-            <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp. · D Prev dépassée`} />
+            <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp.${data.closing.avgOverdueDays ? ` · ~${data.closing.avgOverdueDays} j de retard moyen` : " · D Prev dépassée"}`} />
             <Kpi label="À clôturer ce mois" value={fmt(cb?.mois?.pond)} tone="gold" sub={`${cb?.mois?.count ?? 0} opp. (pondéré)`} />
             <Kpi label="À clôturer ce trimestre" value={fmt(cb?.trim?.pond)} sub={`${cb?.trim?.count ?? 0} opp. (pondéré)`} />
           </div>
@@ -90,7 +90,19 @@ export const Pipeline: FC<Props> = ({ period }) => {
               ) : <EmptyState label="Aucune opportunité en retard de closing." />}
             </Card>
           </div>
-          <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
+          {(data.closing.staleCount ?? 0) > 0 && data.closing.overdueAge && (
+            <Card title={`Ancienneté du retard de closing (retard moyen ~${data.closing.avgOverdueDays ?? 0} j)`}>
+              <HBars
+                rows={[
+                  { name: "≤ 30 j", v: data.closing.overdueAge.d30?.brut || 0, sub: `${data.closing.overdueAge.d30?.count || 0} opp.` },
+                  { name: "31–90 j", v: data.closing.overdueAge.d90?.brut || 0, sub: `${data.closing.overdueAge.d90?.count || 0} opp.` },
+                  { name: "> 90 j", v: data.closing.overdueAge.dPlus?.brut || 0, sub: `${data.closing.overdueAge.dPlus?.count || 0} opp.` },
+                ]}
+                colorFn={(r) => (r.name === "> 90 j" ? T.clay : r.name === "31–90 j" ? T.gold : T.steel)}
+              />
+            </Card>
+          )}
+          <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. L'<b>ancienneté du retard</b> priorise les affaires les plus enlisées (les <b>&gt; 90 j</b> sont les plus à risque, souvent à passer en perdu). Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
         </>
       )}
     </div>
