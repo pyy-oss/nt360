@@ -1,26 +1,26 @@
 import { describe, it, expect } from "vitest";
 const { mergeCommandes } = require("../domain/commandes");
 
-describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
+describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réconcilient", () => {
   const orders = [
     { fp: "FP/2026/1", client: "PNL", bu: "ICT", am: "X", cas: 500, raf: 200, mb: 50, yearPo: 2026, source: "pnl", suppliers: [{ name: "S", amount: 100 }] },
     { fp: "FP/2026/9", client: "PNLONLY", bu: "CLOUD", cas: 300, raf: 300, mb: 30, yearPo: 2026, source: "pnl" },
     { fp: "FP/2026/5", client: "PNLMB", bu: "ICT", am: "Z", cas: 600, raf: 100, mb: 120, marginPct: 0.2, costTotal: 480, yearPo: 2026, source: "pnl" },
   ];
   const opps = [
-    { fp: "FP/2026/1", client: "OPP", am: "AM1", bu: "ICT", amount: 800, stage: 6, closingDate: "2026-05-01" }, // gagnée → écrase P&L
-    { fp: "FP/2026/2", client: "BETA", am: "AM2", bu: "CLOUD", amount: 1000, stage: 6, closingDate: "2026-06-01" }, // nouvelle commande
+    { fp: "FP/2026/1", client: "OPP", am: "AM1", bu: "ICT", amount: 800, stage: 6, closingDate: "2026-05-01" }, // gagnée sur P&L → réconcilie
+    { fp: "FP/2026/2", client: "BETA", am: "AM2", bu: "CLOUD", amount: 1000, stage: 6, closingDate: "2026-06-01" }, // gagnée SANS P&L → ignorée
     { fp: "FP/2026/3", client: "GAMMA", amount: 400, stage: 4, closingDate: "2026-07-01" }, // pas gagnée → ignorée
-    { fp: "FP/2026/5", client: "OPP5", am: "AM5", bu: "ICT", amount: 700, stage: 6, closingDate: "2026-08-01" }, // gagnée sur un P&L : garde la marge P&L
+    { fp: "FP/2026/5", client: "OPP5", am: "AM5", bu: "ICT", amount: 700, stage: 6, closingDate: "2026-08-01" }, // gagnée sur P&L : garde la marge P&L
   ];
   const sheets = [
-    { fp: "FP/2026/1", client: "SAFINE", commercial: "AF", affaire: "RESEAUX", saleTotal: 900, margin: 90, costTotal: 810, marginPct: 0.1 }, // écrase tout
+    { fp: "FP/2026/1", client: "SAFINE", commercial: "AF", affaire: "RESEAUX", saleTotal: 900, margin: 90, costTotal: 810, marginPct: 0.1 }, // enrichit la ligne P&L
   ];
-  const invoices = [{ fp: "FP/2026/2", amountHt: 250 }]; // facturé sur FP/2026/2
+  const invoices = [{ fp: "FP/2026/2", amountHt: 250 }]; // facturé sur un FP sans commande
   const cmd = mergeCommandes(orders, opps, sheets, invoices);
   const byFp = Object.fromEntries(cmd.map((c) => [c.fp, c]));
 
-  it("fiche écrase opp gagnée et P&L (CAS=vente, marge, client, AM, affaire)", () => {
+  it("fiche enrichit une ligne P&L existante (CAS=vente, marge, client, AM, affaire)", () => {
     const c = byFp["FP/2026/1"];
     expect(c.source).toBe("fiche");
     expect(c.cas).toBe(900);
@@ -29,13 +29,8 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
     expect(c.am).toBe("AF");
     expect(c.affaire).toBe("RESEAUX");
   });
-  it("opp gagnée crée une commande (CAS=montant, marge 0, sans provenance P&L)", () => {
-    const c = byFp["FP/2026/2"];
-    expect(c.source).toBe("opp_won");
-    expect(c.cas).toBe(1000);
-    expect(c.mb).toBe(0);
-    expect(c.pnlSource).toBe(null); // aucune donnée P&L d'origine
-    expect(c.raf).toBe(750); // 1000 − 250 facturé
+  it("opp gagnée SANS ligne P&L → aucune commande créée (P&L strict)", () => {
+    expect(byFp["FP/2026/2"]).toBeUndefined();
   });
   it("opp gagnée sur un P&L : CAS=opp mais marge/coût P&L CONSERVÉS (pnlSource=manuel)", () => {
     const c = byFp["FP/2026/5"];
@@ -54,13 +49,13 @@ describe("mergeCommandes — précédence fiche > opp gagnée > P&L", () => {
     expect(c.raf).toBe(300); // RAF Excel du P&L conservé
     expect(c.pnlSource).toBe("manuel");
   });
-  it("fiche affaire → pnlSource=fiche", () => expect(byFp["FP/2026/1"].pnlSource).toBe("fiche"));
-  it("RAF fiche = CAS − facturé (pas de facture ici → RAF = CAS)", () => {
-    expect(byFp["FP/2026/1"].raf).toBe(900);
+  it("fiche affaire → pnlSource=fiche (provenance de la marge)", () => expect(byFp["FP/2026/1"].pnlSource).toBe("fiche"));
+  it("commandes = uniquement les FP présents au P&L", () => {
+    expect(cmd.map((c) => c.fp).sort()).toEqual(["FP/2026/1", "FP/2026/5", "FP/2026/9"]);
   });
 });
 
-describe("mergeCommandes — garde-fous contre l'écrasement par 0", () => {
+describe("mergeCommandes — garde-fous", () => {
   it("opp gagnée SANS montant n'écrase pas le CAS P&L existant", () => {
     const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];
     const opps = [{ fp: "FP/2026/1", client: "OPP", am: "AM1", amount: 0, stage: 6, closingDate: "2026-05-01" }];
@@ -68,13 +63,21 @@ describe("mergeCommandes — garde-fous contre l'écrasement par 0", () => {
     const row = c.find((x) => x.fp === "FP/2026/1");
     expect(row.cas).toBe(500); // CAS P&L conservé (pas remis à 0)
     expect(row.mb).toBe(120);
-    expect(row.source).toBe("opp_won");
+    expect(row.source).toBe("opp_won"); // réconciliée mais sans changement de CAS
   });
-  it("opp gagnée SANS montant NI P&L → aucune commande fantôme", () => {
-    const c = mergeCommandes([], [{ fp: "FP/2026/2", client: "X", amount: 0, stage: 6 }], [], []);
-    expect(c.find((x) => x.fp === "FP/2026/2")).toBeUndefined();
+  it("opp gagnée SANS P&L → aucune commande fantôme (avec ou sans montant)", () => {
+    const c = mergeCommandes([], [
+      { fp: "FP/2026/2", client: "X", amount: 0, stage: 6 },
+      { fp: "FP/2026/3", client: "Y", amount: 999, stage: 6, closingDate: "2026-01-01" },
+    ], [], []);
+    expect(c).toHaveLength(0);
   });
-  it("fiche SANS prix de vente (0) n'écrase pas la commande existante", () => {
+  it("fiche SANS ligne P&L → ignorée (pas de commande)", () => {
+    const sheets = [{ fp: "FP/2026/1", client: "SAFINE", saleTotal: 900, margin: 90 }];
+    const c = mergeCommandes([], [], sheets, []);
+    expect(c).toHaveLength(0);
+  });
+  it("fiche SANS prix de vente (0) n'écrase pas la ligne P&L existante", () => {
     const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];
     const sheets = [{ fp: "FP/2026/1", client: "SAFINE", saleTotal: 0, margin: 0 }];
     const c = mergeCommandes(orders, [], sheets, []);
@@ -85,20 +88,22 @@ describe("mergeCommandes — garde-fous contre l'écrasement par 0", () => {
   });
 });
 
-describe("mergeCommandes — RAF P&L curaté (Excel) vs dérivé (opp/fiche)", () => {
-  it("P&L pur : conserve son RAF Excel (non recalculé, rattachement facturation partiel)", () => {
+describe("mergeCommandes — RAF adossé au P&L (curaté Excel) vs dérivé", () => {
+  it("P&L avec RAF Excel : conserve son RAF (non recalculé, rattachement facturation partiel)", () => {
     const orders = [{ fp: "FP/2024/1", client: "ACME", cas: 1000, raf: 800, yearPo: 2024, source: "pnl" }];
     const invoices = [{ fp: "FP/2024/1", amountHt: 600, date: "2025-02-01" }];
     const c = mergeCommandes(orders, [], [], invoices);
     expect(c[0].raf).toBe(800); // RAF Excel conservé (et non 1000 − 600)
+    expect(c[0].rafSource).toBe("excel");
   });
   it("P&L sans RAF Excel → dérivé max(CAS − facturé, 0)", () => {
     const orders = [{ fp: "FP/2024/2", client: "ACME", cas: 1000, yearPo: 2024, source: "pnl" }]; // raf absent
     const invoices = [{ fp: "FP/2024/2", amountHt: 600 }];
     const c = mergeCommandes(orders, [], [], invoices);
     expect(c[0].raf).toBe(400);
+    expect(c[0].rafSource).toBe("derive");
   });
-  it("opp gagnée AYANT écrasé un P&L → garde le RAF Excel curaté (pas de recalcul)", () => {
+  it("opp gagnée ayant réconcilié un P&L → garde le RAF Excel curaté (pas de recalcul)", () => {
     const orders = [{ fp: "FP/2026/7", client: "PNL", cas: 600, raf: 100, mb: 120, yearPo: 2026, source: "pnl" }];
     const opps = [{ fp: "FP/2026/7", client: "OPP", am: "AM", amount: 700, stage: 6, closingDate: "2026-08-01" }];
     const invoices = [{ fp: "FP/2026/7", amountHt: 50 }]; // facturation partielle
@@ -107,15 +112,15 @@ describe("mergeCommandes — RAF P&L curaté (Excel) vs dérivé (opp/fiche)", (
     expect(row.source).toBe("opp_won");
     expect(row.cas).toBe(700);         // CAS de l'opp
     expect(row.raf).toBe(100);         // RAF Excel du P&L conservé (et non 700 − 50 = 650)
-    expect(row.pnlSource).toBe("manuel");
+    expect(row.rafSource).toBe("excel");
   });
-  it("opp gagnée / fiche (sans RAF Excel) → dérivé, borné à 0 si surfacturé", () => {
-    const opps = [{ fp: "FP/2026/2", client: "BETA", amount: 1000, stage: 6, closingDate: "2026-06-01" }];
+  it("fiche enrichissant un P&L sans RAF Excel → dérivé, borné à 0 si surfacturé", () => {
+    const orders = [{ fp: "FP/2026/9", client: "PNL", cas: 400, yearPo: 2026, source: "pnl" }]; // pas de raf
     const sheets = [{ fp: "FP/2026/9", client: "SAFINE", saleTotal: 500, margin: 50 }];
-    const invoices = [{ fp: "FP/2026/2", amountHt: 250 }, { fp: "FP/2026/9", amountHt: 700 }];
-    const c = mergeCommandes([], opps, sheets, invoices);
-    const byFp = Object.fromEntries(c.map((x) => [x.fp, x]));
-    expect(byFp["FP/2026/2"].raf).toBe(750); // opp : 1000 − 250
-    expect(byFp["FP/2026/9"].raf).toBe(0);   // fiche surfacturée : max(500 − 700, 0)
+    const invoices = [{ fp: "FP/2026/9", amountHt: 700 }];
+    const c = mergeCommandes(orders, [], sheets, invoices);
+    const row = c.find((x) => x.fp === "FP/2026/9");
+    expect(row.raf).toBe(0); // max(500 − 700, 0)
+    expect(row.rafSource).toBe("derive");
   });
 });
