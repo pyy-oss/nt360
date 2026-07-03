@@ -50,6 +50,7 @@ export const Backlog: FC<Props> = () => {
           <Table columns={[
             colText("FP", (t) => t.fp),
             colText("Client", (t) => t.client),
+            colText("Affaire", (t) => t.affaire || "—"),
             colText("BU", (t) => t.bu),
             colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—"),
             colNum("Année", (t) => t.yearPo || "—"),
@@ -62,7 +63,7 @@ export const Backlog: FC<Props> = () => {
       )}
 
       <Card title="Top commandes ouvertes">
-        <Table columns={[colText("FP", (t) => t.fp), colText("Client", (t) => t.client), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
+        <Table columns={[colText("FP", (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
       </Card>
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
     </div>

@@ -38,10 +38,10 @@ export interface PipelineSummary {
 export interface BacklogSummary {
   fy?: number; total?: number; count?: number;
   byVintage?: Record<string, number>; byBu?: Record<string, number>;
-  top?: { fp?: string; client?: string; bu?: string; raf?: number }[];
+  top?: { fp?: string; client?: string; affaire?: string; bu?: string; raf?: number }[];
   // Diagnostic de fiabilité : RAF curaté Excel vs RAF dérivé (CAS − facturé, surévalué).
   totalExcel?: number; totalDerive?: number; countExcel?: number; countDerive?: number;
-  deriveTop?: { fp?: string; client?: string; bu?: string; source?: string | null; yearPo?: number; cas?: number; facture?: number; raf?: number }[];
+  deriveTop?: { fp?: string; client?: string; affaire?: string; bu?: string; source?: string | null; yearPo?: number; cas?: number; facture?: number; raf?: number }[];
 }
 
 export interface FacturationSummary {
@@ -97,7 +97,7 @@ export interface DataQualitySummary {
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
 export interface CommandesSummary { count?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number };
-export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string };
+export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
 export type Objective = {

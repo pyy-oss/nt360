@@ -39,7 +39,7 @@ function mergeCommandes(orders, opps, sheets, invoices) {
 
   // 1. P&L = COLONNE VERTÉBRALE. Une commande n'existe QUE si elle a une ligne P&L.
   //    pnlSource = "manuel" : la marge/coût vient de l'import P&L Excel.
-  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, pnlSource: "manuel" }); }
+  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, affaire: o.designation || "", pnlSource: "manuel" }); }
   const pnlFps = new Set(byFp.keys()); // FP présents au P&L = seuls candidats « commande »
 
   // 2. Opportunités GAGNÉES (stage 6) : RÉCONCILIENT une ligne P&L existante (corrigent le CAS),
@@ -52,6 +52,7 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     const prev = byFp.get(fp);
     merge(fp, {
       client: o.client || prev.client, bu: o.bu || prev.bu, am: o.am || prev.am,
+      affaire: o.designation || prev.affaire || "", // désignation de l'opp gagnée si le P&L n'en a pas
       cas: (o.amount || 0) > 0 ? o.amount : (prev.cas || 0),
       // L'année de PO (CAS FIGÉ) vient de la ligne P&L / du N° FP en PRIORITÉ ; la D Prev de l'opp
       // (prévisionnelle, souvent une autre année) ne sert que de dernier repli.
@@ -69,7 +70,7 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     if (!((s.saleTotal || 0) > 0)) continue; // fiche sans vente exploitable → conserve l'existant
     const prev = byFp.get(fp);
     merge(fp, {
-      client: s.client || prev.client, affaire: s.affaire, am: s.commercial || prev.am,
+      client: s.client || prev.client, affaire: s.affaire || prev.affaire || "", am: s.commercial || prev.am,
       cas: s.saleTotal, mb: s.margin || 0, costTotal: s.costTotal, marginPct: s.marginPct,
       source: "fiche", pnlSource: "fiche",
     });
