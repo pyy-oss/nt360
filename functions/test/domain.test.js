@@ -43,16 +43,23 @@ describe("overview — chaîne (§7)", () => {
     const ov3 = overview(ORDERS, INVOICES, OPPS, { backlog: 9999, backlogCount: 42 });
     expect(ov3.backlog).toBe(9999);
     expect(ov3.backlogCount).toBe(42);
-    expect(ov3.rafPeriode).toBe(1200); // le taux reste sur la cohorte période
-    expect(ov3.ratios.tauxFacturation).toBeCloseTo(1400 / 2300, 6); // facturé rattaché / CAS
+    expect(ov3.rafPeriode).toBe(1200);
+    // Taux de facturation = Facturé / (Facturé + Backlog) : ici Facturé=1400, Backlog=9999.
+    expect(ov3.ratios.tauxFacturation).toBeCloseTo(1400 / (1400 + 9999), 6);
   });
   it("certitudes = pondéré certain (IdC≥90%) à 100% du montant ; commandes suivies à part", () => {
     expect(ov.pondCertain).toBe(1000); // o6 éligible, valorisé à 100% du montant
     expect(ov.certitudes).toBe(1000);
   });
-  it("taux de facturation = facturé rattaché à la cohorte / CAS, borné [0,1]", () => {
-    // Factures rattachées aux FP des commandes : A1+A2 (FP/2026/1)=900 + B1 (FP/2025/2)=500 = 1400.
-    expect(ov.ratios.tauxFacturation).toBeCloseTo(1400 / 2300, 6);
+  it("taux de facturation = Facturé / (Facturé + Backlog)", () => {
+    // Facturé (CAF) = 1400 ; Backlog (sans opts → RAF période) = 1200 → 1400/2600.
+    expect(ov.ratios.tauxFacturation).toBeCloseTo(1400 / (1400 + 1200), 6);
+  });
+  it("taux de conversion vente = Commande / (Commande + Certitude + 20%·[70-90%[ + 10%·[50-70%[ + Perdu)", () => {
+    // Commande=2300 ; Certitude(≥90%)=o6=1000 ; [70-90%[=0 ; [50-70%[=o1(0.6)=1000 ; Perdu=o5=100.
+    // Dénominateur = 2300 + 1000 + 0 + 0.1·1000 + 100 = 3500.
+    expect(ov.perdu).toBe(100);
+    expect(ov.ratios.tauxConversionVente).toBeCloseTo(2300 / 3500, 6);
   });
 });
 

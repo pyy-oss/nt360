@@ -80,12 +80,12 @@ export const Overview: FC<Props> = ({ period }) => {
         <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
 
-      {/* KPIs de pilotage : marge, croissance facturation, pondéré certain, avancement. */}
+      {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
         <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
-        <Kpi label="Pondéré certain (IdC ≥ 90 %)" value={fmt(data.pondCertain)} tone="steel" sub="à venir" />
-        <Kpi label="Avancement facturation" value={pct(data.ratios?.tauxFacturation)} sub="commandes de la période" />
+        <Kpi label="Taux de facturation" value={pct(data.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
+        <Kpi label="Taux de conversion vente" value={pct(data.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
       </div>
 
       {/* Tendance : burn-down du backlog et écart projeté vs réalisé dans le temps. */}
