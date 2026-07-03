@@ -50,8 +50,10 @@ function dataQuality(orders, invoices, opps, bcLines, sheets) {
   issues.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || (b.count - a.count));
 
   // Score de complétude : 1 − (anomalies pondérées / total d'enregistrements), borné [0,1].
+  // Le total inclut TOUTES les collections auditées (dont les fiches) — sinon une anomalie de
+  // fiche (fiches_sans_vente) est comptée au numérateur mais absente du dénominateur → score faussé.
   const W = { high: 1, medium: 0.5, low: 0.2 };
-  const total = orders.length + invoices.length + opps.length + bcLines.length;
+  const total = orders.length + invoices.length + opps.length + bcLines.length + sheets.length;
   const weighted = issues.reduce((s, i) => s + i.count * (W[i.severity] || 0), 0);
   const score = total > 0 ? Math.max(0, Math.min(1, 1 - weighted / total)) : 1;
 

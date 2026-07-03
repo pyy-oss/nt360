@@ -49,11 +49,13 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf) {
   const dormant = orders.filter((o) => (o.raf || 0) > 0 && (o.yearPo || 0) > 0 && o.yearPo <= fy - 2);
   if (dormant.length) out.push({ type: "backlog_dormant", severity: "medium", count: dormant.length, message: `${dormant.length} commande(s) ouverte(s) d'un millésime ≤ ${fy - 2}`, refs: dormant.slice(0, 10).map((o) => o.fp) });
 
-  const saturated = (suppliersSummary.bySupplier || []).filter((s) => s.state === "saturation");
-  if (saturated.length) out.push({ type: "ligne_saturee", severity: "high", count: saturated.length, message: `${saturated.length} ligne(s) fournisseur en saturation`, refs: saturated.slice(0, 10).map((s) => s.name) });
+  // Listes COMPLÈTES (non tronquées au top 50 affiché) : un fournisseur saturé à faible exposition
+  // ne doit pas échapper à l'alerte. Repli sur bySupplier si le champ complet est absent (rétro-compat).
+  const saturated = suppliersSummary.saturated || (suppliersSummary.bySupplier || []).filter((s) => s.state === "saturation").map((s) => s.name);
+  if (saturated.length) out.push({ type: "ligne_saturee", severity: "high", count: saturated.length, message: `${saturated.length} ligne(s) fournisseur en saturation`, refs: saturated.slice(0, 10) });
 
-  const tension = (suppliersSummary.bySupplier || []).filter((s) => s.state === "tension");
-  if (tension.length) out.push({ type: "ligne_tension", severity: "medium", count: tension.length, message: `${tension.length} ligne(s) fournisseur en tension (util ≥ 90 %)`, refs: tension.slice(0, 10).map((s) => s.name) });
+  const tension = suppliersSummary.tension || (suppliersSummary.bySupplier || []).filter((s) => s.state === "tension").map((s) => s.name);
+  if (tension.length) out.push({ type: "ligne_tension", severity: "medium", count: tension.length, message: `${tension.length} ligne(s) fournisseur en tension (util ≥ 90 %)`, refs: tension.slice(0, 10) });
 
   const casByClient = groupSum(orders, (o) => o.client, (o) => o.cas);
   const totalCas = sum(orders, (o) => o.cas);
@@ -65,12 +67,13 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf) {
   if (pending) out.push({ type: "bc_en_attente", severity: "low", count: pending, message: `${pending} ligne(s) BC non soldée(s)` });
 
   // BC en retard : ETA (réelle sinon contractuelle) dépassée alors que non encore livré.
-  const today = asOf || `${fy}-12-31`;
+  // On EXIGE asOf : sans date réelle, retomber sur la fin d'exercice (fy-12-31) déclarerait en
+  // retard quasiment tous les BC ouverts de l'année (faux positifs massifs en début/milieu d'année).
   const DELIVERED = new Set(["livre", "facture", "solde"]);
-  const lateBc = (bcLines || []).filter((b) => {
+  const lateBc = asOf ? (bcLines || []).filter((b) => {
     const eta = b.etaReel || b.etaContrat;
-    return eta && String(eta).slice(0, 10) < today && !DELIVERED.has(b.status);
-  });
+    return eta && String(eta).slice(0, 10) < asOf && !DELIVERED.has(b.status);
+  }) : [];
   if (lateBc.length) out.push({ type: "bc_en_retard", severity: "high", count: lateBc.length, message: `${lateBc.length} BC en retard (ETA dépassée, non livré)`, refs: lateBc.slice(0, 10).map((b) => b.bcNumber || b.supplier || b.fp) });
 
   return out;
