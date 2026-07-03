@@ -16,32 +16,54 @@ function facturation(invoices) {
   };
 }
 
-/** Rentabilité (P&L) : marge, %MB, par domaine, top clients (§ module 7). */
-function rentabilite(orders) {
-  const cas = sum(orders, (o) => o.cas);
-  const mb = sum(orders, (o) => o.mb);
-  const casByBu = groupSum(orders, (o) => o.bu, (o) => o.cas);
-  const mbByBu = groupSum(orders, (o) => o.bu, (o) => o.mb);
-  const byBu = Object.keys({ ...casByBu, ...mbByBu }).map((bu) => ({
-    bu, cas: casByBu[bu] || 0, mb: mbByBu[bu] || 0,
-    pmb: casByBu[bu] > 0 ? (mbByBu[bu] || 0) / casByBu[bu] : 0,
+// Une PERSPECTIVE de rentabilité = même structure (base, marge, %MB, par domaine/AM, faibles
+// marges, top clients) calculée sur une ASSIETTE donnée : Commande (CAS) ou Facturé (CAF). La
+// marge d'une perspective se déduit de la marge P&L : en Commande = marge P&L brute ; en Facturé
+// = taux de marge de la commande appliqué au montant réellement facturé (marge reconnue au
+// prorata de la facturation). `base` porte l'assiette (CAS ou Facturé) pour un rendu générique.
+function perspective(orders, baseFn, mbFn) {
+  const base = sum(orders, baseFn);
+  const mb = sum(orders, mbFn);
+  const baseByBu = groupSum(orders, (o) => o.bu, baseFn);
+  const mbByBu = groupSum(orders, (o) => o.bu, mbFn);
+  const byBu = Object.keys({ ...baseByBu, ...mbByBu }).map((bu) => ({
+    bu, base: baseByBu[bu] || 0, mb: mbByBu[bu] || 0,
+    pmb: baseByBu[bu] > 0 ? (mbByBu[bu] || 0) / baseByBu[bu] : 0,
   }));
-
-  // Marge par commercial (AM) : CAS / MB / %MB, du plus gros CAS au plus petit.
-  const casByAm = groupSum(orders, (o) => o.am || "—", (o) => o.cas);
-  const mbByAm = groupSum(orders, (o) => o.am || "—", (o) => o.mb);
-  const byAm = Object.keys({ ...casByAm, ...mbByAm })
-    .map((am) => ({ am, cas: casByAm[am] || 0, mb: mbByAm[am] || 0, pmb: casByAm[am] > 0 ? (mbByAm[am] || 0) / casByAm[am] : 0 }))
-    .sort((a, b) => b.cas - a.cas);
-
-  // Affaires à FAIBLE marge (chasse aux marges) : %MB croissant, sur commandes à CAS > 0.
+  const baseByAm = groupSum(orders, (o) => o.am || "—", baseFn);
+  const mbByAm = groupSum(orders, (o) => o.am || "—", mbFn);
+  const byAm = Object.keys({ ...baseByAm, ...mbByAm })
+    .map((am) => ({ am, base: baseByAm[am] || 0, mb: mbByAm[am] || 0, pmb: baseByAm[am] > 0 ? (mbByAm[am] || 0) / baseByAm[am] : 0 }))
+    .sort((a, b) => b.base - a.base);
+  // Affaires à FAIBLE marge (chasse aux marges) : %MB croissant, sur assiette > 0.
   const bottomAffaires = orders
-    .filter((o) => (o.cas || 0) > 0)
-    .map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.cas || 0, mb: o.mb || 0, pmb: (o.mb || 0) / o.cas }))
+    .filter((o) => baseFn(o) > 0)
+    .map((o) => ({ fp: o.fp, client: o.client, am: o.am, base: baseFn(o), mb: mbFn(o), pmb: mbFn(o) / baseFn(o) }))
     .sort((a, b) => a.pmb - b.pmb)
     .slice(0, 10);
+  return { base, mb, pmb: base > 0 ? mb / base : 0, byBu, byAm, bottomAffaires, topClients: topN(groupSum(orders, (o) => o.client, mbFn)) };
+}
 
-  return { mb, cas, pmb: cas > 0 ? mb / cas : 0, byBu, byAm, bottomAffaires, topClients: topN(groupSum(orders, (o) => o.client, (o) => o.mb)) };
+/**
+ * Rentabilité (P&L) : deux perspectives (§ module 7).
+ *  • Commande : assiette = CAS (prise de commande), marge = marge P&L.
+ *  • Facturé  : assiette = Facturé (CAF), marge = taux de marge de la commande × facturé.
+ * Champs racine = perspective Commande (rétro-compat : cas / byBu[cas] / bottomAffaires[cas]).
+ */
+function rentabilite(orders) {
+  const rate = (o) => ((o.cas || 0) > 0 ? (o.mb || 0) / o.cas : (o.marginPct || 0));
+  const commande = perspective(orders, (o) => o.cas || 0, (o) => o.mb || 0);
+  const facture = perspective(orders, (o) => o.facture || 0, (o) => rate(o) * (o.facture || 0));
+  return {
+    // Rétro-compat : perspective Commande à plat, assiette nommée `cas`.
+    mb: commande.mb, cas: commande.base, pmb: commande.pmb,
+    byBu: commande.byBu.map((b) => ({ bu: b.bu, cas: b.base, mb: b.mb, pmb: b.pmb })),
+    byAm: commande.byAm.map((a) => ({ am: a.am, cas: a.base, mb: a.mb, pmb: a.pmb })),
+    bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb })),
+    topClients: commande.topClients,
+    // Perspectives génériques (assiette = `base`) pour le sélecteur Commande / Facturé.
+    perspectives: { commande, facture },
+  };
 }
 
 /** Indicateurs par entité (client ou BU) : CAS/Facturé/Backlog/Marge/%MB (§ modules 11-12). */
