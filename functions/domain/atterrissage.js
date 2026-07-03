@@ -2,20 +2,12 @@
 // (pondération tiérée par certitude, fenêtrée sur D Prev) → vs objectifs, écart, probabilité.
 // Le backlog est exposé séparément (informatif) mais N'ENTRE PAS dans le projeté CAS (déjà
 // couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
-const { sum } = require("./chaine");
+const { sum, projectionWeight } = require("./chaine");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
-// Pondération de PROJECTION moyen terme (logique atterrissage, distincte du pondéré risque
-// = montant×proba du module Pipeline) : 100 % du CA si certitude ≥ 90 %, 20 % si 70 %≤IdC<90 %,
-// 0 sinon. On projette large au-delà du court terme, mais on tronque les basses certitudes.
-const CONF_FULL = 0.9, CONF_PARTIAL = 0.7, PARTIAL_RATE = 0.2;
-const projectionWeight = (o) => {
-  const p = o.probability || 0, amt = o.amount || 0;
-  if (p >= CONF_FULL) return amt;          // 100 %
-  if (p >= CONF_PARTIAL) return amt * PARTIAL_RATE; // 20 %
-  return 0;
-};
+// Pondération de PROJECTION unifiée (règle de gestion, chaine.projectionWeight) :
+// 100 % (IdC ≥ 90 %) · 20 % (70-90 %) · 10 % (50-70 %) · 0 sinon. Même fonction partout.
 
 /**
  * @param {object[]} orders

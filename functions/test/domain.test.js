@@ -102,29 +102,30 @@ describe("backlogFy — ancré FY, indépendant de la période (§7)", () => {
   });
 });
 
-describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () => {
+describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion", () => {
   const p = pipeline(OPPS);
-  it("brut = toute la funnel active ; pondéré = éligibles ≥90%", () => {
+  it("brut = funnel active ; pondéré = projection tiérée", () => {
     expect(p.tot.brut).toBe(4000); // active 1-5 : 1000 + 2000 + 1000
-    expect(p.tot.weighted).toBe(1000); // seul o6 (IdC 0.95) éligible, valorisé à 100% du montant
-    expect(p.tot.countConf).toBe(1);
+    // o6 (0.95→100%·1000) + o1 (0.6→10%·1000=100) + o2 (0.25→0) = 1100.
+    expect(p.tot.weighted).toBe(1100);
+    expect(p.tot.countConf).toBe(2); // o6 et o1 contribuent (IdC ≥ 50 %) ; o2 non
     expect(p.confianceMin).toBe(0.9);
   });
   it("suspendu (8) séparé", () => {
     expect(p.susp.brut).toBe(5000);
     expect(p.susp.count).toBe(1);
   });
-  it("conversion = gagné/(gagné+perdu)", () => {
+  it("conversion win-rate = gagné/(gagné+perdu)", () => {
     expect(p.conv).toBe(0.5);
   });
-  it("pondéré par AM = éligibles seulement", () => {
-    expect(p.byAM.DATCHA).toBe(1000); // o6, 100% du montant
-    expect(p.byAM.KOUADIO).toBeUndefined(); // o2 non éligible (proba 0.25)
+  it("pondéré par AM = projection tiérée des actives", () => {
+    expect(p.byAM.DATCHA).toBe(1100); // o6 (1000) + o1 (100)
+    expect(p.byAM.KOUADIO).toBe(0);   // o2 active mais IdC 0.25 → projeté 0
   });
   it("conversion par commercial (byAmConv)", () => {
     const byAm = Object.fromEntries(p.byAmConv.map((x) => [x.am, x]));
     expect(byAm.DATCHA.activeCount).toBe(2); // o1 + o6
-    expect(byAm.DATCHA.weighted).toBe(1000); // o6 à 100% du montant
+    expect(byAm.DATCHA.weighted).toBe(1100); // o6 (1000) + o1 (100)
     expect(byAm.X.won).toBe(1); // o4 gagné
     expect(byAm.X.conv).toBe(1);
     expect(byAm.Y.lost).toBe(1); // o5 perdu
@@ -133,7 +134,7 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
   it("closing = null sans asOf (rétro-compat)", () => {
     expect(p.closing).toBeNull();
   });
-  it("analyse du closing (D Prev) : retard / trimestre + stale", () => {
+  it("analyse du closing (D Prev) : retard / trimestre + stale (projection tiérée)", () => {
     const pc = pipeline(OPPS, "2026-04-15");
     const b = pc.closing.buckets;
     // Actives (1-5) : o1 (03-01, passé), o2 (04-01, passé), o6 (05-01, T2 futur)
@@ -141,7 +142,7 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
     expect(b.retard.brut).toBe(3000); // 1000 + 2000
     expect(b.trim.count).toBe(1);     // o6 (mai, même trimestre qu'avril)
     expect(pc.closing.staleCount).toBe(2);
-    expect(pc.closing.staleTop[0].weighted).toBe(600); // o1 (600) avant o2 (500)
+    expect(pc.closing.staleTop[0].weighted).toBe(100); // o1 projeté (10%·1000) devant o2 (0)
   });
 });
 
