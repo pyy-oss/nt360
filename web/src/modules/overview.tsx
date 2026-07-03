@@ -10,15 +10,17 @@ import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge } from "./_shared";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary } from "../types";
 
-// Bloc « atterrissage » : jauge de probabilité + Projeté / Objectif / Écart.
-function Landing({ title, proba, projete, objectif, ecart, sub }: {
-  title: string; proba: number; projete?: number; objectif?: number; ecart?: number; sub: string;
+// Bloc « atterrissage » : jauge de probabilité + Réalisé / Projeté / Objectif / Écart, avec le
+// R/O (Réalisé / Objectif) mis en avant dans le coin (fusion de l'ancienne carte R/O isolée).
+function Landing({ title, proba, realise, projete, objectif, ecart, sub }: {
+  title: string; proba: number; realise?: number; projete?: number; objectif?: number; ecart?: number; sub: string;
 }) {
   const hasObj = (objectif || 0) > 0;
   return (
-    <Card title={title}>
+    <Card title={title} actions={hasObj ? <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">R/O {roBadge(realise, objectif)}</span> : undefined}>
       <Gauge value={proba || 0} color={(ecart || 0) < 0 ? T.clay : T.emerald} h={170} />
-      <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+      <div className="grid grid-cols-4 gap-2 mt-2 text-center">
+        <div><div className="text-[11px] text-muted">Réalisé</div><div className="font-display tabnum">{fmt(realise)}</div></div>
         <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(projete)}</div></div>
         <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{hasObj ? fmt(objectif) : "—"}</div></div>
         <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", (ecart || 0) < 0 ? "text-clay" : "text-emerald")}>{hasObj ? fmt(ecart) : "—"}</div></div>
@@ -60,10 +62,10 @@ export const Overview: FC<Props> = ({ period }) => {
       {att ? (
         <div className={cols2}>
           <Landing title={`Atterrissage CAS ${fy || ""} — prise de commande`} proba={att.probaAtteinte || 0}
-            projete={att.projete} objectif={att.objectif} ecart={att.ecart}
+            realise={att.realiseCas} projete={att.projete} objectif={att.objectif} ecart={att.ecart}
             sub="Réalisé CAS + pipeline pondéré (certitudes glissantes)" />
           <Landing title={`Atterrissage CAF ${fy || ""} — facturation`} proba={att.probaAtteinteCaf || 0}
-            projete={att.cafProjete} objectif={att.objectifCaf} ecart={att.ecartCaf}
+            realise={att.factureN} projete={att.cafProjete} objectif={att.objectifCaf} ecart={att.ecartCaf}
             sub="Facturé + backlog + pipeline pondéré" />
         </div>
       ) : (
@@ -83,31 +85,12 @@ export const Overview: FC<Props> = ({ period }) => {
 
       {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
-        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}`} />
+        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}${objGlobal?.targetMargin ? ` · R/O ${pct((data.mb || 0) / objGlobal.targetMargin)}` : ""}`} />
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(data.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(data.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
       </div>
 
-      {/* R/O global (Réalisé / Objectif) — objectif GLOBAL de l'exercice sélectionné. */}
-      {objGlobal && (
-        <Card title={`Réalisé / Objectif — global ${period}`}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { label: "R/O CAS", real: data.commandes, target: objGlobal.targetCas },
-              { label: "R/O Facturé", real: data.facture, target: objGlobal.targetInvoiced },
-              { label: "R/O Marge", real: data.mb, target: objGlobal.targetMargin },
-            ].map((r) => (
-              <div key={r.label} className="card p-4 min-w-0">
-                <div className="text-xs text-muted truncate">{r.label}</div>
-                <div className="mt-1 text-lg">{roBadge(r.real, r.target)}</div>
-                <div className="text-[11px] text-faint mt-1 break-words">réalisé {fmt(r.real)} · cible {fmt(r.target)}</div>
-              </div>
-            ))}
-          </div>
-          <Tip>R/O = Réalisé de la période / Objectif de l'exercice {period}. Le suivi par BU, client et commercial est sur leurs vues respectives (Domaines, Clients, AM 360°).</Tip>
-        </Card>
-      )}
 
       {/* Tendance : burn-down du backlog et écart projeté vs réalisé dans le temps. */}
       {points.length >= 2 && (
