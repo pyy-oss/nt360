@@ -219,6 +219,9 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
   const b64 = req.data?.fileB64;
   const filename = String(req.data?.filename || "delta.xlsx");
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+  // Plafond de charge côté SERVEUR (défense en profondeur : le garde-fou UI ~20 Mo est contournable).
+  // ~30 M caractères base64 ≈ 22 Mo bruts, sous la limite d'appel ~32 Mo et la mémoire allouée.
+  if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo) — divise l'import (ex. ZIP par lots).");
   const buf = Buffer.from(b64, "base64");
 
   // Un import peut être : un XLSX (éventuellement multi-onglets), OU un ZIP de plusieurs
