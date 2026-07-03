@@ -50,7 +50,10 @@ function parseSalesData(wb) {
 
     const am = cleanName(val(r, keys, "new am", "sales", "am", "commercial"));
     const idc = val(r, keys, "idc", "id c");
-    const idcNum = idc == null || idc === "" ? null : num(idc);
+    let idcNum = idc == null || idc === "" ? null : num(idc);
+    // Normalise l'IdC en base-100 comme la marge (« 90 » = 90 % → 0.9) : sinon un IdC saisi en
+    // pourcentage retombait sur la proba PAR DÉFAUT (toute la pondération/certitudes faussée).
+    if (idcNum != null && idcNum > 1.5) idcNum = idcNum / 100;
     const probability =
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 

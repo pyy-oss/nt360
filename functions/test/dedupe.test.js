@@ -10,6 +10,13 @@ describe("dédoublonnage — clés métier", () => {
     const b = { client: "acme", am: "DATCHA", bu: "ict", amount: 1000.4, stage: 3, closingDate: "2026-06-30" };
     expect(opportunityKey(a)).toBe(opportunityKey(b));
   });
+  it("opportunité : mêmes attributs mais FP DIFFÉRENTS ⇒ clés différentes (pas de fusion destructive)", () => {
+    const a = { fp: "FP/2026/100", client: "ORANGE CI", am: "DATCHA", bu: "CLOUD", amount: 12000000, stage: 4, closingDate: "2026-06-30" };
+    const b = { fp: "FP/2026/200", client: "ORANGE CI", am: "DATCHA", bu: "CLOUD", amount: 12000000, stage: 4, closingDate: "2026-06-30" };
+    expect(opportunityKey(a)).not.toBe(opportunityKey(b));
+    // ...mais un même FP dédoublé reste un doublon.
+    expect(opportunityKey(a)).toBe(opportunityKey({ ...a, client: "orange ci" }));
+  });
   it("BC : même n° BC + FP + fournisseur ⇒ même clé (fiche vs logistics)", () => {
     const a = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "kukuza", description: "Routeur", source: "fiche" };
     const b = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "KUKUZA", description: "routeur", source: "logistics" };

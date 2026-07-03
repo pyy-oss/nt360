@@ -15,9 +15,12 @@ const invoiceKey = (o) => {
   return "inv:" + [n(o.fp), n(o.client), o.date || "", money(o.amountHt)].join("|");
 };
 
-/** Opportunité : même client/AM/BU/montant/étape/date de clôture ⇒ doublon (double saisie). */
+/** Opportunité : même N° FP + client/AM/BU/montant/étape/date de clôture ⇒ doublon (double saisie).
+ *  Le FP entre dans la clé (quand présent) : deux affaires DISTINCTES de même client/montant/étape
+ *  mais de FP différents ne sont PLUS fusionnées (sinon suppression destructive d'une opp réelle).
+ *  FP absent des deux → clé inchangée (comportement historique préservé pour les opps sans FP). */
 const opportunityKey = (o) =>
-  "opp:" + [n(o.client), n(o.am), n(o.bu), money(o.amount), o.stage ?? "", o.closingDate || ""].join("|");
+  "opp:" + [n(o.fp), n(o.client), n(o.am), n(o.bu), money(o.amount), o.stage ?? "", o.closingDate || ""].join("|");
 
 /** BC fournisseur : n° BC + FP + fournisseur + description ; repli sur montant si pas de n°. */
 const bcKey = (o) => {
