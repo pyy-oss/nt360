@@ -433,6 +433,31 @@ exports.setBcStatus = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req
   return { ok: true };
 });
 
+// --- Fiabilisation d'une ligne BC réelle : rattacher un N° FP et/ou corriger le montant XOF
+// (ex. BC en devise étrangère non convertie → montant 0). Recalcule exposition + décaissements. ---
+exports.patchBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  const { fpKey } = require("./lib/ids");
+  const { id, fp, amountXof } = req.data || {};
+  if (!id) throw new HttpsError("invalid-argument", "id requis");
+  const patch = { updatedAt: FieldValue.serverTimestamp() };
+  if (fp !== undefined) patch.fp = fpKey(fp) || null; // rattachement (ou détachement si vide)
+  if (amountXof !== undefined && amountXof !== null && amountXof !== "") {
+    const n = Number(amountXof);
+    if (!Number.isFinite(n) || n < 0) throw new HttpsError("invalid-argument", "montant XOF invalide");
+    patch.amountXof = n;
+  }
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (FP ou montant)");
+  await db.doc(`bcLines/${id}`).set(patch, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,
+    detail: { fp: patch.fp, amountXof: patch.amountXof }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
+  return { ok: true };
+});
+
 const SUPPLIER_WRITE_ROLES = ["direction", "achats"];
 exports.upsertCreditLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");

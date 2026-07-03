@@ -7,7 +7,7 @@ import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
-import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
+import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity, DataQualitySummary } from "../types";
@@ -182,7 +182,12 @@ function BcImport() {
 // 10 — Exécution BC
 const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
 export const BC: FC<Props> = () => {
-  const { rows } = useCollectionData<BcLine>("bcLines");
+  const { rows: allRows } = useCollectionData<BcLine>("bcLines");
+  // Exécution BC = BC RÉELLEMENT ÉMIS (avec un N° BC). Les lignes « à émettre » générées par les
+  // fiches affaire (sans N° BC) sont des achats PLANIFIÉS — elles restent visibles au niveau
+  // fiche / FP 360°, pas dans le suivi d'exécution.
+  const rows = allRows.filter((r) => (r.bcNumber || "").trim() !== "");
+  const planned = allRows.length - rows.length;
   const canWrite = useCan("bc") === "write";
   const [flt, setFlt] = useState<"all" | "open" | "late">("all");
   const today = new Date().toISOString().slice(0, 10);
@@ -226,12 +231,36 @@ export const BC: FC<Props> = () => {
             colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
             colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
+            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} />, () => 0)] : []),
           ]}
         />
+        {planned > 0 && <Tip>{planned.toLocaleString("fr-FR")} ligne(s) « à émettre » planifiée(s) par les fiches affaire (sans N° BC) sont masquées ici — elles se suivent au niveau de la fiche / FP 360°. Cette vue ne liste que les BC réellement émis.</Tip>}
       </Card>
     </div>
   );
 };
+
+// Fiabilisation inline d'une ligne BC : rattacher un N° FP et/ou saisir la contre-valeur XOF
+// (ex. BC en devise étrangère → montant XOF nul). Pré-remplit les champs à corriger.
+function BcFixer({ id, fp, amountXof }: { id: string; fp?: string; amountXof?: number }) {
+  const [nf, setNf] = useState("");
+  const [amt, setAmt] = useState("");
+  const noFp = !fp;
+  const noAmt = !((amountXof || 0) > 0);
+  if (!noFp && !noAmt) return <span className="text-[11px] text-faint">ok</span>;
+  return (
+    <span className="inline-flex gap-1 items-center flex-wrap">
+      {noFp && <>
+        <input className="field w-28 !py-1 text-xs" aria-label="Rattacher un N° FP" placeholder="FP/2026/…" value={nf} onChange={(e) => setNf(e.target.value)} />
+        <Busy variant="ghost" label="FP" okMsg="FP rattaché" fn={() => patchBcLine({ id, fp: nf })} />
+      </>}
+      {noAmt && <>
+        <input className="field w-24 !py-1 text-xs" inputMode="numeric" aria-label="Montant XOF" placeholder="XOF" value={amt} onChange={(e) => setAmt(e.target.value)} />
+        <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" fn={() => patchBcLine({ id, amountXof: Number(amt) || 0 })} />
+      </>}
+    </span>
+  );
+}
 function StatusSelect({ id, status }: { id: string; status: string }) {
   const [s, setS] = useState(status);
   const toast = useToast();

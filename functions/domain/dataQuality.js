@@ -43,6 +43,9 @@ function dataQuality(orders, invoices, opps, bcLines, sheets) {
   // Lignes BC
   add("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier);
   add("bc_sans_fournisseur", "low", bcLines.filter((b) => !b.supplier), "Lignes BC sans fournisseur", (b) => b.bcNumber);
+  // BC RÉEL (avec N° BC) à montant XOF nul : souvent une devise étrangère non convertie → exposition
+  // fournisseur & décaissements sous-estimés. À fiabiliser (saisir la contre-valeur XOF).
+  add("bc_montant_zero", "medium", bcLines.filter((b) => b.bcNumber && !((b.amountXof || 0) > 0)), "BC émis à montant XOF nul (devise étrangère à convertir ?)", (b) => b.bcNumber);
 
   // Fiches affaire
   add("fiches_sans_vente", "low", sheets.filter((s) => !(s.saleTotal > 0)), "Fiches affaire sans prix de vente", (s) => s.fp);
