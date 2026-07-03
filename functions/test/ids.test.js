@@ -32,7 +32,12 @@ describe("fpKey — normalisation clé d'or N° FP", () => {
   it("rejette les FP placeholder à séquence nulle (.../0000)", () => {
     expect(fpKey("FP/2024/0000")).toBeNull();
     expect(fpKey("FP/2026/00")).toBeNull();
-    expect(fpKey("FP/2026/013")).toBe("FP/2026/013"); // zéros non significatifs conservés
+  });
+  it("normalise les zéros de tête de la séquence (« 013 » ⇒ « 13 »)", () => {
+    expect(fpKey("FP/2026/013")).toBe("FP/2026/13");
+    expect(fpKey("FP/2026/13")).toBe("FP/2026/13");
+    // « 13 » et « 013 » convergent → une seule clé, pas de double comptage.
+    expect(fpKey("FP/2026/013")).toBe(fpKey("FP/2026/13"));
   });
 });
 

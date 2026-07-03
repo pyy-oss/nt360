@@ -13,10 +13,12 @@
 // est renseigné (source de vérité métier ; le rattachement facture→N° FP est incomplet, donc
 // CAS − facturé SURESTIMERAIT le backlog). Ligne P&L sans RAF → dérivé max(CAS − facturé, 0).
 // Module PUR (testable).
-const { fpKey } = require("../lib/ids");
+const { fpKey, plausibleYear } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
-const yearOfFp = (fp) => { const m = String(fp || "").match(/\/(\d{4})\//); return m ? Number(m[1]) : 0; };
+// Année extraite du N° FP, BORNÉE (fenêtre plausible) : un FP mal typé « FP/2099/1 » ne doit pas
+// injecter une année aberrante qui polluerait currentFy / le sélecteur de périodes.
+const yearOfFp = (fp) => { const m = String(fp || "").match(/\/(\d{4})\//); return m ? plausibleYear(m[1]) : 0; };
 
 /**
  * @param {object[]} orders commandes P&L (orders/{fp}) — COLONNE VERTÉBRALE : seule source de création
@@ -26,15 +28,18 @@ const yearOfFp = (fp) => { const m = String(fp || "").match(/\/(\d{4})\//); retu
  * @returns {object[]} commandes fusionnées (toutes adossées à une ligne P&L)
  */
 function mergeCommandes(orders, opps, sheets, invoices) {
+  // Toutes les clés (P&L, factures, opps, fiches) passent par fpKey : mêmes graphies (casse,
+  // espaces, zéros de tête) → même clé canonique. Évite les FP dédoublés et les factures non
+  // rattachées (RAF dérivé surévalué).
   const billed = {};
-  for (const i of invoices || []) if (i.fp) billed[i.fp] = (billed[i.fp] || 0) + (i.amountHt || 0);
+  for (const i of invoices || []) { const k = fpKey(i.fp); if (k) billed[k] = (billed[k] || 0) + (i.amountHt || 0); }
 
   const byFp = new Map();
   const merge = (fp, data) => { if (!fp) return; byFp.set(fp, { ...(byFp.get(fp) || { fp }), ...data }); };
 
   // 1. P&L = COLONNE VERTÉBRALE. Une commande n'existe QUE si elle a une ligne P&L.
   //    pnlSource = "manuel" : la marge/coût vient de l'import P&L Excel.
-  for (const o of orders || []) if (o.fp) merge(o.fp, { ...o, pnlSource: "manuel" });
+  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, pnlSource: "manuel" }); }
   const pnlFps = new Set(byFp.keys()); // FP présents au P&L = seuls candidats « commande »
 
   // 2. Opportunités GAGNÉES (stage 6) : RÉCONCILIENT une ligne P&L existante (corrigent le CAS),
@@ -48,7 +53,9 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     merge(fp, {
       client: o.client || prev.client, bu: o.bu || prev.bu, am: o.am || prev.am,
       cas: (o.amount || 0) > 0 ? o.amount : (prev.cas || 0),
-      yearPo: Number(yearOf(o.closingDate)) || prev.yearPo || yearOfFp(fp) || 0,
+      // L'année de PO (CAS FIGÉ) vient de la ligne P&L / du N° FP en PRIORITÉ ; la D Prev de l'opp
+      // (prévisionnelle, souvent une autre année) ne sert que de dernier repli.
+      yearPo: prev.yearPo || yearOfFp(fp) || Number(yearOf(o.closingDate)) || 0,
       source: "opp_won",
     });
   }

@@ -1,13 +1,16 @@
 // Helpers déterministes partagés (BUILD_KIT §14, §17).
 // IDs déterministes ⇒ idempotence : set(..., {merge:true}) ne duplique jamais.
 
-/** Normalise une clé d'or N° FP → forme canonique "FP/AAAA/NNNNN" (§18.1).
- *  Rejette les placeholders à séquence nulle (ex. FP/2024/0000). */
+/** Normalise une clé d'or N° FP → forme canonique "FP/AAAA/N" (§18.1).
+ *  Rejette les placeholders à séquence nulle (ex. FP/2024/0000). Normalise les ZÉROS DE TÊTE
+ *  de la séquence (« 013 » ⇒ « 13 ») pour qu'un même FP zero-paddé différemment (courant en
+ *  export Excel) ne produise pas deux clés → sinon double comptage CAS/backlog. */
 const fpKey = (v) => {
   const m = String(v || "").match(/FP\/?\s*(\d{4})\/?\s*(\d+)/i);
   if (!m) return null;
   if (/^0+$/.test(m[2])) return null; // FP factice .../0000
-  return `FP/${m[1]}/${m[2]}`.toUpperCase();
+  const seq = String(parseInt(m[2], 10)); // « 013 » → « 13 », « 13 » → « 13 »
+  return `FP/${m[1]}/${seq}`;
 };
 
 /** Parse un nombre tolérant : gère milliers (espaces, ".", ","), décimale "." ou ",",
