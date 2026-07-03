@@ -67,6 +67,20 @@ describe("backlogFy — ancré FY, indépendant de la période (§7)", () => {
   it("inchangé quelle que soit la période (pas de filtre période)", () => {
     expect(backlogFy(ORDERS, 2026).total).toBe(backlogFy(ORDERS, 2025).total);
   });
+  it("ventile le RAF ouvert : curaté Excel vs dérivé (diagnostic)", () => {
+    const orders = [
+      { fp: "FP/2026/1", client: "ACME", bu: "ICT", yearPo: 2026, cas: 1000, raf: 400, rafSource: "excel", facture: 600 },
+      { fp: "FP/2026/3", client: "GAMMA", bu: "ICT", yearPo: 2026, cas: 800, raf: 800, rafSource: "derive", facture: 0, source: "opp_won" },
+      { fp: "FP/2025/2", client: "BETA", bu: "CLOUD", yearPo: 2025, cas: 500, raf: 0, rafSource: "excel" }, // fermé → exclu
+    ];
+    const b = backlogFy(orders, 2026);
+    expect(b.total).toBe(1200);
+    expect(b.totalExcel).toBe(400);
+    expect(b.totalDerive).toBe(800);
+    expect(b.countExcel).toBe(1);
+    expect(b.countDerive).toBe(1);
+    expect(b.deriveTop[0]).toMatchObject({ fp: "FP/2026/3", raf: 800, cas: 800, facture: 0, source: "opp_won" });
+  });
 });
 
 describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () => {

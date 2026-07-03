@@ -71,10 +71,13 @@ function mergeCommandes(orders, opps, sheets, invoices) {
   // (opp gagnée SANS P&L, fiche, ou P&L sans RAF) → dérivé max(CAS − Σfactures du FP, 0). Le
   // rattachement facturation→FP étant partiel, CAS − facturé gonflerait le backlog des P&L.
   return [...byFp.values()].map((o) => {
-    const raf = (o.raf != null && o.pnlSource === "manuel")
+    const curated = o.raf != null && o.pnlSource === "manuel";
+    const raf = curated
       ? o.raf
       : Math.max((o.cas || 0) - (billed[o.fp] || 0), 0);
-    return { ...o, raf };
+    // rafSource : « excel » = RAF total curaté (fiable) ; « derive » = CAS − facturé (surévalué
+    // tant que le rattachement facture→FP est partiel). facture = Σ factures rattachées au FP.
+    return { ...o, raf, rafSource: curated ? "excel" : "derive", facture: billed[o.fp] || 0 };
   });
 }
 

@@ -16,13 +16,51 @@ export const Backlog: FC<Props> = () => {
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
+  const total = data.total || 0;
+  const derive = data.totalDerive || 0;
+  const excel = data.totalExcel ?? (total - derive);
+  const derivePct = total > 0 ? derive / total : 0;
+  const deriveRows = data.deriveTop || [];
   return (
     <div className="flex flex-col gap-4">
-      <div className={grid4}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(data.total)} tone="steel" sub={`${data.count} commandes`} /></div>
+      <div className={grid4}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(total)} tone="steel" sub={`${data.count} commandes`} /></div>
+
+      {/* Diagnostic de fiabilité du RAF : curaté Excel (fiable) vs dérivé CAS − facturé (surévalué). */}
+      {(data.totalDerive != null || data.totalExcel != null) && (
+        <Card title="Fiabilité du RAF — d'où vient le backlog">
+          <div className={grid4}>
+            <Kpi label="RAF curaté (Excel P&L)" value={fmt(excel)} tone="emerald" sub={`${data.countExcel ?? 0} commandes · fiable`} />
+            <Kpi label="RAF dérivé (CAS − facturé)" value={fmt(derive)} tone={derivePct > 0.05 ? "clay" : "steel"} sub={`${data.countDerive ?? 0} commandes · ${pct(derivePct)} du total`} />
+          </div>
+          <Tip>
+            Le <b>RAF dérivé</b> (opp. gagnée ou fiche <b>sans base P&L</b>, ou facture non rattachée au N° FP)
+            vaut <code>CAS − facturé</code> — <b>surévalué</b> tant que le rattachement facture→FP est partiel.
+            C'est cette part ({fmt(derive)}) qui gonfle le backlog au-dessus de la cible.
+          </Tip>
+        </Card>
+      )}
+
       <div className={cols2}>
         <Card title="Par millésime"><Bars data={objToArr(data.byVintage)} color={T.clay} name="Backlog" /></Card>
         <Card title="Par domaine"><DonutBU data={toDonut(data.byBu)} /></Card>
       </div>
+
+      {deriveRows.length > 0 && (
+        <Card title={`Commandes à RAF dérivé (suspectes) · ${deriveRows.length}`}>
+          <Table columns={[
+            colText("FP", (t) => t.fp),
+            colText("Client", (t) => t.client),
+            colText("BU", (t) => t.bu),
+            colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—"),
+            colNum("Année", (t) => t.yearPo || "—"),
+            colNum("CAS", (t) => money(t.cas)),
+            colNum("Facturé", (t) => money(t.facture)),
+            colNum("RAF dérivé", (t) => money(t.raf)),
+          ]} rows={deriveRows} />
+          <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code>. Vérifie si elles devraient déjà être soldées, ou si des factures leur manquent un rattachement N° FP.</Tip>
+        </Card>
+      )}
+
       <Card title="Top commandes ouvertes">
         <Table columns={[colText("FP", (t) => t.fp), colText("Client", (t) => t.client), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
       </Card>
