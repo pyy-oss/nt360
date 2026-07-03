@@ -283,7 +283,7 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
     <button
       className={variant === "gold" ? "btn-gold" : "btn-ghost"}
       disabled={s === "busy"}
-      onClick={async () => { setS("busy"); try { await fn(); toast(okMsg, "ok"); } catch { toast(errMsg, "err"); } finally { setS(""); } }}
+      onClick={async () => { setS("busy"); try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
     >
       {s === "busy" ? "…" : label}
     </button>
