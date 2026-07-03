@@ -136,8 +136,16 @@ exports.logLogin = onCall(async (req) => {
 exports.recompute = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
-  const res = await recomputeAll(db, req.data?.only);
-  return { ok: true, ...res };
+  try {
+    const res = await recomputeAll(db, req.data?.only);
+    return { ok: true, ...res };
+  } catch (e) {
+    // Sans ce wrap, une exception non-HttpsError est renvoyée au client en « internal » SANS
+    // message (masqué par sécurité). On journalise la stack complète et on re-propage le motif
+    // réel pour qu'il soit diagnosticable côté UI.
+    logger.error("recompute a échoué", { message: e && e.message, stack: e && e.stack });
+    throw new HttpsError("internal", `recompute : ${(e && e.message) || e}`);
+  }
 });
 
 // --- F6 : Sync Sales_DATA quotidien (Cloud Scheduler) ---
