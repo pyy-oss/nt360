@@ -81,6 +81,17 @@ describe("backlogFy — ancré FY, indépendant de la période (§7)", () => {
     expect(b.countDerive).toBe(1);
     expect(b.deriveTop[0]).toMatchObject({ fp: "FP/2026/3", raf: 800, cas: 800, facture: 0, source: "opp_won" });
   });
+  it("normalise bu/client/fp manquants (jamais d'undefined → écriture Firestore valide)", () => {
+    const orders = [
+      { fp: "FP/2026/9", cas: 500, raf: 500, rafSource: "derive" }, // bu/client absents
+    ];
+    const b = backlogFy(orders, 2026);
+    for (const row of [...b.top, ...b.deriveTop]) {
+      expect(row.bu).toBe("AUTRE");
+      expect(row.client).toBe("");
+      expect(Object.values(row).every((v) => v !== undefined)).toBe(true);
+    }
+  });
 });
 
 describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () => {

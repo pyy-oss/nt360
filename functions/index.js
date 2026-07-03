@@ -16,6 +16,12 @@ const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
 initializeApp();
 // Base Firestore nommée nt360 (projet partagé) — isole données et règles.
 const db = getFirestore(getApp(), FIRESTORE_DB);
+// Filet de sécurité global : un seul champ `undefined` dans un document écrit fait échouer
+// TOUT le batch (« Cannot use undefined as a Firestore value »), donc tout le recompute. On
+// demande à Firestore d'ignorer les champs undefined (ils sont simplement omis) — les défauts
+// explicites côté domaine restent la 1re ligne de défense ; ceci évite qu'un oubli ne brique
+// à nouveau un recalcul entier.
+db.settings({ ignoreUndefinedProperties: true });
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
