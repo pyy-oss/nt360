@@ -108,6 +108,16 @@ async function recomputeSummaries(only) {
   }
 }
 
+// Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
+// échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
+async function logOps(entry) {
+  try {
+    await db.collection("opsLog").add({ ...entry, ts: FieldValue.serverTimestamp() });
+  } catch (e) {
+    logger.error("opsLog: écriture impossible", { message: e && e.message });
+  }
+}
+
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
 const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
 
@@ -142,15 +152,33 @@ exports.logLogin = onCall(async (req) => {
 exports.recompute = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
+  const t0 = Date.now();
   try {
     const res = await recomputeAll(db, req.data?.only);
+    await logOps({ kind: "recompute", trigger: "manuel", status: "ok", ms: Date.now() - t0, uid: req.auth.uid, detail: { summaries: res.written.length, currentFy: res.currentFy } });
     return { ok: true, ...res };
   } catch (e) {
     // Sans ce wrap, une exception non-HttpsError est renvoyée au client en « internal » SANS
     // message (masqué par sécurité). On journalise la stack complète et on re-propage le motif
     // réel pour qu'il soit diagnosticable côté UI.
     logger.error("recompute a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "recompute", trigger: "manuel", status: "error", ms: Date.now() - t0, uid: req.auth?.uid || null, error: (e && e.message) || String(e) });
     throw new HttpsError("internal", `recompute : ${(e && e.message) || e}`);
+  }
+});
+
+// --- Recompute PLANIFIÉ quotidien : garantit des agrégats jamais datés, indépendamment des
+// imports/sync. Trace succès et échecs dans opsLog (observabilité). ---
+exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", memoryMiB: 512, timeoutSeconds: 300 }, async () => {
+  const { recomputeAll } = require("./lib/aggregate");
+  const t0 = Date.now();
+  try {
+    const res = await recomputeAll(db);
+    await logOps({ kind: "recompute", trigger: "planifié", status: "ok", ms: Date.now() - t0, detail: { summaries: res.written.length, currentFy: res.currentFy } });
+  } catch (e) {
+    logger.error("scheduledRecompute a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "recompute", trigger: "planifié", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
+    throw e;
   }
 });
 

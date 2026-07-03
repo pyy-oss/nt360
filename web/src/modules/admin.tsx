@@ -1,11 +1,12 @@
 // 13 — Habilitations : matrice profil × module + attribution de rôle.
 import { useState, type FC } from "react";
+import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
 import { updateMatrix, callSetUserRole, callDedupe, type DedupeResult } from "../lib/writes";
-import { Props, DataImportCard } from "./_shared";
-import type { PermissionsConfig, UserRow } from "../types";
+import { Props, DataImportCard, relTime } from "./_shared";
+import type { PermissionsConfig, UserRow, OpsLog } from "../types";
 
 export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
@@ -23,6 +24,7 @@ export const Habilitations: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       {canWrite && <DataImportCard />}
+      {canWrite && <OpsHealthCard />}
       {canWrite && <DedupeCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
@@ -54,6 +56,44 @@ export const Habilitations: FC<Props> = () => {
     </div>
   );
 };
+
+// Exploitation : santé des recomputes (manuels + planifié quotidien) via le journal opsLog.
+// Donne une visibilité durable sur les échecs d'agrégation (observabilité), au-delà des logs Cloud.
+function OpsHealthCard() {
+  const { rows } = useCollectionData<OpsLog>("opsLog", [orderBy("ts", "desc"), limit(8)], "ops8");
+  const last = rows[0];
+  const lastErr = rows.find((r) => r.status === "error");
+  return (
+    <Card title="Exploitation — santé des recalculs">
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        {last ? (
+          <Badge tone={last.status === "ok" ? "emerald" : "clay"}>{last.status === "ok" ? "OK" : "ÉCHEC"}</Badge>
+        ) : <span className="text-muted">Aucun recalcul journalisé pour l'instant.</span>}
+        {last && <span className="text-muted">Dernier recalcul {relTime(last.ts)} ({last.trigger}{last.detail?.summaries ? ` · ${last.detail.summaries} agrégats` : ""}{last.ms ? ` · ${(last.ms / 1000).toFixed(1)} s` : ""}).</span>}
+      </div>
+      {lastErr && lastErr.status === "error" && last?.status !== "error" && (
+        <div className="mt-1 text-[12px] text-clay">Dernier échec {relTime(lastErr.ts)} : {lastErr.error}</div>
+      )}
+      {last?.status === "error" && <div className="mt-1 text-[12px] text-clay">Motif : {last.error}</div>}
+      {rows.length > 1 && (
+        <details className="mt-2 text-[12px]">
+          <summary className="cursor-pointer select-none text-faint hover:text-ink">Historique des recalculs</summary>
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {rows.map((r) => (
+              <li key={r.id} className="flex items-center gap-1.5 text-muted">
+                <Badge tone={r.status === "ok" ? "emerald" : "clay"}>{r.status === "ok" ? "OK" : "KO"}</Badge>
+                <span className="text-faint w-20 shrink-0">{relTime(r.ts)}</span>
+                <span className="text-ink">{r.trigger}</span>
+                <span className="text-faint">· {r.status === "ok" ? `${r.detail?.summaries || 0} agrégats · ${((r.ms || 0) / 1000).toFixed(1)} s` : (r.error || "").slice(0, 80)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <Tip>Un recompute planifié tourne chaque jour à 05:00 (agrégats jamais datés). Les échecs sont tracés ici en plus des logs Cloud.</Tip>
+    </Card>
+  );
+}
 
 // Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Analyse d'abord (aperçu),
 // puis suppression des doublons (le meilleur représentant de chaque groupe est conservé).

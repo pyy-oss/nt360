@@ -117,5 +117,7 @@ export type Objective = {
 };
 export type UserRow = { id?: string; email?: string; name?: string; active?: boolean };
 
-export type PeriodsConfig = { available?: string[]; currentFy?: number };
+export type PeriodsConfig = { available?: string[]; currentFy?: number; lastRecomputeAt?: any };
+// Journal d'exploitation (recompute manuel/planifié + échecs).
+export type OpsLog = { id?: string; kind?: string; trigger?: string; status?: string; ms?: number; error?: string; detail?: { summaries?: number; currentFy?: number }; ts?: any };
 export type PermissionsConfig = { matrix?: Record<string, Record<string, string>> };

@@ -154,8 +154,9 @@ async function recomputeAll(db, only) {
     if (want("domaines")) w.push({ path: `summaries/domaines_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.bu), ...stamp } });
   }
 
-  // Enregistre la liste des périodes disponibles (pour le sélecteur front).
-  w.push({ path: "config/periods", data: { available: periods, currentFy } });
+  // Enregistre la liste des périodes disponibles (sélecteur front) + l'horodatage du dernier
+  // recompute (bandeau de fraîcheur « données à jour au… »).
+  w.push({ path: "config/periods", data: { available: periods, currentFy, lastRecomputeAt: FieldValue.serverTimestamp() } });
 
   // Garde-fou limite Firestore (~1 Mio/doc) : summaries/commandes embarque TOUTES les lignes de
   // commande dans un seul document — au-delà d'un certain volume il dépasse la limite et le

@@ -62,6 +62,7 @@ service cloud.firestore {
     match /config/{id}        { allow read: if signedIn();              allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
+    match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }
     match /imports/{id}       { allow read: if signedIn();              allow write: if false; }
     match /users/{uid}        { allow read: if canWrite('habilitations') || request.auth.uid == uid; allow write: if false; }
   }
