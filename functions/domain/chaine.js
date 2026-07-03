@@ -8,6 +8,18 @@
 
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 
+// Pondération de PROJECTION (règle de gestion) : 100 % du montant si IdC ≥ 90 %, 20 % si
+// 70 % ≤ IdC < 90 %, 10 % si 50 % ≤ IdC < 70 %, 0 sinon. Fonction UNIQUE partagée par la Vue
+// d'ensemble (conversion), le Pipeline (pondéré, funnel) et l'atterrissage.
+const CONF_FULL = 0.9, CONF_T2 = 0.7, CONF_T3 = 0.5;
+const projectionWeight = (o) => {
+  const p = o.probability || 0, amt = o.amount || 0;
+  if (p >= CONF_FULL) return amt;
+  if (p >= CONF_T2) return amt * 0.2;
+  if (p >= CONF_T3) return amt * 0.1;
+  return 0;
+};
+
 /**
  * @param {object[]} orders  commandes de la période (orders/{fp})
  * @param {object[]} invoices factures DATÉES dans la période (CAF figé)
@@ -66,4 +78,4 @@ function overview(orders, invoices, opps = [], opts = {}) {
   };
 }
 
-module.exports = { overview, sum };
+module.exports = { overview, sum, projectionWeight };

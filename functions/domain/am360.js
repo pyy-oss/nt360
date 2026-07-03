@@ -3,7 +3,7 @@
 // backlog (RAF), pipeline pondéré + conversion, et R/O vs objectif CAS de l'exercice.
 // VOLONTAIREMENT SANS MARGE (confidentialité — la marge par AM reste dans « Rentabilité »).
 // Module PUR (testable).
-const { sum } = require("./chaine");
+const { sum, projectionWeight } = require("./chaine");
 
 const normAm = (a) => (a && String(a).trim()) || "—";
 
@@ -41,11 +41,10 @@ function am360(orders, invoices, opps, objectives, fy) {
 
       const myOpps = (opps || []).filter((o) => normAm(o.am) === am);
       const active = myOpps.filter((o) => o.stage >= 1 && o.stage <= 5);
-      const eligible = active.filter((o) => (o.probability || 0) >= 0.9);
       const won = myOpps.filter((o) => o.stage === 6).length;
       const lost = myOpps.filter((o) => o.stage === 7).length;
-      // « Pondéré » ≥ 90 % = 100 % du montant (décision métier), cohérent avec pipeline/atterrissage.
-      const pipelinePondere = sum(eligible, (o) => o.amount);
+      // « Pondéré » = PROJECTION tiérée (100/20/10), cohérent avec pipeline/atterrissage.
+      const pipelinePondere = sum(active, projectionWeight);
 
       const ob = objByAm[am.toUpperCase()];
       const targetCas = ob ? ob.targetCas || 0 : 0;

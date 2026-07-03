@@ -8,13 +8,15 @@ import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
-import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary } from "../types";
+import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
 export const Pipeline: FC<Props> = ({ period }) => {
   // Pipeline de la période : opportunités dont la D Prev tombe dans l'année sélectionnée
   // (écarte les opps obsolètes / non mises à jour). « Tout » = tout le pipeline.
   const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
+  // Taux de conversion vente (règle de gestion) : calculé une seule fois côté Vue d'ensemble.
+  const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   // Pipeline de l'EXERCICE (indépendant du sélecteur de période) pour une couverture cohérente
@@ -40,9 +42,9 @@ export const Pipeline: FC<Props> = ({ period }) => {
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
-        <Kpi label="Pondéré (IdC ≥ 90 %)" value={fmt(data.tot?.weighted)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp.`} />
+        <Kpi label="Pondéré projeté" value={fmt(data.tot?.weighted)} tone="gold" sub={`100 %·≥90 · 20 %·70-90 · 10 %·50-70 — ${data.tot?.countConf ?? 0} opp.`} />
         <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
-        <Kpi label="Conversion" value={pct(data.conv)} sub={`${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)}`} />
+        <Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)}`} />
       </div>
       <Card title="Funnel pondéré par étape">
         <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} interval={0} />
