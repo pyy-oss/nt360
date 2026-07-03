@@ -8,7 +8,7 @@ import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { setBcStatus, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity, DataQualitySummary } from "../types";
 
@@ -247,10 +247,15 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
 export function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data, loading, error } = useDocData<EntitySummary>(`summaries/${kind}_${period}`);
   const canMargin = useCanSeeMargin();
+  // R/O par périmètre : objectifs de scope « bu » (Domaines) ou « client » (Clients) de l'exercice.
+  const scope = kind === "domaines" ? "bu" : "client";
+  const obj = useObjectives(period);
+  const roOf = (r: EntityRow) => obj.get(scope, r.key);
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   const rows = data.rows || [];
+  const hasObj = rows.some((r) => roOf(r));
   return (
     <div className="flex flex-col gap-4">
       <Card title={kind === "clients" ? "CAS par client (top 10)" : "CAS par domaine"}>
@@ -263,7 +268,14 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
           colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
           // Marges masquées pour les rôles sans accès « Rentabilité ».
           ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(r.mb), (r: EntityRow) => r.mb), colNum("%MB", (r: EntityRow) => pct(r.pmb), (r: EntityRow) => r.pmb)] : []),
+          // R/O (Réalisé / Objectif) au périmètre — affiché si un objectif existe pour l'exercice.
+          ...(hasObj ? [
+            colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas)),
+            colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced)),
+            ...(canMargin ? [colNum("R/O Marge", (r: EntityRow) => roBadge(r.mb, roOf(r)?.targetMargin))] : []),
+          ] : []),
         ]} rows={rows} />
+        {hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre {kind === "domaines" ? "BU" : "client"}. Les objectifs se définissent dans « Objectifs ».</Tip>}
       </Card>
     </div>
   );

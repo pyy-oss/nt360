@@ -8,7 +8,7 @@ import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
 import { useFilters } from "../lib/filters";
-import type { OverviewSummary, FacturationSummary, RentabiliteSummary, Objective, Invoice, EntitySummary, CommandesSummary } from "../types";
+import type { FacturationSummary, RentabiliteSummary, Objective, Invoice } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -19,41 +19,14 @@ const SCOPES = [
 ];
 const EMPTY_OBJ = { fiscalYear: "", scope: "global", scopeValue: "all", label: "", targetCas: "", targetInvoiced: "", targetMargin: "", targetMarginPct: "" };
 
-export const Objectifs: FC<Props> = ({ period }) => {
+export const Objectifs: FC<Props> = () => {
   const { rows } = useCollectionData<Objective>("objectives");
-  const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
-  const { data: dom } = useDocData<EntitySummary>(`summaries/domaines_${period}`);
-  const { data: cli } = useDocData<EntitySummary>(`summaries/clients_${period}`);
-  const { data: cmd } = useDocData<CommandesSummary>("summaries/commandes");
-  const orders = cmd?.rows || [];
   const canWrite = useCan("objectifs") === "write";
   const toast = useToast();
-  const realiseCas = ov?.commandes || 0, realiseFact = ov?.facture || 0, realiseMb = ov?.mb || 0;
   const [f, setF] = useState({ ...EMPTY_OBJ });
   const [editingId, setEditingId] = useState<string | null>(null);
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
   const reset = () => { setF({ ...EMPTY_OBJ }); setEditingId(null); };
-
-  // Réalisé AU PÉRIMÈTRE de l'objectif (et non le réalisé global) : BU → domaines,
-  // client → clients, commercial (AM) → agrégé depuis les commandes, sinon global.
-  const up = (s?: string) => (s || "").trim().toUpperCase();
-  const realiseFor = (x: Objective): { cas: number; facture: number; mb: number } => {
-    if (x.scope === "bu") { const r = (dom?.rows || []).find((e) => up(e.key) === up(x.scopeValue)); return { cas: r?.cas || 0, facture: r?.facture || 0, mb: r?.mb || 0 }; }
-    if (x.scope === "client") { const r = (cli?.rows || []).find((e) => up(e.key) === up(x.scopeValue)); return { cas: r?.cas || 0, facture: r?.facture || 0, mb: r?.mb || 0 }; }
-    if (x.scope === "commercial") {
-      const os = orders.filter((o) => up(o.am) === up(x.scopeValue) && (period === "all" || String(o.yearPo) === String(period)));
-      return { cas: os.reduce((s, o) => s + (o.cas || 0), 0), facture: NaN, mb: os.reduce((s, o) => s + (o.mb || 0), 0) }; // facturé par AM non disponible
-    }
-    return { cas: realiseCas, facture: realiseFact, mb: realiseMb }; // global
-  };
-
-  // R/O affiché seulement pour l'objectif de l'année sélectionnée et si la cible > 0.
-  const ro = (x: Objective, target: number | undefined, key: "cas" | "facture" | "mb") => {
-    if (!target || target <= 0 || String(x.fiscalYear) !== String(period)) return "—";
-    const real = realiseFor(x)[key];
-    if (!Number.isFinite(real)) return "—"; // réalisé non disponible à ce périmètre (ex. facturé par AM)
-    return <Badge tone={real / target >= 1 ? "emerald" : "gold"}>{pct(real / target)}</Badge>;
-  };
 
   const edit = (x: Objective) => {
     setEditingId(x.id || null);
@@ -90,9 +63,6 @@ export const Objectifs: FC<Props> = ({ period }) => {
     colNum("Cible Facturé", (x) => money(x.targetInvoiced), (x) => x.targetInvoiced || 0),
     colNum("Cible Marge", (x) => money(x.targetMargin), (x) => x.targetMargin || 0),
     colNum("Cible %MB", (x) => x.targetMarginPct ? pct(x.targetMarginPct) : "—", (x) => x.targetMarginPct || 0),
-    colNum("R/O CAS", (x) => ro(x, x.targetCas, "cas")),
-    colNum("R/O Fact.", (x) => ro(x, x.targetInvoiced, "facture")),
-    colNum("R/O Marge", (x) => ro(x, x.targetMargin, "mb")),
     ...(canWrite ? [colNum("", (x: Objective) => (
       <span className="inline-flex gap-1.5 justify-end">
         <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => edit(x)}>Modifier</button>
@@ -103,9 +73,9 @@ export const Objectifs: FC<Props> = ({ period }) => {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Objectifs annuels & Réalisé / Objectif">
+      <Card title="Objectifs annuels par univers / dimension">
         <Table columns={cols} rows={rows} empty="Aucun objectif défini." />
-        <Tip>Réalisé GLOBAL de la période {period} — CAS : {fmt(realiseCas)} · Facturé : {fmt(realiseFact)} · Marge : {fmt(realiseMb)}. Le R/O est calculé au PÉRIMÈTRE de chaque objectif (global / BU / client / commercial) et seulement pour l'année sélectionnée. Facturé par commercial non disponible (« — »).</Tip>
+        <Tip>Cette page sert uniquement à <b>définir les objectifs</b> (global, par BU, par client, par commercial). Le <b>R/O (Réalisé / Objectif)</b> se suit désormais sur la vue de chaque périmètre : global → Vue d'ensemble · BU → Domaines · client → Clients · commercial → AM 360°.</Tip>
       </Card>
       {canWrite && (
         <Card title={editingId ? "Modifier l'objectif" : "Ajouter un objectif"}>
