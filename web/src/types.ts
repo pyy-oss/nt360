@@ -24,6 +24,9 @@ export type StaleOpp = { oppId?: string; client?: string; am?: string; amount?: 
 export interface ClosingAnalysis {
   buckets?: { retard?: ClosingBucket; mois?: ClosingBucket; trim?: ClosingBucket; plus?: ClosingBucket; sans?: ClosingBucket };
   staleCount?: number; staleBrut?: number; staleTop?: StaleOpp[];
+  // Ancienneté du retard (jours depuis la D Prev dépassée) : ≤30 j / 31-90 j / >90 j + moyenne.
+  overdueAge?: { d30?: ClosingBucket; d90?: ClosingBucket; dPlus?: ClosingBucket };
+  avgOverdueDays?: number;
 }
 export interface PipelineSummary {
   tot?: { brut?: number; weighted?: number; count?: number; countConf?: number };

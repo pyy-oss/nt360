@@ -144,6 +144,16 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
     expect(pc.closing.staleCount).toBe(2);
     expect(pc.closing.staleTop[0].weighted).toBe(100); // o1 projeté (10%·1000) devant o2 (0)
   });
+  it("ancienneté du retard : tranches d'âge + retard moyen", () => {
+    const pc = pipeline(OPPS, "2026-04-15");
+    const oa = pc.closing.overdueAge;
+    expect(oa.d30.count).toBe(1);  // o2 (04-01 → 14 j)
+    expect(oa.d30.brut).toBe(2000);
+    expect(oa.d90.count).toBe(1);  // o1 (03-01 → 45 j)
+    expect(oa.d90.brut).toBe(1000);
+    expect(oa.dPlus.count).toBe(0);
+    expect(pc.closing.avgOverdueDays).toBe(30); // round((45 + 14) / 2)
+  });
 });
 
 describe("suppliers — exposition/encours/couverture (§18.6)", () => {

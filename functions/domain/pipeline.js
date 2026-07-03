@@ -35,7 +35,19 @@ function closingAnalysis(active, asOf) {
     .sort((a, b) => projectionWeight(b) - projectionWeight(a))
     .slice(0, 10)
     .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, amount: o.amount, weighted: projectionWeight(o), closingDate: o.closingDate, stageLabel: o.stageLabel }));
-  return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop };
+  // ANCIENNETÉ du retard : jours écoulés depuis la D Prev dépassée, en tranches → priorise les
+  // affaires les plus enlisées (les >90 j sont les plus à risque). Âge légitime (basé sur la D Prev,
+  // pas une date de création inventée).
+  const overdueAge = { d30: mk(), d90: mk(), dPlus: mk() };
+  let overdueDaysSum = 0;
+  for (const o of stale) {
+    const days = Math.max(0, Math.floor((Date.parse(today) - Date.parse(String(o.closingDate).slice(0, 10))) / 86400000));
+    overdueDaysSum += days;
+    const k = days <= 30 ? "d30" : days <= 90 ? "d90" : "dPlus";
+    overdueAge[k].brut += o.amount || 0; overdueAge[k].pond += projectionWeight(o); overdueAge[k].count++;
+  }
+  const avgOverdueDays = stale.length ? Math.round(overdueDaysSum / stale.length) : 0;
+  return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop, overdueAge, avgOverdueDays };
 }
 
 function pipeline(opps, asOf) {
