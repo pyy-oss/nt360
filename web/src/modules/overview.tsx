@@ -7,7 +7,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
-import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge } from "./_shared";
+import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime } from "./_shared";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary } from "../types";
 
 // Bloc « atterrissage » : jauge de probabilité + Réalisé / Projeté / Objectif / Écart, avec le
@@ -39,8 +39,10 @@ export const Overview: FC<Props> = ({ period }) => {
   const canWrite = useCan("overview") === "write";
   const canExport = useCanExport();
   const [url, setUrl] = useState<string | null>(null);
+  const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex gap-2 items-center">
+      {fresh && <span className="text-[11px] text-faint mr-1" title="Recompute planifié chaque jour à 05:00 ; « Recalculer » force la mise à jour.">Données à jour {fresh}</span>}
       {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
       {canExport && <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />}
       {url && <a className="text-gold text-xs underline" href={url} target="_blank" rel="noreferrer">Télécharger</a>}

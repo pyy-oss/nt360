@@ -105,7 +105,7 @@ const PHASE_LABEL: Record<Exclude<ImportPhase, "">, string> = {
   reading: "Lecture du fichier…",
   processing: "Envoi, traitement & recalcul…",
 };
-function relTime(ts: any): string {
+export function relTime(ts: any): string {
   const ms = ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : 0;
   if (!ms) return "";
   const d = Date.now() - ms;
