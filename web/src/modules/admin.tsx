@@ -4,7 +4,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, type DedupeResult, type AlertThresholds } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, callSetNotificationConfig, type DedupeResult, type AlertThresholds, type NotificationConfig } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog } from "../types";
 
@@ -26,6 +26,7 @@ export const Habilitations: FC<Props> = () => {
       {canWrite && <DataImportCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <AlertThresholdsCard />}
+      {canWrite && <NotificationCard />}
       {canWrite && <DedupeCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
@@ -131,6 +132,47 @@ function AlertThresholdsForm({ initial }: { initial: AlertThresholds }) {
         <ThrField label="Backlog dormant (ans)" hint="Commande ouverte d'un millésime ≤ exercice − N" value={yrs} onChange={setYrs} />
       </div>
       <Tip>Pilotent le Centre d'alertes et la Qualité des données. L'enregistrement recalcule immédiatement.</Tip>
+    </Card>
+  );
+}
+
+// Notifications d'alerte (config/notifications) : pousse les alertes ≥ seuil vers un webhook
+// entrant Slack/Teams (digest quotidien 07:00). L'URL n'est visible que des habilitations.
+function NotificationCard() {
+  const { data, loading } = useDocData<NotificationConfig & { lastSentAt?: any }>("config/notifications");
+  if (loading && !data) return null;
+  return <NotificationForm key={JSON.stringify({ e: data?.enabled, s: data?.minSeverity, u: data?.webhookUrl })}
+    initial={{ enabled: !!data?.enabled, minSeverity: data?.minSeverity === "medium" ? "medium" : "high", webhookUrl: data?.webhookUrl || "" }} />;
+}
+function NotificationForm({ initial }: { initial: NotificationConfig }) {
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [sev, setSev] = useState<"high" | "medium">(initial.minSeverity);
+  const [url, setUrl] = useState(initial.webhookUrl);
+  const save = (test: boolean) => callSetNotificationConfig({ enabled, minSeverity: sev, webhookUrl: url, test });
+  return (
+    <Card title="Notifications d'alerte" actions={
+      <div className="flex gap-2">
+        <Busy variant="ghost" label="Tester" okMsg="Ping envoyé au webhook" errMsg="Échec du test" fn={() => save(true)} />
+        <Busy label="Enregistrer" okMsg="Notifications enregistrées" fn={() => save(false)} />
+      </div>}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex items-center gap-2 text-[13px] text-ink">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} aria-label="Activer les notifications" />
+          Activer le digest quotidien (07:00)
+        </label>
+        <label className="flex flex-col gap-1 text-[13px]">
+          <span className="text-ink font-medium">Sévérité minimale</span>
+          <select className="field !py-1" value={sev} onChange={(e) => setSev(e.target.value as "high" | "medium")} aria-label="Sévérité minimale">
+            <option value="high">Critiques seulement (high)</option>
+            <option value="medium">Moyennes et critiques</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[13px] sm:col-span-2">
+          <span className="text-ink font-medium">URL du webhook (Slack / Teams)</span>
+          <input className="field !py-1" type="url" placeholder="https://hooks.slack.com/…" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="URL du webhook" />
+        </label>
+      </div>
+      <Tip>Un webhook entrant Slack/Teams reçoit un message quand l'ensemble des alertes change. L'URL n'est lisible que par les habilitations. « Tester » envoie un ping immédiat.</Tip>
     </Card>
   );
 }

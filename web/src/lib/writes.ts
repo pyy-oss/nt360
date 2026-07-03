@@ -80,6 +80,12 @@ export async function callSetAlertThresholds(cfg: AlertThresholds) {
   return res.data as AlertThresholds & { ok: boolean };
 }
 
+export type NotificationConfig = { enabled: boolean; minSeverity: "high" | "medium"; webhookUrl: string };
+/** Enregistre la config de notifications (admin) ; test=true envoie un ping de vérification. */
+export async function callSetNotificationConfig(cfg: NotificationConfig & { test?: boolean }) {
+  await httpsCallable(functions, "setNotificationConfig")(cfg);
+}
+
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});
