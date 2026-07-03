@@ -40,8 +40,12 @@ service cloud.firestore {
     // Opportunités : seules les saisies (source == 'saisie') sont modifiables par le client.
     match /opportunities/{id} {
       allow read: if canRead('pipeline');
-      allow create, update: if canWrite('pipeline') && request.resource.data.source == 'saisie';
-      allow delete: if canWrite('pipeline');
+      // Création d'une saisie manuelle uniquement.
+      allow create: if canWrite('pipeline') && request.resource.data.source == 'saisie';
+      // Modif/suppression réservées aux opps DÉJÀ saisies (resource.data) : on ne peut pas
+      // « détourner » une opp importée en basculant sa source vers 'saisie' côté client.
+      allow update: if canWrite('pipeline') && resource.data.source == 'saisie' && request.resource.data.source == 'saisie';
+      allow delete: if canWrite('pipeline') && resource.data.source == 'saisie';
     }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
@@ -63,7 +67,7 @@ service cloud.firestore {
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }
-    match /imports/{id}       { allow read: if signedIn();              allow write: if false; }
+    match /imports/{id}       { allow read: if canWrite('habilitations'); allow write: if false; }
     match /users/{uid}        { allow read: if canWrite('habilitations') || request.auth.uid == uid; allow write: if false; }
   }
 }
