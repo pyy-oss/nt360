@@ -12,9 +12,11 @@ const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
  * @param {object[]} bcLines
  * @param {number} fy année fiscale courante
  * @param {string} [asOf] date du jour (YYYY-MM-DD), pour les retards ETA des BC
+ * @param {object[]} [opps] opportunités (pour l'alerte « opportunités dormantes »)
  */
-function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf) {
+function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps) {
   const out = [];
+  opps = opps || [];
 
   const neg = orders.filter((o) => (o.mb || 0) < 0);
   if (neg.length) out.push({ type: "marge_negative", severity: "high", count: neg.length, message: `${neg.length} commande(s) à marge négative`, refs: neg.slice(0, 10).map((o) => o.fp) });
@@ -75,6 +77,16 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf) {
     return eta && String(eta).slice(0, 10) < asOf && !DELIVERED.has(b.status);
   }) : [];
   if (lateBc.length) out.push({ type: "bc_en_retard", severity: "high", count: lateBc.length, message: `${lateBc.length} BC en retard (ETA dépassée, non livré)`, refs: lateBc.slice(0, 10).map((b) => b.bcNumber || b.supplier || b.fp) });
+
+  // Opportunités DORMANTES : encore actives (stage 1-5) mais dont la D Prev est déjà dépassée →
+  // prévision faussée, à requalifier/reprogrammer. Ancienneté = jours écoulés depuis la D Prev.
+  if (asOf) {
+    const dormantOpps = opps.filter((o) => o.stage >= 1 && o.stage <= 5 && o.closingDate && String(o.closingDate).slice(0, 10) < asOf);
+    if (dormantOpps.length) {
+      const oldest = dormantOpps.reduce((mx, o) => Math.max(mx, Math.floor((Date.parse(asOf) - Date.parse(String(o.closingDate).slice(0, 10))) / 86400000)), 0);
+      out.push({ type: "opp_dormante", severity: "medium", count: dormantOpps.length, message: `${dormantOpps.length} opportunité(s) active(s) à D Prev dépassée (la plus ancienne de ${oldest} j) — à requalifier`, refs: dormantOpps.slice(0, 10).map((o) => o.fp || o.client) });
+    }
+  }
 
   return out;
 }

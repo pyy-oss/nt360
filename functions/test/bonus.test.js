@@ -91,4 +91,16 @@ describe("alerts", () => {
     expect(byType.raf_incoherent.count).toBeGreaterThanOrEqual(1); // FP/2022/9 (attendu 800 vs raf 300)
     expect(byType.facture_pre_po.count).toBe(1); // FP/2026/1 prePo
   });
+  it("opportunités dormantes : actives à D Prev dépassée (ancienneté)", () => {
+    const opps = [
+      { client: "A", fp: "FP/2026/10", stage: 3, closingDate: "2026-01-15" }, // passée < asOf → dormante
+      { client: "B", stage: 6, closingDate: "2026-01-01" }, // gagnée → ignorée
+      { client: "C", stage: 2, closingDate: "2026-12-01" }, // future → ignorée
+    ];
+    const it2 = alerts([], [], { bySupplier: [] }, [], 2026, "2026-06-01", opps);
+    const d = it2.find((x) => x.type === "opp_dormante");
+    expect(d.count).toBe(1);
+    expect(d.refs).toContain("FP/2026/10");
+    expect(d.message).toMatch(/\d+ j/); // l'ancienneté (jours) figure dans le message
+  });
 });

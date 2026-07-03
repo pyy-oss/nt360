@@ -102,7 +102,7 @@ async function recomputeAll(db, only) {
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy), ...stamp } });
-  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf), fy: currentFy, ...stamp } });
+  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps), fy: currentFy, ...stamp } });
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets), ...stamp } });
   // Commandes fusionnées matérialisées (lues par l'onglet « Commandes »).

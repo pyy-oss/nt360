@@ -64,6 +64,16 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(t.opps_gagnees_sans_pnl.refs).toContain("FP/2026/8");
     expect(t.opps_gagnees_sans_pnl.severity).toBe("high");
   });
+  it("am_invalide : AM purement numérique détecté", () => {
+    const q3 = dataQuality(
+      [{ fp: "FP/2026/1", client: "X", am: "35", yearPo: 2026 }, { fp: "FP/2026/2", client: "Y", am: "DATCHA", yearPo: 2026 }],
+      [], [], [], [],
+    );
+    const t = Object.fromEntries(q3.issues.map((i) => [i.type, i]));
+    expect(t.am_invalide.count).toBe(1);
+    expect(t.am_invalide.refs).toContain("FP/2026/1");
+    expect(t.am_invalide.severity).toBe("medium");
+  });
   it("issues triées par sévérité (high avant medium avant low)", () => {
     const ranks = q.issues.map((i) => ({ high: 0, medium: 1, low: 2 }[i.severity]));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));

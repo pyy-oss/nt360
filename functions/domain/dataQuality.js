@@ -28,6 +28,9 @@ function dataQuality(orders, invoices, opps, bcLines, sheets) {
   add("commandes_sans_annee", "medium", orders.filter((o) => !(o.yearPo > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp);
   add("commandes_sans_client", "medium", orders.filter((o) => !o.client), "Commandes sans client", (o) => o.fp);
   add("commandes_sans_am", "low", orders.filter((o) => !o.am), "Commandes sans commercial (AM)", (o) => o.fp);
+  // AM purement numérique = colonne mal mappée à l'import (ex. « 35 ») → attribution commerciale faussée.
+  const numAm = (x) => { const a = String(x.am || "").trim(); return a !== "" && /^[\d.,\s]+$/.test(a); };
+  add("am_invalide", "medium", orders.filter(numAm), "Commandes dont l'AM est un nombre (colonne mal mappée — ré-importer)", (o) => o.fp);
 
   // Opportunités
   const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5);

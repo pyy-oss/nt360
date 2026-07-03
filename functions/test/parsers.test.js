@@ -286,3 +286,18 @@ describe("désignation d'affaire : n'aspire pas une colonne identifiant / person
     expect(parseSalesData(wb).rows[0].designation).toBe("MIGRATION O365");
   });
 });
+
+describe("commercial (AM) : un libellé numérique n'est pas un nom (audit #63/#3)", () => {
+  it("LIVE : AM numérique (« 25.69 ») ignoré → vide", () => {
+    const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": 25.69 }]);
+    expect(parseSalesData(wb).rows[0].am).toBe("");
+  });
+  it("LIVE : AM texte conservé", () => {
+    const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA" }]);
+    expect(parseSalesData(wb).rows[0].am).toBe("DATCHA");
+  });
+  it("P&L : AM numérique (« 35 ») ignoré → vide", () => {
+    const wb = wbFromRows("P&L", [{ "Opp ID": "FP/2026/1", Customer: "ACME", BU: "ICT", "Year PO": 2026, CAS: 1000, AM: 35 }]);
+    expect(parsePnl(wb).rows[0].am).toBe("");
+  });
+});

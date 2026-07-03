@@ -1,7 +1,7 @@
 // Parseur feuille LIVE / Sales_DATA → opportunities/{extId|hash} (BUILD_KIT §17.5, §18.5).
 // Module pur (testable). Étapes 1..9, proba défaut, actif=1-5 / veille=8 / conversion=6 vs 7.
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName, cleanPerson, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, toISO, hashId, safeId } = require("../lib/sheets");
 
 /** Probabilités par défaut si `IdC` absent (§18.5). */
@@ -48,7 +48,7 @@ function parseSalesData(wb) {
     const client = cleanName(val(r, keys, "client", "customer"));
     if (!stage || (!client && amount <= 0)) continue; // quarantaine : étape/ligne inexploitable
 
-    const am = cleanName(val(r, keys, "new am", "sales", "am", "commercial"));
+    const am = cleanPerson(val(r, keys, "new am", "sales", "am", "commercial"));
     const idc = val(r, keys, "idc", "id c");
     let idcNum = idc == null || idc === "" ? null : num(idc);
     // Normalise l'IdC en base-100 comme la marge (« 90 » = 90 % → 0.9) : sinon un IdC saisi en

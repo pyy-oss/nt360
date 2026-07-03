@@ -2,7 +2,7 @@
 // Module pur (testable). Matcher robuste (val) : les entêtes réels contiennent des
 // espaces (" CAS ", " MB TOTAL ") et des colonnes proches (" MB TOTAL Manuel ").
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, NOISE, cleanName, noAcc, plausibleYear } = require("../lib/ids");
+const { fpKey, num, cleanBu, NOISE, cleanName, cleanPerson, noAcc, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, safeId } = require("../lib/sheets");
 
 // Choisit la feuille P&L en s'ALIGNANT sur la détection (ingest.hasPnl) plutôt que sur un
@@ -49,7 +49,7 @@ function parsePnl(wb) {
       cas,
       raf: Math.max(num(val(r, keys, "raf total")), 0),
       mb: num(val(r, keys, "mb total")), // MB TOTAL, pas MB Réel / Manuel (§18.2)
-      am: cleanName(val(r, keys, "am")),
+      am: cleanPerson(val(r, keys, "am")),
       suppliers,
       source: "pnl",
     });
