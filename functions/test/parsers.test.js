@@ -124,6 +124,15 @@ describe("parseSalesData → opportunities (§17.5)", () => {
     expect(beta.probability).toBe(0.25);
     expect(beta.weighted).toBe(500);
   });
+  it("IdC en base-100 (« 90 ») normalisé en 0.9 (pas de retombée sur la proba par défaut)", () => {
+    const wb = wbFromRows("LIVE", [
+      { Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", IdC: 90, "NEW AM": "DATCHA", "D Prev": "2026-03-01" },
+      { Client: "BETA", "Montant (HT)": 1000, Statut: "4-Négociation", IdC: 0.9, "NEW AM": "KOUADIO", "D Prev": "2026-03-01" },
+    ]);
+    const { rows } = parseSalesData(wb);
+    expect(rows.find((r) => r.client === "ACME").probability).toBe(0.9); // « 90 » → 0.9 (éligible ≥90%)
+    expect(rows.find((r) => r.client === "BETA").probability).toBe(0.9); // 0.9 inchangé
+  });
   it("oppId stable par hash quand extId absent (idempotence)", () => {
     const mk = () => parseSalesData(wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA" }])).rows[0]._id;
     expect(mk()).toBe(mk());
