@@ -39,7 +39,8 @@ function perspective(orders, baseFn, mbFn) {
   // Affaires à FAIBLE marge (chasse aux marges) : %MB croissant, sur assiette > 0.
   const bottomAffaires = orders
     .filter((o) => baseFn(o) > 0)
-    .map((o) => ({ fp: o.fp, client: o.client, am: o.am, base: baseFn(o), mb: mbFn(o), pmb: mbFn(o) / baseFn(o) }))
+    // Défauts explicites (jamais undefined dans Firestore) : fp/client/am peuvent manquer.
+    .map((o) => ({ fp: o.fp || "", client: o.client || "", am: o.am || "", base: baseFn(o), mb: mbFn(o), pmb: mbFn(o) / baseFn(o) }))
     .sort((a, b) => a.pmb - b.pmb)
     .slice(0, 10);
   return { base, mb, pmb: base > 0 ? mb / base : 0, byBu, byAm, bottomAffaires, topClients: topN(groupSum(orders, (o) => o.client, mbFn)) };
@@ -58,7 +59,8 @@ function factureLines(invoices, ordersByFp) {
   for (const i of invoices || []) {
     const k = fpKey(i.fp) || i.fp || "—";
     const o = ordersByFp[k] || {};
-    const line = byFp[k] || (byFp[k] = { fp: k, base: 0, rate: marginRate(o), bu: o.bu || i.bu, am: o.am || i.am, client: o.client || i.client });
+    // Défauts explicites "" / "AUTRE" : ni la facture ni la commande orpheline n'ont forcément bu/am/client.
+    const line = byFp[k] || (byFp[k] = { fp: k, base: 0, rate: marginRate(o), bu: o.bu || i.bu || "AUTRE", am: o.am || i.am || "", client: o.client || i.client || "" });
     line.base += i.amountHt || 0;
   }
   return Object.values(byFp).map((l) => ({ ...l, mb: l.rate * l.base }));

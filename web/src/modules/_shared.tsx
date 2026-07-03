@@ -11,7 +11,10 @@ import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
 import type { AlertsSummary, AmsSummary, EntitySummary, Objective } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
-const upScope = (s?: string) => (s || "").trim().toUpperCase();
+// Normalisation de périmètre pour le rapprochement objectif ↔ entité : trim + majuscules + SANS
+// accents (l'import conserve les accents des clés client, ex. « SOCIÉTÉ GÉNÉRALE » vs un objectif
+// saisi « Societe Generale » — sans ceci le R/O par client ne se rattache jamais).
+const upScope = (s?: string) => (s || "").trim().toUpperCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
 /** Badge R/O : vert si ≥ 100 %, or sinon ; « — » si pas de cible ou réalisé indisponible. */
 export function roBadge(real: number | undefined, target: number | undefined) {
@@ -91,7 +94,7 @@ const IMPORT_KIND_LABEL: Record<string, string> = {
   logistics: "BC fournisseurs (Exécution BC)",
 };
 const kindLabel = (k: string) => IMPORT_KIND_LABEL[k] || k;
-const MAX_MB = 25; // garde-fou : la charge base64 (~1,33×) doit rester sous la limite d'appel (~32 Mo).
+const MAX_MB = 20; // garde-fou : 20 Mo × base64 (~1,33) ≈ 27 Mo, sous la limite d'appel (~32 Mo).
 
 // Journal d'import (collection `imports`) pour l'ÉTAT durable « dernier import ».
 type ImportLog = { id?: string; filename?: string; kinds?: string[]; rowsOk?: number; rowsSkipped?: number; fileCount?: number; ts?: any };

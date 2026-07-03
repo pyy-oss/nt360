@@ -444,13 +444,16 @@ exports.patchBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req
   const { id, fp, amountXof } = req.data || {};
   if (!id) throw new HttpsError("invalid-argument", "id requis");
   const patch = { updatedAt: FieldValue.serverTimestamp() };
-  if (fp !== undefined) patch.fp = fpKey(fp) || null; // rattachement (ou détachement si vide)
+  // On n'écrit le FP que s'il donne une clé canonique NON vide : un fp vide/blanc n'est pas un
+  // « détachement » utile mais un no-op qui déclencherait un recompute complet pour rien.
+  const fpk = fp !== undefined ? fpKey(fp) : null;
+  if (fpk) patch.fp = fpk;
   if (amountXof !== undefined && amountXof !== null && amountXof !== "") {
     const n = Number(amountXof);
     if (!Number.isFinite(n) || n < 0) throw new HttpsError("invalid-argument", "montant XOF invalide");
     patch.amountXof = n;
   }
-  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (FP ou montant)");
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (FP ou montant valide requis)");
   await db.doc(`bcLines/${id}`).set(patch, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,

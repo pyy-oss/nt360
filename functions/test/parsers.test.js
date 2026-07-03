@@ -267,3 +267,22 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     expect(mapBcStatus("")).toBe("a_emettre");
   });
 });
+
+describe("désignation d'affaire : n'aspire pas une colonne identifiant / personne (audit #63)", () => {
+  it("P&L : « Chargé d'affaires » n'est PAS pris pour la désignation", () => {
+    const wb = wbFromRows("P&L", [{ "Opp ID": "FP/2026/1", Customer: "ACME", BU: "ICT", "Year PO": 2026, CAS: 1000, "Chargé d'affaires": "KOUAME" }]);
+    expect(parsePnl(wb).rows[0].designation).toBe("");
+  });
+  it("P&L : une vraie colonne « Désignation » est captée malgré la présence du chargé d'affaires", () => {
+    const wb = wbFromRows("P&L", [{ "Opp ID": "FP/2026/1", Customer: "ACME", BU: "ICT", "Year PO": 2026, CAS: 1000, "Désignation": "RESEAU CAMPUS", "Chargé d'affaires": "KOUAME" }]);
+    expect(parsePnl(wb).rows[0].designation).toBe("RESEAU CAMPUS");
+  });
+  it("LIVE : « N° Opportunité » (identifiant) n'est PAS pris pour la désignation", () => {
+    const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "N° Opportunité": "OPP-123" }]);
+    expect(parseSalesData(wb).rows[0].designation).toBe("");
+  });
+  it("LIVE : une vraie colonne « Désignation » est captée malgré le n° d'opportunité", () => {
+    const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "Désignation": "MIGRATION O365", "N° Opportunité": "OPP-123" }]);
+    expect(parseSalesData(wb).rows[0].designation).toBe("MIGRATION O365");
+  });
+});

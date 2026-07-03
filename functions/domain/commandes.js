@@ -52,7 +52,7 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     const prev = byFp.get(fp);
     merge(fp, {
       client: o.client || prev.client, bu: o.bu || prev.bu, am: o.am || prev.am,
-      affaire: o.designation || prev.affaire || "", // désignation de l'opp gagnée si le P&L n'en a pas
+      affaire: o.designation || prev.affaire || "", // priorité opp gagnée > P&L (la fiche, appliquée ensuite, prime)
       cas: (o.amount || 0) > 0 ? o.amount : (prev.cas || 0),
       // L'année de PO (CAS FIGÉ) vient de la ligne P&L / du N° FP en PRIORITÉ ; la D Prev de l'opp
       // (prévisionnelle, souvent une autre année) ne sert que de dernier repli.

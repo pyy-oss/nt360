@@ -2,7 +2,7 @@
 // Module pur (testable). Étapes 1..9, proba défaut, actif=1-5 / veille=8 / conversion=6 vs 7.
 const XLSX = require("xlsx");
 const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear } = require("../lib/ids");
-const { headerKeys, val, toISO, hashId, safeId } = require("../lib/sheets");
+const { headerKeys, val, valLabel, toISO, hashId, safeId } = require("../lib/sheets");
 
 /** Probabilités par défaut si `IdC` absent (§18.5). */
 const DEFAULT_PROBA = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
@@ -85,7 +85,7 @@ function parseSalesData(wb) {
       client,
       am,
       // Description / désignation de l'affaire (objet de l'opportunité).
-      designation: String(val(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "opportunité", "opportunite") || "").trim(),
+      designation: String(valLabel(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "opportunité", "opportunite") || "").trim(),
       bu: cleanBu(val(r, keys, "domaine", "bu")),
       amount,
       stage,

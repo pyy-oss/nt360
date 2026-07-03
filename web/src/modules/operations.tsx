@@ -187,9 +187,11 @@ export const BC: FC<Props> = () => {
   // fiches affaire (source « fiche ») sont des achats PLANIFIÉS au niveau projet — elles restent
   // visibles en P&L Projet / FP 360°, JAMAIS dans le suivi d'exécution (même si elles portent un
   // N° BC saisi sur la fiche). Cette vue n'est alimentée que par l'import BC.
-  const emitted = allRows.filter((r) => r.source !== "fiche");
-  const rows = emitted.filter((r) => (r.bcNumber || "").trim() !== "");
-  const planned = allRows.filter((r) => r.source === "fiche").length;
+  // Exécution BC = TOUTES les lignes issues de l'import BC (source ≠ "fiche"), y compris celles dont
+  // le N° BC n'est pas encore renseigné — elles restent visibles et fiabilisables, jamais masquées
+  // en silence (sinon un BC unitaire/logistics sans N° disparaîtrait sans aucun indicateur).
+  const rows = allRows.filter((r) => r.source !== "fiche");
+  const planned = allRows.length - rows.length; // = lignes de fiche affaire (achats planifiés)
   const canWrite = useCan("bc") === "write";
   const [flt, setFlt] = useState<"all" | "open" | "late">("all");
   const today = new Date().toISOString().slice(0, 10);
@@ -258,7 +260,10 @@ function BcFixer({ id, fp, amountXof }: { id: string; fp?: string; amountXof?: n
       </>}
       {noAmt && <>
         <input className="field w-24 !py-1 text-xs" inputMode="numeric" aria-label="Montant XOF" placeholder="XOF" value={amt} onChange={(e) => setAmt(e.target.value)} />
-        <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" fn={() => patchBcLine({ id, amountXof: Number(amt) || 0 })} />
+        {/* Parse tolérant : « 5 000 000 », « 5.000.000 » → 5000000 (XOF entier). Refuse une saisie
+            vide/invalide au lieu d'écrire 0 en silence avec un faux « corrigé ». */}
+        <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" errMsg="Montant invalide"
+          fn={() => { const v = Number(String(amt).replace(/[^\d]/g, "")); if (!(v > 0)) throw new Error("saisir un montant XOF > 0"); return patchBcLine({ id, amountXof: v }); }} />
       </>}
     </span>
   );
