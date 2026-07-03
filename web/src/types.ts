@@ -76,7 +76,7 @@ export interface CashflowSummary {
   asOf?: string; horizon?: number; months?: CashMonth[];
   overdue?: number; overdueCount?: number; beyond?: number;
   totalAR?: number; arHorizon?: number; totalRaf?: number; openCount?: number;
-  totalDecaissement?: number; decaissementBeyond?: number; bcOpenCount?: number;
+  totalDecaissement?: number; decaissementBeyond?: number; decaissementOverdue?: number; decaissementOverdueCount?: number; bcOpenCount?: number;
 }
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 

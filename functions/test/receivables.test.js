@@ -27,6 +27,15 @@ describe("receivables — aging + DSO", () => {
   it("DSO indicatif calculé (> 0)", () => {
     expect(r.dso).toBeGreaterThan(0);
   });
+  it("DSO borné à 999 j quand la cadence de facturation est infime devant l'encours", () => {
+    // Gros encours ANCIEN (hors fenêtre 365 j → n'alimente pas la cadence) + une facture récente
+    // infime → ratio encours/cadence aberrant, plafonné à 999.
+    const r3 = receivables([
+      { client: "X", amountHt: 1_000_000, date: "2024-01-01", dueDate: "2024-02-01", paid: false }, // encours, hors 365j
+      { client: "X", amountHt: 100, date: "2026-06-01", paid: true }, // seule facture récente → cadence infime
+    ], "2026-07-01");
+    expect(r3.dso).toBe(999);
+  });
   it("échéance inconnue OU illisible → notDue (jamais comptée en retard)", () => {
     const r2 = receivables([
       { client: "NODATE", amountHt: 700, paid: false },                       // aucune date

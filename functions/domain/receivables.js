@@ -39,7 +39,9 @@ function receivables(invoices, asOf) {
     const age = days(today, d);
     return age >= 0 && age <= 365 ? s + (i.amountHt || 0) : s;
   }, 0);
-  const dso = billed365 > 0 ? Math.round(totalAR / (billed365 / 365)) : 0;
+  // Borné à 999 j : une cadence de facturation très faible devant l'encours ferait exploser le
+  // ratio (encours/cadence) vers des valeurs aberrantes (ex. 3 650 000 j). Au-delà, non significatif.
+  const dso = billed365 > 0 ? Math.min(999, Math.round(totalAR / (billed365 / 365))) : 0;
 
   const topAR = Object.entries(byClient)
     .map(([key, value]) => ({ key, value }))
