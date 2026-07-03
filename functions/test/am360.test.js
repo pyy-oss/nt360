@@ -13,7 +13,7 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     { fp: "FP/9999/9", amountHt: 999 }, // orpheline (aucun AM) → ignorée
   ];
   const opps = [
-    { am: "DATCHA", stage: 3, probability: 0.95, weighted: 950 }, // actif éligible
+    { am: "DATCHA", stage: 3, probability: 0.95, amount: 1000, weighted: 950 }, // actif éligible
     { am: "DATCHA", stage: 6, probability: 1, weighted: 0 },      // gagné
     { am: "KOUADIO", stage: 7, probability: 0, weighted: 0 },     // perdu
   ];
@@ -33,8 +33,8 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     expect(byAm.DATCHA.facture).toBe(600);
     expect(byAm.KOUADIO.facture).toBe(500);
   });
-  it("pipeline pondéré (éligibles IdC≥90 %) + conversion", () => {
-    expect(byAm.DATCHA.pipelinePondere).toBe(950);
+  it("pipeline pondéré (éligibles IdC≥90 %) à 100% du montant + conversion", () => {
+    expect(byAm.DATCHA.pipelinePondere).toBe(1000);
     expect(byAm.DATCHA.activeCount).toBe(1);
     expect(byAm.DATCHA.won).toBe(1);
     expect(byAm.DATCHA.conv).toBe(1); // 1 gagné, 0 perdu

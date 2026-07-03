@@ -16,8 +16,12 @@ const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
  */
 function overview(orders, invoices, opps = [], opts = {}) {
   const commandes = sum(orders, (o) => o.cas);
-  // RAF des commandes de la PÉRIODE : base de l'avancement de facturation (taux), cohorte.
+  // RAF des commandes de la PÉRIODE (reste à faire, glissant) — sert au backlog de repli.
   const rafPeriode = sum(orders, (o) => Math.max(o.raf || 0, 0));
+  // Facturé RATTACHÉ à la cohorte de commandes (par N° FP) — base du TAUX DE FACTURATION réel.
+  // (≠ CAF total qui inclut les factures orphelines : ici on veut la part facturée DE CES commandes.)
+  const orderFps = new Set(orders.map((o) => o.fp).filter(Boolean));
+  const factureCohorte = sum((invoices || []).filter((i) => orderFps.has(i.fp)), (i) => i.amountHt);
   // Backlog GLISSANT : RAF de toutes les commandes ouvertes, cumulé jusqu'à l'année en cours
   // (indépendant de la période). Fourni via opts ; à défaut = RAF période (rétro-compat tests).
   const backlog = opts.backlog != null ? opts.backlog : rafPeriode;
@@ -30,10 +34,12 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // On ne recompte donc PAS les gagnés dans les certitudes (déjà dans les commandes).
   const pipelineWon = sum(opps.filter((o) => o.stage === 6), (o) => o.amount);
   // Pipeline quasi-certain : actif (non perdu/suspendu) avec IdC ≥ 90 %, pas encore signé.
+  // VALORISÉ À 100 % DU MONTANT (décision métier : une quasi-certitude ≥ 90 % ≈ une commande),
+  // cohérent avec l'atterrissage. (Auparavant : montant × proba, ce qui sous-évaluait.)
   const CONFIANCE_MIN = 0.9;
   const pondCertain = sum(
     opps.filter((o) => o.stage >= 1 && o.stage <= 5 && (o.probability || 0) >= CONFIANCE_MIN),
-    (o) => o.weighted
+    (o) => o.amount
   );
   return {
     // Certitudes = pipeline quasi-certain à venir (glissant), commandes signées suivies à part.
@@ -47,8 +53,9 @@ function overview(orders, invoices, opps = [], opts = {}) {
     mb,
     pipelineWon,
     ratios: {
-      // Avancement de facturation des commandes de la PÉRIODE (cohorte) = (CAS − RAF période)/CAS.
-      tauxFacturation: commandes > 0 ? (commandes - rafPeriode) / commandes : 0,
+      // TAUX DE FACTURATION réel = facturé rattaché à la cohorte / CAS, borné [0,1]. Mesure la
+      // part du CAS déjà facturée (et non l'avancement de LIVRAISON, qui est 1 − RAF/CAS).
+      tauxFacturation: commandes > 0 ? Math.max(0, Math.min(1, factureCohorte / commandes)) : 0,
       pmb: commandes > 0 ? mb / commandes : 0,
     },
   };

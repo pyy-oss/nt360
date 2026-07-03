@@ -44,7 +44,8 @@ function am360(orders, invoices, opps, objectives, fy) {
       const eligible = active.filter((o) => (o.probability || 0) >= 0.9);
       const won = myOpps.filter((o) => o.stage === 6).length;
       const lost = myOpps.filter((o) => o.stage === 7).length;
-      const pipelinePondere = sum(eligible, (o) => o.weighted);
+      // « Pondéré » ≥ 90 % = 100 % du montant (décision métier), cohérent avec pipeline/atterrissage.
+      const pipelinePondere = sum(eligible, (o) => o.amount);
 
       const ob = objByAm[am.toUpperCase()];
       const targetCas = ob ? ob.targetCas || 0 : 0;

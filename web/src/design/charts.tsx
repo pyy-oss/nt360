@@ -81,12 +81,13 @@ export function Bars({ data, color = T.clay, name = "Valeur", h = 200, size = 34
 }
 
 /** Barres groupées. data + series:[{key,color,name}] */
-export function GroupedBars({ data, series, h = 230, size = 22 }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number; size?: number }) {
+export function GroupedBars({ data, series, h = 230, size = 22, interval }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number; size?: number; interval?: number | "preserveStartEnd" }) {
   return (
     <H h={h}>
       <BarChart data={data} margin={{ left: -6, right: 8 }}>
         <CartesianGrid stroke={T.line} vertical={false} />
-        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={12} />
+        {/* interval=0 force TOUS les libellés (ex. funnel à 5 étapes : évite que « Transmise » au milieu soit masqué). */}
+        <XAxis dataKey="name" {...axis} interval={interval ?? "preserveStartEnd"} minTickGap={12} />
         <YAxis {...axis} tickFormatter={fmt} width={44} />
         <Tooltip cursor={{ fill: T.panel2 }} content={<ChartTooltip />} />
         <Legend verticalAlign="top" height={36} iconType="square" iconSize={10} wrapperStyle={legendStyle} />
