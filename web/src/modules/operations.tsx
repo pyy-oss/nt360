@@ -183,11 +183,13 @@ function BcImport() {
 const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
 export const BC: FC<Props> = () => {
   const { rows: allRows } = useCollectionData<BcLine>("bcLines");
-  // Exécution BC = BC RÉELLEMENT ÉMIS (avec un N° BC). Les lignes « à émettre » générées par les
-  // fiches affaire (sans N° BC) sont des achats PLANIFIÉS — elles restent visibles au niveau
-  // fiche / FP 360°, pas dans le suivi d'exécution.
-  const rows = allRows.filter((r) => (r.bcNumber || "").trim() !== "");
-  const planned = allRows.length - rows.length;
+  // Exécution BC = BC RÉELLEMENT ÉMIS via l'IMPORT BC (Logistics / PDF). Les lignes issues des
+  // fiches affaire (source « fiche ») sont des achats PLANIFIÉS au niveau projet — elles restent
+  // visibles en P&L Projet / FP 360°, JAMAIS dans le suivi d'exécution (même si elles portent un
+  // N° BC saisi sur la fiche). Cette vue n'est alimentée que par l'import BC.
+  const emitted = allRows.filter((r) => r.source !== "fiche");
+  const rows = emitted.filter((r) => (r.bcNumber || "").trim() !== "");
+  const planned = allRows.filter((r) => r.source === "fiche").length;
   const canWrite = useCan("bc") === "write";
   const [flt, setFlt] = useState<"all" | "open" | "late">("all");
   const today = new Date().toISOString().slice(0, 10);
@@ -234,7 +236,7 @@ export const BC: FC<Props> = () => {
             ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} />, () => 0)] : []),
           ]}
         />
-        {planned > 0 && <Tip>{planned.toLocaleString("fr-FR")} ligne(s) « à émettre » planifiée(s) par les fiches affaire (sans N° BC) sont masquées ici — elles se suivent au niveau de la fiche / FP 360°. Cette vue ne liste que les BC réellement émis.</Tip>}
+        {planned > 0 && <Tip>{planned.toLocaleString("fr-FR")} ligne(s) d'achat planifiées par les fiches affaire sont suivies en P&amp;L Projet / FP 360°, pas ici. L'Exécution BC n'est alimentée que par l'import BC (Logistics / PDF).</Tip>}
       </Card>
     </div>
   );
