@@ -6,9 +6,10 @@ const { fpKey } = require("../lib/ids");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
-function dataQuality(orders, invoices, opps, bcLines, sheets) {
+function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
   bcLines = bcLines || []; sheets = sheets || [];
+  const surfacPct = (thr && thr.surfacturationPct) || 0.005; // seuil de surfacturation (config/alerts)
 
   const billed = {};
   for (const i of invoices) if (i.fp) billed[i.fp] = (billed[i.fp] || 0) + (i.amountHt || 0);
@@ -22,7 +23,7 @@ function dataQuality(orders, invoices, opps, bcLines, sheets) {
   add("factures_orphelines", "high", invoices.filter((i) => i.linked !== true), "Factures non rattachées à une commande (N° FP inconnu)", (i) => i.numero || i.fp);
   add("factures_sans_date", "medium", invoices.filter((i) => !i.date), "Factures sans date de facturation", (i) => i.numero);
   add("factures_sans_echeance", "low", invoices.filter((i) => !i.dueDate), "Factures sans date d'échéance (prévision cash imprécise)", (i) => i.numero);
-  add("surfacturation", "high", orders.filter((o) => (o.cas || 0) > 0 && (billed[o.fp] || 0) > (o.cas || 0) * 1.005), "Commandes surfacturées (Σ factures > CAS)", (o) => o.fp);
+  add("surfacturation", "high", orders.filter((o) => (o.cas || 0) > 0 && (billed[o.fp] || 0) > (o.cas || 0) * (1 + surfacPct)), "Commandes surfacturées (Σ factures > CAS)", (o) => o.fp);
 
   // Commandes
   add("commandes_sans_annee", "medium", orders.filter((o) => !(o.yearPo > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp);

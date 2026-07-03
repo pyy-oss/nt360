@@ -4,6 +4,8 @@ const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
 
 const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
+// Seuils d'alerte PAR DÉFAUT (surchargés par config/alerts, éditables en Admin).
+const ALERT_DEFAULTS = { concentration: 0.30, surfacturationPct: 0.005, rafEcartPct: 0.10, dormantYears: 2 };
 
 /**
  * @param {object[]} orders
@@ -13,10 +15,12 @@ const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
  * @param {number} fy année fiscale courante
  * @param {string} [asOf] date du jour (YYYY-MM-DD), pour les retards ETA des BC
  * @param {object[]} [opps] opportunités (pour l'alerte « opportunités dormantes »)
+ * @param {object} [thr] seuils configurables (config/alerts) : concentration, surfacturationPct, rafEcartPct, dormantYears
  */
-function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps) {
+function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr) {
   const out = [];
   opps = opps || [];
+  const T = { ...ALERT_DEFAULTS, ...(thr || {}) };
 
   const neg = orders.filter((o) => (o.mb || 0) < 0);
   if (neg.length) out.push({ type: "marge_negative", severity: "high", count: neg.length, message: `${neg.length} commande(s) à marge négative`, refs: neg.slice(0, 10).map((o) => o.fp) });
@@ -38,18 +42,18 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps) {
   const prePo = (invoices || []).filter((i) => i.prePo);
   if (prePo.length) out.push({ type: "facture_pre_po", severity: "medium", count: prePo.length, message: `${prePo.length} facture(s) antérieure(s) à l'année du PO` });
 
-  const surfac = orders.filter((o) => o.cas > 0 && (invByFp[o.fp] || 0) > o.cas * 1.005);
+  const surfac = orders.filter((o) => o.cas > 0 && (invByFp[o.fp] || 0) > o.cas * (1 + T.surfacturationPct));
   if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });
 
   const rafIncoh = orders.filter((o) => {
     if (!(o.cas > 0)) return false;
     const attendu = Math.max(o.cas - (invByFp[o.fp] || 0), 0);
-    return Math.abs((o.raf || 0) - attendu) > 0.1 * o.cas;
+    return Math.abs((o.raf || 0) - attendu) > T.rafEcartPct * o.cas;
   });
-  if (rafIncoh.length) out.push({ type: "raf_incoherent", severity: "medium", count: rafIncoh.length, message: `${rafIncoh.length} commande(s) où le RAF s'écarte de >10 % de (CAS − Facturé)`, refs: rafIncoh.slice(0, 10).map((o) => o.fp) });
+  if (rafIncoh.length) out.push({ type: "raf_incoherent", severity: "medium", count: rafIncoh.length, message: `${rafIncoh.length} commande(s) où le RAF s'écarte de >${(T.rafEcartPct * 100).toFixed(0)} % de (CAS − Facturé)`, refs: rafIncoh.slice(0, 10).map((o) => o.fp) });
 
-  const dormant = orders.filter((o) => (o.raf || 0) > 0 && (o.yearPo || 0) > 0 && o.yearPo <= fy - 2);
-  if (dormant.length) out.push({ type: "backlog_dormant", severity: "medium", count: dormant.length, message: `${dormant.length} commande(s) ouverte(s) d'un millésime ≤ ${fy - 2}`, refs: dormant.slice(0, 10).map((o) => o.fp) });
+  const dormant = orders.filter((o) => (o.raf || 0) > 0 && (o.yearPo || 0) > 0 && o.yearPo <= fy - T.dormantYears);
+  if (dormant.length) out.push({ type: "backlog_dormant", severity: "medium", count: dormant.length, message: `${dormant.length} commande(s) ouverte(s) d'un millésime ≤ ${fy - T.dormantYears}`, refs: dormant.slice(0, 10).map((o) => o.fp) });
 
   // Listes COMPLÈTES (non tronquées au top 50 affiché) : un fournisseur saturé à faible exposition
   // ne doit pas échapper à l'alerte. Repli sur bySupplier si le champ complet est absent (rétro-compat).
@@ -62,7 +66,7 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps) {
   const casByClient = groupSum(orders, (o) => o.client, (o) => o.cas);
   const totalCas = sum(orders, (o) => o.cas);
   const top = Object.entries(casByClient).sort((a, b) => b[1] - a[1])[0];
-  if (top && totalCas > 0 && top[1] / totalCas >= CONCENTRATION_THRESHOLD)
+  if (top && totalCas > 0 && top[1] / totalCas >= T.concentration)
     out.push({ type: "concentration_client", severity: "medium", count: 1, message: `Concentration : ${top[0]} = ${((top[1] / totalCas) * 100).toFixed(0)} % du CAS`, refs: [top[0]] });
 
   const pending = bcLines.filter((b) => b.status && b.status !== "solde").length;
@@ -91,4 +95,4 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps) {
   return out;
 }
 
-module.exports = { alerts, CONCENTRATION_THRESHOLD };
+module.exports = { alerts, CONCENTRATION_THRESHOLD, ALERT_DEFAULTS };
