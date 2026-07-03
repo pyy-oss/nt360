@@ -155,6 +155,52 @@ exports.setAlertThresholds = onCall(async (req) => {
   return { ok: true, ...cfg };
 });
 
+// --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
+// config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
+async function postWebhook(url, text) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
+}
+
+exports.setNotificationConfig = onCall({ timeoutSeconds: 30 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const url = String(d.webhookUrl || "").trim();
+  if (url && !/^https:\/\//i.test(url)) throw new HttpsError("invalid-argument", "URL webhook invalide (https requis)");
+  const cfg = { enabled: !!d.enabled, minSeverity: d.minSeverity === "medium" ? "medium" : "high", webhookUrl: url };
+  await db.doc("config/notifications").set(cfg, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "notif_config", module: "habilitations", entity: "config", entityId: "notifications",
+    detail: { enabled: cfg.enabled, minSeverity: cfg.minSeverity, hasUrl: !!url }, ts: FieldValue.serverTimestamp(),
+  });
+  // Test immédiat (remonte l'échec à l'UI) — ne journalise jamais l'URL.
+  if (d.test && url) await postWebhook(url, "✅ nt360 — test de notification : le webhook fonctionne.");
+  return { ok: true };
+});
+
+// Digest quotidien : pousse les alertes ≥ seuil vers le webhook, dédupliqué (n'envoie que si
+// l'ensemble des alertes a changé depuis le dernier envoi).
+const SEV_RANK = { high: 0, medium: 1, low: 2 };
+exports.alertDigest = onSchedule({ schedule: "every day 07:00", timeoutSeconds: 60 }, async () => {
+  const cfg = (await db.doc("config/notifications").get()).data() || {};
+  if (!cfg.enabled || !cfg.webhookUrl) return;
+  const al = (await db.doc("summaries/alerts").get()).data() || {};
+  const minRank = cfg.minSeverity === "medium" ? 1 : 0;
+  const crit = (al.items || []).filter((a) => (SEV_RANK[a.severity] ?? 9) <= minRank);
+  if (!crit.length) return;
+  const hash = crit.map((a) => `${a.type}:${a.count}`).join("|");
+  if (hash === cfg.lastHash) return; // déjà notifié, rien de nouveau
+  const text = `⚠️ nt360 — Alertes (exercice ${al.fy || ""})\n` + crit.map((a) => `• ${a.message}`).join("\n");
+  try {
+    await postWebhook(cfg.webhookUrl, text);
+    await db.doc("config/notifications").set({ lastHash: hash, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+    await logOps({ kind: "notification", trigger: "planifié", status: "ok", detail: { count: crit.length } });
+  } catch (e) {
+    logger.error("alertDigest a échoué", { message: e && e.message });
+    await logOps({ kind: "notification", trigger: "planifié", status: "error", error: (e && e.message) || String(e) });
+  }
+});
+
 // --- logLogin : audit de connexion (critère F1) ---
 exports.logLogin = onCall(async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
