@@ -129,7 +129,11 @@ exports.logLogin = onCall(async (req) => {
 });
 
 // --- F3 : recalcul des agrégats à la demande (admin) ---
-exports.recompute = onCall(async (req) => {
+// Ressources alignées sur importDelta : recomputeAll lit TOUTES les collections et reconstruit
+// tous les summaries (boucle sur chaque période) — le défaut 256 MiB / 60 s provoquait un
+// timeout/OOM sur un gros volume, surfacé en « Action refusée » côté UI, alors que le même
+// recompute lancé APRÈS un import (512 MiB / 300 s) réussissait.
+exports.recompute = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
   const res = await recomputeAll(db, req.data?.only);
@@ -156,8 +160,8 @@ exports.syncSalesData = onSchedule("every day 06:00", async () => {
   await runSalesSync();
 });
 
-// Déclenchement manuel (admin) pour test / rejouabilité.
-exports.syncSalesDataNow = onCall(async (req) => {
+// Déclenchement manuel (admin) pour test / rejouabilité. Même recompute complet → mêmes ressources.
+exports.syncSalesDataNow = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   return await runSalesSync(req.data?.objectKey);
 });
