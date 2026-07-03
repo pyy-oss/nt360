@@ -52,6 +52,11 @@ const noAcc = (s) => String(s || "").toLowerCase().normalize("NFD").replace(COMB
  *  Fusionne les doublons logiques (casse/espaces). */
 const cleanName = (s) => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
 
+// Nom de PERSONNE (commercial / AM) : comme cleanName, mais un libellé purement NUMÉRIQUE n'est
+// jamais un nom — c'est le signe d'une colonne mal mappée à l'import (ex. « 35 », « 25.69 ») →
+// vidé pour ne pas polluer les attributions par commercial.
+const cleanPerson = (s) => { const v = cleanName(s); return /^[\d.,\s]+$/.test(v) ? "" : v; };
+
 /** Année plausible pour un PO / une clôture : fenêtre GLISSANTE [2015, année courante + 3].
  *  Rejette les sentinelles (1899/1900/0) tout en restant valide dans le futur (pas de 2030 codé
  *  en dur qui périmerait). Retourne le nombre si plausible, sinon 0. */
@@ -62,4 +67,4 @@ const plausibleYear = (y) => {
   return n >= 2015 && n <= max ? n : 0;
 };
 
-module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, plausibleYear };
+module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear };

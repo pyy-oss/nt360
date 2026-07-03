@@ -40,6 +40,7 @@ const ALERT_TARGET: Record<string, string> = {
   factures_non_rattachees: "invoicelist", facture_pre_po: "invoicelist", surfacturation: "invoicelist",
   backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
   concentration_client: "clients", bc_en_attente: "bc", bc_en_retard: "bc",
+  opp_dormante: "opplist",
 };
 
 export type Props = { period: string };
