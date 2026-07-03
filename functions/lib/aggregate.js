@@ -152,6 +152,18 @@ async function recomputeAll(db, only) {
   // Enregistre la liste des périodes disponibles (pour le sélecteur front).
   w.push({ path: "config/periods", data: { available: periods, currentFy } });
 
+  // Garde-fou limite Firestore (~1 Mio/doc) : summaries/commandes embarque TOUTES les lignes de
+  // commande dans un seul document — au-delà d'un certain volume il dépasse la limite et le
+  // batch.commit() échoue avec une erreur opaque (« internal »). On détecte le doc fautif AVANT
+  // l'écriture et on lève un message explicite (path + taille) plutôt qu'une erreur illisible.
+  const DOC_LIMIT = 1_000_000; // marge sous la limite dure de 1 048 576 octets
+  for (const it of w) {
+    const bytes = Buffer.byteLength(JSON.stringify(it.data ?? {}), "utf8");
+    if (bytes > DOC_LIMIT) {
+      throw new Error(`summary trop volumineux: ${it.path} ≈ ${bytes} octets (> limite Firestore ~1 Mio) — trop de lignes pour un seul document`);
+    }
+  }
+
   let batch = db.batch(), n = 0;
   for (const it of w) {
     batch.set(db.doc(it.path), it.data, { merge: true });
