@@ -45,7 +45,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Kpi label="Conversion" value={pct(data.conv)} sub={`${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)}`} />
       </div>
       <Card title="Funnel pondéré par étape">
-        <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} />
+        <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} interval={0} />
       </Card>
       <div className={cols2}>
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>

@@ -44,14 +44,15 @@ describe("overview — chaîne (§7)", () => {
     expect(ov3.backlog).toBe(9999);
     expect(ov3.backlogCount).toBe(42);
     expect(ov3.rafPeriode).toBe(1200); // le taux reste sur la cohorte période
-    expect(ov3.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);
+    expect(ov3.ratios.tauxFacturation).toBeCloseTo(1400 / 2300, 6); // facturé rattaché / CAS
   });
-  it("certitudes = pondéré certain (IdC≥90%) seul ; commandes suivies à part", () => {
-    expect(ov.pondCertain).toBe(950); // o6 éligible
-    expect(ov.certitudes).toBe(950); // pondéré quasi-certain seul (hors commandes signées)
+  it("certitudes = pondéré certain (IdC≥90%) à 100% du montant ; commandes suivies à part", () => {
+    expect(ov.pondCertain).toBe(1000); // o6 éligible, valorisé à 100% du montant
+    expect(ov.certitudes).toBe(1000);
   });
-  it("avancement facturation = (CAS − RAF période)/CAS", () => {
-    expect(ov.ratios.tauxFacturation).toBeCloseTo((2300 - 1200) / 2300, 6);
+  it("taux de facturation = facturé rattaché à la cohorte / CAS, borné [0,1]", () => {
+    // Factures rattachées aux FP des commandes : A1+A2 (FP/2026/1)=900 + B1 (FP/2025/2)=500 = 1400.
+    expect(ov.ratios.tauxFacturation).toBeCloseTo(1400 / 2300, 6);
   });
 });
 
@@ -98,7 +99,7 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
   const p = pipeline(OPPS);
   it("brut = toute la funnel active ; pondéré = éligibles ≥90%", () => {
     expect(p.tot.brut).toBe(4000); // active 1-5 : 1000 + 2000 + 1000
-    expect(p.tot.weighted).toBe(950); // seul o6 (IdC 0.95) éligible
+    expect(p.tot.weighted).toBe(1000); // seul o6 (IdC 0.95) éligible, valorisé à 100% du montant
     expect(p.tot.countConf).toBe(1);
     expect(p.confianceMin).toBe(0.9);
   });
@@ -110,13 +111,13 @@ describe("pipeline — pondéré = éligibles (IdC ≥ 90 %), conversion", () =>
     expect(p.conv).toBe(0.5);
   });
   it("pondéré par AM = éligibles seulement", () => {
-    expect(p.byAM.DATCHA).toBe(950); // o6
+    expect(p.byAM.DATCHA).toBe(1000); // o6, 100% du montant
     expect(p.byAM.KOUADIO).toBeUndefined(); // o2 non éligible (proba 0.25)
   });
   it("conversion par commercial (byAmConv)", () => {
     const byAm = Object.fromEntries(p.byAmConv.map((x) => [x.am, x]));
     expect(byAm.DATCHA.activeCount).toBe(2); // o1 + o6
-    expect(byAm.DATCHA.weighted).toBe(950);
+    expect(byAm.DATCHA.weighted).toBe(1000); // o6 à 100% du montant
     expect(byAm.X.won).toBe(1); // o4 gagné
     expect(byAm.X.conv).toBe(1);
     expect(byAm.Y.lost).toBe(1); // o5 perdu

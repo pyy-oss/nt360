@@ -1,6 +1,9 @@
 // Pipeline pondéré (BUILD_KIT §7, §18.5).
 // Actif = étapes 1-5, veille = 8, conversion = 6 (gagné) vs 7 (perdu).
-// Pondéré = Σ(montant × proba). Phasage par mois de closingDate.
+// « Pondéré (IdC ≥ 90 %) » / Certitudes = Σ MONTANT des éligibles (100 %, décision métier :
+// une quasi-certitude ≈ une commande) — cohérent avec l'atterrissage. Le funnel PAR ÉTAPE et
+// l'analyse de closing gardent la pondération RISQUE (montant × proba, champ o.weighted) : ce
+// sont des lentilles exploratoires distinctes, pas le chiffre « certain ».
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
 
@@ -54,11 +57,12 @@ function pipeline(opps, asOf) {
   }
 
   const month = (o) => (o.closingDate ? String(o.closingDate).slice(0, 7) : "?");
-  // Top opportunités : celles éligibles (IdC ≥ 90 %), triées par montant pondéré.
+  // Top opportunités : celles éligibles (IdC ≥ 90 %), triées par montant. La valeur « certaine »
+  // = 100 % du montant (weighted renvoyé = amount pour l'affichage).
   const topOpps = [...eligible]
-    .sort((a, b) => (b.weighted || 0) - (a.weighted || 0))
+    .sort((a, b) => (b.amount || 0) - (a.amount || 0))
     .slice(0, 10)
-    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: o.weighted, stage: o.stage, probability: o.probability }));
+    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: o.amount, stage: o.stage, probability: o.probability }));
 
   // Conversion par commercial (AM) : gagné / perdu / taux de transformation + pipeline actif pondéré.
   const ams = [...new Set(opps.map((o) => o.am).filter(Boolean))];
@@ -67,21 +71,21 @@ function pipeline(opps, asOf) {
       const w = won.filter((o) => o.am === am).length;
       const l = lost.filter((o) => o.am === am).length;
       const act = active.filter((o) => o.am === am);
-      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(eligible.filter((o) => o.am === am), (o) => o.weighted) };
+      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(eligible.filter((o) => o.am === am), (o) => o.amount) };
     })
     .filter((x) => x.won + x.lost + x.activeCount > 0)
     .sort((a, b) => (b.weighted - a.weighted) || (b.won - a.won));
 
   const wonCount = won.length, lostCount = lost.length;
   return {
-    // brut = toute la funnel active ; pondéré = éligibles (non perdu/suspendu, IdC ≥ 90 %).
-    tot: { brut: sum(active, (o) => o.amount), weighted: sum(eligible, (o) => o.weighted), count: active.length, countConf: eligible.length },
+    // brut = toute la funnel active ; « pondéré » = éligibles (IdC ≥ 90 %) valorisés à 100 % du montant.
+    tot: { brut: sum(active, (o) => o.amount), weighted: sum(eligible, (o) => o.amount), count: active.length, countConf: eligible.length },
     susp: { brut: sum(suspended, (o) => o.amount), count: suspended.length },
     confianceMin: CONFIANCE_MIN,
     byStage,
-    byAM: groupSum(eligible, (o) => o.am, (o) => o.weighted),
-    byBU: groupSum(eligible, (o) => o.bu, (o) => o.weighted),
-    byMonth: groupSum(eligible, month, (o) => o.weighted),
+    byAM: groupSum(eligible, (o) => o.am, (o) => o.amount),
+    byBU: groupSum(eligible, (o) => o.bu, (o) => o.amount),
+    byMonth: groupSum(eligible, month, (o) => o.amount),
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
