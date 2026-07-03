@@ -1,14 +1,16 @@
 // 1 — Cockpit décisionnel : atterrissage exercice (décision n°1) + chaîne de valeur
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
 import { useState, type FC } from "react";
-import { useDocData } from "../lib/hooks";
+import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanExport } from "../lib/rbac";
+import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime } from "./_shared";
-import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary } from "../types";
+import { computeFilteredOverview } from "./overviewCalc";
+import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, CommandesSummary, Opportunity, Invoice } from "../types";
 
 // Bloc « atterrissage » : jauge de probabilité + Réalisé / Projeté / Objectif / Écart, avec le
 // R/O (Réalisé / Objectif) mis en avant dans le coin (fusion de l'ancienne carte R/O isolée).
@@ -39,6 +41,12 @@ export const Overview: FC<Props> = ({ period }) => {
   const canWrite = useCan("overview") === "write";
   const canExport = useCanExport();
   const [url, setUrl] = useState<string | null>(null);
+  // Filtre transverse : quand un BU/AM/client est sélectionné, on RECALCULE la chaîne & les KPI
+  // par périmètre côté client (les collections dégradent proprement à vide si l'accès manque).
+  const { active, f, match } = useFilters();
+  const { data: cmd } = useDocData<CommandesSummary>("summaries/commandes");
+  const { rows: allOpps } = useCollectionData<Opportunity>("opportunities");
+  const { rows: allInvoices } = useCollectionData<Invoice>("invoices");
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex gap-2 items-center">
@@ -55,10 +63,20 @@ export const Overview: FC<Props> = ({ period }) => {
   const points = (trends?.points || []).map((p) => ({
     name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
   }));
+  // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur.
+  const filtered = active ? computeFilteredOverview(cmd?.rows || [], allInvoices, allOpps, period, match) : null;
+  const v = filtered ?? data;
+  const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">{actions}</div>
+
+      {active && (
+        <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-[12px] text-muted">
+          Vue recalculée pour le périmètre <b className="text-ink">{filterLabel}</b> : chaîne de valeur & KPI ci-dessous filtrés. L'<b>atterrissage</b> et la <b>trajectoire</b> restent globaux (projection d'exercice).
+        </div>
+      )}
 
       {/* DÉCISION N°1 — Atterrissage de l'exercice : allons-nous atteindre l'objectif ? */}
       {att ? (
@@ -77,26 +95,26 @@ export const Overview: FC<Props> = ({ period }) => {
       {/* Alertes actionnables — ce qui bloque / à arbitrer, en haut du cockpit. */}
       <AlertsBanner />
 
-      {/* Chaîne de valeur (non additive) */}
+      {/* Chaîne de valeur (non additive) — filtrée par périmètre si le filtre est actif. */}
       <Chain>
-        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(data.certitudes)} sub="pondéré IdC ≥ 90 % · D Prev période" />
-        <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(data.commandes)} sub="prise de commande" />
-        <Stage idx={3} label="Facturé · CAF" accent={T.emerald} value={fmt(data.facture)} sub="figé sur l'exercice" />
-        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(data.backlog)} sub={data.backlogCount ? `${data.backlogCount} commandes · glissant` : "glissant"} />
+        <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(v.certitudes)} sub="pondéré IdC ≥ 90 % · D Prev période" />
+        <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(v.commandes)} sub="prise de commande" />
+        <Stage idx={3} label="Facturé · CAF" accent={T.emerald} value={fmt(v.facture)} sub="figé sur l'exercice" />
+        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(v.backlog)} sub={v.backlogCount ? `${v.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
 
       {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
-        <Kpi label="Marge brute" value={fmt(data.mb)} tone="gold" sub={`%MB ${pct(data.ratios?.pmb)}${objGlobal?.targetMargin ? ` · R/O ${pct((data.mb || 0) / objGlobal.targetMargin)}` : ""}`} />
-        <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1" : "atterrissage indispo."} />
-        <Kpi label="Taux de facturation" value={pct(data.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
-        <Kpi label="Taux de conversion vente" value={pct(data.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
+        <Kpi label="Marge brute" value={fmt(v.mb)} tone="gold" sub={`%MB ${pct(v.ratios?.pmb)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((v.mb || 0) / objGlobal.targetMargin)}` : ""}`} />
+        <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
+        <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
+        <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
       </div>
 
 
       {/* Tendance : burn-down du backlog et écart projeté vs réalisé dans le temps. */}
       {points.length >= 2 && (
-        <Card title="Trajectoire (projeté vs réalisé)">
+        <Card title={`Trajectoire (projeté vs réalisé)${active ? " · global" : ""}`}>
           <MultiLine data={points} series={[
             { key: "Projeté CAS", color: T.gold, name: "Projeté CAS" },
             { key: "Réalisé CAS", color: T.steel, name: "Réalisé CAS" },
