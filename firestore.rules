@@ -17,6 +17,8 @@ service cloud.firestore {
       // Marge (par ligne / agrégée / par entité) → accès « Rentabilité » requis. Testé AVANT les
       // préfixes plus larges (overview/clients/domaines) qui matcheraient aussi ces identifiants.
       return id.matches('overviewMargin.*') ? 'rentabilite'
+        // Marge reportée sur N+1 (isolée) → accès « Rentabilité » requis (avant atterrissage.*).
+        : id.matches('atterrissageMargin.*') ? 'rentabilite'
         : id.matches('overview.*') ? 'overview'
         : id.matches('facturation.*') ? 'facturation'
         : id.matches('receivables.*') ? 'facturation'

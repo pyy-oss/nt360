@@ -68,12 +68,13 @@ describe("atterrissage (§7)", () => {
     expect(r.backlogProjete).toBe(40);    // projection : plafonné à 100 − 60
     expect(r.cafProjete).toBe(100);       // 60 (facturé) + 40 (RAF plafonné) + 0 pipeline = 100 (= CAS), pas 160
   });
-  it("report de CA sur N+1 : montant exclu du Projeté CAF, exposé en reporteCaf (borné au RAF projetable)", () => {
-    const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0 }]; // RAF projetable = 400
+  it("report de CA sur N+1 : montant exclu du Projeté CAF + marge reportée au prorata (taux × reporté)", () => {
+    const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }]; // RAF projetable = 400 ; taux 20 %
     const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": 250 });
     expect(a.reporteCaf).toBe(250);
     expect(a.backlogProjete).toBe(150); // 400 − 250 reporté
     expect(a.cafProjete).toBe(150);     // 0 facturé + 150 (backlog net) + 0 pipeline
+    expect(a.reporteMarge).toBe(50);    // 20 % × 250 reporté (marge suit le CA au prorata)
   });
   it("report borné au RAF projetable (report > RAF n'engendre pas de CAF négatif)", () => {
     const ord = [{ fp: "FP/2026/2", yearPo: 2026, cas: 500, raf: 500, facture: 0 }];
