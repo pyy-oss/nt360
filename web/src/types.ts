@@ -11,8 +11,9 @@ export interface OverviewSummary {
   mb?: number; pipelineWon?: number; perdu?: number; ratios?: Ratios;
 }
 
+export type Carryover = { fp?: string; amount?: number; updatedAt?: unknown };
 export interface AtterrissageSummary {
-  fy?: number; realiseCas?: number; backlog?: number; backlogProjete?: number; pipelinePondere?: number;
+  fy?: number; realiseCas?: number; backlog?: number; backlogProjete?: number; reporteCaf?: number; pipelinePondere?: number;
   pipelineRetard?: number; pipelineRetardCount?: number;
   projete?: number; cafProjete?: number;
   objectif?: number; ecart?: number; probaAtteinte?: number;
@@ -112,7 +113,7 @@ export interface DataQualitySummary {
   counts?: { orders?: number; invoices?: number; opportunities?: number; bcLines?: number; projectSheets?: number };
 }
 
-export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
+export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; facture?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
 // Méta des commandes matérialisées. Les lignes sont désormais dans les chunks commandesRows/{i}
 // (rows conservé optionnel pour lire un ancien agrégat pré-chunking en transition).
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }

@@ -41,6 +41,12 @@ export async function patchBcLine(data: { id: string; fp?: string; amountXof?: n
   await httpsCallable(functions, "patchBcLine")(data);
 }
 
+/** Reporte (montant FCFA) une part du RAF d'un projet sur l'exercice N+1 (0 = retirer). Direction/PMO. */
+export async function setCarryover(fp: string, amount: number) {
+  const res = await httpsCallable(functions, "setCarryover")({ fp, amount });
+  return res.data as { ok: boolean; fp: string; amount: number };
+}
+
 /** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
 export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
   await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });

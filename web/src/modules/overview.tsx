@@ -16,9 +16,9 @@ import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
 // Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
 // une probabilité statistique : c'est un ratio d'atteinte de l'objectif — libellé en conséquence.
-function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount }: {
+function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount, reporte }: {
   title: string; proba: number; realise?: number; projete?: number; objectif?: number; ecart?: number; sub: string;
-  retard?: number; retardCount?: number;
+  retard?: number; retardCount?: number; reporte?: number;
 }) {
   const hasObj = (objectif || 0) > 0;
   return (
@@ -35,6 +35,11 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard,
       {(retard || 0) > 0 && (
         <div className="text-[11px] text-clay text-center mt-1" title="Ces opportunités sont comptées dans le projeté (D Prev dans l'exercice) mais leur date de clôture prévue est déjà dépassée — elles apparaissent « en retard de closing » côté Pipeline.">
           dont {fmt(retard)}{(retardCount || 0) > 0 ? ` (${retardCount} opp.)` : ""} à requalifier — D Prev dépassée
+        </div>
+      )}
+      {(reporte || 0) > 0 && (
+        <div className="text-[11px] text-steel text-center mt-1" title="RAF explicitement reporté sur l'exercice suivant (facturation décalée) — EXCLU de ce projeté CAF.">
+          hors {fmt(reporte)} reporté sur N+1 (exclu du projeté)
         </div>
       )}
     </Card>
@@ -115,7 +120,7 @@ export const Overview: FC<Props> = ({ period }) => {
             sub="Réalisé CAS + pipeline pondéré (certitudes glissantes)" />
           <Landing title={`Atterrissage CAF ${fy || ""} — facturation`} proba={att.probaAtteinteCaf || 0}
             realise={att.factureN} projete={att.cafProjete} objectif={att.objectifCaf} ecart={att.ecartCaf}
-            retard={att.pipelineRetard} retardCount={att.pipelineRetardCount}
+            retard={att.pipelineRetard} retardCount={att.pipelineRetardCount} reporte={att.reporteCaf}
             sub="Facturé + backlog + pipeline pondéré" />
         </div>
       ) : (

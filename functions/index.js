@@ -173,6 +173,28 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
   return { ok: true, ...cfg };
 });
 
+// --- Report de CA sur l'exercice suivant, PAR PROJET (carryovers/{safeId(fp)}) : un montant du RAF
+// d'une commande explicitement reporté en N+1 → exclu du Projeté CAF courant. Édité par direction
+// et PMO (pilotes du backlog). Montant borné ≥ 0 ; le plafond au RAF projetable est appliqué au calcul.
+// Persisté hors des commandes (non écrasé par les réimports). ---
+exports.setCarryover = onCallG("setCarryover", async (req) => {
+  const role = req.auth?.token?.role;
+  if (role !== "direction" && role !== "pmo") throw new HttpsError("permission-denied", "direction ou PMO requis");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const fp = fpKey(req.data?.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  const n = Number(req.data?.amount);
+  const amount = Number.isFinite(n) && n > 0 ? Math.round(n) : 0; // 0 = retirer le report
+  await db.doc(`carryovers/${safeId(fp)}`).set({ fp, amount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "carryover", module: "backlog",
+    entity: "carryover", entityId: fp, detail: { amount }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["atterrissage"]); // le report n'impacte que le Projeté CAF (atterrissage)
+  return { ok: true, fp, amount };
+});
+
 // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
 // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
 async function postWebhook(url, text) {

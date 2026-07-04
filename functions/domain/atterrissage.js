@@ -19,7 +19,7 @@ const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
  * @param {number} fy année fiscale courante
  * @param {string} [asOf] date du jour (YYYY-MM-DD) : borne basse de la fenêtre D Prev
  */
-function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers) {
+function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carryovers) {
   const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
@@ -65,14 +65,26 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers) {
   // un RAF curaté non décrémenté par la facturation, ou une facture mal rattachée, ferait compter
   // « facturé + RAF » au-delà du CAS de l'affaire. CONFINÉ à la projection : le Suivi Backlog
   // conserve le RAF curaté tel quel (fiable par construction, avec son propre diagnostic).
-  const backlogProjete = sum(orders, (o) => Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0));
+  //
+  // REPORT DE CA sur N+1 (par projet) : une part (montant, borné au RAF projetable) du RAF d'une
+  // commande peut être explicitement reportée à l'exercice SUIVANT → elle NE COMPTE PLUS dans le
+  // Projeté CAF de l'exercice courant. `reporteCaf` est exposé (traçabilité, « reporté N+1 »).
+  const cby = carryovers || {};
+  let backlogProjete = 0, reporteCaf = 0;
+  for (const o of orders || []) {
+    const bp = Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0); // RAF projetable cette année (M2)
+    const rep = Math.min(Math.max(cby[fpKey(o.fp)] || 0, 0), bp); // reporté N+1, borné au RAF projetable
+    backlogProjete += bp - rep;
+    reporteCaf += rep;
+  }
   const cafProjete = factureN + backlogProjete + pipelinePondere;
 
   return {
     fy,
     realiseCas,
     backlog,
-    backlogProjete,        // RAF plafonné à (CAS − facturé) utilisé dans cafProjete (M2)
+    backlogProjete,        // RAF plafonné à (CAS − facturé), NET du report N+1, utilisé dans cafProjete
+    reporteCaf,            // CA reporté sur l'exercice suivant (exclu du cafProjete courant)
     pipelinePondere,
     pipelineRetard,        // part (pondérée) du pipeline projeté dont la D Prev est dépassée (à requalifier)
     pipelineRetardCount,   // nombre d'opps concernées

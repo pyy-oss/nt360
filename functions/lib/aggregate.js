@@ -69,6 +69,9 @@ async function recomputeAll(db, only) {
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
   const projCfg = (await db.doc("config/projection").get()).data() || {}; // niveaux de projection configurables
   const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
+  // Reports de CA sur N+1 par projet (montant FCFA, keyé par fpKey) : exclus du Projeté CAF courant.
+  const carryovers = {};
+  (await db.collection("carryovers").get()).forEach((doc) => { const v = doc.data() || {}; if ((v.amount || 0) > 0) carryovers[doc.id] = v.amount; });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -126,7 +129,7 @@ async function recomputeAll(db, only) {
       ...stamp,
     } });
   }
-  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers);
+  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, carryovers);
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
