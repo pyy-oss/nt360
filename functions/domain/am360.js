@@ -5,7 +5,9 @@
 // Module PUR (testable).
 const { sum, projectionWeight } = require("./chaine");
 
-const normAm = (a) => (a && String(a).trim()) || "—";
+// AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
+// en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
+const normAm = (a) => (a && String(a).trim().toUpperCase()) || "—";
 
 /**
  * @param {object[]} orders commandes fusionnées (am, cas, raf, yearPo, fp)

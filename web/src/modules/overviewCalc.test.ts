@@ -49,6 +49,15 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(r.facture).toBe(1300);     // 600 + 700 (toutes dates)
   });
 
+  it("dédup saisie/salesData : une opp saisie couverte par salesData (même FP) n'est comptée qu'une fois", () => {
+    const opps2 = [
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 100, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "salesData" },
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 100, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "saisie" }, // doublon même FP
+    ];
+    const r = computeFilteredOverview([] as any, [] as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.certitudes).toBe(100); // 100, pas 200 (doublon écarté)
+  });
+
   it("facture ORPHELINE attribuée au périmètre via son propre BU (pas de commande)", () => {
     const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "ACME", cas: 100, raf: 0, mb: 10, yearPo: 2026 }];
     const inv = [{ fp: "FP/9", bu: "ICT", client: "OTHER", amountHt: 500, date: "2026-01-01" }]; // orpheline, BU ICT

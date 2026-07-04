@@ -398,7 +398,10 @@ exports.patchOrder = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req)
 
   if (newFp && newFp !== fp) {
     // Ré-clé : le FP est la clé de jointure (factures, BC…). On copie sous le nouveau FP puis supprime.
+    // Garde-fou : si une commande existe DÉJÀ sous le FP cible, un set(merge) fusionnerait deux
+    // lignes P&L distinctes (perte d'une commande) → on refuse.
     const newId = safeId(newFp);
+    if ((await db.doc(`orders/${newId}`).get()).exists) throw new HttpsError("failed-precondition", `une commande existe déjà pour ${newFp} — ré-clé refusée (fusion destructive)`);
     await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await ref.delete();
   } else if (Object.keys(patch).length) {

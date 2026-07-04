@@ -19,6 +19,12 @@ export function computeFilteredOverview(
   const yr = (d?: string) => (d ? String(d).slice(0, 4) : "");
   const inPeriod = (y: string) => period === "all" || y === period;
   const S = (a: any[], f: (x: any) => number) => a.reduce((s, x) => s + (f(x) || 0), 0);
+  // Dédup inter-source (miroir de recomputeAll) : une opp SAISIE dont le FP est aussi couvert par
+  // une opp SALESDATA est écartée (la version importée fait foi) — sinon double-compte du pipeline
+  // dans la vue filtrée (certitudes / conversion gonflées vs le cockpit global).
+  const cf = (s?: string) => (s || "").trim().toUpperCase();
+  const salesFps = new Set(opps.filter((o) => o.source === "salesData" && o.fp).map((o) => cf(o.fp)));
+  opps = opps.filter((o) => !(o.source === "saisie" && o.fp && salesFps.has(cf(o.fp))));
   // Commandes du périmètre = cohorte par année de PO ; backlog GLISSANT = toutes les commandes
   // ouvertes du périmètre (indépendant de la période).
   const ordP = cmdRows.filter((o) => inPeriod(String(o.yearPo || "")) && match(o, DIMS));

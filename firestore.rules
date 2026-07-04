@@ -51,8 +51,10 @@ service cloud.firestore {
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
       allow read: if canRead('bc');
+      // Le client ne peut faire évoluer QUE le statut, et seulement vers une valeur du cycle.
       allow update: if canWrite('bc')
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['a_emettre', 'emis', 'livre', 'facture', 'solde'];
     }
 
     match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if canWrite('fournisseurs'); }
