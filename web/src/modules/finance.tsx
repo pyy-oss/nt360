@@ -192,6 +192,7 @@ export const InvoiceList: FC<Props> = () => {
 // 7 — Rentabilité : deux perspectives de marge — Commande (assiette CAS) ou Facturé (assiette CAF).
 export const Rentabilite: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<RentabiliteSummary>(`summaries/rentabilite_${period}`);
+  const { active } = useFilters();
   const [view, setView] = useState<"commande" | "facture">("commande");
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
@@ -208,6 +209,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
     topClients: data.topClients || [],
   };
   const p = data.perspectives ? data.perspectives[view] : fallback;
+  const filterActive = active; // la Rentabilité lit un agrégat pré-calculé GLOBAL : le filtre transverse ne s'y applique pas
   const baseLbl = view === "commande" ? "CAS" : "Facturé";
   const baseSub = view === "commande" ? "Marge P&L sur la prise de commande" : "Marge reconnue au prorata du facturé (CAF)";
   const seg = (id: "commande" | "facture", label: string, disabled?: boolean) => (
@@ -225,6 +227,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         <span className="text-[11px] uppercase tracking-wide text-faint">Perspective</span>
         <div className="flex gap-1.5">{seg("commande", "Commande")}{seg("facture", "Facturé", !hasFac)}</div>
       </div>
+      {filterActive && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client) ne s'applique pas ici (agrégat pré-calculé). La marge filtrée est lisible dans la Vue d'ensemble.</div>}
       <div className={grid4}>
         <Kpi label={view === "commande" ? "Marge brute (commande)" : "Marge brute (facturé)"} value={fmt(p.mb)} tone="gold" sub={baseSub} />
         <Kpi label={baseLbl} value={fmt(p.base)} />

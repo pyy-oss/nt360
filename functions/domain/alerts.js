@@ -67,14 +67,19 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   if (top && totalCas > 0 && top[1] / totalCas >= T.concentration)
     out.push({ type: "concentration_client", severity: "medium", count: 1, message: `Concentration : ${top[0]} = ${((top[1] / totalCas) * 100).toFixed(0)} % du CAS`, refs: [top[0]] });
 
-  const pending = bcLines.filter((b) => b.status && b.status !== "solde").length;
+  // Alertes BC = EXÉCUTION : uniquement les lignes issues de l'import BC (source ≠ "fiche"). Les
+  // lignes de fiche affaire sont des achats PLANIFIÉS (P&L Projet / FP 360°), jamais du suivi
+  // d'exécution — les compter ici surévaluerait l'alerte et contredirait la vue Exécution BC
+  // (qui les exclut), rendant le compte de l'alerte ≠ du compte de la vue au drill-through.
+  const execBc = (bcLines || []).filter((b) => b.source !== "fiche");
+  const pending = execBc.filter((b) => b.status && b.status !== "solde").length;
   if (pending) out.push({ type: "bc_en_attente", severity: "low", count: pending, message: `${pending} ligne(s) BC non soldée(s)` });
 
   // BC en retard : ETA (réelle sinon contractuelle) dépassée alors que non encore livré.
   // On EXIGE asOf : sans date réelle, retomber sur la fin d'exercice (fy-12-31) déclarerait en
   // retard quasiment tous les BC ouverts de l'année (faux positifs massifs en début/milieu d'année).
   const DELIVERED = new Set(["livre", "facture", "solde"]);
-  const lateBc = asOf ? (bcLines || []).filter((b) => {
+  const lateBc = asOf ? execBc.filter((b) => {
     const eta = b.etaReel || b.etaContrat;
     return eta && String(eta).slice(0, 10) < asOf && !DELIVERED.has(b.status);
   }) : [];

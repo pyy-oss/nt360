@@ -244,6 +244,20 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(ict.mb).toBeCloseTo(150, 6);       // 120 + 30
     expect(fac.bottomAffaires[0].pmb).toBeCloseTo(0.10, 6); // FP/2, marge la plus faible
   });
+  it("Facturé : marge reconnue PLAFONNÉE au CAS (pas de marge sur la surfacturation)", () => {
+    const orders = [{ fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 1000, mb: 200 }]; // taux 20 %
+    const invoices = [{ fp: "FP/1", amountHt: 1500 }]; // surfacturé : 1500 > CAS 1000
+    const fac = rentabilite(orders, invoices, orders).perspectives.facture;
+    expect(fac.base).toBe(1500);      // assiette = facturé RÉEL (inchangée)
+    expect(fac.mb).toBe(200);         // marge plafonnée à taux×CAS = 200 (et non 0,20×1500 = 300)
+    expect(fac.pmb).toBeCloseTo(200 / 1500, 6); // %MB facturé dilué par la surfacturation (honnête)
+  });
+  it("plafond marge : marge NÉGATIVE aussi bornée à la perte P&L (pas d'aggravation par surfacturation)", () => {
+    const orders = [{ fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 1000, mb: -100 }]; // taux -10 %
+    const invoices = [{ fp: "FP/1", amountHt: 2000 }]; // surfacturé
+    const fac = rentabilite(orders, invoices, orders).perspectives.facture;
+    expect(fac.mb).toBe(-100); // −0,10 × min(2000,1000) = −100 (et non −200)
+  });
   it("invariant inter-vues : Facturé (rentabilité) == total Facturation pour les mêmes factures", () => {
     const orders = [{ fp: "FP/1", bu: "ICT", am: "X", client: "ACME", cas: 1000, mb: 200 }];
     const invoices = [{ fp: "FP/1", amountHt: 600 }, { fp: "FP/2", amountHt: 400 }]; // FP/2 orpheline
