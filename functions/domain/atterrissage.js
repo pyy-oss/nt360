@@ -3,6 +3,7 @@
 // Le backlog est exposé séparément (informatif) mais N'ENTRE PAS dans le projeté CAS (déjà
 // couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
 const { sum, projectionWeight } = require("./chaine");
+const { fpKey } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
@@ -26,8 +27,15 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   // D Prev en N-1 (année révolue) ou en N+1 et au-delà (non encore dans l'exercice).
   const inYear = (o) => yearOf(o.closingDate) === String(fy);
   const isActive = (o) => o.stage >= 1 && o.stage <= 5; // ni gagné (6), ni perdu (7), ni suspendu (8)
-  // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude.
-  const projOpps = opps.filter((o) => isActive(o) && inYear(o));
+  // M1 — NEUTRALISATION du double compte : une opp encore « ouverte » dont le FP a DÉJÀ une ligne
+  // commande (P&L) est déjà comptée dans le CAS réalisé → on l'EXCLUT du pipeline projeté, sinon
+  // elle serait comptée deux fois dans projete (CAS + pipeline) et dans cafProjete. Le N° FP est
+  // l'identifiant du deal : même FP = même affaire (pipeline LIVE non repassé « gagné »).
+  const orderFps = new Set((orders || []).map((o) => fpKey(o.fp)).filter(Boolean));
+  const alreadyBooked = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !!k && orderFps.has(k); };
+  // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude, hors
+  // affaires déjà en commande (M1).
+  const projOpps = opps.filter((o) => isActive(o) && inYear(o) && !alreadyBooked(o));
   const pipelinePondere = sum(projOpps, projectionWeight);
   // COHÉRENCE avec la vue Pipeline (closingAnalysis) : une D Prev déjà passée (au jour) est « en
   // retard de closing / à requalifier » là-bas. Ici elle compte TOUJOURS (design glissant : elle
@@ -50,12 +58,19 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   // + backlog écoulable (RAF des commandes signées, reste à facturer) + pipeline pondéré
   // (futures commandes facturables). Le backlog Y ENTRE (contrairement au projeté CAS, où
   // le CAS inclut déjà le RAF). Pas de double compte : facturé, RAF et futur sont disjoints.
-  const cafProjete = factureN + backlog + pipelinePondere;
+  // M2 — NEUTRALISATION du double compte facturé + RAF : pour la projection CAF, le RAF de chaque
+  // commande est borné à ce qui RESTE réellement à facturer (CAS − déjà facturé). Sans ce plafond,
+  // un RAF curaté non décrémenté par la facturation, ou une facture mal rattachée, ferait compter
+  // « facturé + RAF » au-delà du CAS de l'affaire. CONFINÉ à la projection : le Suivi Backlog
+  // conserve le RAF curaté tel quel (fiable par construction, avec son propre diagnostic).
+  const backlogProjete = sum(orders, (o) => Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0));
+  const cafProjete = factureN + backlogProjete + pipelinePondere;
 
   return {
     fy,
     realiseCas,
     backlog,
+    backlogProjete,        // RAF plafonné à (CAS − facturé) utilisé dans cafProjete (M2)
     pipelinePondere,
     pipelineRetard,        // part (pondérée) du pipeline projeté dont la D Prev est dépassée (à requalifier)
     pipelineRetardCount,   // nombre d'opps concernées

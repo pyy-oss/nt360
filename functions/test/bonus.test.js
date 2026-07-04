@@ -50,6 +50,24 @@ describe("atterrissage (§7)", () => {
     expect(a.factureN1).toBe(400);
     expect(a.croissanceFacture).toBeCloseTo(0.5, 6);
   });
+  it("M1 — opp ouverte dont le FP a déjà une commande = exclue du pipeline projeté (pas de double compte)", () => {
+    const ord = [{ fp: "FP/2026/5", yearPo: 2026, cas: 100, raf: 0 }];
+    const op = [
+      { fp: "FP/2026/5", stage: 5, probability: 0.95, amount: 100, closingDate: "2026-06-01" }, // déjà en commande → exclue
+      { fp: "FP/2026/6", stage: 5, probability: 0.95, amount: 80, closingDate: "2026-06-01" },  // pas de commande → comptée
+    ];
+    const r = atterrissage(ord, [], op, [], 2026, "2026-03-01");
+    expect(r.realiseCas).toBe(100);
+    expect(r.pipelinePondere).toBe(80);   // seule FP/2026/6 (100 % de 80) ; FP/2026/5 exclue (déjà en CAS)
+    expect(r.projete).toBe(180);          // 100 + 80, pas 100 + 180
+  });
+  it("M2 — RAF plafonné à (CAS − facturé) dans cafProjete (pas de facturé + RAF > CAS)", () => {
+    const ord = [{ fp: "FP/2026/7", yearPo: 2026, cas: 100, raf: 100, facture: 60 }]; // RAF curaté non décrémenté
+    const r = atterrissage(ord, [{ fp: "FP/2026/7", date: "2026-02-01", amountHt: 60 }], [], [], 2026, "2026-03-01");
+    expect(r.backlog).toBe(100);          // Suivi Backlog : RAF curaté inchangé
+    expect(r.backlogProjete).toBe(40);    // projection : plafonné à 100 − 60
+    expect(r.cafProjete).toBe(100);       // 60 (facturé) + 40 (RAF plafonné) + 0 pipeline = 100 (= CAS), pas 160
+  });
   it("cohérence closing : part du pipeline projeté « à requalifier » (D Prev passée) exposée", () => {
     // asOf = 2026-03-01 → seule l'opp D Prev 2026-02-01 (95 % → 300) est en retard, mais comptée.
     expect(a.pipelineRetard).toBe(300);
