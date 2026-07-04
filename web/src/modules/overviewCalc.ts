@@ -8,6 +8,7 @@ import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
+  factureMb: number; facturePmb: number; // perspective Facturé (marge reconnue au prorata, plafonnée au CAS)
   ratios: { tauxFacturation: number; tauxConversionVente: number; pmb: number };
 };
 
@@ -46,6 +47,15 @@ export function computeFilteredOverview(
   const backlogCount = ordAll.filter((o) => (o.raf || 0) > 0).length;
   const mb = S(ordP, (o) => o.mb);
   const facture = S(invP, (i) => i.amountHt);
+  // Perspective FACTURÉ : marge reconnue = taux(mb/CAS) de la commande × min(facturé_FP, CAS_FP)
+  // (plafond au CAS = pas de marge sur la surfacturation, miroir reporting.factureLines).
+  const rateByFp = new Map<string, { rate: number; cas: number }>();
+  for (const o of cmdRows) if (o.fp) rateByFp.set(o.fp, { rate: (o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : 0, cas: o.cas || 0 });
+  const facByFp = new Map<string, number>();
+  for (const i of invP) { const k = i.fp || ""; facByFp.set(k, (facByFp.get(k) || 0) + (i.amountHt || 0)); }
+  let factureMb = 0;
+  for (const [fp, base] of facByFp) { const r = rateByFp.get(fp); if (r && r.cas > 0) factureMb += r.rate * Math.min(base, r.cas); }
+  const facturePmb = facture > 0 ? factureMb / facture : 0;
   const active = oppP.filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5);
   // Pipeline projeté = Σ des niveaux ACTIFS (moteur configurable, miroir serveur). Certitudes =
   // contribution pondérée du niveau ≥90 (0 si désactivé).
@@ -55,7 +65,7 @@ export function computeFilteredOverview(
   const perdu = S(oppP.filter((o) => o.stage === 7), (o) => o.amount);
   const convDenom = commandes + pipelineProjete + perdu;
   return {
-    certitudes: pondCertain, commandes, facture, backlog, backlogCount, mb,
+    certitudes: pondCertain, commandes, facture, backlog, backlogCount, mb, factureMb, facturePmb,
     ratios: {
       tauxFacturation: (facture + backlog) > 0 ? facture / (facture + backlog) : 0,
       tauxConversionVente: convDenom > 0 ? commandes / convDenom : 0,
