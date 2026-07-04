@@ -155,6 +155,24 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
   return { ok: true, ...cfg };
 });
 
+// --- Niveaux de PROJECTION configurables (config/projection) : activer/désactiver et pondérer
+// chacun des 3 niveaux (Certitudes ≥90 · Forecast 70-90 · Pipe 50-70). Édité par la direction ;
+// recompute COMPLET (overview, pipeline, atterrissage, AM 360° en dépendent). Poids bornés [0,1]. ---
+exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const w = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
+  const tier = (k, dw) => ({ active: d?.[k]?.active === undefined ? true : !!d[k].active, weight: w(d?.[k]?.weight, dw) });
+  const cfg = { certitudes: tier("certitudes", 1), forecast: tier("forecast", 0.2), pipe: tier("pipe", 0.05) };
+  await db.doc("config/projection").set(cfg, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "projection_config", module: "habilitations",
+    entity: "config", entityId: "projection", detail: cfg, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // projection → overview / pipeline / atterrissage / ams : recompute complet
+  return { ok: true, ...cfg };
+});
+
 // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
 // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
 async function postWebhook(url, text) {
