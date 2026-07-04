@@ -8,17 +8,10 @@
 
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 
-// Pondération de PROJECTION (règle de gestion) : 100 % du montant si IdC ≥ 90 %, 20 % si
-// 70 % ≤ IdC < 90 %, 10 % si 50 % ≤ IdC < 70 %, 0 sinon. Fonction UNIQUE partagée par la Vue
-// d'ensemble (conversion), le Pipeline (pondéré, funnel) et l'atterrissage.
-const CONF_FULL = 0.9, CONF_T2 = 0.7, CONF_T3 = 0.5;
-const projectionWeight = (o) => {
-  const p = o.probability || 0, amt = o.amount || 0;
-  if (p >= CONF_FULL) return amt;
-  if (p >= CONF_T2) return amt * 0.2;
-  if (p >= CONF_T3) return amt * 0.1;
-  return 0;
-};
+// Pondération de PROJECTION : moteur à 3 niveaux configurables (domain/projection). Fonction UNIQUE
+// partagée par la Vue d'ensemble (conversion), le Pipeline (pondéré, funnel) et l'atterrissage.
+// Sans tiers explicites → défauts (Certitudes 100 % · Forecast 20 % · Pipe 5 %).
+const { projectionWeight, tierBreakdown, normalizeTiers } = require("./projection");
 
 /**
  * @param {object[]} orders  commandes de la période (orders/{fp})
@@ -41,23 +34,23 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // Gagné = Commandes : une opportunité gagnée (stage 6) devient un PO/commande (CAS).
   // On ne recompte donc PAS les gagnés dans les certitudes (déjà dans les commandes).
   const pipelineWon = sum(opps.filter((o) => o.stage === 6), (o) => o.amount);
-  // Pipeline quasi-certain : actif (non perdu/suspendu) avec IdC ≥ 90 %, pas encore signé.
-  // VALORISÉ À 100 % DU MONTANT (décision métier : une quasi-certitude ≥ 90 % ≈ une commande),
-  // cohérent avec l'atterrissage. (Auparavant : montant × proba, ce qui sous-évaluait.)
-  const CONFIANCE_MIN = 0.9;
+  // Pipeline de projection : 3 niveaux DISJOINTS (Certitudes ≥90 · Forecast 70-90 · Pipe 50-70),
+  // chacun activable/pondérable (config/projection). On ne mélange pas : on expose la décomposition
+  // ET la somme des niveaux ACTIFS. « certitudes » = contribution pondérée du niveau ≥90.
+  const tiers = opts.tiers || normalizeTiers();
   const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5);
-  const band = (lo, hi) => sum(active.filter((o) => (o.probability || 0) >= lo && (o.probability || 0) < hi), (o) => o.amount);
-  const pondCertain = sum(active.filter((o) => (o.probability || 0) >= CONFIANCE_MIN), (o) => o.amount);
-  // Bandes de confiance intermédiaires (pour le taux de conversion) et perdu de la période.
-  const opp70_90 = band(0.70, 0.90); // pondéré 20 %
-  const opp50_70 = band(0.50, 0.70); // pondéré 10 %
+  const breakdown = tierBreakdown(active, tiers);
+  const pipelineProjete = breakdown.reduce((s, b) => s + b.pond, 0); // Σ niveaux ACTIFS
+  const pondCertain = breakdown.find((b) => b.key === "certitudes")?.pond || 0;
   const perdu = sum(opps.filter((o) => o.stage === 7), (o) => o.amount);
-  // Dénominateur de conversion = Commande + Certitude (≥90 % à 100 %) + 20 %·[70-90 %[ + 10 %·[50-70 %[ + Perdu.
-  const convDenom = commandes + pondCertain + 0.20 * opp70_90 + 0.10 * opp50_70 + perdu;
+  // Dénominateur de conversion = Commande + pipeline projeté (niveaux actifs) + Perdu.
+  const convDenom = commandes + pipelineProjete + perdu;
   return {
-    // Certitudes = pipeline quasi-certain à venir (glissant), commandes signées suivies à part.
+    // Certitudes = contribution pondérée du niveau ≥90 (glissant) ; commandes signées à part.
     certitudes: pondCertain,
     pondCertain,
+    pipelineProjete,             // Σ des niveaux de projection ACTIFS
+    tierBreakdown: breakdown,    // décomposition par niveau (Certitudes / Forecast / Pipe) — jamais mélangée
     commandes,
     facture,
     rafPeriode,
@@ -70,8 +63,7 @@ function overview(orders, invoices, opps = [], opts = {}) {
       // TAUX DE FACTURATION (période) = Facturé / (Facturé + Backlog) : part déjà facturée du
       // « facturé + reste à facturer ». Borné [0,1] par construction (deux grandeurs positives).
       tauxFacturation: (facture + backlog) > 0 ? facture / (facture + backlog) : 0,
-      // TAUX DE CONVERSION VENTE (période) = Commande / (Commande + Certitude + 20 %·opps[70-90 %[
-      // + 10 %·opps[50-70 %[ + Perdu). Part du potentiel adressable déjà transformée en commande.
+      // TAUX DE CONVERSION VENTE (période) = Commande / (Commande + pipeline projeté + Perdu).
       tauxConversionVente: convDenom > 0 ? commandes / convDenom : 0,
       pmb: commandes > 0 ? mb / commandes : 0,
     },

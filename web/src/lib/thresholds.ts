@@ -5,19 +5,10 @@
 //
 // ⚠️ CONTRAT SERVEUR ↔ CLIENT : ces valeurs DOIVENT rester alignées avec le serveur, qui reste la
 // source de vérité des agrégats. En cas de changement, mettre à jour EN MÊME TEMPS :
-//   • pondération de projection : functions/domain/chaine.js  (projectionWeight, CONF_*)
-//   • défauts d'alerte         : functions/domain/alerts.js   (ALERT_DEFAULTS)
+//   • défauts d'alerte : functions/domain/alerts.js (ALERT_DEFAULTS)
+// (Les paliers de PROJECTION — Certitudes/Forecast/Pipe — vivent désormais dans lib/projection.ts,
+//  miroir de functions/domain/projection.js, et sont CONFIGURABLES via config/projection.)
 // Le test web thresholds.test.ts fige ces valeurs pour détecter une dérive accidentelle.
-
-/** Paliers de « certitude » (IdC) → pondération de la projection (miroir de projectionWeight). */
-export const PROJ = {
-  FULL: 0.9,   // ≥ 90 % ⇒ quasi-certitude, comptée à 100 %
-  T2: 0.7,     // [70 %, 90 %[
-  T3: 0.5,     // [50 %, 70 %[
-  W_FULL: 1,   // poids du palier « certain »
-  W_T2: 0.2,   // poids du palier 70–90
-  W_T3: 0.1,   // poids du palier 50–70
-} as const;
 
 /** Seuils couleur %MB (marge brute) : < LOW = alerte, < OK = à surveiller, ≥ OK = sain. */
 export const MARGIN = { LOW: 0.1, OK: 0.2 } as const;

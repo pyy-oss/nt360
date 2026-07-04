@@ -2,13 +2,14 @@
 // (pondération tiérée par certitude, fenêtrée sur D Prev) → vs objectifs, écart, probabilité.
 // Le backlog est exposé séparément (informatif) mais N'ENTRE PAS dans le projeté CAS (déjà
 // couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
-const { sum, projectionWeight } = require("./chaine");
+const { sum } = require("./chaine");
+const { projectionWeight, normalizeTiers } = require("./projection");
 const { fpKey } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
-// Pondération de PROJECTION unifiée (règle de gestion, chaine.projectionWeight) :
-// 100 % (IdC ≥ 90 %) · 20 % (70-90 %) · 10 % (50-70 %) · 0 sinon. Même fonction partout.
+// Pondération de PROJECTION unifiée (domain/projection, niveaux configurables) :
+// Certitudes ≥90 · Forecast 70-90 · Pipe 50-70, chacun activable/pondérable (défaut 100/20/5).
 
 /**
  * @param {object[]} orders
@@ -18,7 +19,8 @@ const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
  * @param {number} fy année fiscale courante
  * @param {string} [asOf] date du jour (YYYY-MM-DD) : borne basse de la fenêtre D Prev
  */
-function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
+function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers) {
+  const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
   // Fenêtre D Prev = l'EXERCICE (D Prev dans l'année {fy}). Les certitudes GLISSENT jusqu'à
@@ -36,7 +38,7 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude, hors
   // affaires déjà en commande (M1).
   const projOpps = opps.filter((o) => isActive(o) && inYear(o) && !alreadyBooked(o));
-  const pipelinePondere = sum(projOpps, projectionWeight);
+  const pipelinePondere = sum(projOpps, pw);
   // COHÉRENCE avec la vue Pipeline (closingAnalysis) : une D Prev déjà passée (au jour) est « en
   // retard de closing / à requalifier » là-bas. Ici elle compte TOUJOURS (design glissant : elle
   // n'est pas obsolète tant qu'elle est dans l'exercice), mais on EXPOSE la part de la projection
@@ -44,7 +46,7 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   // comme entièrement « à jour » alors que Pipeline le signale en retard sur le même objet.
   const today = asOf ? String(asOf) : "";
   const retardOpps = today ? projOpps.filter((o) => o.closingDate && String(o.closingDate).slice(0, 10) < today) : [];
-  const pipelineRetard = sum(retardOpps, projectionWeight);
+  const pipelineRetard = sum(retardOpps, pw);
   const pipelineRetardCount = retardOpps.length;
   const objGlobal = objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global"));
   const objectif = sum(objGlobal, (o) => o.targetCas);       // cible CAS (prise de commande)
