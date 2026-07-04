@@ -4,6 +4,7 @@
 const { FieldValue } = require("firebase-admin/firestore");
 const { overview } = require("../domain/chaine");
 const { normalizeTiers } = require("../domain/projection");
+const { billingTrend } = require("../domain/billing");
 const { backlogFy } = require("../domain/backlog");
 const { pipeline } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
@@ -141,6 +142,9 @@ async function recomputeAll(db, only) {
   if (want("atterrissage")) {
     w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
+    // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
+    const trend = billingTrend(invoices, Object.values(milestonesByFp).flat(), currentFy, asOf);
+    w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });

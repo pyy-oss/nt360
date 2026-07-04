@@ -13,6 +13,10 @@ export interface OverviewSummary {
 
 export type Carryover = { fp?: string; amount?: number; updatedAt?: unknown };
 export type BillingMilestonesDoc = { fp?: string; milestones?: { date: string; amount: number }[]; updatedAt?: unknown };
+export type BillingTrendMonth = { month: string; realise: number; planifie: number; retenu: number; cumulRealise: number; cumulTrajectoire: number };
+export interface BillingTrendSummary {
+  fy?: number; months?: BillingTrendMonth[]; realiseYtd?: number; planifieRestant?: number; projeteDec?: number;
+}
 export type AtterrissageNext = {
   fy?: number; realiseCas?: number; factureN?: number; reporteEntrant?: number; pipelinePondere?: number;
   projete?: number; cafProjete?: number; objectif?: number; ecart?: number; objectifCaf?: number; ecartCaf?: number;
