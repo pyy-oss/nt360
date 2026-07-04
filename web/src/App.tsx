@@ -6,8 +6,8 @@ import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
 import { ErrorBoundary, cx } from "./design/components";
-import { NavContext } from "./lib/nav";
-import { FilterProvider } from "./lib/filters";
+import { NavContext, useNav, type NavIntent } from "./lib/nav";
+import { FilterProvider, useFilters } from "./lib/filters";
 import { FilterBar } from "./modules/_shared";
 import { MODULES, GROUPS } from "./modules";
 
@@ -16,12 +16,26 @@ function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: 
   return <Comp period={period} />;
 }
 
+// Pont Nav → Filtre : quand une navigation porte une intention `filter`, l'applique au filtre
+// transverse (le FilterProvider est un enfant du NavProvider, donc ce pont vit dans les deux).
+function NavFilterBridge() {
+  const { intent } = useNav();
+  const { set } = useFilters();
+  useEffect(() => { if (intent?.filter) set(intent.filter); }, [intent]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
 export default function App() {
   const { user, role, loading } = useClaims();
   const can = useCanFn();
   const { data: periods } = useDocData<any>("config/periods");
   const [period, setPeriod] = useState<string>("all");
   const [active, setActive] = useState<string>("overview");
+  // Intention de navigation courante (filtre / segment / FP à pré-appliquer par le module cible).
+  // Remise à zéro sur toute navigation MANUELLE (clic onglet/domaine) pour ne pas rejouer un
+  // contexte périmé ; posée par `go(id, intent)` lors d'un drill-through.
+  const [intent, setIntent] = useState<NavIntent | null>(null);
+  const openManual = (id: string) => { setActive(id); setIntent(null); };
 
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
   const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none"), [can]);
@@ -46,8 +60,9 @@ export default function App() {
   const visibleIds = useMemo(() => new Set(visible.map((m) => m.id)), [visible]);
   const nav = useMemo(() => ({
     canGo: (id: string) => visibleIds.has(id),
-    go: (id: string) => { if (visibleIds.has(id)) setActive(id); },
-  }), [visibleIds]);
+    go: (id: string, it?: NavIntent) => { if (visibleIds.has(id)) { setActive(id); setIntent(it ?? null); } },
+    intent,
+  }), [visibleIds, intent]);
 
   // Au lancement : sélectionner par défaut l'année fiscale en cours (si l'utilisateur
   // n'a pas encore choisi de période et qu'elle est disponible). Ne surcharge pas un choix manuel.
@@ -71,6 +86,7 @@ export default function App() {
   return (
     <NavContext.Provider value={nav}>
     <FilterProvider>
+    <NavFilterBridge />
     <div className="min-h-screen">
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
         {/* Header */}
@@ -112,7 +128,7 @@ export default function App() {
               return (
                 <button
                   key={g.label}
-                  onClick={() => { if (!g.mods.some((m) => m.id === allowed?.id)) setActive(g.mods[0].id); }}
+                  onClick={() => { if (!g.mods.some((m) => m.id === allowed?.id)) openManual(g.mods[0].id); }}
                   aria-pressed={on}
                   className={cx("whitespace-nowrap rounded-full px-3.5 py-1.5 min-h-[34px] text-[13px] font-semibold transition-colors",
                     on ? "bg-panel text-ink ring-1 ring-gold/60" : "text-muted hover:text-ink hover:bg-panel/50")}
@@ -132,7 +148,7 @@ export default function App() {
                   <button
                     key={m.id}
                     ref={on ? activeTabRef : undefined}
-                    onClick={() => setActive(m.id)}
+                    onClick={() => openManual(m.id)}
                     aria-current={on ? "page" : undefined}
                     className={cx("inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors",
                       on ? "text-ink border-gold" : "text-muted border-transparent hover:text-ink hover:bg-panel/50 rounded-t-lg")}
