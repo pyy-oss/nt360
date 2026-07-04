@@ -31,10 +31,17 @@ export const Pipeline: FC<Props> = ({ period }) => {
   const coverage = hasObj && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
   const coverageLabel = coverage != null ? `${coverage.toFixed(2)}×` : hasObj ? "atteint" : "—";
   const cb = data.closing?.buckets;
+  // Buckets serveur DISJOINTS par horizon : `mois` = clôture ce mois ; `trim` = clôture plus tard
+  // DANS le trimestre courant (hors ce mois). L'échéancier (waterfall) les affiche tels quels.
+  // Les KPI, eux, sont CUMULATIFS (« ce trimestre » inclut « ce mois ») — sinon le trimestre
+  // pourrait afficher moins que le mois, ce qui est incohérent pour une lecture cumulée.
+  const moisPond = cb?.mois?.pond || 0, moisCount = cb?.mois?.count || 0;
+  const trimCumPond = moisPond + (cb?.trim?.pond || 0);
+  const trimCumCount = moisCount + (cb?.trim?.count || 0);
   const closingRows = cb ? [
     { name: "En retard", v: cb.retard?.pond || 0, sub: `${cb.retard?.count || 0} opp.` },
     { name: "Ce mois", v: cb.mois?.pond || 0, sub: `${cb.mois?.count || 0} opp.` },
-    { name: "Ce trimestre", v: cb.trim?.pond || 0, sub: `${cb.trim?.count || 0} opp.` },
+    { name: "Reste du trimestre", v: cb.trim?.pond || 0, sub: `${cb.trim?.count || 0} opp.` },
     { name: "Plus tard", v: cb.plus?.pond || 0, sub: `${cb.plus?.count || 0} opp.` },
     { name: "Sans date", v: cb.sans?.pond || 0, sub: `${cb.sans?.count || 0} opp.` },
   ] : [];
@@ -71,8 +78,8 @@ export const Pipeline: FC<Props> = ({ period }) => {
           <div className={grid4}>
             <Kpi label="Couverture reste-à-faire" value={coverageLabel} tone={coverage == null ? (hasObj ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré exercice / (objectif − réalisé CAS)" />
             <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp.${data.closing.avgOverdueDays ? ` · ~${data.closing.avgOverdueDays} j de retard moyen` : " · D Prev dépassée"}`} />
-            <Kpi label="À clôturer ce mois" value={fmt(cb?.mois?.pond)} tone="gold" sub={`${cb?.mois?.count ?? 0} opp. (pondéré)`} />
-            <Kpi label="À clôturer ce trimestre" value={fmt(cb?.trim?.pond)} sub={`${cb?.trim?.count ?? 0} opp. (pondéré)`} />
+            <Kpi label="À clôturer ce mois" value={fmt(moisPond)} tone="gold" sub={`${moisCount} opp. (pondéré)`} />
+            <Kpi label="À clôturer ce trimestre" value={fmt(trimCumPond)} sub={`${trimCumCount} opp. · ce mois inclus`} />
           </div>
           <div className={cols2}>
             <Card title="Échéancier du closing (pondéré, par horizon)">
