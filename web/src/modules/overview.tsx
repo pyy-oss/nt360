@@ -11,7 +11,7 @@ import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
 import { normalizeTiers, type ProjectionConfig } from "../lib/projection";
-import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice } from "../types";
+import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice, RentabiliteSummary } from "../types";
 
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
 // Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
@@ -62,6 +62,9 @@ export const Overview: FC<Props> = ({ period }) => {
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
   const canMargin = useCanSeeMargin();
   const { data: ovMargin } = useDocData<{ mb?: number; pmb?: number }>(canMargin && !active ? `summaries/overviewMargin_${period}` : null);
+  // Perspective FACTURÉ de la marge (marge reconnue au prorata du facturé, plafonnée au CAS) : hors
+  // filtre depuis l'agrégat Rentabilité (gaté « rentabilite ») ; en vue filtrée depuis le recalcul.
+  const { data: rentab } = useDocData<RentabiliteSummary>(canMargin && !active ? `summaries/rentabilite_${period}` : null);
   // Niveaux de projection configurés (Certitudes/Forecast/Pipe) : appliqués au recalcul filtré pour
   // rester cohérent avec les agrégats serveur (mêmes poids/activation).
   const { data: projCfg } = useDocData<ProjectionConfig>("config/projection");
@@ -89,6 +92,9 @@ export const Overview: FC<Props> = ({ period }) => {
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).
   const margeMb = active ? filtered?.mb : ovMargin?.mb;
   const margePmb = active ? filtered?.ratios.pmb : ovMargin?.pmb;
+  // Perspective Facturé : marge reconnue sur le facturé (CAF) et son %MB.
+  const margeFacMb = active ? filtered?.factureMb : rentab?.perspectives?.facture?.mb;
+  const margeFacPmb = active ? filtered?.facturePmb : rentab?.perspectives?.facture?.pmb;
 
   return (
     <div className="flex flex-col gap-4">
@@ -129,7 +135,8 @@ export const Overview: FC<Props> = ({ period }) => {
 
       {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
-        {canMargin && <Kpi label="Marge brute (commande)" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)} · marge P&L / CAS${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)} vs objectif marge` : ""}`} />}
+        {canMargin && <Kpi label="Marge brute (commande)" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)} · marge P&L / CAS ${fmt(v.commandes)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)}` : ""}`} />}
+        {canMargin && <Kpi label="Marge brute (facturé)" value={fmt(margeFacMb)} tone="gold" sub={`%MB ${pct(margeFacPmb)} · marge reconnue / CAF ${fmt(v.facture)}`} />}
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />

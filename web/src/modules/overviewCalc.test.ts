@@ -58,6 +58,14 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(r.certitudes).toBe(100); // 100, pas 200 (doublon écarté)
   });
 
+  it("perspective Facturé : marge reconnue = taux × min(facturé, CAS) (plafond surfacturation)", () => {
+    const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "A", cas: 1000, raf: 0, mb: 200, yearPo: 2026 }]; // taux 20 %
+    const inv = [{ fp: "FP/1", bu: "ICT", client: "A", amountHt: 1500, date: "2026-03-01" }]; // surfacturé
+    const r = computeFilteredOverview(ord as any, inv as any, [] as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.facture).toBe(1500);          // assiette facturé = facturé réel
+    expect(r.factureMb).toBe(200);         // 0,20 × min(1500, 1000) = 200 (pas 300)
+    expect(r.facturePmb).toBeCloseTo(200 / 1500, 6);
+  });
   it("conversion vente : bandes 70-90 / 50-70 pondérées + perdu au dénominateur", () => {
     const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "A", cas: 2000, raf: 0, mb: 0, yearPo: 2026 }];
     const opps2 = [
