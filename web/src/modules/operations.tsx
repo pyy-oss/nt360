@@ -331,12 +331,12 @@ export const Fp360: FC<Props> = () => {
   const cons = [where("fp", "==", fp || "__none__")];
   // Commande lue depuis commandesRows (marge fusionnée si accès Rentabilité) — plus de lecture directe
   // de orders/* côté client (qui porte la marge et est désormais réservé à « Rentabilité »).
-  const { rows: cmdRows } = useCommandesRows();
-  // queryKey = fp : sans lui le hook ne se ré-abonne pas quand la recherche change.
-  const { rows: invoices } = useCollectionData<Invoice>("invoices", cons, fp);
-  const { rows: sheets } = useCollectionData<ProjectSheet>("projectSheets", cons, fp);
-  const { rows: bc } = useCollectionData<BcLine>("bcLines", cons, fp);
-  const { rows: opps } = useCollectionData<Opportunity>("opportunities", cons, fp);
+  const { rows: cmdRows } = useCommandesRows(!!fp); // chargé seulement quand un N° FP est saisi
+  // queryKey = fp ; abonnements ouverts UNIQUEMENT quand un N° FP est saisi (sinon name null).
+  const { rows: invoices } = useCollectionData<Invoice>(fp ? "invoices" : null, cons, fp);
+  const { rows: sheets } = useCollectionData<ProjectSheet>(fp ? "projectSheets" : null, cons, fp);
+  const { rows: bc } = useCollectionData<BcLine>(fp ? "bcLines" : null, cons, fp);
+  const { rows: opps } = useCollectionData<Opportunity>(fp ? "opportunities" : null, cons, fp);
   const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;
   return (
     <div className="flex flex-col gap-4">
