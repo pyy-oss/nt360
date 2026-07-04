@@ -1,14 +1,15 @@
 // Modules opérations : P&L Projet, Crédit Fournisseurs, Exécution BC, Clients/Domaines, FP 360°.
-import { useState, type FC } from "react";
+import { useState, useEffect, type FC } from "react";
 import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
+import { useNav } from "../lib/nav";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
@@ -50,7 +51,7 @@ export const PnlProjet: FC<Props> = () => {
           rows={rows}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
           columns={[
-            colText("FP", (r) => r.fp, (r) => r.fp),
+            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
             // Coût / vente / marge masqués pour les rôles sans accès « Rentabilité » (confidentialité).
@@ -203,7 +204,10 @@ export const BC: FC<Props> = () => {
   const rows = allRows.filter((r) => r.source !== "fiche");
   const planned = allRows.length - rows.length; // = lignes de fiche affaire (achats planifiés)
   const canWrite = useCan("bc") === "write";
-  const [flt, setFlt] = useState<"all" | "open" | "late">("all");
+  const { intent } = useNav();
+  const [flt, setFlt] = useState<"all" | "open" | "late">(intent?.segment === "late" ? "late" : intent?.segment === "open" ? "open" : "all");
+  // Drill-through depuis le Centre d'alertes (« BC en retard / en attente ») → segment pré-sélectionné.
+  useEffect(() => { if (intent?.segment === "late" || intent?.segment === "open") setFlt(intent.segment as "late" | "open"); }, [intent]);
   const today = new Date().toISOString().slice(0, 10);
   const isLate = (r: BcLine) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
   const byStatus: Record<string, number> = {};
@@ -237,7 +241,7 @@ export const BC: FC<Props> = () => {
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           columns={[
             colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
-            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
             colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
             colText("Type", (r) => r.expenseType, (r) => r.expenseType),
             colNum("XOF", (r) => money(r.amountXof), (r) => r.amountXof || 0),
@@ -315,7 +319,7 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
       </Card>
       <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
         <Table columns={[
-          colText(kind === "clients" ? "Client" : "BU", (r) => r.key, (r) => r.key),
+          colText(kind === "clients" ? "Client" : "BU", (r) => <EntityLink kind={kind} value={r.key} />, (r) => r.key),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
           colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
           // Marges masquées pour les rôles sans accès « Rentabilité ».
@@ -333,9 +337,27 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
   );
 }
 
+// Cellule entité (client / BU) cliquable → ouvre la liste correspondante pré-filtrée (factures du
+// client, commandes de la BU) via l'intention de filtre transverse. Repli en texte si pas d'accès.
+function EntityLink({ kind, value }: { kind: "clients" | "domaines"; value: string }) {
+  const { go, canGo } = useNav();
+  if (!value) return <>—</>;
+  const target = kind === "clients" ? "invoicelist" : "orderlist";
+  const filter = kind === "clients" ? { client: value } : { bu: value };
+  if (!canGo(target)) return <>{value}</>;
+  return (
+    <button type="button" onClick={() => go(target, { filter })}
+      className="text-ink hover:text-gold underline decoration-dotted underline-offset-2"
+      title={kind === "clients" ? "Voir les factures de ce client" : "Voir les commandes de cette BU"}>{value}</button>
+  );
+}
+
 // FP 360°
 export const Fp360: FC<Props> = () => {
-  const [q, setQ] = useState("");
+  const { intent } = useNav();
+  const [q, setQ] = useState(intent?.fp ?? "");
+  // Ouverture depuis une cellule FP (maillage) → pré-remplit la recherche avec le N° FP cliqué.
+  useEffect(() => { if (intent?.fp) setQ(intent.fp); }, [intent]);
   const canMargin = useCanSeeMargin();
   const fp = q.trim().toUpperCase();
   const cons = [where("fp", "==", fp || "__none__")];
@@ -376,8 +398,22 @@ export const Fp360: FC<Props> = () => {
 };
 
 // Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
+// Anomalie → module de remédiation (le drill-through remplace le cul-de-sac « export CSV » par un
+// accès direct au widget de correction déjà existant : rattacher facture, corriger commande, etc.).
+const ISSUE_FIX = (type: string): { module: string; segment?: string } | null => {
+  if (type === "factures_orphelines") return { module: "invoicelist", segment: "orphan" };
+  if (type.startsWith("factures")) return { module: "invoicelist" };
+  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation") return { module: "orderlist" };
+  if (type.startsWith("opps")) return { module: "opplist" };
+  if (type.startsWith("bc_")) return { module: "bc" };
+  if (type.startsWith("fiches")) return { module: "pnlprojet" };
+  return null;
+};
+
+// Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
 export const DataQuality: FC<Props> = () => {
   const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  const { go, canGo } = useNav();
   if (!data) return <EmptyState />;
   const issues = data.issues || [];
   const c = data.counts || {};
@@ -413,18 +449,24 @@ export const DataQuality: FC<Props> = () => {
       <Card title={`Anomalies de données · ${issues.length}`} actions={issues.length ? <button onClick={exportCsv} className="btn-ghost !px-2.5 !py-1 text-xs">Exporter (CSV)</button> : undefined}>
         {issues.length ? (
           <div className="flex flex-col gap-2">
-            {issues.map((it, i) => (
+            {issues.map((it, i) => {
+              const fix = ISSUE_FIX(it.type);
+              const actionable = !!fix && canGo(fix.module);
+              return (
               <div key={i} className="flex items-start gap-2 text-[13px]">
                 <Badge tone={(tone[it.severity] || "neutral") as any}>{it.count}</Badge>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span>{it.label}</span>
+                  {actionable
+                    ? <button onClick={() => go(fix!.module, fix!.segment ? { segment: fix!.segment } : undefined)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir la vue pour corriger">{it.label}</button>
+                    : <span>{it.label}</span>}
                   {(it.refs || []).slice(0, 6).map((r, j) => (
                     <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
                   ))}
                   {(it.refs || []).length > 6 && <span className="text-[11px] text-faint">+{(it.refs || []).length - 6}</span>}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : <EmptyState label="Aucune anomalie détectée — données propres." />}
       </Card>

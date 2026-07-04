@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
 
@@ -224,7 +224,7 @@ export const OppList: FC<Props> = () => {
           rows={rows}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
           columns={[
-            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("Désignation", (r) => r.designation || "—", (r) => r.designation || ""),
             colText("AM", (r) => r.am, (r) => r.am),

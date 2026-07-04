@@ -59,14 +59,29 @@ export function useCommandesRows(enabled = true) {
   return { rows, count: meta?.count ?? rows.length, loading: l1 || l2 };
 }
 
-// Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable).
-const ALERT_TARGET: Record<string, string> = {
-  marge_negative: "orderlist", achat_sup_vente: "orderlist", raf_incoherent: "orderlist",
-  factures_non_rattachees: "invoicelist", facture_pre_po: "invoicelist", surfacturation: "invoicelist",
-  backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
-  concentration_client: "clients", bc_en_attente: "bc", bc_en_retard: "bc",
-  opp_dormante: "opplist",
+// Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable), avec le
+// SEGMENT interne à pré-sélectionner sur la vue cible quand elle en propose un (ex. « en retard »
+// sur Exécution BC) — le drill-through arrive ainsi filtré, pas sur la liste complète.
+const ALERT_TARGET: Record<string, { module: string; segment?: string }> = {
+  marge_negative: { module: "orderlist" }, achat_sup_vente: { module: "orderlist" }, raf_incoherent: { module: "orderlist" },
+  factures_non_rattachees: { module: "invoicelist", segment: "orphan" }, facture_pre_po: { module: "invoicelist" }, surfacturation: { module: "invoicelist" },
+  backlog_dormant: { module: "backlog" }, ligne_saturee: { module: "fournisseurs" }, ligne_tension: { module: "fournisseurs" },
+  concentration_client: { module: "clients" }, bc_en_attente: { module: "bc", segment: "open" }, bc_en_retard: { module: "bc", segment: "late" },
+  opp_dormante: { module: "opplist" },
 };
+
+// Cellule N° FP cliquable → ouvre FP 360° pré-renseigné (maillage transverse). Repli en texte
+// simple si l'utilisateur n'a pas accès à FP 360° ou si le FP est vide.
+export function FpLink({ fp }: { fp?: string | null }) {
+  const { go, canGo } = useNav();
+  if (!fp) return <>—</>;
+  if (!canGo("fp360")) return <>{fp}</>;
+  return (
+    <button type="button" onClick={() => go("fp360", { fp })}
+      className="text-ink hover:text-gold underline decoration-dotted underline-offset-2"
+      title="Ouvrir FP 360°">{fp}</button>
+  );
+}
 
 export type Props = { period: string };
 export const grid4 = "grid gap-3 grid-cols-2 lg:grid-cols-4";
@@ -362,14 +377,14 @@ export function AlertsBanner() {
       <div className="flex flex-col gap-2">
         {items.map((a, i) => {
           const target = ALERT_TARGET[a.type];
-          const actionable = !!target && canGo(target);
+          const actionable = !!target && canGo(target.module);
           const refs = (a.refs || []).filter(Boolean);
           return (
             <div key={i} className="flex items-start gap-2 text-[13px]">
               <AlertTriangle size={14} aria-hidden="true" className={cx("mt-0.5 shrink-0", a.severity === "high" ? "text-clay" : a.severity === "medium" ? "text-gold" : "text-steel")} />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 {actionable
-                  ? <button onClick={() => go(target)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir le module concerné">{a.message}</button>
+                  ? <button onClick={() => go(target.module, target.segment ? { segment: target.segment } : undefined)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir le module concerné">{a.message}</button>
                   : <span>{a.message}</span>}
                 <Badge tone={(tone[a.severity] || "neutral") as any}>{a.count}</Badge>
                 {refs.slice(0, 6).map((r, j) => (

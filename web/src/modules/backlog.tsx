@@ -5,7 +5,7 @@ import { useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows } from "./_shared";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { patchOrder } from "../lib/writes";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary } from "../types";
@@ -48,7 +48,7 @@ export const Backlog: FC<Props> = () => {
       {deriveRows.length > 0 && (
         <Card title={`Commandes à RAF dérivé (suspectes) · ${deriveRows.length}`}>
           <Table columns={[
-            colText("FP", (t) => t.fp),
+            colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp),
             colText("Client", (t) => t.client),
             colText("Affaire", (t) => t.affaire || "—"),
             colText("BU", (t) => t.bu),
@@ -63,7 +63,7 @@ export const Backlog: FC<Props> = () => {
       )}
 
       <Card title="Top commandes ouvertes">
-        <Table columns={[colText("FP", (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
+        <Table columns={[colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
       </Card>
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
     </div>
@@ -319,7 +319,7 @@ export const OrderList: FC<Props> = () => {
         rows={rows}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.affaire || ""]}
         columns={[
-          colText("FP", (r) => r.fp, (r) => r.fp),
+          colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colText("BU", (r) => buBadge(r.bu), (r) => r.bu),

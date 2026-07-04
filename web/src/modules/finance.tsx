@@ -1,12 +1,13 @@
 // Modules finance : Objectifs / R-O, Facturation, liste Factures, Rentabilité.
-import { useState, type FC } from "react";
+import { useState, useEffect, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
+import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
-import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote } from "./_shared";
+import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import type { FacturationSummary, RentabiliteSummary, Objective, Invoice } from "../types";
 
@@ -145,7 +146,10 @@ export const InvoiceList: FC<Props> = () => {
   const { match } = useFilters();
   const rows = allRows.filter((r) => match(r, ["bu", "client"])); // les factures ne portent pas d'AM
   const canImport = useCanImport();
-  const [f, setF] = useState<"all" | "linked" | "orphan">("all");
+  const { intent } = useNav();
+  const [f, setF] = useState<"all" | "linked" | "orphan">(intent?.segment === "orphan" ? "orphan" : "all");
+  // Drill-through depuis le Centre d'alertes (« factures non rattachées ») → segment pré-sélectionné.
+  useEffect(() => { if (intent?.segment === "orphan") setF("orphan"); }, [intent]);
   if (loading && !allRows.length) return <CardSkeleton />;
   const orphan = rows.filter((r) => r.linked !== true);
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
@@ -169,7 +173,7 @@ export const InvoiceList: FC<Props> = () => {
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
           columns={[
             colText("Numéro", (r) => r.numero, (r) => r.numero),
-            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
             colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1)),
@@ -237,7 +241,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
       </div>
       <Card title="Affaires à faible marge (à surveiller)">
         <Table columns={[
-          colText("FP", (a) => a.fp || "—", (a) => a.fp || ""),
+          colText("FP", (a) => <FpLink fp={a.fp} />, (a) => a.fp || ""),
           colText("Client", (a) => a.client || "—", (a) => a.client || ""),
           colText("AM", (a) => a.am || "—", (a) => a.am || ""),
           colNum(baseLbl, (a) => money(a.base), (a) => a.base),
