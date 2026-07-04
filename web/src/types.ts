@@ -12,6 +12,7 @@ export interface OverviewSummary {
 
 export interface AtterrissageSummary {
   fy?: number; realiseCas?: number; backlog?: number; pipelinePondere?: number;
+  pipelineRetard?: number; pipelineRetardCount?: number;
   projete?: number; cafProjete?: number;
   objectif?: number; ecart?: number; probaAtteinte?: number;
   objectifCaf?: number; ecartCaf?: number; probaAtteinteCaf?: number;
