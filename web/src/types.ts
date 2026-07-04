@@ -12,8 +12,12 @@ export interface OverviewSummary {
 }
 
 export type Carryover = { fp?: string; amount?: number; updatedAt?: unknown };
+export type AtterrissageNext = {
+  fy?: number; realiseCas?: number; factureN?: number; reporteEntrant?: number; pipelinePondere?: number;
+  projete?: number; cafProjete?: number; objectif?: number; ecart?: number; objectifCaf?: number; ecartCaf?: number;
+};
 export interface AtterrissageSummary {
-  fy?: number; realiseCas?: number; backlog?: number; backlogProjete?: number; reporteCaf?: number; pipelinePondere?: number;
+  fy?: number; next?: AtterrissageNext; realiseCas?: number; backlog?: number; backlogProjete?: number; reporteCaf?: number; pipelinePondere?: number;
   pipelineRetard?: number; pipelineRetardCount?: number;
   projete?: number; cafProjete?: number;
   objectif?: number; ecart?: number; probaAtteinte?: number;

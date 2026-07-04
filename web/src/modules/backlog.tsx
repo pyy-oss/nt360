@@ -193,6 +193,17 @@ export const Prevision: FC<Props> = () => {
             <GroupedBars data={[{ name: `FY ${(att.fy || 0) - 1}`, Facturé: att.factureN1 }, { name: `FY ${att.fy}`, Facturé: att.factureN }]} series={[{ key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={54} />
             <Tip>Croissance : <span className={(att.croissanceFacture || 0) >= 0 ? "text-emerald" : "text-clay"}>{pct(att.croissanceFacture)}</span></Tip>
           </Card>
+          {att.next && ((att.next.cafProjete || 0) > 0 || (att.next.projete || 0) > 0) && (
+            <Card title={`Amorce d'atterrissage ${att.next.fy} — exercice suivant`}>
+              <div className={cols2}>
+                <Kpi label={`Projeté CAS ${att.next.fy}`} value={fmt(att.next.projete)} sub="Réalisé CAS N+1 + pipeline (D Prev N+1)" />
+                <Kpi label={`Projeté CAF ${att.next.fy}`} value={fmt(att.next.cafProjete)} tone="gold" sub={`Facturé N+1 + reporté de ${att.fy} + pipeline`} />
+              </div>
+              <Tip>
+                Amorce de l'exercice <b>{att.next.fy}</b> : le <b>CA reporté de {att.fy}</b> ({fmt(att.next.reporteEntrant)}{canMargin && (attMargin?.reporteMarge || 0) > 0 ? ` · marge ${fmt(attMargin?.reporteMarge)}` : ""}) constitue le <b>backlog entrant</b>, complété par le <b>pipeline</b> dont la D Prev tombe en {att.next.fy}. Le RAF glissant reste facturé en {att.fy} (non recompté ici). {(att.next.objectifCaf || 0) > 0 ? <>Objectif CAF {att.next.fy} : {fmt(att.next.objectifCaf)} · écart {fmt(att.next.ecartCaf)}.</> : null}
+              </Tip>
+            </Card>
+          )}
         </>
       )}
       {cf && ((cf.openCount || 0) > 0 || (cf.bcOpenCount || 0) > 0) && (() => {
