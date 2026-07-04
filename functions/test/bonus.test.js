@@ -68,6 +68,19 @@ describe("atterrissage (§7)", () => {
     expect(r.backlogProjete).toBe(40);    // projection : plafonné à 100 − 60
     expect(r.cafProjete).toBe(100);       // 60 (facturé) + 40 (RAF plafonné) + 0 pipeline = 100 (= CAS), pas 160
   });
+  it("report de CA sur N+1 : montant exclu du Projeté CAF, exposé en reporteCaf (borné au RAF projetable)", () => {
+    const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0 }]; // RAF projetable = 400
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": 250 });
+    expect(a.reporteCaf).toBe(250);
+    expect(a.backlogProjete).toBe(150); // 400 − 250 reporté
+    expect(a.cafProjete).toBe(150);     // 0 facturé + 150 (backlog net) + 0 pipeline
+  });
+  it("report borné au RAF projetable (report > RAF n'engendre pas de CAF négatif)", () => {
+    const ord = [{ fp: "FP/2026/2", yearPo: 2026, cas: 500, raf: 500, facture: 0 }];
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/2": 9999 });
+    expect(a.reporteCaf).toBe(500); // plafonné à 500
+    expect(a.backlogProjete).toBe(0);
+  });
   it("cohérence closing : part du pipeline projeté « à requalifier » (D Prev passée) exposée", () => {
     // asOf = 2026-03-01 → seule l'opp D Prev 2026-02-01 (95 % → 300) est en retard, mais comptée.
     expect(a.pipelineRetard).toBe(300);

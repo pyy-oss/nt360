@@ -1,15 +1,15 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { useState, type FC } from "react";
-import { useDocData } from "../lib/hooks";
-import { useCanImport, useCanSeeMargin } from "../lib/rbac";
+import { useDocData, useCollectionData } from "../lib/hooks";
+import { useCanImport, useCanSeeMargin, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
-import { patchOrder } from "../lib/writes";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary } from "../types";
+import { patchOrder, setCarryover } from "../lib/writes";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -66,10 +66,58 @@ export const Backlog: FC<Props> = () => {
       <Card title="Top commandes ouvertes">
         <Table columns={[colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
       </Card>
+      <CarryoverCard />
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
     </div>
   );
 };
+
+// Report de CA sur N+1 par projet (direction / PMO) : on saisit, par commande ouverte, le montant
+// du RAF qui sera facturé l'exercice SUIVANT → exclu du Projeté CAF courant. Persisté (collection
+// carryovers), non écrasé par les réimports. L'enregistrement relance le calcul de l'atterrissage.
+function CarryoverCard() {
+  const { role } = useClaims();
+  const canEdit = role === "direction" || role === "pmo";
+  const { rows: orders } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
+  const { rows: carry } = useCollectionData<Carryover>(canEdit ? "carryovers" : null);
+  if (!canEdit) return null;
+  const cby = new Map<string, number>();
+  for (const c of carry) if (c.fp) cby.set(c.fp.toUpperCase(), c.amount || 0);
+  // Commandes ouvertes (RAF projetable > 0) triées par RAF décroissant.
+  const open = orders
+    .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
+    .filter((o) => o.projetable > 0)
+    .sort((a, b) => b.projetable - a.projetable);
+  const totalReporte = open.reduce((s, o) => s + Math.min(cby.get((o.fp || "").toUpperCase()) || 0, o.projetable), 0);
+  return (
+    <Card title="Report de CA sur l'exercice suivant (par projet)">
+      {totalReporte > 0 && <div className={grid4}><Kpi label="Total reporté sur N+1" value={fmt(totalReporte)} tone="steel" sub="exclu du Projeté CAF courant" /></div>}
+      <ListView
+        rows={open}
+        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire || ""]}
+        columns={[
+          colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
+          colText("Client", (r) => r.client, (r) => r.client),
+          colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
+          colNum("RAF projetable", (r) => money(r.projetable), (r) => r.projetable),
+          colNum("Reporté N+1", (r) => <CarryoverEditor fp={r.fp!} current={cby.get((r.fp || "").toUpperCase()) || 0} max={r.projetable} />, (r) => cby.get((r.fp || "").toUpperCase()) || 0),
+        ]}
+      />
+      <Tip>Saisir le montant du <b>RAF</b> d'un projet qui sera facturé en <b>N+1</b> (0 = aucun report ; borné au RAF projetable). Ce montant est <b>exclu du Projeté CAF</b> de l'exercice courant et affiché « reporté N+1 » sur la Prévision et la Vue d'ensemble. L'enregistrement relance le calcul.</Tip>
+    </Card>
+  );
+}
+function CarryoverEditor({ fp, current, max }: { fp: string; current: number; max: number }) {
+  const [v, setV] = useState(current ? String(current) : "");
+  const num = Number(String(v).replace(/\s/g, "").replace(",", "."));
+  const eff = Number.isFinite(num) && num > 0 ? Math.min(num, max) : 0;
+  return (
+    <span className="inline-flex gap-1 items-center justify-end">
+      <input className="field w-32 !py-1 text-xs text-right" inputMode="numeric" placeholder="0" value={v} onChange={(e) => setV(e.target.value)} aria-label={`Report N+1 pour ${fp}`} />
+      <Busy variant="ghost" label="OK" okMsg="Report enregistré (recalcul lancé)" fn={() => setCarryover(fp, eff)} />
+    </span>
+  );
+}
 
 // 6 — Prévision (ancrée FY, cohérente avec l'atterrissage)
 export const Prevision: FC<Props> = () => {
@@ -124,6 +172,7 @@ export const Prevision: FC<Props> = () => {
                 <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", (att.ecartCaf || 0) < 0 ? "text-clay" : "text-emerald")}>{(att.objectifCaf || 0) > 0 ? fmt(att.ecartCaf) : "—"}</div></div>
               </div>
               {(att.pipelineRetard || 0) > 0 && <div className="text-[11px] text-clay text-center mt-1" title="Comptées dans le projeté (D Prev dans l'exercice) mais D Prev déjà dépassée — « en retard de closing » côté Pipeline.">dont {fmt(att.pipelineRetard)}{(att.pipelineRetardCount || 0) > 0 ? ` (${att.pipelineRetardCount} opp.)` : ""} à requalifier — D Prev dépassée</div>}
+              {(att.reporteCaf || 0) > 0 && <div className="text-[11px] text-steel text-center mt-1" title="RAF explicitement reporté sur l'exercice suivant (par projet, Suivi Backlog) — EXCLU de ce projeté CAF.">hors {fmt(att.reporteCaf)} reporté sur N+1 (exclu du projeté)</div>}
             </Card>
           </div>
           <Card title="Facturation N vs N-1">
