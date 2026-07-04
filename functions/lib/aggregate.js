@@ -35,9 +35,11 @@ async function recomputeAll(db, only) {
   // bcLines/creditLines/objectives ne sont lus QUE si un summary demandé en a besoin. Un recompute
   // ciblé (ex. après un changement de statut BC → ["suppliers","alerts"]) évite ainsi des lectures.
   const need = (keys) => !only || keys.some((k) => only.includes(k));
-  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality"]);
+  // NB : ces ensembles DOIVENT couvrir tous les summaries qui utilisent la collection — y compris
+  // les co-déclenchements (cashflow s'écrit aussi sur want("facturation") ; ams sur want("pipeline")).
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation"]);
   const needCredit = need(["suppliers", "alerts"]);
-  const needObj = need(["atterrissage", "ams"]);
+  const needObj = need(["atterrissage", "ams", "pipeline"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices"),

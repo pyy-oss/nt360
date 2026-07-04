@@ -67,7 +67,9 @@ function parseSalesData(wb) {
     // + un index d'occurrence PARMI LES LIGNES IDENTIQUES. On hashe la date BRUTE (pas la date
     // fenêtrée) pour que l'oppId ne dépende PAS de l'horloge : une échéance en limite de fenêtre
     // (année+3/+4) donne le même ID quelle que soit l'année de ré-import (pas de doublon).
-    const extId = val(r, keys, "ext id", "extid", "opp id", "oppid");
+    // trim : un ext-id fait uniquement d'espaces donnerait un safeId vide → chemin Firestore invalide
+    // (import entier planté). Vidé → on retombe sur la clé métier hashée.
+    const extId = String(val(r, keys, "ext id", "extid", "opp id", "oppid") || "").trim();
     let oppId;
     if (extId) {
       oppId = safeId(extId);

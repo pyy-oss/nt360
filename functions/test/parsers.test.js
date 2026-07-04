@@ -39,6 +39,10 @@ describe("parsePnl → orders + suppliers (§17.2)", () => {
     expect(rows[0].raf).toBe(400);
     expect(rows[0].bu).toBe("ICT");
   });
+  it("RAF Total VIDE → raf null (≠ 0) pour autoriser le repli dérivé en aval", () => {
+    const wb2 = wbFromRows("P&L", [{ "Opp ID": "FP/2026/7", Customer: "ACME", BU: "ICT", "Year PO": 2026, CAS: 1000, "RAF Total": "" }]);
+    expect(parsePnl(wb2).rows[0].raf).toBeNull();
+  });
   it("filtre le bruit fournisseurs (COM) et les montants nuls", () => {
     expect(rows[0].suppliers).toEqual([{ name: "HIPERDIST", amount: 300 }]);
   });

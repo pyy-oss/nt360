@@ -5,6 +5,11 @@ const XLSX = require("xlsx");
 const { fpKey, num, cleanBu, NOISE, cleanName, cleanPerson, noAcc, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, safeId } = require("../lib/sheets");
 
+// RAF du P&L : une colonne « RAF Total » VIDE doit rester `null` (RAF non curaté) et NON 0, sinon
+// `mergeCommandes` la prend pour un RAF Excel figé (`o.raf != null`) et neutralise le repli dérivé
+// max(CAS − facturé, 0) → une commande signée non facturée disparaîtrait du backlog.
+const rafOf = (v) => (v == null || v === "" ? null : Math.max(num(v), 0));
+
 // Choisit la feuille P&L en s'ALIGNANT sur la détection (ingest.hasPnl) plutôt que sur un
 // nom littéral "P&L" : 1re feuille dont l'entête porte opp id + cas + raf total ; repli sur
 // une feuille nommée P&L/PnL ; sinon 1re feuille. Évite un import silencieusement vide (§17.2).
@@ -47,7 +52,7 @@ function parsePnl(wb) {
       bu: cleanBu(val(r, keys, "bu")),
       yearPo: plausibleYear(parseInt(val(r, keys, "year po")) || 0), // fenêtre glissante, rejet sentinelles 1900
       cas,
-      raf: Math.max(num(val(r, keys, "raf total")), 0),
+      raf: rafOf(val(r, keys, "raf total")),
       mb: num(val(r, keys, "mb total")), // MB TOTAL, pas MB Réel / Manuel (§18.2)
       am: cleanPerson(val(r, keys, "am")),
       suppliers,
