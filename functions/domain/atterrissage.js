@@ -82,8 +82,32 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
   }
   const cafProjete = factureN + backlogProjete + pipelinePondere;
 
+  // AMORCE D'ATTERRISSAGE N+1 : le CA reporté (backlog explicitement décalé) devient la base facturable
+  // de l'exercice SUIVANT ; s'y ajoutent le pipeline dont la D Prev tombe en N+1 (hors affaires déjà
+  // en commande) et le réalisé / facturé DÉJÀ enregistrés pour N+1. Le RAF glissant N'y entre PAS
+  // (il est facturé en N) : seule la part reportée constitue le backlog entrant en N+1.
+  const fyNext = fy + 1;
+  const realiseCasNext = sum(orders.filter((o) => (o.yearPo || 0) === fyNext), (o) => o.cas);
+  const factureNext = sum(invoices.filter((i) => yearOf(i.date) === String(fyNext)), (i) => i.amountHt);
+  const pipelineNext = sum(opps.filter((o) => isActive(o) && yearOf(o.closingDate) === String(fyNext) && !alreadyBooked(o)), pw);
+  const objGlobalNext = objectives.filter((o) => Number(o.fiscalYear) === fyNext && (!o.scope || o.scope === "global"));
+  const objectifNext = sum(objGlobalNext, (o) => o.targetCas);
+  const objectifCafNext = sum(objGlobalNext, (o) => o.targetInvoiced);
+  const projeteNext = realiseCasNext + pipelineNext;
+  const cafProjeteNext = factureNext + reporteCaf + pipelineNext; // reporté = backlog entrant en N+1
+  const next = {
+    fy: fyNext,
+    realiseCas: realiseCasNext, factureN: factureNext,
+    reporteEntrant: reporteCaf,          // CA reporté depuis N (amorce du CAF N+1)
+    pipelinePondere: pipelineNext,
+    projete: projeteNext, cafProjete: cafProjeteNext,
+    objectif: objectifNext, ecart: projeteNext - objectifNext,
+    objectifCaf: objectifCafNext, ecartCaf: cafProjeteNext - objectifCafNext,
+  };
+
   return {
     fy,
+    next,                  // amorce de projection de l'exercice suivant (alimentée par le reporté)
     realiseCas,
     backlog,
     backlogProjete,        // RAF plafonné à (CAS − facturé), NET du report N+1, utilisé dans cafProjete
