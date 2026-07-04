@@ -8,7 +8,7 @@ import Login from "./components/Login";
 import { ErrorBoundary, cx } from "./design/components";
 import { NavContext, useNav, type NavIntent } from "./lib/nav";
 import { FilterProvider, useFilters } from "./lib/filters";
-import { FilterBar } from "./modules/_shared";
+import { FilterBar, FreshnessGuard } from "./modules/_shared";
 import { MODULES, GROUPS } from "./modules";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
@@ -167,6 +167,7 @@ export default function App() {
 
         {/* Content */}
         <main>
+          <FreshnessGuard />
           {allowed ? (
             <ErrorBoundary key={allowed.id}>
               <h1 className="font-display text-2xl font-bold mb-4">{allowed.label}</h1>

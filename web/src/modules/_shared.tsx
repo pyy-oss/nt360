@@ -6,7 +6,8 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
 import { useCanSeeMargin } from "../lib/rbac";
-import { relTime } from "../lib/format";
+import { relTime, ageDays } from "../lib/format";
+import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
@@ -80,6 +81,37 @@ export function FpLink({ fp }: { fp?: string | null }) {
     <button type="button" onClick={() => go("fp360", { fp })}
       className="text-ink hover:text-gold underline decoration-dotted underline-offset-2"
       title="Ouvrir FP 360°">{fp}</button>
+  );
+}
+
+// Garde-fou de FRAÎCHEUR (affiché sur toutes les vues) : alerte quand le dernier recalcul est trop
+// ancien (les indicateurs « en retard / à venir / ce mois » sont datés par rapport à lui et peuvent
+// avoir dérivé), et quand l'exercice courant (dérivé des données = max année de PO) est en retard
+// sur l'année civile (imports en retard → atterrissage et closing ne parlent pas du même exercice).
+export function FreshnessGuard() {
+  const { data: cfg } = useDocData<{ lastRecomputeAt?: any; currentFy?: number }>("config/periods");
+  if (!cfg) return null;
+  const age = ageDays(cfg.lastRecomputeAt, Date.now());
+  const stale = age >= STALE_RECOMPUTE_DAYS;
+  const realYear = new Date().getFullYear();
+  const fyLag = !!cfg.currentFy && cfg.currentFy < realYear;
+  if (!stale && !fyLag) return null;
+  const box = stale ? "border-clay/40 bg-clay/10" : "border-gold/40 bg-gold/10";
+  return (
+    <div role="status" className={cx("mb-4 flex flex-col gap-1.5 rounded-lg border px-3 py-2 text-[13px] text-ink", box)}>
+      {stale && (
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-clay" />
+          <span><b>Données possiblement obsolètes</b> — dernier recalcul {relTime(cfg.lastRecomputeAt) || `il y a ${age} j`}. Les indicateurs « en retard / à venir / à clôturer ce mois » sont datés par rapport à ce recalcul et peuvent avoir dérivé. Lance « Recalculer » (Vue d'ensemble) ou vérifie le recompute planifié (05:00).</span>
+        </div>
+      )}
+      {fyLag && (
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-gold" />
+          <span><b>Exercice courant = {cfg.currentFy}</b> alors que l'année civile est {realYear} — aucune commande {realYear} importée. L'atterrissage raisonne sur {cfg.currentFy}, tandis que le closing compare au calendrier réel : importe les commandes {realYear} pour réaligner.</span>
+        </div>
+      )}
+    </div>
   );
 }
 
