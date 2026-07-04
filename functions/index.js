@@ -649,8 +649,8 @@ exports.exportReport = onCall(async (req) => {
   const ExcelJS = require("exceljs");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};
-  const [ov, bl, pl, fiscal] = await Promise.all([
-    get(`summaries/overview_${period}`), get("summaries/backlog_fy"),
+  const [ov, ovm, bl, pl, fiscal] = await Promise.all([
+    get(`summaries/overview_${period}`), get(`summaries/overviewMargin_${period}`), get("summaries/backlog_fy"),
     get("summaries/pipeline"), get("config/fiscal"),
   ]);
   const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`);
@@ -663,7 +663,7 @@ exports.exportReport = onCall(async (req) => {
   ws.addRow(["Indicateur", "Valeur"]);
   [
     ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
-    ["Backlog (RAF)", bl.total], ["Marge brute", ov.mb], ["Taux facturation", ov.ratios?.tauxFacturation],
+    ["Backlog (RAF)", bl.total], ["Marge brute", ovm.mb], ["Taux facturation", ov.ratios?.tauxFacturation],
     ["Pipeline actif pondéré", pl.tot?.weighted], ["Atterrissage projeté", att.projete],
     ["Objectif CAS", att.objectif], ["Écart", att.ecart],
   ].forEach((r) => ws.addRow(r));

@@ -14,7 +14,10 @@ service cloud.firestore {
     // Applique le cloisonnement de la matrice AUSSI aux summaries (sinon un rôle sans droit
     // sur un module — ex. commercial sur fournisseurs — pourrait lire ses agrégats).
     function summaryModule(id) {
-      return id.matches('overview.*') ? 'overview'
+      // Marge (par ligne / agrégée / par entité) → accès « Rentabilité » requis. Testé AVANT les
+      // préfixes plus larges (overview/clients/domaines) qui matcheraient aussi ces identifiants.
+      return id.matches('overviewMargin.*') ? 'rentabilite'
+        : id.matches('overview.*') ? 'overview'
         : id.matches('facturation.*') ? 'facturation'
         : id.matches('receivables.*') ? 'facturation'
         : id.matches('cashflow.*') ? 'facturation'
@@ -36,7 +39,9 @@ service cloud.firestore {
     }
 
     // Collections sources : écriture réservée aux Functions (Admin SDK, contourne les rules).
-    match /orders/{id}        { allow read: if canRead('overview');     allow write: if false; }
+    // orders/* porte la marge (mb) par ligne → lecture réservée à « Rentabilité ». Les vues non-marge
+    // (FP 360°, Commandes) lisent les chunks commandesRows (sans marge) ; le serveur lit via Admin SDK.
+    match /orders/{id}        { allow read: if canRead('rentabilite'); allow write: if false; }
     match /invoices/{id}      { allow read: if canRead('facturation');  allow write: if false; }
     match /projectSheets/{id} { allow read: if canRead('pnlprojet');    allow write: if false; }
 
@@ -67,6 +72,8 @@ service cloud.firestore {
     match /summaries/{id}     { allow read: if canRead(summaryModule(id)); allow write: if false; }
     // Chunks des commandes matérialisées (module « overview », comme summaries/commandes).
     match /commandesRows/{id} { allow read: if canRead('overview');       allow write: if false; }
+    // Chunks de MARGE par ligne → accès « Rentabilité » requis (confidentialité).
+    match /commandesRowsMargin/{id} { allow read: if canRead('rentabilite'); allow write: if false; }
 
     // Config : la matrice de droits est éditable par 'habilitations' ; le reste est écrit par Functions.
     match /config/permissions { allow read: if signedIn();              allow write: if canWrite('habilitations'); }
