@@ -94,17 +94,24 @@ function decaissements(bcLines, asOf, opts = {}) {
   let beyond = 0, total = 0, overdue = 0, overdueCount = 0;
 
   const open = (bcLines || []).filter((b) => b.status !== "solde" && (b.amountXof || 0) > 0);
+  let etaKnown = 0, noEtaCount = 0; // fiabilité de la prévision : part du montant ouvert à ETA connue
   for (const b of open) {
     const amt = b.amountXof || 0;
     total += amt;
     const eta = b.etaReel || b.etaContrat;
-    if (!eta) { out[curMonth] += amt; continue; } // ETA inconnue → dû ce mois (comme AR sans échéance)
+    if (!eta) { out[curMonth] += amt; noEtaCount++; continue; } // ETA inconnue → dû ce mois (comme AR sans échéance)
+    etaKnown += amt;
     if (cmpDay(eta) < today) { overdue += amt; overdueCount++; continue; } // ETA passée → isolée (comme AR échu)
     const mk = String(eta).slice(0, 7);
     if (inHorizon.has(mk)) out[mk] += amt;
     else beyond += amt;
   }
-  return { months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, overdue, overdueCount, openCount: open.length };
+  // etaCompleteness : plus il est bas, moins la ventilation mensuelle est fiable (montants sans ETA
+  // rabattus par défaut sur le mois courant). 1 si rien d'ouvert.
+  return {
+    months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, overdue, overdueCount,
+    openCount: open.length, etaKnown, noEtaCount, etaCompleteness: total > 0 ? etaKnown / total : 1,
+  };
 }
 
 module.exports = { cashflow, decaissements, monthList };

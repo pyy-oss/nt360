@@ -8,7 +8,7 @@ import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { patchOrder } from "../lib/writes";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -77,6 +77,7 @@ export const Prevision: FC<Props> = () => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
+  const { data: cf } = useDocData<CashflowSummary>("summaries/cashflow");
   if (!bl && !pl && !att) return <EmptyState />;
   const realiseCas = att?.realiseCas || 0;
   const backlog = bl?.total || 0;
@@ -126,6 +127,45 @@ export const Prevision: FC<Props> = () => {
           </Card>
         </>
       )}
+      {cf && ((cf.openCount || 0) > 0 || (cf.bcOpenCount || 0) > 0) && (() => {
+        // Prévision de trésorerie NETTE : encaissements AR attendus − décaissements fournisseurs
+        // attendus, mois par mois (échus isolés des deux côtés). La fiabilité de la ventilation des
+        // décaissements dépend de la part des lignes BC à ETA connue : sans ETA → rabattues sur le
+        // mois courant, ce qui gonfle artificiellement la sortie du 1er mois.
+        const months = cf.months || [];
+        const fiab = cf.decaissementEtaCompleteness ?? 1;
+        const fiabTone: "emerald" | "gold" | "clay" = fiab >= 0.8 ? "emerald" : fiab >= 0.5 ? "gold" : "clay";
+        const netHorizon = (cf.arHorizon || 0) - months.reduce((s, m) => s + (m.decaissement || 0), 0);
+        return (
+          <Card title={`Prévision de trésorerie — position nette (${cf.horizon || 6} mois glissants)`}>
+            <div className={grid4}>
+              <Kpi label="Encaissements attendus (AR)" value={fmt(cf.arHorizon)} tone="emerald" sub={`${cf.openCount || 0} créances · échéancier`} />
+              <Kpi label="Décaissements attendus (BC)" value={fmt(months.reduce((s, m) => s + (m.decaissement || 0), 0))} tone="clay" sub={`${cf.bcOpenCount || 0} lignes BC ouvertes`} />
+              <Kpi label="Position nette horizon" value={fmt(netHorizon)} tone={netHorizon < 0 ? "clay" : "emerald"} sub="AR attendu − décaissements" />
+              <Kpi label="Échus (recouvrer / payer)" value={`${fmt(cf.overdue)} / ${fmt(cf.decaissementOverdue)}`} tone={(cf.decaissementOverdue || 0) > 0 ? "clay" : "steel"} sub={`${cf.overdueCount || 0} créances · ${cf.decaissementOverdueCount || 0} BC échus`} />
+            </div>
+            <GroupedBars
+              data={months.map((m) => ({ name: m.month, Encaissements: m.ar || 0, Décaissements: m.decaissement || 0 }))}
+              series={[{ key: "Encaissements", color: T.emerald, name: "Encaissements (AR)" }, { key: "Décaissements", color: T.clay, name: "Décaissements (BC)" }]}
+              h={220} size={26}
+            />
+            {/* Indicateur de fiabilité : complétude ETA des décaissements. */}
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-xs text-muted whitespace-nowrap">Fiabilité prévision décaissement</span>
+              <div className="flex-1 h-2 rounded-full bg-line/60 overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${Math.round(fiab * 100)}%`, background: fiabTone === "emerald" ? T.emerald : fiabTone === "gold" ? T.gold : T.clay }} />
+              </div>
+              <Badge tone={fiabTone}>{pct(fiab)}</Badge>
+            </div>
+            <Tip>
+              <b>Position nette</b> = encaissements AR attendus (créances émises, ancrées sur leur échéance) − décaissements fournisseurs attendus (lignes BC non soldées, ancrées sur leur ETA réel/contractuel). Les <b>échus</b> sont isolés des deux côtés (jamais empilés sur le mois courant). Le <b>backlog RAF</b> reste indicatif et hors du net.
+              {(cf.decaissementNoEtaCount || 0) > 0 && (
+                <> La <b>fiabilité</b> ({pct(fiab)}) reflète la part du montant BC à ETA connue : <b>{cf.decaissementNoEtaCount}</b> ligne{(cf.decaissementNoEtaCount || 0) > 1 ? "s" : ""} sans ETA {(cf.decaissementNoEtaCount || 0) > 1 ? "sont rabattues" : "est rabattue"} sur le mois courant — renseigner leur ETA affine la ventilation.</>
+              )}
+            </Tip>
+          </Card>
+        );
+      })()}
       {(trends?.points?.length || 0) >= 2 && (
         <Card title="Tendances (historique des recalculs)">
           <MultiLine

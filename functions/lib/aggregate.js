@@ -119,6 +119,7 @@ async function recomputeAll(db, only) {
       ...cf, months: monthsNet,
       totalDecaissement: dec.total, decaissementBeyond: dec.beyond,
       decaissementOverdue: dec.overdue, decaissementOverdueCount: dec.overdueCount, bcOpenCount: dec.openCount,
+      decaissementEtaCompleteness: dec.etaCompleteness, decaissementNoEtaCount: dec.noEtaCount,
       ...stamp,
     } });
   }
