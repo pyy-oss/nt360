@@ -16,9 +16,9 @@ import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
 // Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
 // une probabilité statistique : c'est un ratio d'atteinte de l'objectif — libellé en conséquence.
-function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount, reporte }: {
+function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount, reporte, reporteMarge }: {
   title: string; proba: number; realise?: number; projete?: number; objectif?: number; ecart?: number; sub: string;
-  retard?: number; retardCount?: number; reporte?: number;
+  retard?: number; retardCount?: number; reporte?: number; reporteMarge?: number;
 }) {
   const hasObj = (objectif || 0) > 0;
   return (
@@ -38,8 +38,8 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard,
         </div>
       )}
       {(reporte || 0) > 0 && (
-        <div className="text-[11px] text-steel text-center mt-1" title="RAF explicitement reporté sur l'exercice suivant (facturation décalée) — EXCLU de ce projeté CAF.">
-          hors {fmt(reporte)} reporté sur N+1 (exclu du projeté)
+        <div className="text-[11px] text-steel text-center mt-1" title="RAF explicitement reporté sur l'exercice suivant (facturation décalée) — EXCLU de ce projeté CAF. La marge suit au prorata.">
+          hors {fmt(reporte)} reporté sur N+1{(reporteMarge || 0) > 0 ? ` · marge ${fmt(reporteMarge)}` : ""} (exclu du projeté)
         </div>
       )}
     </Card>
@@ -70,6 +70,8 @@ export const Overview: FC<Props> = ({ period }) => {
   // Perspective FACTURÉ de la marge (marge reconnue au prorata du facturé, plafonnée au CAS) : hors
   // filtre depuis l'agrégat Rentabilité (gaté « rentabilite ») ; en vue filtrée depuis le recalcul.
   const { data: rentab } = useDocData<RentabiliteSummary>(canMargin && !active ? `summaries/rentabilite_${period}` : null);
+  // Marge reportée sur N+1 (isolée, gatée « rentabilite ») — pour le caveat de l'atterrissage CAF.
+  const { data: attMargin } = useDocData<{ reporteMarge?: number }>(canMargin && cfg?.currentFy ? `summaries/atterrissageMargin_${cfg.currentFy}` : null);
   // Niveaux de projection configurés (Certitudes/Forecast/Pipe) : appliqués au recalcul filtré pour
   // rester cohérent avec les agrégats serveur (mêmes poids/activation).
   const { data: projCfg } = useDocData<ProjectionConfig>("config/projection");
@@ -120,7 +122,7 @@ export const Overview: FC<Props> = ({ period }) => {
             sub="Réalisé CAS + pipeline pondéré (certitudes glissantes)" />
           <Landing title={`Atterrissage CAF ${fy || ""} — facturation`} proba={att.probaAtteinteCaf || 0}
             realise={att.factureN} projete={att.cafProjete} objectif={att.objectifCaf} ecart={att.ecartCaf}
-            retard={att.pipelineRetard} retardCount={att.pipelineRetardCount} reporte={att.reporteCaf}
+            retard={att.pipelineRetard} retardCount={att.pipelineRetardCount} reporte={att.reporteCaf} reporteMarge={attMargin?.reporteMarge}
             sub="Facturé + backlog + pipeline pondéré" />
         </div>
       ) : (

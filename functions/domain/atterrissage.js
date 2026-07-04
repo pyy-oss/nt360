@@ -70,12 +70,15 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
   // commande peut être explicitement reportée à l'exercice SUIVANT → elle NE COMPTE PLUS dans le
   // Projeté CAF de l'exercice courant. `reporteCaf` est exposé (traçabilité, « reporté N+1 »).
   const cby = carryovers || {};
-  let backlogProjete = 0, reporteCaf = 0;
+  let backlogProjete = 0, reporteCaf = 0, reporteMarge = 0;
   for (const o of orders || []) {
     const bp = Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0); // RAF projetable cette année (M2)
     const rep = Math.min(Math.max(cby[fpKey(o.fp)] || 0, 0), bp); // reporté N+1, borné au RAF projetable
     backlogProjete += bp - rep;
     reporteCaf += rep;
+    // Marge reportée AU PRORATA : taux P&L de la commande × montant reporté (la marge suit le CA).
+    const rate = (o.cas || 0) > 0 ? (o.mb || 0) / o.cas : (o.marginPct || 0);
+    reporteMarge += rate * rep;
   }
   const cafProjete = factureN + backlogProjete + pipelinePondere;
 
@@ -85,6 +88,7 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
     backlog,
     backlogProjete,        // RAF plafonné à (CAS − facturé), NET du report N+1, utilisé dans cafProjete
     reporteCaf,            // CA reporté sur l'exercice suivant (exclu du cafProjete courant)
+    reporteMarge,          // marge (P&L) reportée au prorata du CA reporté — DONNÉE MARGE (à isoler côté écriture)
     pipelinePondere,
     pipelineRetard,        // part (pondérée) du pipeline projeté dont la D Prev est dépassée (à requalifier)
     pipelineRetardCount,   // nombre d'opps concernées

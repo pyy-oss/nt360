@@ -130,7 +130,13 @@ async function recomputeAll(db, only) {
     } });
   }
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, carryovers);
-  if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
+  // La marge reportée est de la DONNÉE MARGE → isolée dans un doc gaté « rentabilite » (jamais dans
+  // le summary atterrissage public, lu au niveau « overview »).
+  const { reporteMarge, ...attPublic } = att;
+  if (want("atterrissage")) {
+    w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
+    w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
+  }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr), fy: currentFy, ...stamp } });
