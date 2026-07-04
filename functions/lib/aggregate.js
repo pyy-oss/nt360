@@ -9,7 +9,8 @@ const { backlogFy } = require("../domain/backlog");
 const { pipeline } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
-const { atterrissage } = require("../domain/atterrissage");
+const { atterrissage, projetableBacklog } = require("../domain/atterrissage");
+const { defaultMilestones } = require("../domain/milestones");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
@@ -143,7 +144,21 @@ async function recomputeAll(db, only) {
     w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
     // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
-    const trend = billingTrend(invoices, Object.values(milestonesByFp).flat(), currentFy, asOf);
+    // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier PAR DÉFAUT pour les projets SANS
+    // jalons (RAF projetable restant en N réparti uniformément sur 3 jalons jusqu'au 31/12). Ainsi la
+    // tendance couvre TOUT le backlog, pas seulement les projets manuellement échéancés. Aucun effet de
+    // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0) ni double compte : le report
+    // manuel éventuel (carryover) est retranché de la part défaut in-year, exactement comme l'atterrissage.
+    const trendMilestones = Object.values(milestonesByFp).flat();
+    for (const o of orders) {
+      const k = fpKey(o.fp);
+      if (k && milestonesByFp[k]) continue; // FP à jalons saisis → déjà pris en compte
+      const bp = projetableBacklog(o);
+      if (bp <= 0) continue;
+      const rep = Math.min(Math.max((k && carryovers[k]) || 0, 0), bp); // report manuel → exclu de l'in-year
+      trendMilestones.push(...defaultMilestones(bp - rep, asOf, currentFy));
+    }
+    const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
     w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
