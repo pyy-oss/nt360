@@ -20,5 +20,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Vitest ne couvre que les tests unitaires sous src/. Les specs Playwright (e2e/) sont
+    // jouées par `playwright test` et ne doivent pas être ramassées par vitest (elles importent
+    // @playwright/test et ne tourneraient pas sous vitest).
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

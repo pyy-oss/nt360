@@ -1,0 +1,67 @@
+name: Smoke go-live (prod)
+
+# Smoke-test post-déploiement joué contre la PROD (ou une URL fournie).
+# Vérifie le chargement + l'authentification + la confidentialité de la marge (accès Rentabilité).
+#
+# Déclencheurs :
+#   • automatiquement après un déploiement réussi (workflow_run sur « Firebase Deploy (main) ») ;
+#   • manuellement (workflow_dispatch), avec une URL cible optionnelle.
+#
+# Secrets requis (Settings → Secrets and variables → Actions) :
+#   SMOKE_NOMARGIN_EMAIL / SMOKE_NOMARGIN_PASSWORD  → compte SANS accès Rentabilité (sans MFA)
+#   SMOKE_MARGIN_EMAIL    / SMOKE_MARGIN_PASSWORD    → compte AVEC accès Rentabilité (sans MFA)
+# Sans ces secrets, les tests de marge se SKIPPENT (le smoke de chargement/login reste joué).
+
+on:
+  workflow_run:
+    workflows: ["Firebase Deploy (main)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL cible du smoke-test"
+        required: false
+        default: "https://nt360.web.app"
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    # Sur workflow_run : ne joue que si le déploiement a RÉUSSI. Sur dispatch : toujours.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Smoke test
+        working-directory: web
+        env:
+          SMOKE_BASE_URL: ${{ github.event.inputs.base_url || 'https://nt360.web.app' }}
+          SMOKE_NOMARGIN_EMAIL: ${{ secrets.SMOKE_NOMARGIN_EMAIL }}
+          SMOKE_NOMARGIN_PASSWORD: ${{ secrets.SMOKE_NOMARGIN_PASSWORD }}
+          SMOKE_MARGIN_EMAIL: ${{ secrets.SMOKE_MARGIN_EMAIL }}
+          SMOKE_MARGIN_PASSWORD: ${{ secrets.SMOKE_MARGIN_PASSWORD }}
+        run: pnpm test:e2e
+
+      - name: Upload rapport Playwright
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7

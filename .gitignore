@@ -31,6 +31,11 @@ serviceAccountKey.json
 # Test coverage
 coverage/
 
+# Playwright (smoke e2e) — rapports & artefacts, jamais committés
+web/playwright-report/
+web/test-results/
+web/playwright/.cache/
+
 # Données réelles (confidentielles) — ne pas committer
 *.xlsx
 seed/data/
