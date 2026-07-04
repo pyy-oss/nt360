@@ -60,10 +60,18 @@ function factureLines(invoices, ordersByFp) {
     const k = fpKey(i.fp) || i.fp || "—";
     const o = ordersByFp[k] || {};
     // Défauts explicites "" / "AUTRE" : ni la facture ni la commande orpheline n'ont forcément bu/am/client.
-    const line = byFp[k] || (byFp[k] = { fp: k, base: 0, rate: marginRate(o), bu: o.bu || i.bu || "AUTRE", am: o.am || i.am || "", client: o.client || i.client || "" });
+    const line = byFp[k] || (byFp[k] = { fp: k, base: 0, rate: marginRate(o), cap: o.cas || 0, bu: o.bu || i.bu || "AUTRE", am: o.am || i.am || "", client: o.client || i.client || "" });
     line.base += i.amountHt || 0;
   }
-  return Object.values(byFp).map((l) => ({ ...l, mb: l.rate * l.base }));
+  // Marge reconnue PLAFONNÉE au CAS de l'affaire : on ne reconnaît pas de marge sur la SURFACTURATION
+  // (facturé > CAS). Sans plafond, taux×facturé dépasserait la marge P&L totale du deal (marge
+  // fantôme). L'assiette `base` (facturé affiché) reste le facturé réel ; seule la marge est bornée.
+  // Vaut pour les deux signes : |taux×min(base,cap)| ≤ |mb| = |taux×cap|. Pas de plafond si CAS=0
+  // (affaire orpheline : taux déjà 0 via marginRate({})).
+  return Object.values(byFp).map((l) => {
+    const marginBase = l.cap > 0 ? Math.min(l.base, l.cap) : l.base;
+    return { ...l, mb: l.rate * marginBase };
+  });
 }
 
 /**

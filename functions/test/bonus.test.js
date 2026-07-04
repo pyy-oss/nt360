@@ -92,6 +92,12 @@ describe("alerts", () => {
     expect(byType.bc_en_retard.count).toBe(1); // BC1 seulement (BC2 livré, BC3 ETA future)
     expect(byType.bc_en_retard.refs).toContain("BC1");
   });
+  it("alertes BC = exécution : lignes de fiche affaire (source « fiche ») exclues (cohérence avec la vue Exécution BC)", () => {
+    const withFiche = [...BCL, { status: "emis", etaContrat: "2026-03-01", bcNumber: "BCF", source: "fiche" }];
+    const a = Object.fromEntries(alerts(ORDERS, INV, sup, withFiche, 2026, "2026-06-01").map((i) => [i.type, i]));
+    expect(a.bc_en_retard.count).toBe(1);   // BCF (fiche) NON compté malgré ETA dépassée
+    expect(a.bc_en_attente.count).toBe(4);  // BCF (non soldé) NON compté non plus
+  });
   it("alertes financières : orphelines, surfacturation, RAF incohérent, pré-PO", () => {
     expect(byType.factures_non_rattachees.count).toBe(1); // FP/9999/9 (linked !== true)
     expect(byType.surfacturation.count).toBe(1); // FP/2026/3 (300 > 200)
