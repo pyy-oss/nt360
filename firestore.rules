@@ -44,6 +44,8 @@ service cloud.firestore {
     match /orders/{id}        { allow read: if canRead('rentabilite'); allow write: if false; }
     match /invoices/{id}      { allow read: if canRead('facturation');  allow write: if false; }
     match /projectSheets/{id} { allow read: if canRead('pnlprojet');    allow write: if false; }
+    // Marge des fiches affaire (coût/vente/marge/%MB) → accès « Rentabilité » requis.
+    match /projectSheetsMargin/{id} { allow read: if canRead('rentabilite'); allow write: if false; }
 
     // Opportunités : seules les saisies (source == 'saisie') sont modifiables par le client.
     match /opportunities/{id} {

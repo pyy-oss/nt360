@@ -19,10 +19,15 @@ const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number)
   return Object.entries(m).map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
 };
 export const PnlProjet: FC<Props> = () => {
+  const canMargin = useCanSeeMargin();
   const { rows: allRows } = useCollectionData<ProjectSheet>("projectSheets");
+  // Marge des fiches isolée (accès Rentabilité) : lue seulement si le rôle a le droit, fusionnée par FP.
+  const { rows: mrows } = useCollectionData<ProjectSheet>(canMargin ? "projectSheetsMargin" : null);
   const { rows: bc } = useCollectionData<BcLine>("bcLines");
   const { match } = useFilters();
-  const rows = allRows.filter((r) => match(r, ["client"])); // fiches : filtre client uniquement
+  const marginBy = new Map(mrows.map((m) => [m.fp, m]));
+  const base = allRows.filter((r) => match(r, ["client"])); // fiches : filtre client uniquement
+  const rows = canMargin ? base.map((r) => ({ ...r, ...(marginBy.get(r.fp) || {}) })) : base;
   const canImport = useCanImport();
   if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
@@ -32,13 +37,15 @@ export const PnlProjet: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <FilterNote dims="client" />
-      <div className={grid4}>
-        <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
-        <Kpi label="Prix de vente" value={fmt(vente)} />
-        <Kpi label="Marge brute" value={fmt(marge)} tone="gold" />
-        <Kpi label="%MB global" value={pct(pmb)} tone={pmb < 0.1 ? "clay" : "emerald"} />
-      </div>
-      <Card title={`Fiches affaire — coût / vente / marge · ${rows.length}`}>
+      {canMargin && (
+        <div className={grid4}>
+          <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
+          <Kpi label="Prix de vente" value={fmt(vente)} />
+          <Kpi label="Marge brute" value={fmt(marge)} tone="gold" />
+          <Kpi label="%MB global" value={pct(pmb)} tone={pmb < 0.1 ? "clay" : "emerald"} />
+        </div>
+      )}
+      <Card title={`Fiches affaire${canMargin ? " — coût / vente / marge" : ""} · ${rows.length}`}>
         <ListView
           rows={rows}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
@@ -46,10 +53,13 @@ export const PnlProjet: FC<Props> = () => {
             colText("FP", (r) => r.fp, (r) => r.fp),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
-            colNum("Revient", (r) => money(r.costTotal), (r) => r.costTotal || 0),
-            colNum("Vente", (r) => money(r.saleTotal), (r) => r.saleTotal || 0),
-            colNum("Marge", (r) => money(r.margin), (r) => r.margin || 0),
-            colNum("%MB", (r) => <Badge tone={((r.marginPct || 0) < 0.1 ? "clay" : (r.marginPct || 0) < 0.2 ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r) => r.marginPct || 0),
+            // Coût / vente / marge masqués pour les rôles sans accès « Rentabilité » (confidentialité).
+            ...(canMargin ? [
+              colNum("Revient", (r: ProjectSheet) => money(r.costTotal), (r: ProjectSheet) => r.costTotal || 0),
+              colNum("Vente", (r: ProjectSheet) => money(r.saleTotal), (r: ProjectSheet) => r.saleTotal || 0),
+              colNum("Marge", (r: ProjectSheet) => money(r.margin), (r: ProjectSheet) => r.margin || 0),
+              colNum("%MB", (r: ProjectSheet) => <Badge tone={((r.marginPct || 0) < 0.1 ? "clay" : (r.marginPct || 0) < 0.2 ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r: ProjectSheet) => r.marginPct || 0),
+            ] : []),
           ]}
         />
       </Card>
@@ -334,7 +344,11 @@ export const Fp360: FC<Props> = () => {
   const { rows: cmdRows } = useCommandesRows(!!fp); // chargé seulement quand un N° FP est saisi
   // queryKey = fp ; abonnements ouverts UNIQUEMENT quand un N° FP est saisi (sinon name null).
   const { rows: invoices } = useCollectionData<Invoice>(fp ? "invoices" : null, cons, fp);
-  const { rows: sheets } = useCollectionData<ProjectSheet>(fp ? "projectSheets" : null, cons, fp);
+  const { rows: sheetsBase } = useCollectionData<ProjectSheet>(fp ? "projectSheets" : null, cons, fp);
+  // Marge de la fiche isolée (accès Rentabilité) : fusionnée par FP quand le rôle a le droit.
+  const { rows: sheetsMargin } = useCollectionData<ProjectSheet>(fp && canMargin ? "projectSheetsMargin" : null, cons, fp);
+  const sheetsMBy = new Map(sheetsMargin.map((m) => [m.fp, m]));
+  const sheets = sheetsBase.map((s) => ({ ...s, ...(sheetsMBy.get(s.fp) || {}) }));
   const { rows: bc } = useCollectionData<BcLine>(fp ? "bcLines" : null, cons, fp);
   const { rows: opps } = useCollectionData<Opportunity>(fp ? "opportunities" : null, cons, fp);
   const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;

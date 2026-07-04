@@ -91,7 +91,11 @@ function buildWrites(wb) {
       if (!fiches.length) { byKind.fiche = { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" }; continue; }
       let ok = 0;
       for (const { sheet, bcLines } of fiches) {
-        writes.push({ path: `projectSheets/${sheet._id}`, data: sheet });
+        // Marge de la fiche (coût/vente/marge/%MB) isolée dans projectSheetsMargin/{id} (lecture
+        // « Rentabilité ») ; le doc de base ne porte que l'identité (FP/client/affaire/commercial).
+        const { costTotal, saleTotal, margin, marginPct, ...sbase } = sheet;
+        writes.push({ path: `projectSheets/${sheet._id}`, data: sbase });
+        writes.push({ path: `projectSheetsMargin/${sheet._id}`, data: { _id: sheet._id, fp: sheet.fp, costTotal, saleTotal, margin, marginPct } });
         bcLines.forEach((b) => writes.push({ path: `bcLines/${b._id}`, data: b }));
         ok += bcLines.length + 1;
       }

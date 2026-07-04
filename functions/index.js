@@ -733,7 +733,13 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   (b.uinv || []).forEach((i) => i.numero && push(`invoices/${safeId(i.numero)}`, { ...i, source: "legacy" }));
   (b.objectives || []).forEach((o, idx) => push(`objectives/${o.fiscalYear || 0}_${o.scope || "global"}_${o.scopeValue || idx}`, o));
   (b.lines || []).forEach((c) => c.id && push(`creditLines/${safeId(c.id)}`, c));
-  (b.fiches || []).forEach((f) => f.fp && push(`projectSheets/${safeId(f.fp)}`, { ...f, source: "legacy" }));
+  (b.fiches || []).forEach((f) => {
+    if (!f.fp) return;
+    const id = safeId(f.fp);
+    const { costTotal, saleTotal, margin, marginPct, ...fbase } = f; // marge isolée (rentabilite)
+    push(`projectSheets/${id}`, { ...fbase, _id: id, source: "legacy" });
+    push(`projectSheetsMargin/${id}`, { _id: id, fp: f.fp, costTotal, saleTotal, margin, marginPct });
+  });
   (b.pipeOpps || []).forEach((o, idx) => push(`opportunities/${o.oppId ? safeId(o.oppId) : "legacy_" + idx}`, { ...o, source: o.source || "salesData" }));
 
   let batch = db.batch(), n = 0;

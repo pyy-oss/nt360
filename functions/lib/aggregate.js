@@ -40,7 +40,7 @@ async function recomputeAll(db, only) {
   const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation"]);
   const needCredit = need(["suppliers", "alerts"]);
   const needObj = need(["atterrissage", "ams", "pipeline"]);
-  const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, projectSheets] = await Promise.all([
+  const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices"),
     readAll(db, "opportunities"),
@@ -48,7 +48,11 @@ async function recomputeAll(db, only) {
     needCredit ? readAll(db, "creditLines", true) : Promise.resolve([]),
     needObj ? readAll(db, "objectives") : Promise.resolve([]),
     readAll(db, "projectSheets"),
+    readAll(db, "projectSheetsMargin"), // marge isolée (rules) — le serveur (Admin SDK) la re-fusionne
   ]);
+  // Fiches complètes reconstituées pour les calculs serveur (mergeCommandes, dataQuality).
+  const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
+  const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));
 
   // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
   // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
@@ -77,6 +81,16 @@ async function recomputeAll(db, only) {
   const asOf = new Date().toISOString().slice(0, 10); // aujourd'hui : borne basse fenêtre D Prev (atterrissage)
   const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
   const w = []; // écritures {path, data}
+
+  // Migration DOUCE : d'anciennes fiches (importées avant l'isolation) portent la marge INLINE dans
+  // projectSheets → on la déplace vers projectSheetsMargin et on purge les champs de base au 1er
+  // recompute. Auto-résorbant (plus rien à migrer ensuite) → confidentialité effective sur un Recalculer.
+  for (const s of sheetsBase) {
+    if (s._id && (s.costTotal != null || s.saleTotal != null || s.margin != null || s.marginPct != null) && !smBy.has(s._id)) {
+      w.push({ path: `projectSheets/${s._id}`, data: { costTotal: FieldValue.delete(), saleTotal: FieldValue.delete(), margin: FieldValue.delete(), marginPct: FieldValue.delete() } });
+      w.push({ path: `projectSheetsMargin/${s._id}`, data: { _id: s._id, fp: s.fp, costTotal: s.costTotal ?? null, saleTotal: s.saleTotal ?? null, margin: s.margin ?? null, marginPct: s.marginPct ?? null } });
+    }
+  }
 
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
