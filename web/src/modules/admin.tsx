@@ -59,40 +59,42 @@ export const Habilitations: FC<Props> = () => {
   );
 };
 
-// Exploitation : santé des recomputes (manuels + planifié quotidien) via le journal opsLog.
-// Donne une visibilité durable sur les échecs d'agrégation (observabilité), au-delà des logs Cloud.
+// Exploitation : santé des FONCTIONS (recomputes + callables + tâches planifiées) via opsLog.
+// Visibilité durable sur les échecs inattendus (observabilité), au-delà des logs Cloud.
 function OpsHealthCard() {
-  const { rows } = useCollectionData<OpsLog>("opsLog", [orderBy("ts", "desc"), limit(8)], "ops8");
+  const { rows } = useCollectionData<OpsLog>("opsLog", [orderBy("ts", "desc"), limit(12)], "ops12");
   const last = rows[0];
-  const lastErr = rows.find((r) => r.status === "error");
+  const errs = rows.filter((r) => r.status === "error");
+  const label = (r?: OpsLog) => r?.action || r?.trigger || r?.kind || "—";
   return (
-    <Card title="Exploitation — santé des recalculs">
+    <Card title="Exploitation — santé des fonctions">
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
         {last ? (
           <Badge tone={last.status === "ok" ? "emerald" : "clay"}>{last.status === "ok" ? "OK" : "ÉCHEC"}</Badge>
-        ) : <span className="text-muted">Aucun recalcul journalisé pour l'instant.</span>}
-        {last && <span className="text-muted">Dernier recalcul {relTime(last.ts)} ({last.trigger}{last.detail?.summaries ? ` · ${last.detail.summaries} agrégats` : ""}{last.ms ? ` · ${(last.ms / 1000).toFixed(1)} s` : ""}).</span>}
+        ) : <span className="text-muted">Aucune opération journalisée pour l'instant.</span>}
+        {last && <span className="text-muted">Dernier : {label(last)} {relTime(last.ts)}{last.detail?.summaries ? ` · ${last.detail.summaries} agrégats` : ""}{last.ms ? ` · ${(last.ms / 1000).toFixed(1)} s` : ""}.</span>}
+        {errs.length > 0 && <Badge tone="clay">{errs.length} échec(s) récent(s)</Badge>}
       </div>
-      {lastErr && lastErr.status === "error" && last?.status !== "error" && (
-        <div className="mt-1 text-[12px] text-clay">Dernier échec {relTime(lastErr.ts)} : {lastErr.error}</div>
-      )}
       {last?.status === "error" && <div className="mt-1 text-[12px] text-clay">Motif : {last.error}</div>}
+      {last?.status !== "error" && errs[0] && (
+        <div className="mt-1 text-[12px] text-clay">Dernier échec — {label(errs[0])} {relTime(errs[0].ts)} : {errs[0].error}</div>
+      )}
       {rows.length > 1 && (
         <details className="mt-2 text-[12px]">
-          <summary className="cursor-pointer select-none text-faint hover:text-ink">Historique des recalculs</summary>
+          <summary className="cursor-pointer select-none text-faint hover:text-ink">Historique des opérations</summary>
           <ul className="mt-1.5 flex flex-col gap-1">
             {rows.map((r) => (
               <li key={r.id} className="flex items-center gap-1.5 text-muted">
                 <Badge tone={r.status === "ok" ? "emerald" : "clay"}>{r.status === "ok" ? "OK" : "KO"}</Badge>
                 <span className="text-faint w-20 shrink-0">{relTime(r.ts)}</span>
-                <span className="text-ink">{r.trigger}</span>
-                <span className="text-faint">· {r.status === "ok" ? `${r.detail?.summaries || 0} agrégats · ${((r.ms || 0) / 1000).toFixed(1)} s` : (r.error || "").slice(0, 80)}</span>
+                <span className="text-ink">{label(r)}</span>
+                <span className="text-faint truncate">· {r.status === "ok" ? `${r.detail?.summaries ? `${r.detail.summaries} agrégats · ` : ""}${((r.ms || 0) / 1000).toFixed(1)} s` : (r.error || "").slice(0, 90)}</span>
               </li>
             ))}
           </ul>
         </details>
       )}
-      <Tip>Un recompute planifié tourne chaque jour à 05:00 (agrégats jamais datés). Les échecs sont tracés ici en plus des logs Cloud.</Tip>
+      <Tip>Recompute planifié chaque jour à 05:00. Les échecs INATTENDUS des fonctions (callables & tâches planifiées) sont tracés ici et, si un webhook est configuré, poussés en alerte.</Tip>
     </Card>
   );
 }

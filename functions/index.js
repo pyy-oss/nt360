@@ -121,7 +121,7 @@ async function logOps(entry) {
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
 const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
 
-exports.setUserRole = onCall(async (req) => {
+exports.setUserRole = onCallG("setUserRole", async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { uid, role } = req.data || {};
   if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (∈ 6 profils) requis");
@@ -135,7 +135,7 @@ exports.setUserRole = onCall(async (req) => {
 
 // --- Seuils d'alerte configurables (config/alerts) : édités par la direction, recompute des
 // alertes + qualité des données pour appliquer immédiatement. Bornés pour éviter les valeurs absurdes. ---
-exports.setAlertThresholds = onCall(async (req) => {
+exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const pct = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
@@ -162,7 +162,38 @@ async function postWebhook(url, text) {
   if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
 }
 
-exports.setNotificationConfig = onCall({ timeoutSeconds: 30 }, async (req) => {
+// Codes HttpsError « attendus » (rejets de validation/autorisation) : ne PAS les traiter comme des
+// incidents. Tout le reste = échec inattendu → journalisé dans opsLog + alerte webhook.
+const EXPECTED_ERR = new Set(["invalid-argument", "permission-denied", "unauthenticated", "failed-precondition", "not-found", "already-exists"]);
+
+// Enveloppe un handler onCall : capture les échecs INATTENDUS (observabilité), les trace dans
+// opsLog et, si un webhook est configuré, envoie une alerte de crash — puis re-propage l'erreur.
+function guarded(action, handler) {
+  return async (req) => {
+    try {
+      return await handler(req);
+    } catch (e) {
+      if (e && e.code && EXPECTED_ERR.has(e.code)) throw e; // rejet métier normal → pas un incident
+      const msg = (e && e.message) || String(e);
+      logger.error(`${action} a échoué`, { message: msg, stack: e && e.stack });
+      await logOps({ kind: "callable", action, status: "error", uid: (req.auth && req.auth.uid) || null, error: msg });
+      try {
+        const cfg = (await db.doc("config/notifications").get()).data();
+        if (cfg && cfg.enabled && cfg.webhookUrl) await postWebhook(cfg.webhookUrl, `⚠️ nt360 — échec de « ${action} » : ${msg}`);
+      } catch (_) { /* alerte best-effort */ }
+      throw e;
+    }
+  };
+}
+
+// onCall enveloppé par guarded() (observabilité). Supporte onCall(handler) ET onCall(opts, handler).
+// Fonction DÉCLARÉE (hoistée) car utilisée par des exports définis plus haut dans le fichier.
+function onCallG(action, opts, handler) {
+  if (typeof opts === "function") { handler = opts; opts = {}; }
+  return onCall(opts, guarded(action, handler));
+}
+
+exports.setNotificationConfig = onCallG("setNotificationConfig", { timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const url = String(d.webhookUrl || "").trim();
@@ -202,7 +233,7 @@ exports.alertDigest = onSchedule({ schedule: "every day 07:00", timeoutSeconds: 
 });
 
 // --- logLogin : audit de connexion (critère F1) ---
-exports.logLogin = onCall(async (req) => {
+exports.logLogin = onCallG("logLogin", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "login", module: "auth", entity: "session", entityId: req.auth.uid,
@@ -217,7 +248,7 @@ exports.logLogin = onCall(async (req) => {
 // tous les summaries (boucle sur chaque période) — le défaut 256 MiB / 60 s provoquait un
 // timeout/OOM sur un gros volume, surfacé en « Action refusée » côté UI, alors que le même
 // recompute lancé APRÈS un import (512 MiB / 300 s) réussissait.
-exports.recompute = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.recompute = onCallG("recompute", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
   const t0 = Date.now();
@@ -267,11 +298,17 @@ async function runSalesSync(objectKey) {
 }
 
 exports.syncSalesData = onSchedule("every day 06:00", async () => {
-  await runSalesSync();
+  try {
+    await runSalesSync();
+  } catch (e) {
+    logger.error("syncSalesData a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "scheduled", action: "syncSalesData", status: "error", error: (e && e.message) || String(e) });
+    throw e;
+  }
 });
 
 // Déclenchement manuel (admin) pour test / rejouabilité. Même recompute complet → mêmes ressources.
-exports.syncSalesDataNow = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.syncSalesDataNow = onCallG("syncSalesDataNow", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   return await runSalesSync(req.data?.objectKey);
 });
@@ -281,7 +318,7 @@ exports.syncSalesDataNow = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
 const IMPORT_ROLES = ["direction", "commercial_dir", "pmo", "achats"];
 
-exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import requis");
   const b64 = req.data?.fileB64;
@@ -354,7 +391,7 @@ exports.importDelta = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req
 
 // --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.
 // Recalcule ensuite (rattachement, taux de facturation, RAF dérivé des commandes opp/fiche). ---
-exports.setInvoiceFp = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
   const { fpKey } = require("./lib/ids");
@@ -375,7 +412,7 @@ exports.setInvoiceFp = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (re
 
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
-exports.patchOrder = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
   const { fpKey } = require("./lib/ids");
@@ -423,7 +460,7 @@ exports.patchOrder = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req)
 // agrégats pipeline, sinon l'opp restait invisible des summaries jusqu'au recompute admin/quotidien. ---
 const PIPELINE_WRITE_ROLES = ["direction", "commercial_dir", "commercial"];
 
-exports.upsertOpportunity = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
   const { fpKey } = require("./lib/ids");
@@ -457,7 +494,7 @@ exports.upsertOpportunity = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, asyn
   return { ok: true, id };
 });
 
-exports.deleteOpportunity = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
   const id = String(req.data?.id || "");
@@ -470,7 +507,7 @@ exports.deleteOpportunity = onCall({ memoryMiB: 256, timeoutSeconds: 120 }, asyn
 const BC_WRITE_ROLES = ["direction", "pmo", "achats"];
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 
-exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
   const { fpKey } = require("./lib/ids");
@@ -523,7 +560,7 @@ exports.addBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) 
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---
-exports.setBcStatus = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
   const { id, status } = req.data || {};
@@ -539,7 +576,7 @@ exports.setBcStatus = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req
 
 // --- Fiabilisation d'une ligne BC réelle : rattacher un N° FP et/ou corriger le montant XOF
 // (ex. BC en devise étrangère non convertie → montant 0). Recalcule exposition + décaissements. ---
-exports.patchBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
   const { fpKey } = require("./lib/ids");
@@ -566,7 +603,7 @@ exports.patchBcLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req
 });
 
 const SUPPLIER_WRITE_ROLES = ["direction", "achats"];
-exports.upsertCreditLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!SUPPLIER_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit fournisseurs requis");
   // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
@@ -587,7 +624,7 @@ exports.upsertCreditLine = onCall({ memoryMiB: 512, timeoutSeconds: 120 }, async
 // --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis
 // mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
 // avant enregistrement via addBcLine. Ne persiste rien. ---
-exports.parseBcPdf = onCall({ memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
+exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
   const b64 = req.data?.pdfB64;
@@ -606,7 +643,7 @@ exports.parseBcPdf = onCall({ memoryMiB: 1024, timeoutSeconds: 120 }, async (req
 
 // --- Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Regroupe par clé
 // métier, garde le meilleur représentant, supprime les autres. `apply:false` = analyse seule. ---
-exports.dedupe = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
   const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
@@ -643,7 +680,7 @@ exports.dedupe = onCall({ memoryMiB: 512, timeoutSeconds: 300 }, async (req) => 
 // Le one-pager CODIR contient des données financières (P&L, atterrissage) → réservé aux
 // profils habilités à la rentabilité (direction / commercial_dir / lecture), pas à tout compte.
 const EXPORT_ROLES = ["direction", "commercial_dir", "lecture"];
-exports.exportReport = onCall(async (req) => {
+exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!EXPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit de rapport requis");
   const ExcelJS = require("exceljs");
@@ -686,7 +723,7 @@ exports.exportReport = onCall(async (req) => {
 });
 
 // --- Migration prototype → Firestore (BUILD_KIT §13) ---
-exports.importLegacyBackup = onCall(async (req) => {
+exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const b = req.data?.backup || {};
   const { safeId } = require("./lib/sheets");
@@ -709,18 +746,24 @@ exports.importLegacyBackup = onCall(async (req) => {
 
 // --- F8 : export Firestore managé planifié → gs://nt360/backups/ (sauvegarde) ---
 exports.scheduledFirestoreExport = onSchedule("every sunday 03:00", async () => {
-  const firestore = require("@google-cloud/firestore");
-  const client = new firestore.v1.FirestoreAdminClient();
-  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
-  const ts = new Date().toISOString().slice(0, 10);
-  const name = client.databasePath(projectId, FIRESTORE_DB);
-  const [op] = await client.exportDocuments({
-    name,
-    outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,
-    collectionIds: [], // toutes les collections
-  });
-  logger.info("scheduledFirestoreExport lancé", { op: op.name });
-  return { ok: true };
+  try {
+    const firestore = require("@google-cloud/firestore");
+    const client = new firestore.v1.FirestoreAdminClient();
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
+    const ts = new Date().toISOString().slice(0, 10);
+    const name = client.databasePath(projectId, FIRESTORE_DB);
+    const [op] = await client.exportDocuments({
+      name,
+      outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,
+      collectionIds: [], // toutes les collections
+    });
+    logger.info("scheduledFirestoreExport lancé", { op: op.name });
+    return { ok: true };
+  } catch (e) {
+    logger.error("scheduledFirestoreExport a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "error", error: (e && e.message) || String(e) });
+    throw e;
+  }
 });
 
 // Exposé pour les tests / réutilisation.
