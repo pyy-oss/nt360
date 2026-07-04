@@ -69,9 +69,14 @@ async function recomputeAll(db, only) {
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
   const projCfg = (await db.doc("config/projection").get()).data() || {}; // niveaux de projection configurables
   const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
-  // Reports de CA sur N+1 par projet (montant FCFA, keyé par fpKey) : exclus du Projeté CAF courant.
+  // Reports de CA sur N+1 par projet (montant FCFA). Keyé par le fpKey STOCKÉ (champ `fp`) — PAS par
+  // doc.id (= safeId, avec « _ ») que l'atterrissage ne saurait pas retrouver (il cherche par fpKey).
   const carryovers = {};
-  (await db.collection("carryovers").get()).forEach((doc) => { const v = doc.data() || {}; if ((v.amount || 0) > 0) carryovers[doc.id] = v.amount; });
+  (await db.collection("carryovers").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && (v.amount || 0) > 0) carryovers[v.fp] = v.amount; });
+  // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 quand ils existent (Σ des
+  // jalons après le 31/12 de l'exercice), sinon repli sur le report manuel. Keyé par fpKey stocké.
+  const milestonesByFp = {};
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones; });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -129,7 +134,7 @@ async function recomputeAll(db, only) {
       ...stamp,
     } });
   }
-  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, carryovers);
+  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, carryovers, milestonesByFp);
   // La marge reportée est de la DONNÉE MARGE → isolée dans un doc gaté « rentabilite » (jamais dans
   // le summary atterrissage public, lu au niveau « overview »).
   const { reporteMarge, ...attPublic } = att;

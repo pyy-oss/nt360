@@ -8,8 +8,8 @@ import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
-import { patchOrder, setCarryover } from "../lib/writes";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover } from "../types";
+import { patchOrder, setCarryover, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover, BillingMilestonesDoc } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -72,36 +72,52 @@ export const Backlog: FC<Props> = () => {
   );
 };
 
-// Report de CA sur N+1 par projet (direction / PMO) : on saisit, par commande ouverte, le montant
-// du RAF qui sera facturé l'exercice SUIVANT → exclu du Projeté CAF courant. Persisté (collection
-// carryovers), non écrasé par les réimports. L'enregistrement relance le calcul de l'atterrissage.
+type OpenOrder = Order & { projetable: number };
+
+// Report de CA sur N+1 & JALONS de facturation par projet (direction / PMO). Deux niveaux :
+//  • report simple : montant du RAF facturé en N+1 (fallback quand pas de jalons) ;
+//  • jalons (≤ 15, date + montant) : échéancier prévisionnel — SOURCE UNIQUE du report N+1 (Σ après
+//    le 31/12) quand ils existent. Persistés hors des commandes, non écrasés par les réimports.
 function CarryoverCard() {
   const { role } = useClaims();
   const canEdit = role === "direction" || role === "pmo";
   const canMargin = useCanSeeMargin();
+  const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
+  const fy = cfg?.currentFy;
+  const cutoff = fy ? `${fy}-12-31` : "9999-12-31";
   const { rows: orders } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
   const { rows: carry } = useCollectionData<Carryover>(canEdit ? "carryovers" : null);
+  const { rows: mstones } = useCollectionData<BillingMilestonesDoc>(canEdit ? "billingMilestones" : null);
+  const [editFp, setEditFp] = useState<string | null>(null);
   if (!canEdit) return null;
   const cby = new Map<string, number>();
   for (const c of carry) if (c.fp) cby.set(c.fp.toUpperCase(), c.amount || 0);
-  const repOf = (o: Order & { projetable: number }) => Math.min(cby.get((o.fp || "").toUpperCase()) || 0, o.projetable);
-  // Taux de marge P&L de la commande (mb/CAS) → marge reportée au prorata du montant reporté.
+  const msBy = new Map<string, BillingMilestone[]>();
+  for (const m of mstones) if (m.fp) msBy.set(m.fp.toUpperCase(), (m.milestones || []) as BillingMilestone[]);
   const rateOf = (o: Order) => ((o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : (o.marginPct || 0));
-  // Commandes ouvertes (RAF projetable > 0) triées par RAF décroissant.
-  const open = orders
+  // Report N+1 dérivé des jalons (Σ après le 31/12, borné au RAF) si présents ; sinon report manuel.
+  const repOf = (o: OpenOrder) => {
+    const fpU = (o.fp || "").toUpperCase();
+    const ms = msBy.get(fpU);
+    if (ms) return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
+    return Math.min(cby.get(fpU) || 0, o.projetable);
+  };
+  const open: OpenOrder[] = orders
     .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
     .filter((o) => o.projetable > 0)
     .sort((a, b) => b.projetable - a.projetable);
   const totalReporte = open.reduce((s, o) => s + repOf(o), 0);
   const totalMarge = open.reduce((s, o) => s + rateOf(o) * repOf(o), 0);
+  const editing = editFp ? open.find((o) => o.fp === editFp) : null;
   return (
-    <Card title="Report de CA sur l'exercice suivant (par projet)">
+    <Card title="Report & jalons de facturation (par projet)">
       {totalReporte > 0 && (
         <div className={grid4}>
           <Kpi label="Total reporté sur N+1" value={fmt(totalReporte)} tone="steel" sub="CA exclu du Projeté CAF courant" />
           {canMargin && <Kpi label="Marge reportée sur N+1" value={fmt(totalMarge)} tone="steel" sub="au prorata du CA reporté" />}
         </div>
       )}
+      {editing && <MilestoneEditor fp={editing.fp!} raf={editing.projetable} initial={msBy.get((editing.fp || "").toUpperCase()) || []} fy={fy} onClose={() => setEditFp(null)} />}
       <ListView
         rows={open}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire || ""]}
@@ -110,12 +126,58 @@ function CarryoverCard() {
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colNum("RAF projetable", (r) => money(r.projetable), (r) => r.projetable),
-          colNum("Reporté N+1", (r) => <CarryoverEditor fp={r.fp!} current={cby.get((r.fp || "").toUpperCase()) || 0} max={r.projetable} />, (r) => cby.get((r.fp || "").toUpperCase()) || 0),
-          ...(canMargin ? [colNum("Marge reportée", (r: Order & { projetable: number }) => money(rateOf(r) * repOf(r)), (r: Order & { projetable: number }) => rateOf(r) * repOf(r))] : []),
+          colNum("Reporté N+1", (r: OpenOrder) => (msBy.has((r.fp || "").toUpperCase())
+            ? <span className="tabnum text-steel" title="Dérivé des jalons (Σ après le 31/12)">{money(repOf(r))}</span>
+            : <CarryoverEditor fp={r.fp!} current={cby.get((r.fp || "").toUpperCase()) || 0} max={r.projetable} />), (r: OpenOrder) => repOf(r)),
+          ...(canMargin ? [colNum("Marge reportée", (r: OpenOrder) => money(rateOf(r) * repOf(r)), (r: OpenOrder) => rateOf(r) * repOf(r))] : []),
+          colText("Jalons", (r: OpenOrder) => {
+            const ms = msBy.get((r.fp || "").toUpperCase());
+            const drift = !!ms && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(r.projetable);
+            return <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditFp(r.fp!)}>{ms?.length ? `${ms.length} jalon${ms.length > 1 ? "s" : ""}` : "Définir"}{drift ? " ⚠" : ""}</button>;
+          }, (r: OpenOrder) => (msBy.get((r.fp || "").toUpperCase())?.length || 0)),
         ]}
       />
-      <Tip>Saisir le montant du <b>RAF</b> d'un projet qui sera facturé en <b>N+1</b> (0 = aucun report ; borné au RAF projetable). Le CA <b>et sa marge au prorata</b> sont <b>exclus du Projeté CAF</b> de l'exercice courant et affichés « reporté N+1 » sur la Prévision et la Vue d'ensemble. L'enregistrement relance le calcul.</Tip>
+      <Tip><b>Report simple</b> : montant du RAF facturé en N+1 (exclu du Projeté CAF). <b>Jalons</b> (≤ 15, date + montant) : échéancier prévisionnel qui devient la <b>source unique</b> du report (Σ des jalons <b>après le 31/12</b>) — un <b>⚠</b> signale une <b>réconciliation</b> à faire (Σ jalons ≠ RAF, la facturation a progressé). Le CA et sa marge reportés sont exclus du Projeté CAF (Prévision / Vue d'ensemble). L'enregistrement relance le calcul.</Tip>
     </Card>
+  );
+}
+// Éditeur d'échéancier de facturation (≤ 15 jalons). Règle STRICTE : Σ jalons = RAF projetable pour
+// pouvoir enregistrer. Le report N+1 dérivé (Σ après le 31/12) est affiché en direct.
+function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: number; initial: BillingMilestone[]; fy?: number; onClose: () => void }) {
+  const [rows, setRows] = useState<BillingMilestone[]>(initial.length ? initial.map((m) => ({ date: m.date, amount: m.amount })) : [{ date: "", amount: 0 }]);
+  const set = (i: number, patch: Partial<BillingMilestone>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const add = () => setRows((rs) => (rs.length < 15 ? [...rs, { date: "", amount: 0 }] : rs));
+  const del = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const clean = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number(r.amount) > 0).map((r) => ({ date: r.date, amount: Math.round(Number(r.amount)) }));
+  const total = clean.reduce((s, r) => s + r.amount, 0);
+  const matches = Math.round(total) === Math.round(raf);
+  const cutoff = fy ? `${fy}-12-31` : "";
+  const reported = cutoff ? clean.filter((r) => r.date > cutoff).reduce((s, r) => s + r.amount, 0) : 0;
+  return (
+    <div className="mb-3 rounded-lg border border-gold/40 bg-panel2 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-semibold">Jalons de facturation — {fp}</span>
+        <button className="btn-ghost !px-2 !py-1 text-xs" onClick={onClose}>Fermer</button>
+      </div>
+      <div className="flex flex-col gap-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="date" className="field !py-1 text-xs" value={r.date} onChange={(e) => set(i, { date: e.target.value })} aria-label="Date du jalon" />
+            <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label="Montant du jalon" />
+            <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label="Supprimer le jalon">×</button>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3 mt-2 flex-wrap text-[12px]">
+        {rows.length < 15 && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={add}>+ Jalon</button>}
+        <span className={matches ? "text-emerald" : "text-clay"}>Σ jalons {fmt(total)} / RAF {fmt(raf)}{matches ? " ✓" : ` · écart ${fmt(total - raf)}`}</span>
+        <span className="text-steel">dont reporté N+1 : {fmt(reported)}</span>
+        {matches
+          ? <Busy label="Enregistrer" okMsg="Jalons enregistrés (recalcul lancé)" fn={async () => { await setBillingMilestones(fp, clean); onClose(); }} />
+          : <button className="btn-gold opacity-40 cursor-not-allowed" disabled title="Σ jalons doit égaler le RAF projetable">Enregistrer</button>}
+      </div>
+      <Tip>≤ 15 jalons (date + montant). <b>Σ jalons = RAF projetable</b> requis pour enregistrer (règle stricte). Le <b>report N+1</b> dérive des jalons datés <b>après le 31/12</b>. Quand la facturation progresse, réajuste les jalons — l'écart Σ ≠ RAF signale la réconciliation.</Tip>
+    </div>
   );
 }
 function CarryoverEditor({ fp, current, max }: { fp: string; current: number; max: number }) {

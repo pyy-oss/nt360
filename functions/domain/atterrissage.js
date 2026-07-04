@@ -4,6 +4,7 @@
 // couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
+const { reportedFromMilestones } = require("./milestones");
 const { fpKey } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
@@ -19,7 +20,7 @@ const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
  * @param {number} fy année fiscale courante
  * @param {string} [asOf] date du jour (YYYY-MM-DD) : borne basse de la fenêtre D Prev
  */
-function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carryovers) {
+function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carryovers, milestonesByFp) {
   const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
   const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
@@ -70,10 +71,16 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
   // commande peut être explicitement reportée à l'exercice SUIVANT → elle NE COMPTE PLUS dans le
   // Projeté CAF de l'exercice courant. `reporteCaf` est exposé (traçabilité, « reporté N+1 »).
   const cby = carryovers || {};
+  const msBy = milestonesByFp || {};
   let backlogProjete = 0, reporteCaf = 0, reporteMarge = 0;
   for (const o of orders || []) {
     const bp = Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0); // RAF projetable cette année (M2)
-    const rep = Math.min(Math.max(cby[fpKey(o.fp)] || 0, 0), bp); // reporté N+1, borné au RAF projetable
+    const k = fpKey(o.fp);
+    // SOURCE UNIQUE : si le projet a des jalons, le report N+1 en dérive (Σ jalons après le 31/12,
+    // borné au RAF) ; sinon repli sur le report manuel. Jamais les deux → aucune incohérence.
+    const rep = msBy[k]
+      ? reportedFromMilestones(msBy[k], fy, bp)
+      : Math.min(Math.max(cby[k] || 0, 0), bp);
     backlogProjete += bp - rep;
     reporteCaf += rep;
     // Marge reportée AU PRORATA : taux P&L de la commande × montant reporté (la marge suit le CA).
