@@ -17,10 +17,15 @@ describe("dédoublonnage — clés métier", () => {
     // ...mais un même FP dédoublé reste un doublon.
     expect(opportunityKey(a)).toBe(opportunityKey({ ...a, client: "orange ci" }));
   });
-  it("BC : même n° BC + FP + fournisseur ⇒ même clé (fiche vs logistics)", () => {
-    const a = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "kukuza", description: "Routeur", source: "fiche" };
-    const b = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "KUKUZA", description: "routeur", source: "logistics" };
+  it("BC : même n° BC + FP + fournisseur + montant ⇒ même clé (fiche vs logistics)", () => {
+    const a = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "kukuza", description: "Routeur", amountXof: 500000, source: "fiche" };
+    const b = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "KUKUZA", description: "routeur", amountXof: 500000, source: "logistics" };
     expect(bcKey(a)).toBe(bcKey(b));
+  });
+  it("BC : même n° BC mais MONTANTS différents ⇒ clés différentes (2 lignes distinctes d'un même BC)", () => {
+    const a = { fp: "FP/2024/1", bcNumber: "BC1", supplier: "S", description: "L", amountXof: 100000 };
+    const b = { fp: "FP/2024/1", bcNumber: "BC1", supplier: "S", description: "L", amountXof: 250000 };
+    expect(bcKey(a)).not.toBe(bcKey(b));
   });
 });
 

@@ -22,11 +22,15 @@ const invoiceKey = (o) => {
 const opportunityKey = (o) =>
   "opp:" + [n(o.fp), n(o.client), n(o.am), n(o.bu), money(o.amount), o.stage ?? "", o.closingDate || ""].join("|");
 
-/** BC fournisseur : n° BC + FP + fournisseur + description ; repli sur montant si pas de n°. */
+/** BC fournisseur : n° BC + FP + fournisseur + description + MONTANT (toujours). */
 const bcKey = (o) => {
   const bc = n(o.bcNumber);
   const base = [n(o.fp), n(o.supplier), n(o.description)].join("|");
-  return "bc:" + (bc ? bc + "|" + base : base + "|" + money(o.amountXof));
+  // Le MONTANT fait TOUJOURS partie de la clé, même avec un N° BC : un BC peut porter PLUSIEURS
+  // lignes (mêmes fp/fournisseur/description, montants différents) → sans le montant elles se
+  // confondraient et le dédup en supprimerait une (exposition sous-estimée). L'idempotence de
+  // ré-import reste assurée par l'_id déterministe du parseur, pas par cette clé.
+  return "bc:" + (bc ? bc + "|" + base : base) + "|" + money(o.amountXof);
 };
 
 // Priorité de source pour choisir le représentant à CONSERVER (source figée > saisie/legacy).

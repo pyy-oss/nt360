@@ -19,6 +19,9 @@ service cloud.firestore {
         : id.matches('receivables.*') ? 'facturation'
         : id.matches('cashflow.*') ? 'facturation'
         : id.matches('rentabilite.*') ? 'rentabilite'
+        // Marge par entité isolée → accès « Rentabilité » requis (avant les règles clients/domaines).
+        : id.matches('clientsMargin.*') ? 'rentabilite'
+        : id.matches('domainesMargin.*') ? 'rentabilite'
         : id.matches('pipeline.*') ? 'pipeline'
         : id.matches('ams.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'

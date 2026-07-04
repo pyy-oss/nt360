@@ -283,6 +283,12 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
 export function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data, loading, error } = useDocData<EntitySummary>(`summaries/${kind}_${period}`);
   const canMargin = useCanSeeMargin();
+  // Marge par entité isolée dans un doc *Margin_* (lecture réservée à « Rentabilité ») — lu seulement
+  // si le rôle a l'accès marge ; sinon jamais demandé (confidentialité opposable par les Rules).
+  const { data: mdata } = useDocData<EntitySummary>(canMargin ? `summaries/${kind}Margin_${period}` : null);
+  const marginBy = new Map((mdata?.rows || []).map((r) => [r.key, r]));
+  const mbOf = (r: EntityRow) => marginBy.get(r.key)?.mb;
+  const pmbOf = (r: EntityRow) => marginBy.get(r.key)?.pmb;
   // R/O par périmètre : objectifs de scope « bu » (Domaines) ou « client » (Clients) de l'exercice.
   const scope = kind === "domaines" ? "bu" : "client";
   const obj = useObjectives(period);
@@ -303,12 +309,12 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
           colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
           colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
           // Marges masquées pour les rôles sans accès « Rentabilité ».
-          ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(r.mb), (r: EntityRow) => r.mb), colNum("%MB", (r: EntityRow) => pct(r.pmb), (r: EntityRow) => r.pmb)] : []),
+          ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0), colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0)] : []),
           // R/O (Réalisé / Objectif) au périmètre — affiché si un objectif existe pour l'exercice.
           ...(hasObj ? [
             colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas)),
             colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced)),
-            ...(canMargin ? [colNum("R/O Marge", (r: EntityRow) => roBadge(r.mb, roOf(r)?.targetMargin))] : []),
+            ...(canMargin ? [colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin))] : []),
           ] : []),
         ]} rows={rows} />
         {hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre {kind === "domaines" ? "BU" : "client"}. Les objectifs se définissent dans « Objectifs ».</Tip>}

@@ -166,8 +166,18 @@ async function recomputeAll(db, only) {
     if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
-    if (want("clients")) w.push({ path: `summaries/clients_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.client), ...stamp } });
-    if (want("domaines")) w.push({ path: `summaries/domaines_${period}`, data: { period, rows: byEntity(ord, inv, (x) => x.bu), ...stamp } });
+    // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec
+    // l'accès « Rentabilité » (confidentialité côté serveur) ; le doc de base ne porte que CAS/facturé/backlog.
+    if (want("clients")) {
+      const cl = byEntity(ord, inv, (x) => x.client);
+      w.push({ path: `summaries/clients_${period}`, data: { period, rows: cl.map(({ mb, pmb, ...r }) => r), ...stamp } });
+      w.push({ path: `summaries/clientsMargin_${period}`, data: { period, rows: cl.map(({ key, mb, pmb }) => ({ key, mb, pmb })), ...stamp } });
+    }
+    if (want("domaines")) {
+      const dm = byEntity(ord, inv, (x) => x.bu);
+      w.push({ path: `summaries/domaines_${period}`, data: { period, rows: dm.map(({ mb, pmb, ...r }) => r), ...stamp } });
+      w.push({ path: `summaries/domainesMargin_${period}`, data: { period, rows: dm.map(({ key, mb, pmb }) => ({ key, mb, pmb })), ...stamp } });
+    }
   }
 
   // Enregistre la liste des périodes disponibles (sélecteur front) + l'horodatage du dernier
