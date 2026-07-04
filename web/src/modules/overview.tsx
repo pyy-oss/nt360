@@ -129,7 +129,7 @@ export const Overview: FC<Props> = ({ period }) => {
 
       {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
-        {canMargin && <Kpi label="Marge brute" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)}` : ""}`} />}
+        {canMargin && <Kpi label="Marge brute (commande)" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)} · marge P&L / CAS${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)} vs objectif marge` : ""}`} />}
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
