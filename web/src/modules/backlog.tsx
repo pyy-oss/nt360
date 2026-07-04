@@ -9,7 +9,7 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { patchOrder, setCarryover, setBillingMilestones, type BillingMilestone } from "../lib/writes";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover, BillingMilestonesDoc } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover, BillingMilestonesDoc, BillingTrendSummary } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -203,6 +203,8 @@ export const Prevision: FC<Props> = () => {
   const { data: attMargin } = useDocData<{ reporteMarge?: number }>(canMargin && cfg?.currentFy ? `summaries/atterrissageMargin_${cfg.currentFy}` : null);
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const { data: cf } = useDocData<CashflowSummary>("summaries/cashflow");
+  // Tendance de facturation (réalisé vs planifié par les jalons) jusqu'au 31/12 — accès facturation.
+  const { data: billTrend } = useDocData<BillingTrendSummary>(cfg?.currentFy ? `summaries/billingTrend_${cfg.currentFy}` : null);
   if (!bl && !pl && !att) return <EmptyState />;
   const realiseCas = att?.realiseCas || 0;
   const backlog = bl?.total || 0;
@@ -267,6 +269,30 @@ export const Prevision: FC<Props> = () => {
             </Card>
           )}
         </>
+      )}
+      {billTrend && (billTrend.months?.length || 0) > 0 && (
+        <Card title={`Tendance de facturation ${billTrend.fy} — jusqu'au 31/12`}>
+          <div className={grid4}>
+            <Kpi label="Facturé à date" value={fmt(billTrend.realiseYtd)} tone="emerald" sub="mois échus (réel)" />
+            <Kpi label="Planifié restant" value={fmt(billTrend.planifieRestant)} tone="steel" sub="jalons des mois à venir" />
+            <Kpi label="Projeté au 31/12" value={fmt(billTrend.projeteDec)} tone="gold" sub="réalisé + planifié restant" />
+          </div>
+          <MultiLine
+            data={(billTrend.months || []).map((m) => ({ name: m.month.slice(5), "Réalisé cumulé": m.cumulRealise, "Trajectoire (→ 31/12)": m.cumulTrajectoire }))}
+            series={[
+              { key: "Réalisé cumulé", color: T.emerald, name: "Réalisé cumulé" },
+              { key: "Trajectoire (→ 31/12)", color: T.gold, name: "Trajectoire (réalisé + planifié)" },
+            ]}
+          />
+          <Card title="Réalisé vs planifié par mois">
+            <GroupedBars
+              data={(billTrend.months || []).map((m) => ({ name: m.month.slice(5), Réalisé: m.realise, Planifié: m.planifie }))}
+              series={[{ key: "Réalisé", color: T.emerald, name: "Réalisé" }, { key: "Planifié", color: T.steel, name: "Planifié (jalons)" }]}
+              h={220} size={16} interval={0}
+            />
+          </Card>
+          <Tip>La <b>trajectoire</b> combine le <b>réalisé</b> (factures datées) pour les mois échus et le <b>planifié</b> (jalons de facturation) pour les mois à venir → <b>projeté de facturation au 31/12</b>. L'écart réalisé/planifié par mois révèle l'avance ou le retard sur le plan.</Tip>
+        </Card>
       )}
       {cf && ((cf.openCount || 0) > 0 || (cf.bcOpenCount || 0) > 0) && (() => {
         // Prévision de trésorerie NETTE : encaissements AR attendus − décaissements fournisseurs
