@@ -44,9 +44,11 @@ export const Overview: FC<Props> = ({ period }) => {
   // Filtre transverse : quand un BU/AM/client est sélectionné, on RECALCULE la chaîne & les KPI
   // par périmètre côté client (les collections dégradent proprement à vide si l'accès manque).
   const { active, f, match } = useFilters();
-  const { rows: cmdRows } = useCommandesRows();
-  const { rows: allOpps } = useCollectionData<Opportunity>("opportunities");
-  const { rows: allInvoices } = useCollectionData<Invoice>("invoices");
+  // Les collections brutes ne sont abonnées QUE si un filtre est actif (le recalcul par périmètre en
+  // a besoin) — sinon la Vue d'ensemble (page la plus vue) n'ouvre aucun listener plein-collection.
+  const { rows: cmdRows } = useCommandesRows(active);
+  const { rows: allOpps } = useCollectionData<Opportunity>(active ? "opportunities" : null);
+  const { rows: allInvoices } = useCollectionData<Invoice>(active ? "invoices" : null);
   // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
   const canMargin = useCanSeeMargin();

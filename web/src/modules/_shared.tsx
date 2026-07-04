@@ -38,13 +38,15 @@ export function useObjectives(fy: number | string | undefined) {
 // Lignes de commandes matérialisées, LUES DEPUIS LES CHUNKS (commandesRows/{i}) pour s'affranchir
 // de la limite Firestore ~1 Mio/doc. Fusionne les chunks (ordre stable), avec repli sur les lignes
 // inline d'un ancien agrégat (transition avant le premier recompute chunké). count depuis la méta.
-export function useCommandesRows() {
+export function useCommandesRows(enabled = true) {
   const canMargin = useCanSeeMargin();
-  const { data: meta, loading: l1 } = useDocData<CommandesSummary>("summaries/commandes");
-  const { rows: chunks, loading: l2 } = useCollectionData<CommandeChunk>("commandesRows", [orderBy("i", "asc")], "chunks");
-  // Marge par ligne dans une collection SÉPARÉE (accès « Rentabilité ») : lue seulement si le rôle a
-  // le droit marge (sinon name null → pas d'abonnement), puis fusionnée par FP.
-  const { rows: mchunks } = useCollectionData<CommandeChunk>(canMargin ? "commandesRowsMargin" : null, [orderBy("i", "asc")], canMargin ? "mchunks" : "off");
+  // enabled=false → aucun abonnement (name null) : la Vue d'ensemble / FP 360° ne chargent la liste
+  // complète des commandes que lorsqu'elle est réellement nécessaire (filtre actif / recherche saisie).
+  const { data: meta, loading: l1 } = useDocData<CommandesSummary>(enabled ? "summaries/commandes" : null);
+  const { rows: chunks, loading: l2 } = useCollectionData<CommandeChunk>(enabled ? "commandesRows" : null, [orderBy("i", "asc")], "chunks");
+  // Marge par ligne dans une collection SÉPARÉE (accès « Rentabilité ») : lue seulement si activé ET
+  // si le rôle a le droit marge (sinon name null → pas d'abonnement), puis fusionnée par FP.
+  const { rows: mchunks } = useCollectionData<CommandeChunk>(enabled && canMargin ? "commandesRowsMargin" : null, [orderBy("i", "asc")], canMargin ? "mchunks" : "off");
   const base: Order[] = chunks.length ? chunks.flatMap((c) => c.rows || []) : (meta?.rows || []);
   let rows = base;
   if (canMargin && mchunks.length) {
