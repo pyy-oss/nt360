@@ -83,4 +83,14 @@ describe("decaissements — sorties de cash (BC non soldés)", () => {
     const sumMonths = d.months.reduce((s, m) => s + m.out, 0);
     expect(sumMonths + d.beyond + d.overdue).toBe(d.total);
   });
+  it("complétude ETA : part du montant à ETA connue (fiabilité de la ventilation)", () => {
+    expect(d.etaKnown).toBe(1700);        // 1000 + 500 + 200 (à ETA), 300 sans ETA exclu
+    expect(d.noEtaCount).toBe(1);         // une seule ligne sans ETA
+    expect(d.etaCompleteness).toBeCloseTo(0.85); // 1700 / 2000
+  });
+  it("complétude = 1 quand rien d'ouvert (aucune division par zéro)", () => {
+    const empty = decaissements([], "2026-07-01");
+    expect(empty.etaCompleteness).toBe(1);
+    expect(empty.noEtaCount).toBe(0);
+  });
 });

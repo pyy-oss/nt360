@@ -91,6 +91,7 @@ export interface CashflowSummary {
   overdue?: number; overdueCount?: number; beyond?: number;
   totalAR?: number; arHorizon?: number; totalRaf?: number; openCount?: number;
   totalDecaissement?: number; decaissementBeyond?: number; decaissementOverdue?: number; decaissementOverdueCount?: number; bcOpenCount?: number;
+  decaissementEtaCompleteness?: number; decaissementNoEtaCount?: number;
 }
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 
