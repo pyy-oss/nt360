@@ -8,7 +8,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
-import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime, useCommandesRows } from "./_shared";
+import { Props, cols2, AlertsBanner, useObjectives, roBadge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
 import { normalizeTiers, type ProjectionConfig } from "../lib/projection";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice, RentabiliteSummary } from "../types";
@@ -140,10 +140,16 @@ export const Overview: FC<Props> = ({ period }) => {
         <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(v.backlog)} sub={v.backlogCount ? `${v.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
 
-      {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
-      <div className={grid4}>
-        {canMargin && <Kpi label="Marge brute (commande)" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)} · marge P&L / CAS ${fmt(v.commandes)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)}` : ""}`} />}
-        {canMargin && <Kpi label="Marge brute (facturé)" value={fmt(margeFacMb)} tone="gold" sub={`%MB ${pct(margeFacPmb)} · marge reconnue / CAF ${fmt(v.facture)}`} />}
+      {/* Marge — 2 perspectives sur leur propre ligne (bases CAS/CAF déjà dans la chaîne ci-dessus,
+          non répétées ici pour éviter le double affichage). */}
+      {canMargin && (
+        <div className={cols2}>
+          <Kpi label="Marge brute (commande)" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)} · marge P&L / CAS${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)} vs objectif` : ""}`} />
+          <Kpi label="Marge brute (facturé)" value={fmt(margeFacMb)} tone="gold" sub={`%MB ${pct(margeFacPmb)} · marge reconnue / CAF`} />
+        </div>
+      )}
+      {/* KPIs de pilotage opérationnels : facturation N (croissance), taux de facturation, conversion. */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
