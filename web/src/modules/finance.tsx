@@ -9,6 +9,7 @@ import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { MARGIN } from "../lib/thresholds";
 import type { FacturationSummary, RentabiliteSummary, Objective, Invoice } from "../types";
 
 // 3 — Objectifs / R-O
@@ -246,7 +247,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
           colText("AM", (a) => a.am || "—", (a) => a.am || ""),
           colNum(baseLbl, (a) => money(a.base), (a) => a.base),
           colNum("MB", (a) => money(a.mb), (a) => a.mb),
-          colNum("%MB", (a) => <Badge tone={(a.pmb < 0.1 ? "clay" : a.pmb < 0.2 ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
+          colNum("%MB", (a) => <Badge tone={(a.pmb < MARGIN.LOW ? "clay" : a.pmb < MARGIN.OK ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
         ]} rows={p.bottomAffaires || []} empty={`Aucune affaire à ${baseLbl} positif.`} />
       </Card>
       <Card title="Top clients (marge)"><HBars rows={topArr(p.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>

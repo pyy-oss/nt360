@@ -6,6 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
+import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { patchOrder } from "../lib/writes";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary } from "../types";
@@ -30,7 +31,7 @@ export const Backlog: FC<Props> = () => {
         <Card title="Fiabilité du RAF — d'où vient le backlog">
           <div className={grid4}>
             <Kpi label="RAF curaté (Excel P&L)" value={fmt(excel)} tone="emerald" sub={`${data.countExcel ?? 0} commandes · fiable`} />
-            <Kpi label="RAF dérivé (CAS − facturé)" value={fmt(derive)} tone={derivePct > 0.05 ? "clay" : "steel"} sub={`${data.countDerive ?? 0} commandes · ${pct(derivePct)} du total`} />
+            <Kpi label="RAF dérivé (CAS − facturé)" value={fmt(derive)} tone={derivePct > DERIVE_SUSPECT_PCT ? "clay" : "steel"} sub={`${data.countDerive ?? 0} commandes · ${pct(derivePct)} du total`} />
           </div>
           <Tip>
             Le <b>RAF dérivé</b> (opp. gagnée ou fiche <b>sans base P&L</b>, ou facture non rattachée au N° FP)
@@ -106,6 +107,7 @@ export const Prevision: FC<Props> = () => {
           <div className={cols2}>
             <Card title={`Atterrissage CAS ${att.fy} — prise de commande`}>
               <Gauge value={att.probaAtteinte || 0} color={(att.ecart || 0) < 0 ? T.clay : T.emerald} />
+              {(att.objectif || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
                 <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
                 <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{(att.objectif || 0) > 0 ? fmt(att.objectif) : "—"}</div></div>
@@ -114,6 +116,7 @@ export const Prevision: FC<Props> = () => {
             </Card>
             <Card title={`Atterrissage CAF ${att.fy} — facturation`}>
               <Gauge value={att.probaAtteinteCaf || 0} color={(att.ecartCaf || 0) < 0 ? T.clay : T.emerald} />
+              {(att.objectifCaf || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
                 <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(att.cafProjete)}</div></div>
                 <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{(att.objectifCaf || 0) > 0 ? fmt(att.objectifCaf) : "—"}</div></div>
@@ -134,7 +137,7 @@ export const Prevision: FC<Props> = () => {
         // mois courant, ce qui gonfle artificiellement la sortie du 1er mois.
         const months = cf.months || [];
         const fiab = cf.decaissementEtaCompleteness ?? 1;
-        const fiabTone: "emerald" | "gold" | "clay" = fiab >= 0.8 ? "emerald" : fiab >= 0.5 ? "gold" : "clay";
+        const fiabTone: "emerald" | "gold" | "clay" = fiab >= FIAB.GOOD ? "emerald" : fiab >= FIAB.FAIR ? "gold" : "clay";
         const netHorizon = (cf.arHorizon || 0) - months.reduce((s, m) => s + (m.decaissement || 0), 0);
         return (
           <Card title={`Prévision de trésorerie — position nette (${cf.horizon || 6} mois glissants)`}>
@@ -186,7 +189,7 @@ export const Prevision: FC<Props> = () => {
 };
 
 // 6bis — Simulateur d'atterrissage (what-if) : leviers commerciaux → impact live sur
-// le Projeté CAS/CAF et la probabilité d'atteinte de l'objectif. 100 % client (aucune écriture).
+// le Projeté CAS/CAF et le taux d'atteinte de l'objectif. 100 % client (aucune écriture).
 const M = 1_000_000;
 export const Simulateur: FC<Props> = () => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
@@ -241,6 +244,7 @@ export const Simulateur: FC<Props> = () => {
       <div className={cols2}>
         <Card title="Atterrissage CAS simulé — prise de commande">
           <Gauge value={probaCas} color={ecartCas < 0 ? T.clay : T.emerald} />
+          {objectifCas > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(projeteCas)}</div></div>
             <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCas > 0 ? fmt(objectifCas) : "—"}</div></div>
@@ -249,6 +253,7 @@ export const Simulateur: FC<Props> = () => {
         </Card>
         <Card title="Atterrissage CAF simulé — facturation">
           <Gauge value={probaCaf} color={ecartCaf < 0 ? T.clay : T.emerald} />
+          {objectifCaf > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(projeteCaf)}</div></div>
             <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCaf > 0 ? fmt(objectifCaf) : "—"}</div></div>

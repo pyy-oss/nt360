@@ -2,10 +2,8 @@
 // ligne fournisseur saturée, concentration client, BC en attente. Fonction pure.
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
-
-const CONCENTRATION_THRESHOLD = 0.3; // >30 % du CAS sur un seul client
-// Seuils d'alerte PAR DÉFAUT (surchargés par config/alerts, éditables en Admin).
-const ALERT_DEFAULTS = { concentration: 0.30, surfacturationPct: 0.005, rafEcartPct: 0.10, dormantYears: 2 };
+// Seuils d'alerte PAR DÉFAUT (source unique domain/thresholds ; surchargés par config/alerts).
+const { ALERT_DEFAULTS } = require("./thresholds");
 
 /**
  * @param {object[]} orders
@@ -95,4 +93,4 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   return out;
 }
 
-module.exports = { alerts, CONCENTRATION_THRESHOLD, ALERT_DEFAULTS };
+module.exports = { alerts, ALERT_DEFAULTS };

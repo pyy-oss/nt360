@@ -12,8 +12,9 @@ import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime, use
 import { computeFilteredOverview } from "./overviewCalc";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice } from "../types";
 
-// Bloc « atterrissage » : jauge de probabilité + Réalisé / Projeté / Objectif / Écart, avec le
-// R/O (Réalisé / Objectif) mis en avant dans le coin (fusion de l'ancienne carte R/O isolée).
+// Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
+// Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
+// une probabilité statistique : c'est un ratio d'atteinte de l'objectif — libellé en conséquence.
 function Landing({ title, proba, realise, projete, objectif, ecart, sub }: {
   title: string; proba: number; realise?: number; projete?: number; objectif?: number; ecart?: number; sub: string;
 }) {
@@ -21,6 +22,7 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub }: {
   return (
     <Card title={title} actions={hasObj ? <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">R/O {roBadge(realise, objectif)}</span> : undefined}>
       <Gauge value={proba || 0} color={(ecart || 0) < 0 ? T.clay : T.emerald} h={170} />
+      {hasObj && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
       <div className="grid grid-cols-4 gap-2 mt-2 text-center">
         <div><div className="text-[11px] text-muted">Réalisé</div><div className="font-display tabnum">{fmt(realise)}</div></div>
         <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(projete)}</div></div>

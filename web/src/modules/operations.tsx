@@ -11,6 +11,7 @@ import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
@@ -43,7 +44,7 @@ export const PnlProjet: FC<Props> = () => {
           <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
           <Kpi label="Prix de vente" value={fmt(vente)} />
           <Kpi label="Marge brute" value={fmt(marge)} tone="gold" />
-          <Kpi label="%MB global" value={pct(pmb)} tone={pmb < 0.1 ? "clay" : "emerald"} />
+          <Kpi label="%MB global" value={pct(pmb)} tone={pmb < MARGIN.LOW ? "clay" : "emerald"} />
         </div>
       )}
       <Card title={`Fiches affaire${canMargin ? " — coût / vente / marge" : ""} · ${rows.length}`}>
@@ -59,7 +60,7 @@ export const PnlProjet: FC<Props> = () => {
               colNum("Revient", (r: ProjectSheet) => money(r.costTotal), (r: ProjectSheet) => r.costTotal || 0),
               colNum("Vente", (r: ProjectSheet) => money(r.saleTotal), (r: ProjectSheet) => r.saleTotal || 0),
               colNum("Marge", (r: ProjectSheet) => money(r.margin), (r: ProjectSheet) => r.margin || 0),
-              colNum("%MB", (r: ProjectSheet) => <Badge tone={((r.marginPct || 0) < 0.1 ? "clay" : (r.marginPct || 0) < 0.2 ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r: ProjectSheet) => r.marginPct || 0),
+              colNum("%MB", (r: ProjectSheet) => <Badge tone={((r.marginPct || 0) < MARGIN.LOW ? "clay" : (r.marginPct || 0) < MARGIN.OK ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r: ProjectSheet) => r.marginPct || 0),
             ] : []),
           ]}
         />
@@ -434,7 +435,7 @@ export const DataQuality: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <div className={cols2}>
         <Card title="Score de complétude des données">
-          <Gauge value={score} color={score >= 0.9 ? T.emerald : score >= 0.7 ? T.gold : T.clay} />
+          <Gauge value={score} color={score >= QUALITY.GOOD ? T.emerald : score >= QUALITY.FAIR ? T.gold : T.clay} />
           <div className="text-[11px] text-faint text-center mt-1">1 − anomalies pondérées / enregistrements</div>
         </Card>
         <Card title="Volumes ingérés">

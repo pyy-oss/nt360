@@ -3,13 +3,14 @@
 // de rattachement, incohérences. Distinct du « Centre d'alertes » (alertes MÉTIER actionnables).
 // Module PUR (testable).
 const { fpKey } = require("../lib/ids");
+const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
 function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
   bcLines = bcLines || []; sheets = sheets || [];
-  const surfacPct = (thr && thr.surfacturationPct) || 0.005; // seuil de surfacturation (config/alerts)
+  const surfacPct = (thr && thr.surfacturationPct) || ALERT_DEFAULTS.surfacturationPct; // seuil de surfacturation (même défaut que les alertes)
 
   const billed = {};
   for (const i of invoices) if (i.fp) billed[i.fp] = (billed[i.fp] || 0) + (i.amountHt || 0);

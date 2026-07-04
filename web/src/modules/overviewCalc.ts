@@ -4,6 +4,7 @@
 // et mêmes ratios. Fonction PURE → testable sans React.
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
+import { PROJ } from "../lib/thresholds";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -45,9 +46,9 @@ export function computeFilteredOverview(
   const facture = S(invP, (i) => i.amountHt);
   const active = oppP.filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5);
   const band = (lo: number, hi: number) => S(active.filter((o) => (o.probability || 0) >= lo && (o.probability || 0) < hi), (o) => o.amount);
-  const pondCertain = S(active.filter((o) => (o.probability || 0) >= 0.9), (o) => o.amount);
+  const pondCertain = S(active.filter((o) => (o.probability || 0) >= PROJ.FULL), (o) => o.amount);
   const perdu = S(oppP.filter((o) => o.stage === 7), (o) => o.amount);
-  const convDenom = commandes + pondCertain + 0.20 * band(0.70, 0.90) + 0.10 * band(0.50, 0.70) + perdu;
+  const convDenom = commandes + pondCertain + PROJ.W_T2 * band(PROJ.T2, PROJ.FULL) + PROJ.W_T3 * band(PROJ.T3, PROJ.T2) + perdu;
   return {
     certitudes: pondCertain, commandes, facture, backlog, backlogCount, mb,
     ratios: {
