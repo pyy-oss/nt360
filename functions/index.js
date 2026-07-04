@@ -195,6 +195,28 @@ exports.setCarryover = onCallG("setCarryover", async (req) => {
   return { ok: true, fp, amount };
 });
 
+// --- Jalons de facturation par projet (billingMilestones/{safeId(fp)}) : échéancier prévisionnel
+// (≤ 15 jalons {date, montant}), SOURCE UNIQUE du report N+1 (Σ jalons après le 31/12). Édité par
+// direction/PMO. La règle « Σ jalons = RAF » est validée à l'éditeur ; le serveur normalise (≤ 15,
+// dates ISO, montants > 0) et borne le report dérivé au RAF (aucune incohérence même en cas de dérive). ---
+exports.setBillingMilestones = onCallG("setBillingMilestones", async (req) => {
+  const role = req.auth?.token?.role;
+  if (role !== "direction" && role !== "pmo") throw new HttpsError("permission-denied", "direction ou PMO requis");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const { normalizeMilestones } = require("./domain/milestones");
+  const fp = fpKey(req.data?.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  const milestones = normalizeMilestones(req.data?.milestones);
+  await db.doc(`billingMilestones/${safeId(fp)}`).set({ fp, milestones, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "billing_milestones", module: "backlog",
+    entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0) }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(["atterrissage"]);
+  return { ok: true, fp, milestones };
+});
+
 // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
 // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
 async function postWebhook(url, text) {

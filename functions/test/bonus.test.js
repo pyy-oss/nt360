@@ -86,6 +86,15 @@ describe("atterrissage (§7)", () => {
     expect(a2.next.pipelinePondere).toBe(500); // pipeline D Prev 2027 (≥90 % → 100 %)
     expect(a2.next.cafProjete).toBe(750);     // 0 facturé N+1 + 250 reporté + 500 pipeline
   });
+  it("jalons = source unique du report N+1 (Σ jalons après le 31/12), priment sur le report manuel", () => {
+    const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }]; // RAF projetable 400
+    const ms = { "FP/2026/1": [{ date: "2026-06-01", amount: 150 }, { date: "2027-02-01", amount: 250 }] };
+    // Un report manuel de 999 est présent MAIS ignoré car des jalons existent (source unique).
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": 999 }, ms);
+    expect(a.reporteCaf).toBe(250);     // Σ jalons après 2026-12-31 = 250 (pas 999)
+    expect(a.backlogProjete).toBe(150); // 400 − 250
+    expect(a.reporteMarge).toBe(50);    // 20 % × 250
+  });
   it("report borné au RAF projetable (report > RAF n'engendre pas de CAF négatif)", () => {
     const ord = [{ fp: "FP/2026/2", yearPo: 2026, cas: 500, raf: 500, facture: 0 }];
     const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/2": 9999 });

@@ -47,6 +47,13 @@ export async function setCarryover(fp: string, amount: number) {
   return res.data as { ok: boolean; fp: string; amount: number };
 }
 
+export type BillingMilestone = { date: string; amount: number };
+/** Enregistre l'échéancier de facturation d'un projet (≤ 15 jalons). Direction/PMO. Recalcule. */
+export async function setBillingMilestones(fp: string, milestones: BillingMilestone[]) {
+  const res = await httpsCallable(functions, "setBillingMilestones")({ fp, milestones });
+  return res.data as { ok: boolean; fp: string; milestones: BillingMilestone[] };
+}
+
 /** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
 export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
   await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });
