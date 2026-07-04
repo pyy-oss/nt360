@@ -100,7 +100,7 @@ export const Prevision: FC<Props> = () => {
       {/* Atterrissages : les deux projections issues des composantes ci-dessus. */}
       <div className={cols2}>
         <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="Réalisé CAS + Pipeline projeté" />
-        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="Facturé + Backlog + Pipeline projeté" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="Facturé + Backlog (à facturer) + Pipeline projeté" />
       </div>
       {att && (
         <>
@@ -202,7 +202,9 @@ export const Simulateur: FC<Props> = () => {
   if (!att) return <EmptyState label="Atterrissage indisponible — importer données & objectifs, puis recalculer." />;
 
   const realiseCas = att.realiseCas || 0;
-  const backlog = att.backlog || 0;
+  // Backlog utilisé pour la projection CAF = RAF plafonné à (CAS − facturé) (neutralisation du double
+  // compte facturé + RAF), pour que le simulateur parte de la MÊME base que l'atterrissage réel.
+  const backlog = att.backlogProjete ?? att.backlog ?? 0;
   const factureN = att.factureN || 0;
   const basePipe = att.pipelinePondere || 0;
   const objectifCas = objOverride.trim() !== "" ? (Number(objOverride) || 0) * M : (att.objectif || 0);
