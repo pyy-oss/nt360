@@ -16,6 +16,16 @@ type Ctx = {
 };
 
 const up = (s?: string) => (s || "").trim().toUpperCase();
+
+/** Prédicat PUR (testable) : la ligne passe-t-elle le filtre sur les dimensions demandées ?
+ *  Comparaison insensible à la casse ; un critère vide n'exclut jamais. */
+export function filterMatch(f: Filters, row: { bu?: string; am?: string; client?: string }, dims: Dim[] = ["bu", "am", "client"]): boolean {
+  if (dims.includes("bu") && f.bu && up(row.bu) !== up(f.bu)) return false;
+  if (dims.includes("am") && f.am && up(row.am) !== up(f.am)) return false;
+  if (dims.includes("client") && f.client && up(row.client) !== up(f.client)) return false;
+  return true;
+}
+
 const FilterCtx = createContext<Ctx>({ f: { bu: "", am: "", client: "" }, set: () => {}, clear: () => {}, active: false, match: () => true });
 
 export function FilterProvider({ children }: { children: ReactNode }) {
@@ -25,12 +35,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     set: (p) => setF((s) => ({ ...s, ...p })),
     clear: () => setF({ bu: "", am: "", client: "" }),
     active: !!(f.bu || f.am || f.client),
-    match: (row, dims = ["bu", "am", "client"]) => {
-      if (dims.includes("bu") && f.bu && up(row.bu) !== up(f.bu)) return false;
-      if (dims.includes("am") && f.am && up(row.am) !== up(f.am)) return false;
-      if (dims.includes("client") && f.client && up(row.client) !== up(f.client)) return false;
-      return true;
-    },
+    match: (row, dims) => filterMatch(f, row, dims),
   }), [f]);
   return <FilterCtx.Provider value={value}>{children}</FilterCtx.Provider>;
 }

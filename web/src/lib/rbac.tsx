@@ -5,6 +5,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "./firebase";
+import { resolveLevel } from "./perm";
 
 export type Level = "none" | "read" | "write";
 export type Role = "direction" | "commercial_dir" | "commercial" | "pmo" | "achats" | "lecture";
@@ -54,11 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const can = (module: string): Level => {
-    if (!role) return "none";
-    if (role === "direction") return "write"; // direction = write partout (cohérent avec les rules)
-    return matrix?.[role]?.[module] ?? "none";
-  };
+  const can = (module: string): Level => resolveLevel(role, matrix, module);
 
   return <AuthCtx.Provider value={{ user, role, loading, can }}>{children}</AuthCtx.Provider>;
 }

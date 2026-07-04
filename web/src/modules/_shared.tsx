@@ -6,6 +6,8 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
 import { useCanSeeMargin } from "../lib/rbac";
+import { relTime } from "../lib/format";
+export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
@@ -129,17 +131,6 @@ const PHASE_LABEL: Record<Exclude<ImportPhase, "">, string> = {
   reading: "Lecture du fichier…",
   processing: "Envoi, traitement & recalcul…",
 };
-export function relTime(ts: any): string {
-  const ms = ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : 0;
-  if (!ms) return "";
-  const d = Date.now() - ms;
-  const m = Math.floor(d / 60000);
-  if (m < 1) return "à l'instant";
-  if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `il y a ${h} h`;
-  return `il y a ${Math.floor(h / 24)} j`;
-}
 
 // Hook d'import partagé : garde-fou taille, phases de progression (lecture → traitement), et
 // résultat/erreur persistant. L'upsert serveur est idempotent (ré-import = remplace, pas de doublon).
