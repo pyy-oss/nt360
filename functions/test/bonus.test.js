@@ -31,21 +31,21 @@ describe("atterrissage (§7)", () => {
   const a = atterrissage(ORDERS, INVOICES, OPPS, OBJ, 2026, ASOF);
   it("pipeline projeté tiéré (100%≥90 · 20%≥70 · 10%≥50) sur l'exercice → projeté CAS", () => {
     expect(a.realiseCas).toBe(1200); // 1000 + 200 (yearPo 2026)
-    expect(a.pipelinePondere).toBe(1800); // 1000 + 300 (≥90%) + 400 (20%·2000) + 100 (10%·1000) ; N±1/<50%/non-actifs exclus
-    expect(a.projete).toBe(3000); // 1200 + 1800
+    expect(a.pipelinePondere).toBe(1750); // 1000 + 300 (≥90%) + 400 (20%·2000) + 50 (5%·1000) ; N±1/<50%/non-actifs exclus
+    expect(a.projete).toBe(2950); // 1200 + 1750
   });
   it("projeté CAF = facturé réalisé + backlog (RAF) + pipeline projeté", () => {
     expect(a.backlog).toBe(700); // RAF ouverts : 400 (FP/2026/1) + 300 (FP/2022/9)
-    expect(a.cafProjete).toBe(3100); // 600 (facturé FY) + 700 (backlog) + 1800 (pipeline projeté)
+    expect(a.cafProjete).toBe(3050); // 600 (facturé FY) + 700 (backlog) + 1750 (pipeline projeté)
   });
   it("atterrissage CAF vs cible de facturation (targetInvoiced)", () => {
     expect(a.objectifCaf).toBe(4000);
-    expect(a.ecartCaf).toBe(-900); // 3100 − 4000
-    expect(a.probaAtteinteCaf).toBeCloseTo(3100 / 4000, 6);
+    expect(a.ecartCaf).toBe(-950); // 3050 − 4000
+    expect(a.probaAtteinteCaf).toBeCloseTo(3050 / 4000, 6);
   });
   it("écart vs objectif CAS + N vs N-1", () => {
     expect(a.objectif).toBe(4000);
-    expect(a.ecart).toBe(-1000); // 3000 − 4000
+    expect(a.ecart).toBe(-1050); // 2950 − 4000
     expect(a.factureN).toBe(600);
     expect(a.factureN1).toBe(400);
     expect(a.croissanceFacture).toBeCloseTo(0.5, 6);

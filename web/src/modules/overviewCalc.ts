@@ -4,7 +4,7 @@
 // et mêmes ratios. Fonction PURE → testable sans React.
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
-import { PROJ } from "../lib/thresholds";
+import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -16,7 +16,9 @@ const DIMS: Dim[] = ["bu", "am", "client"];
 export function computeFilteredOverview(
   cmdRows: Order[], invoices: Invoice[], opps: Opportunity[], period: string,
   match: (row: { bu?: string; am?: string; client?: string }, dims?: Dim[]) => boolean,
+  tiers?: Tier[],
 ): FilteredOverview {
+  const t = tiers || normalizeTiers();
   const yr = (d?: string) => (d ? String(d).slice(0, 4) : "");
   const inPeriod = (y: string) => period === "all" || y === period;
   const S = (a: any[], f: (x: any) => number) => a.reduce((s, x) => s + (f(x) || 0), 0);
@@ -45,10 +47,13 @@ export function computeFilteredOverview(
   const mb = S(ordP, (o) => o.mb);
   const facture = S(invP, (i) => i.amountHt);
   const active = oppP.filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5);
-  const band = (lo: number, hi: number) => S(active.filter((o) => (o.probability || 0) >= lo && (o.probability || 0) < hi), (o) => o.amount);
-  const pondCertain = S(active.filter((o) => (o.probability || 0) >= PROJ.FULL), (o) => o.amount);
+  // Pipeline projeté = Σ des niveaux ACTIFS (moteur configurable, miroir serveur). Certitudes =
+  // contribution pondérée du niveau ≥90 (0 si désactivé).
+  const pipelineProjete = S(active, (o) => projectionWeight(o, t));
+  const certT = t.find((x) => x.key === "certitudes")!;
+  const pondCertain = certT.active ? S(active.filter((o) => (o.probability || 0) >= certT.min), (o) => o.amount) * certT.weight : 0;
   const perdu = S(oppP.filter((o) => o.stage === 7), (o) => o.amount);
-  const convDenom = commandes + pondCertain + PROJ.W_T2 * band(PROJ.T2, PROJ.FULL) + PROJ.W_T3 * band(PROJ.T3, PROJ.T2) + perdu;
+  const convDenom = commandes + pipelineProjete + perdu;
   return {
     certitudes: pondCertain, commandes, facture, backlog, backlogCount, mb,
     ratios: {

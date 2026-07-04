@@ -1,9 +1,11 @@
 // Pipeline pondéré (BUILD_KIT §7, §18.5).
 // Actif = étapes 1-5, veille = 8, conversion = 6 (gagné) vs 7 (perdu).
-// « Pondéré » = PROJECTION tiérée UNIQUE (chaine.projectionWeight : 100 % si IdC ≥ 90 %, 20 % si
-// 70-90 %, 10 % si 50-70 %, 0 sinon). Le KPI Pondéré, les ventilations, le funnel par étape et
-// l'analyse de closing utilisent tous cette même règle (cohérence avec l'atterrissage).
-const { sum, projectionWeight } = require("./chaine");
+// « Pondéré » = PROJECTION à 3 niveaux CONFIGURABLES (domain/projection : Certitudes ≥90 · Forecast
+// 70-90 · Pipe 50-70, chacun activable/pondérable ; défaut 100/20/5). Le KPI Pondéré, les
+// ventilations, le funnel et l'analyse de closing utilisent tous ces mêmes niveaux (cohérence
+// avec l'atterrissage et la Vue d'ensemble).
+const { sum } = require("./chaine");
+const { projectionWeight, tierBreakdown, normalizeTiers } = require("./projection");
 const { groupSum } = require("./backlog");
 
 const CONFIANCE_MIN = 0.9;
@@ -13,7 +15,8 @@ const isEligible = (o) => isActive(o) && (o.probability || 0) >= CONFIANCE_MIN;
 
 // Analyse temporelle du closing (D Prev) sur les opps ACTIVES — uniquement à partir de la
 // closingDate réelle (aucune date de création/étape en source → pas de vélocité/âge inventés).
-function closingAnalysis(active, asOf) {
+// `pw` = pondération de projection liée aux niveaux configurés.
+function closingAnalysis(active, asOf, pw) {
   const today = String(asOf);
   const ym = today.slice(0, 7), yr = today.slice(0, 4);
   const q = Math.floor((Number(today.slice(5, 7)) - 1) / 3);
@@ -28,13 +31,13 @@ function closingAnalysis(active, asOf) {
     else if (d.slice(0, 7) === ym) key = "mois";
     else if (d.slice(0, 4) === yr && Math.floor((Number(d.slice(5, 7)) - 1) / 3) === q) key = "trim";
     else key = "plus";
-    B[key].brut += o.amount || 0; B[key].pond += projectionWeight(o); B[key].count++;
+    B[key].brut += o.amount || 0; B[key].pond += pw(o); B[key].count++;
     if (key === "retard") stale.push(o);
   }
   const staleTop = stale
-    .sort((a, b) => projectionWeight(b) - projectionWeight(a))
+    .sort((a, b) => pw(b) - pw(a))
     .slice(0, 10)
-    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, amount: o.amount, weighted: projectionWeight(o), closingDate: o.closingDate, stageLabel: o.stageLabel }));
+    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, amount: o.amount, weighted: pw(o), closingDate: o.closingDate, stageLabel: o.stageLabel }));
   // ANCIENNETÉ du retard : jours écoulés depuis la D Prev dépassée, en tranches → priorise les
   // affaires les plus enlisées (les >90 j sont les plus à risque). Âge légitime (basé sur la D Prev,
   // pas une date de création inventée).
@@ -44,15 +47,17 @@ function closingAnalysis(active, asOf) {
     const days = Math.max(0, Math.floor((Date.parse(today) - Date.parse(String(o.closingDate).slice(0, 10))) / 86400000));
     overdueDaysSum += days;
     const k = days <= 30 ? "d30" : days <= 90 ? "d90" : "dPlus";
-    overdueAge[k].brut += o.amount || 0; overdueAge[k].pond += projectionWeight(o); overdueAge[k].count++;
+    overdueAge[k].brut += o.amount || 0; overdueAge[k].pond += pw(o); overdueAge[k].count++;
   }
   const avgOverdueDays = stale.length ? Math.round(overdueDaysSum / stale.length) : 0;
   return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop, overdueAge, avgOverdueDays };
 }
 
-function pipeline(opps, asOf) {
+function pipeline(opps, asOf, tiers) {
+  const t = tiers || normalizeTiers();
+  const pw = (o) => projectionWeight(o, t);
   const active = opps.filter(isActive);
-  const projected = active.filter((o) => projectionWeight(o) > 0); // contribuent à la projection (IdC ≥ 50 %)
+  const projected = active.filter((o) => pw(o) > 0); // contribuent à la projection (IdC ≥ 50 %)
   const suspended = opps.filter((o) => o.stage === 8);
   const won = opps.filter((o) => o.stage === 6);
   const lost = opps.filter((o) => o.stage === 7);
@@ -63,15 +68,15 @@ function pipeline(opps, asOf) {
     byStage[s] = byStage[s] || { count: 0, amount: 0, weighted: 0 };
     byStage[s].count++;
     byStage[s].amount += o.amount || 0;
-    byStage[s].weighted += projectionWeight(o); // funnel = projection tiérée
+    byStage[s].weighted += pw(o); // funnel = projection tiérée
   }
 
   const month = (o) => (o.closingDate ? String(o.closingDate).slice(0, 7) : "?");
   // Top opportunités contribuant à la projection, triées par montant PROJETÉ.
   const topOpps = [...projected]
-    .sort((a, b) => projectionWeight(b) - projectionWeight(a))
+    .sort((a, b) => pw(b) - pw(a))
     .slice(0, 10)
-    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: projectionWeight(o), stage: o.stage, probability: o.probability }));
+    .map((o) => ({ oppId: o.oppId, client: o.client, am: o.am, bu: o.bu, amount: o.amount, weighted: pw(o), stage: o.stage, probability: o.probability }));
 
   // Conversion par commercial (AM) : gagné / perdu / taux + pipeline actif projeté.
   const ams = [...new Set(opps.map((o) => o.am).filter(Boolean))];
@@ -80,28 +85,30 @@ function pipeline(opps, asOf) {
       const w = won.filter((o) => o.am === am).length;
       const l = lost.filter((o) => o.am === am).length;
       const act = active.filter((o) => o.am === am);
-      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(act, projectionWeight) };
+      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(act, pw) };
     })
     .filter((x) => x.won + x.lost + x.activeCount > 0)
     .sort((a, b) => (b.weighted - a.weighted) || (b.won - a.won));
 
   const wonCount = won.length, lostCount = lost.length;
   return {
-    // brut = toute la funnel active ; « pondéré » = PROJECTION tiérée (100/20/10) des actives.
-    tot: { brut: sum(active, (o) => o.amount), weighted: sum(active, projectionWeight), count: active.length, countConf: projected.length },
+    // brut = toute la funnel active ; « pondéré » = PROJECTION tiérée (niveaux actifs) des actives.
+    tot: { brut: sum(active, (o) => o.amount), weighted: sum(active, pw), count: active.length, countConf: projected.length },
     susp: { brut: sum(suspended, (o) => o.amount), count: suspended.length },
     confianceMin: CONFIANCE_MIN,
+    // Décomposition du pondéré projeté par niveau (Certitudes / Forecast / Pipe) — jamais mélangée.
+    tierBreakdown: tierBreakdown(active, t),
     byStage,
-    byAM: groupSum(active, (o) => o.am, projectionWeight),
-    byBU: groupSum(active, (o) => o.bu, projectionWeight),
-    byMonth: groupSum(active, month, projectionWeight),
+    byAM: groupSum(active, (o) => o.am, pw),
+    byBU: groupSum(active, (o) => o.bu, pw),
+    byMonth: groupSum(active, month, pw),
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
     byAmConv,
     topOpps,
     // Analyse du closing (D Prev) : seulement si asOf fourni (sinon null, rétro-compat).
-    closing: asOf ? closingAnalysis(active, asOf) : null,
+    closing: asOf ? closingAnalysis(active, asOf, pw) : null,
   };
 }
 

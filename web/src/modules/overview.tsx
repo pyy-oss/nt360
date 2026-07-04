@@ -10,6 +10,7 @@ import { Gauge, MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, grid4, cols2, AlertsBanner, useObjectives, roBadge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
+import { normalizeTiers, type ProjectionConfig } from "../lib/projection";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice } from "../types";
 
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
@@ -61,6 +62,10 @@ export const Overview: FC<Props> = ({ period }) => {
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
   const canMargin = useCanSeeMargin();
   const { data: ovMargin } = useDocData<{ mb?: number; pmb?: number }>(canMargin && !active ? `summaries/overviewMargin_${period}` : null);
+  // Niveaux de projection configurés (Certitudes/Forecast/Pipe) : appliqués au recalcul filtré pour
+  // rester cohérent avec les agrégats serveur (mêmes poids/activation).
+  const { data: projCfg } = useDocData<ProjectionConfig>("config/projection");
+  const projTiers = normalizeTiers(projCfg || undefined);
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex gap-2 items-center">
@@ -78,7 +83,7 @@ export const Overview: FC<Props> = ({ period }) => {
     name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
   }));
   // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur.
-  const filtered = active ? computeFilteredOverview(cmdRows, allInvoices, allOpps, period, match) : null;
+  const filtered = active ? computeFilteredOverview(cmdRows, allInvoices, allOpps, period, match, projTiers) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).

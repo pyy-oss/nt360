@@ -59,7 +59,7 @@ describe("overview — chaîne (§7)", () => {
     // Commande=2300 ; Certitude(≥90%)=o6=1000 ; [70-90%[=0 ; [50-70%[=o1(0.6)=1000 ; Perdu=o5=100.
     // Dénominateur = 2300 + 1000 + 0 + 0.1·1000 + 100 = 3500.
     expect(ov.perdu).toBe(100);
-    expect(ov.ratios.tauxConversionVente).toBeCloseTo(2300 / 3500, 6);
+    expect(ov.ratios.tauxConversionVente).toBeCloseTo(2300 / 3450, 6); // convDenom = 2300 (cmd) + 1050 (pipeline projeté : 1000 + 5%·1000) + 100 (perdu)
   });
 });
 
@@ -106,8 +106,8 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
   const p = pipeline(OPPS);
   it("brut = funnel active ; pondéré = projection tiérée", () => {
     expect(p.tot.brut).toBe(4000); // active 1-5 : 1000 + 2000 + 1000
-    // o6 (0.95→100%·1000) + o1 (0.6→10%·1000=100) + o2 (0.25→0) = 1100.
-    expect(p.tot.weighted).toBe(1100);
+    // o6 (0.95→100%·1000) + o1 (0.6→5%·1000=50) + o2 (0.25→0) = 1050.
+    expect(p.tot.weighted).toBe(1050);
     expect(p.tot.countConf).toBe(2); // o6 et o1 contribuent (IdC ≥ 50 %) ; o2 non
     expect(p.confianceMin).toBe(0.9);
   });
@@ -119,13 +119,13 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
     expect(p.conv).toBe(0.5);
   });
   it("pondéré par AM = projection tiérée des actives", () => {
-    expect(p.byAM.DATCHA).toBe(1100); // o6 (1000) + o1 (100)
+    expect(p.byAM.DATCHA).toBe(1050); // o6 (1000) + o1 (5%·1000 = 50)
     expect(p.byAM.KOUADIO).toBe(0);   // o2 active mais IdC 0.25 → projeté 0
   });
   it("conversion par commercial (byAmConv)", () => {
     const byAm = Object.fromEntries(p.byAmConv.map((x) => [x.am, x]));
     expect(byAm.DATCHA.activeCount).toBe(2); // o1 + o6
-    expect(byAm.DATCHA.weighted).toBe(1100); // o6 (1000) + o1 (100)
+    expect(byAm.DATCHA.weighted).toBe(1050); // o6 (1000) + o1 (5%·1000 = 50)
     expect(byAm.X.won).toBe(1); // o4 gagné
     expect(byAm.X.conv).toBe(1);
     expect(byAm.Y.lost).toBe(1); // o5 perdu
@@ -142,7 +142,7 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
     expect(b.retard.brut).toBe(3000); // 1000 + 2000
     expect(b.trim.count).toBe(1);     // o6 (mai, même trimestre qu'avril)
     expect(pc.closing.staleCount).toBe(2);
-    expect(pc.closing.staleTop[0].weighted).toBe(100); // o1 projeté (10%·1000) devant o2 (0)
+    expect(pc.closing.staleTop[0].weighted).toBe(50); // o1 projeté (5%·1000) devant o2 (0)
   });
   it("ancienneté du retard : tranches d'âge + retard moyen", () => {
     const pc = pipeline(OPPS, "2026-04-15");

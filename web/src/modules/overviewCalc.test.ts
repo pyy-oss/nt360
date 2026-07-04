@@ -62,13 +62,13 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "A", cas: 2000, raf: 0, mb: 0, yearPo: 2026 }];
     const opps2 = [
       { bu: "ICT", am: "X", client: "A", amount: 1000, stage: 2, probability: 0.80, closingDate: "2026-05-01" }, // 70-90 → ×0.2
-      { bu: "ICT", am: "X", client: "A", amount: 1000, stage: 2, probability: 0.60, closingDate: "2026-05-01" }, // 50-70 → ×0.1
+      { bu: "ICT", am: "X", client: "A", amount: 1000, stage: 2, probability: 0.60, closingDate: "2026-05-01" }, // 50-70 → ×0.05 (Pipe)
       { bu: "ICT", am: "X", client: "A", amount: 500, stage: 7, closingDate: "2026-05-01" }, // perdu
     ];
     const r = computeFilteredOverview(ord as any, [] as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }));
     expect(r.certitudes).toBe(0); // aucune ≥ 90 %
-    // convDenom = 2000 + 0 + 0.2·1000 + 0.1·1000 + 500 = 2800
-    expect(r.ratios.tauxConversionVente).toBeCloseTo(2000 / 2800, 6);
+    // convDenom = 2000 (cmd) + 0.2·1000 (Forecast) + 0.05·1000 (Pipe) + 500 (perdu) = 2750
+    expect(r.ratios.tauxConversionVente).toBeCloseTo(2000 / 2750, 6);
   });
 
   it("facture ORPHELINE attribuée au périmètre via son propre BU (pas de commande)", () => {

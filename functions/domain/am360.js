@@ -3,7 +3,8 @@
 // backlog (RAF), pipeline pondéré + conversion, et R/O vs objectif CAS de l'exercice.
 // VOLONTAIREMENT SANS MARGE (confidentialité — la marge par AM reste dans « Rentabilité »).
 // Module PUR (testable).
-const { sum, projectionWeight } = require("./chaine");
+const { sum } = require("./chaine");
+const { projectionWeight, normalizeTiers } = require("./projection");
 
 // AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
 // en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
@@ -16,7 +17,8 @@ const normAm = (a) => (a && String(a).trim().toUpperCase()) || "—";
  * @param {object[]} objectives objectifs (scope, scopeValue, fiscalYear, targetCas)
  * @param {number|string} fy exercice courant (pour le R/O)
  */
-function am360(orders, invoices, opps, objectives, fy) {
+function am360(orders, invoices, opps, objectives, fy, tiers) {
+  const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
   // FP → AM (depuis les commandes) pour rattacher les factures à un commercial.
   const amOfFp = {};
   for (const o of orders || []) if (o.fp) amOfFp[o.fp] = normAm(o.am);
@@ -46,7 +48,7 @@ function am360(orders, invoices, opps, objectives, fy) {
       const won = myOpps.filter((o) => o.stage === 6).length;
       const lost = myOpps.filter((o) => o.stage === 7).length;
       // « Pondéré » = PROJECTION tiérée (100/20/10), cohérent avec pipeline/atterrissage.
-      const pipelinePondere = sum(active, projectionWeight);
+      const pipelinePondere = sum(active, pw);
 
       const ob = objByAm[am.toUpperCase()];
       const targetCas = ob ? ob.targetCas || 0 : 0;

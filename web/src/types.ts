@@ -3,9 +3,10 @@
 
 export type Ratios = { tauxFacturation?: number; tauxConversionVente?: number; pmb?: number };
 
+export type TierBucket = { key: string; label: string; band: string; weight: number; active: boolean; brut: number; pond: number; count: number };
 export interface OverviewSummary {
   period?: string;
-  certitudes?: number; pondCertain?: number; commandes?: number;
+  certitudes?: number; pondCertain?: number; pipelineProjete?: number; tierBreakdown?: TierBucket[]; commandes?: number;
   facture?: number; rafPeriode?: number; backlog?: number; backlogCount?: number;
   mb?: number; pipelineWon?: number; perdu?: number; ratios?: Ratios;
 }
@@ -32,6 +33,7 @@ export interface ClosingAnalysis {
 export interface PipelineSummary {
   tot?: { brut?: number; weighted?: number; count?: number; countConf?: number };
   susp?: { brut?: number; count?: number };
+  tierBreakdown?: TierBucket[];
   conv?: number; wonCount?: number; lostCount?: number;
   byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];

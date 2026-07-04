@@ -38,6 +38,10 @@ export const Pipeline: FC<Props> = ({ period }) => {
   const moisPond = cb?.mois?.pond || 0, moisCount = cb?.mois?.count || 0;
   const trimCumPond = moisPond + (cb?.trim?.pond || 0);
   const trimCumCount = moisCount + (cb?.trim?.count || 0);
+  // Décomposition du pondéré projeté par niveau (Certitudes / Forecast / Pipe) — jamais mélangée.
+  // Le sous-libellé du KPI ne liste que les niveaux ACTIFS et leur poids configuré.
+  const tiers = data.tierBreakdown || [];
+  const projLabel = tiers.filter((t) => t.active).map((t) => `${Math.round(t.weight * 100)} %·${t.band}`).join(" · ") || "aucun niveau actif";
   const closingRows = cb ? [
     { name: "En retard", v: cb.retard?.pond || 0, sub: `${cb.retard?.count || 0} opp.` },
     { name: "Ce mois", v: cb.mois?.pond || 0, sub: `${cb.mois?.count || 0} opp.` },
@@ -49,10 +53,22 @@ export const Pipeline: FC<Props> = ({ period }) => {
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
-        <Kpi label="Pondéré projeté" value={fmt(data.tot?.weighted)} tone="gold" sub={`100 %·≥90 · 20 %·70-90 · 10 %·50-70 — ${data.tot?.countConf ?? 0} opp.`} />
+        <Kpi label="Pondéré projeté" value={fmt(data.tot?.weighted)} tone="gold" sub={`${projLabel} — ${data.tot?.countConf ?? 0} opp.`} />
         <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
         <Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)}`} />
       </div>
+      {tiers.length > 0 && (
+        <Card title="Pondéré projeté — décomposition par niveau (on ne mélange pas)">
+          <Table columns={[
+            colText("Niveau", (t) => <span>{t.label} <span className="text-faint">{t.band}</span>{!t.active && <span className="ml-1.5 rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">inactif</span>}</span>),
+            colNum("Poids", (t) => (t.active ? pct(t.weight) : "—")),
+            colNum("Brut", (t) => money(t.brut)),
+            colNum("Pondéré", (t) => (t.active ? money(t.pond) : "—")),
+            colNum("Opp.", (t) => (t.count ?? 0).toLocaleString("fr-FR")),
+          ]} rows={tiers} />
+          <Tip>Trois cohortes <b>disjointes</b> par certitude : Certitudes (≥ 90 %) · Forecast (70-90 %) · Pipe (50-70 %). Le <b>Pondéré projeté</b> = somme des niveaux <b>actifs</b> uniquement (on ne mélange pas les niveaux). Poids et activation se règlent dans <b>Habilitations</b> et s'appliquent à toutes les vues et projections.</Tip>
+        </Card>
+      )}
       <Card title="Funnel pondéré par étape">
         <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} interval={0} />
       </Card>

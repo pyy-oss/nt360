@@ -3,6 +3,7 @@
 // interdite au client par les rules). Le front s'abonne en temps réel (onSnapshot).
 const { FieldValue } = require("firebase-admin/firestore");
 const { overview } = require("../domain/chaine");
+const { normalizeTiers } = require("../domain/projection");
 const { backlogFy } = require("../domain/backlog");
 const { pipeline } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
@@ -66,6 +67,8 @@ async function recomputeAll(db, only) {
 
   const fiscal = (await db.doc("config/fiscal").get()).data() || {};
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
+  const projCfg = (await db.doc("config/projection").get()).data() || {}; // niveaux de projection configurables
+  const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -95,7 +98,7 @@ async function recomputeAll(db, only) {
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps, asOf), ...stamp } }); // global (rétro-compat)
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps, asOf, tiers), ...stamp } }); // global (rétro-compat)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
@@ -123,10 +126,10 @@ async function recomputeAll(db, only) {
       ...stamp,
     } });
   }
-  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf);
+  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers);
   if (want("atterrissage")) w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...att, ...stamp } });
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
-  if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy), ...stamp } });
+  if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr), fy: currentFy, ...stamp } });
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr), ...stamp } });
@@ -186,12 +189,12 @@ async function recomputeAll(db, only) {
     if (want("overview")) {
       // Marge agrégée (mb + ratios.pmb) isolée dans overviewMargin_* (accès « Rentabilité ») ;
       // overview_* ne garde que la chaîne non-additive et les taux non sensibles.
-      const ov = overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count });
+      const ov = overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count, tiers });
       const { mb: ovMb, ratios: ovR, ...ovRest } = ov;
       w.push({ path: `summaries/overview_${period}`, data: { period, ...ovRest, ratios: { tauxFacturation: ovR.tauxFacturation, tauxConversionVente: ovR.tauxConversionVente }, ...stamp } });
       w.push({ path: `summaries/overviewMargin_${period}`, data: { period, mb: ovMb, pmb: ovR.pmb, ...stamp } });
     }
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf), ...stamp } });
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec
