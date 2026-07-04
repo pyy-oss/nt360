@@ -27,7 +27,17 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
   const inYear = (o) => yearOf(o.closingDate) === String(fy);
   const isActive = (o) => o.stage >= 1 && o.stage <= 5; // ni gagné (6), ni perdu (7), ni suspendu (8)
   // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude.
-  const pipelinePondere = sum(opps.filter((o) => isActive(o) && inYear(o)), projectionWeight);
+  const projOpps = opps.filter((o) => isActive(o) && inYear(o));
+  const pipelinePondere = sum(projOpps, projectionWeight);
+  // COHÉRENCE avec la vue Pipeline (closingAnalysis) : une D Prev déjà passée (au jour) est « en
+  // retard de closing / à requalifier » là-bas. Ici elle compte TOUJOURS (design glissant : elle
+  // n'est pas obsolète tant qu'elle est dans l'exercice), mais on EXPOSE la part de la projection
+  // qui repose sur ces opps à requalifier — pour que l'atterrissage ne présente pas ce pipeline
+  // comme entièrement « à jour » alors que Pipeline le signale en retard sur le même objet.
+  const today = asOf ? String(asOf) : "";
+  const retardOpps = today ? projOpps.filter((o) => o.closingDate && String(o.closingDate).slice(0, 10) < today) : [];
+  const pipelineRetard = sum(retardOpps, projectionWeight);
+  const pipelineRetardCount = retardOpps.length;
   const objGlobal = objectives.filter((o) => Number(o.fiscalYear) === fy && (!o.scope || o.scope === "global"));
   const objectif = sum(objGlobal, (o) => o.targetCas);       // cible CAS (prise de commande)
   const objectifCaf = sum(objGlobal, (o) => o.targetInvoiced); // cible CAF (facturation)
@@ -47,6 +57,8 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf) {
     realiseCas,
     backlog,
     pipelinePondere,
+    pipelineRetard,        // part (pondérée) du pipeline projeté dont la D Prev est dépassée (à requalifier)
+    pipelineRetardCount,   // nombre d'opps concernées
     projete,
     cafProjete,
     objectif,

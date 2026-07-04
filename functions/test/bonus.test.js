@@ -50,6 +50,13 @@ describe("atterrissage (§7)", () => {
     expect(a.factureN1).toBe(400);
     expect(a.croissanceFacture).toBeCloseTo(0.5, 6);
   });
+  it("cohérence closing : part du pipeline projeté « à requalifier » (D Prev passée) exposée", () => {
+    // asOf = 2026-03-01 → seule l'opp D Prev 2026-02-01 (95 % → 300) est en retard, mais comptée.
+    expect(a.pipelineRetard).toBe(300);
+    expect(a.pipelineRetardCount).toBe(1);
+    // Sous-ensemble du pipeline projeté (n'est PAS soustrait — transparence, design glissant).
+    expect(a.pipelineRetard).toBeLessThanOrEqual(a.pipelinePondere);
+  });
 });
 
 describe("alerts", () => {
