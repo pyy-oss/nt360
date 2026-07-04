@@ -5,6 +5,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
+import { useCanSeeMargin } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
@@ -38,9 +39,19 @@ export function useObjectives(fy: number | string | undefined) {
 // de la limite Firestore ~1 Mio/doc. Fusionne les chunks (ordre stable), avec repli sur les lignes
 // inline d'un ancien agrégat (transition avant le premier recompute chunké). count depuis la méta.
 export function useCommandesRows() {
+  const canMargin = useCanSeeMargin();
   const { data: meta, loading: l1 } = useDocData<CommandesSummary>("summaries/commandes");
   const { rows: chunks, loading: l2 } = useCollectionData<CommandeChunk>("commandesRows", [orderBy("i", "asc")], "chunks");
-  const rows: Order[] = chunks.length ? chunks.flatMap((c) => c.rows || []) : (meta?.rows || []);
+  // Marge par ligne dans une collection SÉPARÉE (accès « Rentabilité ») : lue seulement si le rôle a
+  // le droit marge (sinon name null → pas d'abonnement), puis fusionnée par FP.
+  const { rows: mchunks } = useCollectionData<CommandeChunk>(canMargin ? "commandesRowsMargin" : null, [orderBy("i", "asc")], canMargin ? "mchunks" : "off");
+  const base: Order[] = chunks.length ? chunks.flatMap((c) => c.rows || []) : (meta?.rows || []);
+  let rows = base;
+  if (canMargin && mchunks.length) {
+    const mBy = new Map<string, any>();
+    for (const c of mchunks) for (const m of (c.rows as any[]) || []) if (m.fp) mBy.set(m.fp, m);
+    rows = base.map((r) => { const m = r.fp ? mBy.get(r.fp) : null; return m ? { ...r, mb: m.mb, costTotal: m.costTotal, marginPct: m.marginPct } : r; });
+  }
   return { rows, count: meta?.count ?? rows.length, loading: l1 || l2 };
 }
 

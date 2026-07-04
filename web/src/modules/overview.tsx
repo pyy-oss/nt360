@@ -2,7 +2,7 @@
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan, useCanExport } from "../lib/rbac";
+import { useCan, useCanExport, useCanSeeMargin } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
@@ -47,6 +47,10 @@ export const Overview: FC<Props> = ({ period }) => {
   const { rows: cmdRows } = useCommandesRows();
   const { rows: allOpps } = useCollectionData<Opportunity>("opportunities");
   const { rows: allInvoices } = useCollectionData<Invoice>("invoices");
+  // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
+  // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
+  const canMargin = useCanSeeMargin();
+  const { data: ovMargin } = useDocData<{ mb?: number; pmb?: number }>(canMargin && !active ? `summaries/overviewMargin_${period}` : null);
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex gap-2 items-center">
@@ -67,6 +71,9 @@ export const Overview: FC<Props> = ({ period }) => {
   const filtered = active ? computeFilteredOverview(cmdRows, allInvoices, allOpps, period, match) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
+  // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).
+  const margeMb = active ? filtered?.mb : ovMargin?.mb;
+  const margePmb = active ? filtered?.ratios.pmb : ovMargin?.pmb;
 
   return (
     <div className="flex flex-col gap-4">
@@ -105,7 +112,7 @@ export const Overview: FC<Props> = ({ period }) => {
 
       {/* KPIs de pilotage : marge, croissance facturation, taux de facturation, conversion vente. */}
       <div className={grid4}>
-        <Kpi label="Marge brute" value={fmt(v.mb)} tone="gold" sub={`%MB ${pct(v.ratios?.pmb)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((v.mb || 0) / objGlobal.targetMargin)}` : ""}`} />
+        {canMargin && <Kpi label="Marge brute" value={fmt(margeMb)} tone="gold" sub={`%MB ${pct(margePmb)}${!active && objGlobal?.targetMargin ? ` · R/O ${pct((margeMb || 0) / objGlobal.targetMargin)}` : ""}`} />}
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />

@@ -120,16 +120,22 @@ async function recomputeAll(db, only) {
   // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).
   let commandeChunks = null;
   if (want("commandes") || want("overview")) {
-    const rows = orders.map((o) => ({
+    // La MARGE par ligne (mb / costTotal / marginPct) est ISOLÉE dans commandesRowsMargin/{i}
+    // (lecture réservée à « Rentabilité ») ; les chunks de base ne portent que des grandeurs non
+    // sensibles → confidentialité opposable côté serveur (pas seulement masquage UI).
+    const base = orders.map((o) => ({
       fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
-      cas: o.cas || 0, raf: o.raf || 0, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null,
-      yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
+      cas: o.cas || 0, raf: o.raf || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
     }));
+    const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));
     const CHUNK = 800; // ~800 lignes/doc reste très en deçà de la limite 1 Mio
-    commandeChunks = Math.max(1, Math.ceil(rows.length / CHUNK));
+    commandeChunks = Math.max(1, Math.ceil(base.length / CHUNK));
     // rows: delete() purge l'ancien champ inline (écritures merge) — sinon la méta resterait ~1 Mio.
     w.push({ path: "summaries/commandes", data: { count: orders.length, chunks: commandeChunks, rows: FieldValue.delete(), ...stamp } });
-    for (let i = 0; i < commandeChunks; i++) w.push({ path: `commandesRows/${i}`, data: { i, rows: rows.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
+    for (let i = 0; i < commandeChunks; i++) {
+      w.push({ path: `commandesRows/${i}`, data: { i, rows: base.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
+      w.push({ path: `commandesRowsMargin/${i}`, data: { i, rows: margin.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
+    }
   }
 
   // Historisation : un INSTANTANÉ daté des grandeurs clés à chaque recompute (1 point/jour,
@@ -162,7 +168,14 @@ async function recomputeAll(db, only) {
     const oppP = period === "all" ? opps : opps.filter((o) => yearOf(o.closingDate) === period);
     // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
     // (bf global, indépendant de la période) · Certitudes = pondéré des opps de la période (D Prev).
-    if (want("overview")) w.push({ path: `summaries/overview_${period}`, data: { period, ...overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count }), ...stamp } });
+    if (want("overview")) {
+      // Marge agrégée (mb + ratios.pmb) isolée dans overviewMargin_* (accès « Rentabilité ») ;
+      // overview_* ne garde que la chaîne non-additive et les taux non sensibles.
+      const ov = overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count });
+      const { mb: ovMb, ratios: ovR, ...ovRest } = ov;
+      w.push({ path: `summaries/overview_${period}`, data: { period, ...ovRest, ratios: { tauxFacturation: ovR.tauxFacturation, tauxConversionVente: ovR.tauxConversionVente }, ...stamp } });
+      w.push({ path: `summaries/overviewMargin_${period}`, data: { period, mb: ovMb, pmb: ovR.pmb, ...stamp } });
+    }
     if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
@@ -203,15 +216,17 @@ async function recomputeAll(db, only) {
   }
   await batch.commit();
 
-  // Purge des chunks de commandes ORPHELINS (si le nombre de chunks a diminué depuis le dernier
-  // recompute), sinon d'anciennes lignes resteraient lues par le front.
+  // Purge des chunks de commandes ORPHELINS (base ET marge) si le nombre de chunks a diminué depuis
+  // le dernier recompute, sinon d'anciennes lignes resteraient lues par le front.
   if (commandeChunks != null) {
-    const snap = await db.collection("commandesRows").get();
-    let del = db.batch(), d = 0;
-    for (const doc of snap.docs) {
-      if (Number(doc.id) >= commandeChunks) { del.delete(doc.ref); if (++d % 400 === 0) { await del.commit(); del = db.batch(); } }
+    for (const coll of ["commandesRows", "commandesRowsMargin"]) {
+      const snap = await db.collection(coll).get();
+      let del = db.batch(), d = 0;
+      for (const doc of snap.docs) {
+        if (Number(doc.id) >= commandeChunks) { del.delete(doc.ref); if (++d % 400 === 0) { await del.commit(); del = db.batch(); } }
+      }
+      if (d % 400 !== 0) await del.commit();
     }
-    if (d % 400 !== 0) await del.commit();
   }
   return { written: w.map((x) => x.path), currentFy, periods };
 }

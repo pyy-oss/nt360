@@ -8,9 +8,9 @@ import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows } from "./_shared";
 import { useFilters } from "../lib/filters";
-import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Order, Invoice, Opportunity, DataQualitySummary } from "../types";
+import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
@@ -329,13 +329,15 @@ export const Fp360: FC<Props> = () => {
   const canMargin = useCanSeeMargin();
   const fp = q.trim().toUpperCase();
   const cons = [where("fp", "==", fp || "__none__")];
+  // Commande lue depuis commandesRows (marge fusionnée si accès Rentabilité) — plus de lecture directe
+  // de orders/* côté client (qui porte la marge et est désormais réservé à « Rentabilité »).
+  const { rows: cmdRows } = useCommandesRows();
   // queryKey = fp : sans lui le hook ne se ré-abonne pas quand la recherche change.
-  const { rows: orders } = useCollectionData<Order>("orders", cons, fp);
   const { rows: invoices } = useCollectionData<Invoice>("invoices", cons, fp);
   const { rows: sheets } = useCollectionData<ProjectSheet>("projectSheets", cons, fp);
   const { rows: bc } = useCollectionData<BcLine>("bcLines", cons, fp);
   const { rows: opps } = useCollectionData<Opportunity>("opportunities", cons, fp);
-  const o = orders[0];
+  const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recherche par N° FP">

@@ -35,15 +35,17 @@ export function useDocData<T = any>(path: string | null): { data: T | null; load
  * `queryKey` DOIT refléter la VALEUR des contraintes dynamiques (ex. le N° FP recherché),
  * sinon le hook ne se ré-abonne pas quand la valeur change (bug de recherche FP 360°). */
 export function useCollectionData<T = any>(
-  name: string,
+  name: string | null,
   constraints: QueryConstraint[] = [],
   queryKey: string = ""
 ): { rows: T[]; loading: boolean; error: Error | null } {
   const [rows, setRows] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const key = name + "|" + queryKey + "|" + constraints.map((c) => (c as any).type ?? "").join(",");
+  const key = (name || "") + "|" + queryKey + "|" + constraints.map((c) => (c as any).type ?? "").join(",");
   useEffect(() => {
+    // name falsy = pas d'abonnement (ex. collection réservée non lisible par le rôle) → liste vide.
+    if (!name) { setRows([]); setLoading(false); setError(null); return; }
     setLoading(true);
     setError(null);
     return onSnapshot(
