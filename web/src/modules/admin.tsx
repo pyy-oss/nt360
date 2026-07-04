@@ -4,7 +4,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, callSetNotificationConfig, type DedupeResult, type AlertThresholds, type NotificationConfig } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog } from "../types";
 
@@ -25,6 +25,7 @@ export const Habilitations: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       {canWrite && <DataImportCard />}
       {canWrite && <OpsHealthCard />}
+      {canWrite && <ProjectionConfigCard />}
       {canWrite && <AlertThresholdsCard />}
       {canWrite && <NotificationCard />}
       {canWrite && <DedupeCard />}
@@ -95,6 +96,59 @@ function OpsHealthCard() {
         </details>
       )}
       <Tip>Recompute planifié chaque jour à 05:00. Les échecs INATTENDUS des fonctions (callables & tâches planifiées) sont tracés ici et, si un webhook est configuré, poussés en alerte.</Tip>
+    </Card>
+  );
+}
+
+// Niveaux de PROJECTION configurables (config/projection) : activer/désactiver et pondérer chacun
+// des 3 niveaux (Certitudes / Forecast / Pipe). S'applique à TOUTES les vues et projections
+// (pondéré pipeline, atterrissage, conversion). Enregistrer recalcule immédiatement côté serveur.
+const DEFAULT_PROJ: ProjectionConfigInput = {
+  certitudes: { active: true, weight: 1 }, forecast: { active: true, weight: 0.2 }, pipe: { active: true, weight: 0.05 },
+};
+const PROJ_TIERS = [
+  { key: "certitudes", label: "Certitudes", band: "IdC ≥ 90 %" },
+  { key: "forecast", label: "Forecast", band: "70-90 %" },
+  { key: "pipe", label: "Pipe", band: "50-70 %" },
+] as const;
+function ProjectionConfigCard() {
+  const { data, loading } = useDocData<Partial<ProjectionConfigInput>>("config/projection");
+  if (loading && !data) return null;
+  const init: ProjectionConfigInput = {
+    certitudes: { ...DEFAULT_PROJ.certitudes, ...(data?.certitudes || {}) },
+    forecast: { ...DEFAULT_PROJ.forecast, ...(data?.forecast || {}) },
+    pipe: { ...DEFAULT_PROJ.pipe, ...(data?.pipe || {}) },
+  };
+  return <ProjectionConfigForm key={JSON.stringify(data || {})} initial={init} />;
+}
+function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
+  const p1 = (v: number) => String(+(v * 100).toFixed(2));
+  const [st, setSt] = useState(() => Object.fromEntries(PROJ_TIERS.map((t) => [t.key, { active: initial[t.key].active, weight: p1(initial[t.key].weight) }])) as Record<string, { active: boolean; weight: string }>);
+  const num = (s: string) => Number(String(s).replace(",", "."));
+  const set = (k: string, patch: Partial<{ active: boolean; weight: string }>) => setSt((s) => ({ ...s, [k]: { ...s[k], ...patch } }));
+  const build = (): ProjectionConfigInput => ({
+    certitudes: { active: st.certitudes.active, weight: num(st.certitudes.weight) / 100 },
+    forecast: { active: st.forecast.active, weight: num(st.forecast.weight) / 100 },
+    pipe: { active: st.pipe.active, weight: num(st.pipe.weight) / 100 },
+  });
+  return (
+    <Card title="Niveaux de projection du pipeline" actions={<Busy label="Enregistrer" okMsg="Niveaux appliqués (recalcul complet lancé)" fn={() => callSetProjectionConfig(build())} />}>
+      <div className="flex flex-col gap-2.5">
+        {PROJ_TIERS.map((t) => (
+          <div key={t.key} className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 min-w-[190px] cursor-pointer">
+              <input type="checkbox" checked={st[t.key].active} onChange={(e) => set(t.key, { active: e.target.checked })} aria-label={`Activer ${t.label}`} />
+              <span className="text-ink font-medium">{t.label}</span>
+              <span className="text-[11px] text-faint">{t.band}</span>
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <span className="text-muted">Poids (%)</span>
+              <input className="field !py-1 w-24" inputMode="decimal" disabled={!st[t.key].active} value={st[t.key].weight} onChange={(e) => set(t.key, { weight: e.target.value })} aria-label={`Poids ${t.label}`} />
+            </label>
+          </div>
+        ))}
+      </div>
+      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Ces réglages s'appliquent à <b>toutes les vues</b> (Pipeline, Vue d'ensemble, Atterrissage, AM 360°). L'enregistrement lance un <b>recalcul complet</b>.</Tip>
     </Card>
   );
 }

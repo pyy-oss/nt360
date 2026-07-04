@@ -80,6 +80,14 @@ export async function callSetAlertThresholds(cfg: AlertThresholds) {
   return res.data as AlertThresholds & { ok: boolean };
 }
 
+export type ProjectionTierInput = { active: boolean; weight: number };
+export type ProjectionConfigInput = { certitudes: ProjectionTierInput; forecast: ProjectionTierInput; pipe: ProjectionTierInput };
+/** Enregistre les niveaux de projection (admin) : recompute COMPLET (overview/pipeline/atterrissage/ams). */
+export async function callSetProjectionConfig(cfg: ProjectionConfigInput) {
+  const res = await httpsCallable(functions, "setProjectionConfig")(cfg);
+  return res.data as ProjectionConfigInput & { ok: boolean };
+}
+
 export type NotificationConfig = { enabled: boolean; minSeverity: "high" | "medium"; webhookUrl: string };
 /** Enregistre la config de notifications (admin) ; test=true envoie un ping de vérification. */
 export async function callSetNotificationConfig(cfg: NotificationConfig & { test?: boolean }) {
