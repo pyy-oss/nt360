@@ -30,3 +30,7 @@ export const FIAB = { GOOD: 0.8, FAIR: 0.5 } as const;
 
 /** Score de complétude des données (Qualité) : ≥ GOOD = propre, ≥ FAIR = à surveiller. */
 export const QUALITY = { GOOD: 0.9, FAIR: 0.7 } as const;
+
+/** Âge (jours) du dernier recalcul au-delà duquel les indicateurs temporels sont jugés
+ *  possiblement obsolètes (le recompute planifié tourne chaque jour ; > 2 j = anomalie). */
+export const STALE_RECOMPUTE_DAYS = 2;
