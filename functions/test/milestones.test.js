@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { normalizeMilestones, milestonesTotal, reportedFromMilestones, plannedInMonth, MAX_MILESTONES } = require("../domain/milestones");
+const { normalizeMilestones, milestonesTotal, reportedFromMilestones, plannedInMonth, defaultMilestones, MAX_MILESTONES } = require("../domain/milestones");
 
 describe("milestones — jalons de facturation (module pur)", () => {
   it("normalise : dates ISO, montants > 0, tri par date, plafond 15, idempotent", () => {
@@ -40,5 +40,37 @@ describe("milestones — jalons de facturation (module pur)", () => {
     expect(plannedInMonth(ms, "2026-07")).toBe(150);
     expect(plannedInMonth(ms, "2026-08")).toBe(30);
     expect(plannedInMonth(ms, "2026-09")).toBe(0);
+  });
+});
+
+describe("defaultMilestones — échéancier par défaut (repli sans jalons saisis)", () => {
+  it("répartit uniformément le RAF sur 3 jalons, étalés sur les mois futurs jusqu'au 31/12", () => {
+    const d = defaultMilestones(300, "2026-07-15", 2026);
+    expect(d).toHaveLength(3);
+    // Fenêtre = août→décembre (mois strictement après juillet), 3 jalons étalés régulièrement.
+    expect(d.map((m) => m.date)).toEqual(["2026-08-28", "2026-10-28", "2026-12-28"]);
+    expect(d.every((m) => m.date <= "2026-12-31")).toBe(true); // aucun report N+1
+    expect(reportedFromMilestones(d, 2026)).toBe(0);
+  });
+  it("Σ des jalons par défaut = montant exact (reliquat d'arrondi sur le dernier)", () => {
+    const d = defaultMilestones(100, "2026-07-15", 2026); // 100/3 → 33,33,34
+    expect(milestonesTotal(d)).toBe(100);
+    expect(d.map((m) => m.amount)).toEqual([33, 33, 34]);
+  });
+  it("déterministe : même entrée → même échéancier (cohérence des recalculs)", () => {
+    expect(defaultMilestones(500, "2026-04-01", 2026)).toEqual(defaultMilestones(500, "2026-04-01", 2026));
+  });
+  it("montant nul ou négatif → aucun jalon", () => {
+    expect(defaultMilestones(0, "2026-07-15", 2026)).toEqual([]);
+    expect(defaultMilestones(-10, "2026-07-15", 2026)).toEqual([]);
+  });
+  it("asOf en décembre → repli sur le 31/12 (aucun mois futur dans l'exercice)", () => {
+    const d = defaultMilestones(300, "2026-12-10", 2026);
+    expect(d.every((m) => m.date.slice(0, 7) === "2026-12")).toBe(true);
+    expect(milestonesTotal(d)).toBe(300);
+  });
+  it("asOf avant l'exercice → étalé sur toute l'année cible", () => {
+    const d = defaultMilestones(300, "2025-11-01", 2026);
+    expect(d.map((m) => m.date)).toEqual(["2026-01-28", "2026-07-28", "2026-12-28"]);
   });
 });

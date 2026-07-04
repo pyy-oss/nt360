@@ -9,6 +9,7 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { patchOrder, setCarryover, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover, BillingMilestonesDoc, BillingTrendSummary } from "../types";
 
 // 5 — Suivi Backlog
@@ -148,6 +149,9 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
   const set = (i: number, patch: Partial<BillingMilestone>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const add = () => setRows((rs) => (rs.length < 15 ? [...rs, { date: "", amount: 0 }] : rs));
   const del = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+  // Pré-remplissage par défaut : RAF projetable réparti uniformément sur 3 jalons jusqu'au 31/12
+  // (aligné sur le repli serveur). L'utilisateur peut ensuite ajuster dates/montants avant d'enregistrer.
+  const fill = () => { const today = new Date().toISOString().slice(0, 10); const d = defaultMilestones(raf, today, fy || Number(today.slice(0, 4))); if (d.length) setRows(d); };
   const clean = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number(r.amount) > 0).map((r) => ({ date: r.date, amount: Math.round(Number(r.amount)) }));
   const total = clean.reduce((s, r) => s + r.amount, 0);
   const matches = Math.round(total) === Math.round(raf);
@@ -170,6 +174,7 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
       </div>
       <div className="flex items-center gap-3 mt-2 flex-wrap text-[12px]">
         {rows.length < 15 && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={add}>+ Jalon</button>}
+        <button className="btn-ghost !px-2 !py-1 text-xs" onClick={fill} title="Répartir uniformément le RAF projetable sur 3 jalons jusqu'au 31/12 (ajustable)">Répartir par défaut</button>
         <span className={matches ? "text-emerald" : "text-clay"}>Σ jalons {fmt(total)} / RAF {fmt(raf)}{matches ? " ✓" : ` · écart ${fmt(total - raf)}`}</span>
         <span className="text-steel">dont reporté N+1 : {fmt(reported)}</span>
         {matches

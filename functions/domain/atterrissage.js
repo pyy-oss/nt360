@@ -9,6 +9,11 @@ const { fpKey } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
+// RAF PROJETABLE d'une commande cette année (neutralisation M2 du double compte facturé + RAF) :
+// borné à ce qui RESTE réellement à facturer = max(min(RAF, CAS − facturé), 0). Source unique de la
+// base facturable, partagée par l'atterrissage ET la tendance de facturation (zéro dérive entre eux).
+const projetableBacklog = (o) => Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0);
+
 // Pondération de PROJECTION unifiée (domain/projection, niveaux configurables) :
 // Certitudes ≥90 · Forecast 70-90 · Pipe 50-70, chacun activable/pondérable (défaut 100/20/5).
 
@@ -74,7 +79,7 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
   const msBy = milestonesByFp || {};
   let backlogProjete = 0, reporteCaf = 0, reporteMarge = 0;
   for (const o of orders || []) {
-    const bp = Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0); // RAF projetable cette année (M2)
+    const bp = projetableBacklog(o); // RAF projetable cette année (M2)
     const k = fpKey(o.fp);
     // SOURCE UNIQUE : si le projet a des jalons, le report N+1 en dérive (Σ jalons après le 31/12,
     // borné au RAF) ; sinon repli sur le report manuel. Jamais les deux → aucune incohérence.
@@ -138,4 +143,4 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, carry
   };
 }
 
-module.exports = { atterrissage };
+module.exports = { atterrissage, projetableBacklog };
