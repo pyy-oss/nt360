@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "firebase": "^10",
@@ -21,6 +22,7 @@
     "@fontsource-variable/bricolage-grotesque": "^5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@vitejs/plugin-react": "^4",
