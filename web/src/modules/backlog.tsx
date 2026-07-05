@@ -10,7 +10,7 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
 
@@ -603,8 +603,15 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
         colText("", (o: Opportunity) => (o.amount && o.amount > 0
           ? <Busy label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Inscription refusée" fn={() => createOrder({ fp: o.fp!, cas: o.amount!, client: o.client, am: o.am, bu: o.bu })} />
           : <span className="text-[11px] text-clay">montant manquant</span>), () => 0),
+        // Écarter une opp gagnée qu'on ne veut PAS inscrire : passe au statut « Annulé » (stage 9) →
+        // quitte cette liste et le pipeline. Un ré-import de la source la rétablit si elle y est gagnée.
+        colText("", (o: Opportunity) => (o.id
+          ? <DangerBtn label="Annuler" tone="gold" okMsg="Opportunité annulée (recalcul lancé)" errMsg="Annulation refusée"
+              confirm={`Annuler l'opportunité gagnée ${o.fp} (${o.client || "—"}) ? Elle passe au statut « Annulé » et quitte cette liste. Un ré-import de la source la rétablira si elle y figure encore comme gagnée.`}
+              fn={() => patchOpportunity({ id: o.id!, stage: 9 })} />
+          : null), () => 0),
       ]} rows={won} />
-      <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. « Inscrire au P&L » crée la commande depuis l'opportunité (CAS = montant de l'opp). Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
+      <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. <b>« Inscrire au P&L »</b> crée la commande depuis l'opportunité (CAS = montant de l'opp). <b>« Annuler »</b> écarte l'opp (statut « Annulé ») si elle ne doit pas devenir une commande. Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
     </Card>
   );
 }
