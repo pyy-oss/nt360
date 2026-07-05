@@ -44,3 +44,20 @@ jobs:
 
       - name: Budget de bundle (chunk d'entrée)
         run: pnpm --filter web check:bundle
+
+      # Smoke E2E de PR : joue le rendu de l'écran de connexion contre l'app BUILDÉE (vite preview,
+      # servie localement par Playwright). Sans secret — les tests de marge se skippent. Attrape les
+      # régressions runtime (écran blanc, crash au boot, assets manquants) avant merge.
+      - name: Install Playwright Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Smoke E2E (app buildée, sans secret)
+        run: pnpm --filter web test:e2e
+
+      - name: Upload rapport Playwright (si échec)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-ci
+          path: web/playwright-report/
+          retention-days: 7
