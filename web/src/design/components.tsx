@@ -118,7 +118,7 @@ export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; e
   const toggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   return (
     <div className="overflow-x-auto -mx-1">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm rtable">
         <thead>
           <tr className="text-muted">
             {columns.map((c, i) => (
@@ -137,7 +137,7 @@ export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; e
           {sorted.map((r, ri) => (
             <tr key={ri} className="odd:bg-white/[.015] hover:bg-white/[.04] transition-colors">
               {columns.map((c, ci) => (
-                <td key={ci} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
+                <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
               ))}
             </tr>
           ))}
@@ -231,7 +231,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
       </div>
       {slice.length === 0 ? <EmptyState label="Aucun résultat." /> : (
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm rtable">
             <thead>
               <tr className="text-muted">
                 {columns.map((c, i) => (
@@ -249,7 +249,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             <tbody>
               {slice.map((r, ri) => (
                 <tr key={ri} className="odd:bg-white/[.015] hover:bg-white/[.04] transition-colors">
-                  {columns.map((c, ci) => <td key={ci} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                  {columns.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
                 </tr>
               ))}
             </tbody>
