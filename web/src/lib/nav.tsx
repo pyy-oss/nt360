@@ -12,6 +12,8 @@ export type NavIntent = {
   segment?: string;
   /** N° FP à ouvrir directement (FP 360°). */
   fp?: string;
+  /** Recherche à pré-remplir sur la liste cible (remédiation guidée : pré-filtre sur la ligne à corriger). */
+  search?: string;
 };
 export type NavFn = (moduleId: string, intent?: NavIntent) => void;
 export const NavContext = createContext<{ go: NavFn; canGo: (id: string) => boolean; intent: NavIntent | null }>({

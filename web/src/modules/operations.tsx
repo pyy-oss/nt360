@@ -32,6 +32,7 @@ export const PnlProjet: FC<Props> = () => {
   const rows = canMargin ? base.map((r) => ({ ...r, ...(marginBy.get(r.fp) || {}) })) : base;
   const canImport = useCanImport();
   const canEditFiche = useCan("rentabilite") === "write"; // saisie du prix de vente = donnée de marge
+  const { intent } = useNav();
   if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
@@ -51,6 +52,7 @@ export const PnlProjet: FC<Props> = () => {
       <Card title={`Fiches affaire${canMargin ? " — coût / vente / marge" : ""} · ${rows.length}`}>
         <ListView
           rows={rows}
+          initialSearch={intent?.search}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
           columns={[
             colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
@@ -249,6 +251,7 @@ export const BC: FC<Props> = () => {
       <Card title={`Lignes BC · ${rows.length.toLocaleString("fr-FR")}`} actions={<Segmented value={flt} onChange={setFlt} ariaLabel="Filtrer les lignes BC" options={[{ value: "all", label: "Toutes" }, { value: "open", label: "Non soldés" }, { value: "late", label: "En retard", count: lateCount }]} />}>
         <ListView
           rows={filtered}
+          initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           columns={[
             colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
@@ -475,7 +478,7 @@ export const DataQuality: FC<Props> = () => {
                 <Badge tone={(tone[it.severity] || "neutral") as any}>{it.count}</Badge>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   {actionable
-                    ? <button onClick={() => go(fix!.module, fix!.segment ? { segment: fix!.segment } : undefined)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir la vue pour corriger">{it.label}</button>
+                    ? <button onClick={() => go(fix!.module, { ...(fix!.segment ? { segment: fix!.segment } : {}), search: it.refs?.[0] })} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir la vue pré-filtrée sur la 1re ligne à corriger">{it.label}</button>
                     : <span>{it.label}</span>}
                   {(it.refs || []).slice(0, 6).map((r, j) => (
                     <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>

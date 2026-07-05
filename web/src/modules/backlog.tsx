@@ -8,6 +8,7 @@ import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
+import { useNav } from "../lib/nav";
 import { patchOrder, createOrder, setBillingMilestones, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity } from "../types";
@@ -589,6 +590,7 @@ export const OrderList: FC<Props> = () => {
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
+  const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => r.fp).filter(Boolean) as string[]), [all]);
   if (loading && !all.length) return <CardSkeleton />;
@@ -607,6 +609,7 @@ export const OrderList: FC<Props> = () => {
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
       <ListView
         rows={rows}
+        initialSearch={intent?.search}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.affaire || ""]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),

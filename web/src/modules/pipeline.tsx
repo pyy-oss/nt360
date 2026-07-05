@@ -8,6 +8,7 @@ import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { useNav } from "../lib/nav";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
@@ -184,6 +185,7 @@ export const OppList: FC<Props> = () => {
   const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]));
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
+  const { intent } = useNav();
   const [f, setF] = useState({ ...EMPTY_OPP });
   const prefill = (o: Opportunity, patch: boolean) => setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
@@ -249,6 +251,7 @@ export const OppList: FC<Props> = () => {
       <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
         <ListView
           rows={rows}
+          initialSearch={intent?.search}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
           columns={[
             colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),

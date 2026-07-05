@@ -1,5 +1,5 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
-import { Component, createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff } from "lucide-react";
 import { fmt, pct } from "./tokens";
 
@@ -198,10 +198,13 @@ export function Tip({ children }: { children: ReactNode }) {
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
-export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…" }:
-  { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string }) {
-  const [q, setQ] = useState("");
+export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "" }:
+  { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string }) {
+  const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
+  // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
+  // corriger), on pré-remplit le filtre. Se met à jour si l'intention change (nouvelle anomalie).
+  useEffect(() => { if (initialSearch) { setQ(initialSearch); setPage(0); } }, [initialSearch]);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
 
   const filtered = useMemo(() => {
