@@ -121,6 +121,12 @@ export async function callCreateUser(input: { email: string; name?: string; role
   const res = await httpsCallable(functions, "createUser")(input);
   return res.data as { ok: boolean; uid: string };
 }
+/** RATTACHE un compte Firebase déjà existant (autre app du même projet) : pose le rôle + crée la
+ *  fiche, sans recréer le compte ni toucher au mot de passe. Direction uniquement. */
+export async function callAttachUser(input: { email: string; name?: string; role: string }) {
+  const res = await httpsCallable(functions, "attachUser")(input);
+  return res.data as { ok: boolean; uid: string; attached: boolean };
+}
 
 /** Active/désactive un compte (Auth `disabled` + fiche users.active). Direction uniquement. */
 export async function callSetUserActive(uid: string, active: boolean) {

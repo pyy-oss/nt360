@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -334,8 +334,21 @@ function CreateUserCard() {
     await callCreateUser({ email: em, name: name.trim(), role, password: pwd });
     setEmail(""); setName(""); setPwd(""); setRole("lecture");
   };
+  // Rattache un compte DÉJÀ existant dans le projet Firebase (créé par une autre app) : rôle + fiche,
+  // sans mot de passe. Utile quand « Créer » est refusé car l'email existe déjà à l'échelle du projet.
+  const attach = async () => {
+    const em = email.trim();
+    if (!EMAIL_RE.test(em)) throw new Error("email invalide");
+    await callAttachUser({ email: em, name: name.trim(), role });
+    setEmail(""); setName(""); setPwd(""); setRole("lecture");
+  };
   return (
-    <Card title="Créer un utilisateur" actions={<Busy label="Créer le compte" okMsg="Compte créé" errMsg="Création refusée" fn={create} />}>
+    <Card title="Créer un utilisateur" actions={
+      <div className="flex gap-2 items-center">
+        <Busy variant="ghost" label="Rattacher un compte existant" okMsg="Compte existant rattaché" errMsg="Rattachement refusé" fn={attach} />
+        <Busy label="Créer le compte" okMsg="Compte créé" errMsg="Création refusée" fn={create} />
+      </div>
+    }>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-[13px]">
           <span className="text-ink font-medium">Email</span>
@@ -358,7 +371,7 @@ function CreateUserCard() {
           </div>
         </label>
       </div>
-      <Tip>Compte créé <b>actif</b>, email vérifié. Communiquez le mot de passe initial à l'utilisateur (hors bande) ; il pourra le changer. Un email déjà utilisé est refusé.</Tip>
+      <Tip>Compte créé <b>actif</b>, email vérifié. Communiquez le mot de passe initial à l'utilisateur (hors bande) ; il pourra le changer. <b>« Créer »</b> échoue si l'email existe déjà — l'authentification Firebase est <b>partagée par tout le projet</b>, un compte d'une autre application y figure donc déjà. Dans ce cas, <b>« Rattacher un compte existant »</b> lui donne accès (rôle + fiche) sans le recréer ni changer son mot de passe.</Tip>
     </Card>
   );
 }
