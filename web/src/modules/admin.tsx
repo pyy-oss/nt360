@@ -152,21 +152,24 @@ function ProjectionConfigCard() {
     certitudes: { ...DEFAULT_PROJ.certitudes, ...(data?.certitudes || {}) },
     forecast: { ...DEFAULT_PROJ.forecast, ...(data?.forecast || {}) },
     pipe: { ...DEFAULT_PROJ.pipe, ...(data?.pipe || {}) },
+    cashOpening: data?.cashOpening ?? 0,
   };
   return <ProjectionConfigForm key={JSON.stringify(data || {})} initial={init} />;
 }
 function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
   const p1 = (v: number) => String(+(v * 100).toFixed(2));
   const [st, setSt] = useState(() => Object.fromEntries(PROJ_TIERS.map((t) => [t.key, { active: initial[t.key].active, weight: p1(initial[t.key].weight) }])) as Record<string, { active: boolean; weight: string }>);
+  const [cashOpening, setCashOpening] = useState(String(initial.cashOpening ?? 0));
   const num = (s: string) => Number(String(s).replace(",", "."));
   const set = (k: string, patch: Partial<{ active: boolean; weight: string }>) => setSt((s) => ({ ...s, [k]: { ...s[k], ...patch } }));
   const build = (): ProjectionConfigInput => ({
     certitudes: { active: st.certitudes.active, weight: num(st.certitudes.weight) / 100 },
     forecast: { active: st.forecast.active, weight: num(st.forecast.weight) / 100 },
     pipe: { active: st.pipe.active, weight: num(st.pipe.weight) / 100 },
+    cashOpening: Number.isFinite(num(cashOpening)) ? num(cashOpening) : 0,
   });
   return (
-    <Card title="Niveaux de projection du pipeline" actions={<Busy label="Enregistrer" okMsg="Niveaux appliqués (recalcul complet lancé)" fn={() => callSetProjectionConfig(build())} />}>
+    <Card title="Niveaux de projection du pipeline" actions={<Busy label="Enregistrer" okMsg="Réglages appliqués (recalcul complet lancé)" fn={() => callSetProjectionConfig(build())} />}>
       <div className="flex flex-col gap-2.5">
         {PROJ_TIERS.map((t) => (
           <div key={t.key} className="flex items-center gap-3 flex-wrap">
@@ -182,7 +185,17 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
           </div>
         ))}
       </div>
-      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Ces réglages s'appliquent à <b>toutes les vues</b> (Pipeline, Vue d'ensemble, Atterrissage, AM 360°). L'enregistrement lance un <b>recalcul complet</b>.</Tip>
+      <div className="mt-3 border-t border-line/60 pt-3 flex items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 min-w-[190px]">
+          <span className="text-ink font-medium">Solde d'ouverture trésorerie</span>
+          <span className="text-[11px] text-faint">position cash de départ</span>
+        </label>
+        <label className="flex items-center gap-2 text-[13px]">
+          <span className="text-muted">FCFA</span>
+          <input className="field !py-1 w-40" inputMode="numeric" value={cashOpening} onChange={(e) => setCashOpening(e.target.value)} placeholder="0" aria-label="Solde d'ouverture trésorerie" />
+        </label>
+      </div>
+      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
     </Card>
   );
 }
