@@ -55,7 +55,7 @@ export const Objectifs: FC<Props> = () => {
   };
 
   const remove = async (x: Objective) => {
-    if (!x.id || !window.confirm(`Supprimer l'objectif « ${x.fiscalYear} ${x.scope} ${x.scopeValue} » ?`)) return;
+    if (!x.id) return;
     await deleteObjective(x.id);
     if (editingId === x.id) reset();
   };
@@ -69,7 +69,9 @@ export const Objectifs: FC<Props> = () => {
     ...(canWrite ? [colNum("", (x: Objective) => (
       <span className="inline-flex gap-1.5 justify-end">
         <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => edit(x)}>Modifier</button>
-        <Busy variant="ghost" label="Suppr." okMsg="Objectif supprimé" fn={() => remove(x)} />
+        <DangerBtn label="Suppr." okMsg="Objectif supprimé" errMsg="Suppression refusée"
+          confirm={`Supprimer l'objectif « ${x.fiscalYear} ${x.scope || ""} ${x.scopeValue || ""} » ? Cette action est définitive.`}
+          fn={() => remove(x)} />
       </span>
     ))] : []),
   ];

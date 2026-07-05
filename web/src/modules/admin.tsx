@@ -3,7 +3,7 @@ import { useState, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
-import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
+import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
 import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
@@ -174,11 +174,11 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
       <div className="flex flex-col gap-2.5">
         {PROJ_TIERS.map((t) => (
           <div key={t.key} className="flex items-center gap-3 flex-wrap">
-            <label className="flex items-center gap-2 min-w-[190px] cursor-pointer">
-              <input type="checkbox" checked={st[t.key].active} onChange={(e) => set(t.key, { active: e.target.checked })} aria-label={`Activer ${t.label}`} />
+            <div className="flex items-center gap-2 min-w-[190px]">
+              <Toggle checked={st[t.key].active} onChange={(v) => set(t.key, { active: v })} ariaLabel={`Activer ${t.label}`} />
               <span className="text-ink font-medium">{t.label}</span>
               <span className="text-[11px] text-faint">{t.band}</span>
-            </label>
+            </div>
             <label className="flex items-center gap-2 text-[13px]">
               <span className="text-muted">Poids (%)</span>
               <input className="field !py-1 w-24" inputMode="decimal" disabled={!st[t.key].active} value={st[t.key].weight} onChange={(e) => set(t.key, { weight: e.target.value })} aria-label={`Poids ${t.label}`} />
@@ -260,10 +260,10 @@ function NotificationForm({ initial }: { initial: NotificationConfig }) {
         <Busy label="Enregistrer" okMsg="Notifications enregistrées" fn={() => save(false)} />
       </div>}>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex items-center gap-2 text-[13px] text-ink">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} aria-label="Activer les notifications" />
+        <div className="flex items-center gap-2 text-[13px] text-ink">
+          <Toggle checked={enabled} onChange={setEnabled} ariaLabel="Activer les notifications" />
           Activer le digest quotidien (07:00)
-        </label>
+        </div>
         <label className="flex flex-col gap-1 text-[13px]">
           <span className="text-ink font-medium">Sévérité minimale</span>
           <Select className="!py-1" value={sev} onChange={(v) => setSev(v as "high" | "medium")} ariaLabel="Sévérité minimale"

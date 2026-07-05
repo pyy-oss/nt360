@@ -91,7 +91,16 @@
     @apply btn border border-line text-ink hover:bg-panel2;
   }
   .field {
-    @apply rounded-lg border border-line bg-bg px-3 py-2 min-h-[40px] text-sm text-ink placeholder:text-muted focus:border-gold/50;
+    @apply rounded-lg border border-line bg-bg px-3 py-2 min-h-[40px] text-sm text-ink placeholder:text-muted transition-[border-color,box-shadow] outline-none;
+  }
+  .field:hover:not(:disabled):not(:focus) {
+    border-color: rgb(var(--muted) / 0.55);
+  }
+  /* Focus premium : bordure dorée + halo doux (remplace l'anneau global générique sur les champs). */
+  .field:focus, .field:focus-visible, .field:focus-within {
+    border-color: rgb(var(--gold));
+    box-shadow: 0 0 0 3px rgb(var(--gold) / 0.15);
+    outline: none;
   }
   .tabnum {
     font-variant-numeric: tabular-nums;
