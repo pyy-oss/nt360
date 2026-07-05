@@ -115,10 +115,16 @@ export interface CashflowSummary {
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 
 export interface SuppliersSummary {
-  totalExpo?: number; openTotal?: number; encoursTotal?: number;
+  totalExpo?: number; openTotal?: number; encoursTotal?: number; engagementTotal?: number; soldeTotal?: number;
   bySupplier?: SupplierRow[];
 }
-export type SupplierRow = { name: string; expo?: number; open?: number; encours?: number; authorized?: number; coverage?: number; util?: number; reco?: number; state?: string };
+// SOA : `solde` = compte réel (ouverture + BC facturés non payés) ; `engagement` = BC non facturés
+// + prévisionnel ; `disponible` = autorisé − solde − engagement. `encours` conservé (= solde) pour compat.
+export type SupplierRow = {
+  name: string; expo?: number; open?: number; engagement?: number; solde?: number; opening?: number;
+  facture?: number; openingDate?: string | null; encours?: number; authorized?: number;
+  disponible?: number; coverage?: number; util?: number; reco?: number; state?: string;
+};
 
 export type AlertItem = { type: string; severity: "high" | "medium" | "low"; count: number; message: string; refs?: string[] };
 export interface AlertsSummary { items?: AlertItem[]; fy?: number }

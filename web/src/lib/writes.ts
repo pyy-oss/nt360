@@ -80,9 +80,11 @@ export async function patchProjectSheet(data: { fp: string; saleTotal?: number; 
   await httpsCallable(functions, "patchProjectSheet")(data);
 }
 
-/** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
-export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
-  await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });
+/** Crée/met à jour une ligne de crédit fournisseur : plafond autorisé + solde d'ouverture SOA daté
+ *  (« à jour maintenant »). Seule une facture (BC statut « facturé ») bouge ensuite le solde.
+ *  onCall : recalcule exposition + alertes. */
+export async function upsertCreditLine(id: string, data: { authorized: number; openingBalance?: number; openingDate?: string | null }) {
+  await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, openingBalance: data.openingBalance, openingDate: data.openingDate ?? null });
 }
 
 /** Identifiant déterministe d'un objectif (année × périmètre × valeur). */
