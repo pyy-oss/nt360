@@ -1,13 +1,13 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
-import { useState, type FC } from "react";
+import { useState, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId } from "../lib/writes";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
@@ -202,6 +202,15 @@ export const OppList: FC<Props> = () => {
     .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9)
     .sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
   const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
+  // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
+  // commandes sont chargés depuis la vue matérialisée (accès overview — sinon flag masqué, gracieux).
+  const { rows: cmd } = useCommandesRows();
+  const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
+  const isBooked = (o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp))));
+  const pnlFlag = (o: Opportunity): ReactNode =>
+    isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
+      : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
+        : <span className="text-faint">—</span>;
   return (
     <div className="flex flex-col gap-4">
       <FilterNote dims="BU / AM / client" />
@@ -234,18 +243,22 @@ export const OppList: FC<Props> = () => {
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
         {certitudes.length ? (
           <Table columns={[
-            colText("Client", (o) => o.client, (o) => o.client), colText("AM", (o) => o.am, (o) => o.am),
+            colText("Client", (o) => o.client, (o) => o.client),
+            colText("Désignation", (o) => o.designation || "—", (o) => o.designation || ""),
+            colText("AM", (o) => o.am, (o) => o.am),
             colText("BU", (o) => buBadge(o.bu), (o) => o.bu), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
             colNum("Proba", (o) => pct(o.probability), (o) => o.probability),
             colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
             colText("Closing (D Prev)", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
+            colText("P&L", (o: Opportunity) => pnlFlag(o), () => 0),
           ]} rows={certitudes} />
         ) : <EmptyState label="Aucune opportunité IdC ≥ 90 %." />}
       </Card>
       <Card title="Top opportunités (pondéré)">
         <Table columns={[
-          colText("Client", (o) => o.client), colText("AM", (o) => o.am),
+          colText("Client", (o) => o.client), colText("Désignation", (o) => o.designation || "—"), colText("AM", (o) => o.am),
           colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(o.weighted)),
+          colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
       <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
@@ -264,6 +277,7 @@ export const OppList: FC<Props> = () => {
             colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
             colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
             colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || ""),
+            colText("P&L", (r: Opportunity) => pnlFlag(r), (r: Opportunity) => (isBooked(r) ? 2 : r.stage === 6 ? 1 : 0)),
             ...(canWrite ? [colText("", (r: Opportunity) => (r.source === "saisie" ? (
               <span className="inline-flex gap-2">
                 <button onClick={() => { editOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs">Éditer</button>

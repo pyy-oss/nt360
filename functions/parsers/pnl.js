@@ -48,7 +48,7 @@ function parsePnl(wb) {
       fp,
       client: cleanName(val(r, keys, "customer")),
       // Description / désignation de l'affaire (objet de la commande) — colonnes possibles variées.
-      designation: String(valLabel(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description") || "").trim(),
+      designation: String(valLabel(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "descriptif", "nom du projet", "nom projet", "nom de l'affaire", "sujet", "titre", "prestation", "mission", "nature", "solution", "offre", "opportunité", "opportunite") || "").trim(),
       bu: cleanBu(val(r, keys, "bu")),
       yearPo: plausibleYear(parseInt(val(r, keys, "year po")) || 0), // fenêtre glissante, rejet sentinelles 1900
       cas,
