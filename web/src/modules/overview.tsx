@@ -16,9 +16,10 @@ import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
 // Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
 // une probabilité statistique : c'est un ratio d'atteinte de l'objectif — libellé en conséquence.
-function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount, reporte, reporteMarge }: {
+function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard, retardCount, reporte, reporteMarge, undated, undatedCount, undatedLabel }: {
   title: string; proba: number; realise?: number; projete?: number; objectif?: number; ecart?: number; sub: string;
   retard?: number; retardCount?: number; reporte?: number; reporteMarge?: number;
+  undated?: number; undatedCount?: number; undatedLabel?: string;
 }) {
   const hasObj = (objectif || 0) > 0;
   return (
@@ -40,6 +41,11 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard,
       {(reporte || 0) > 0 && (
         <div className="text-[11px] text-steel text-center mt-1" title="RAF explicitement reporté sur l'exercice suivant (facturation décalée) — EXCLU de ce projeté CAF. La marge suit au prorata.">
           hors {fmt(reporte)} reporté sur N+1{(reporteMarge || 0) > 0 ? ` · marge ${fmt(reporteMarge)}` : ""} (exclu du projeté)
+        </div>
+      )}
+      {(undated || 0) > 0 && (
+        <div className="text-[11px] text-clay text-center mt-1" title="Signé/facturé sans année/date attribuable à l'exercice → EXCLU du réalisé et donc du R/O. À dater pour fiabiliser l'assiette (le R/O est alors opposable).">
+          assiette opposable — hors {fmt(undated)} {undatedLabel} ({undatedCount}) à dater
         </div>
       )}
     </Card>
@@ -119,10 +125,12 @@ export const Overview: FC<Props> = ({ period }) => {
           <Landing title={`Atterrissage CAS ${fy || ""} — prise de commande`} proba={att.probaAtteinte || 0}
             realise={att.realiseCas} projete={att.projete} objectif={att.objectif} ecart={att.ecart}
             retard={att.pipelineRetard} retardCount={att.pipelineRetardCount}
+            undated={att.realiseCasUndated} undatedCount={att.realiseCasUndatedCount} undatedLabel="commandes sans année de PO"
             sub="Réalisé CAS + pipeline pondéré (certitudes glissantes)" />
           <Landing title={`Atterrissage CAF ${fy || ""} — facturation`} proba={att.probaAtteinteCaf || 0}
             realise={att.factureN} projete={att.cafProjete} objectif={att.objectifCaf} ecart={att.ecartCaf}
             retard={att.pipelineRetard} retardCount={att.pipelineRetardCount} reporte={att.reporteCaf} reporteMarge={attMargin?.reporteMarge}
+            undated={att.factureNUndated} undatedCount={att.factureNUndatedCount} undatedLabel="factures non datées"
             sub="Facturé + backlog + pipeline pondéré" />
         </div>
       ) : (
