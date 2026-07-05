@@ -120,6 +120,9 @@ export interface DataQualitySummary {
   issues?: QualityIssue[]; score?: number;
   counts?: { orders?: number; invoices?: number; opportunities?: number; bcLines?: number; projectSheets?: number };
 }
+export type QualityPoint = { date: string; score: number; anomalies: number; types: number };
+export interface QualityHistory { days?: QualityPoint[] }
+export type AuditLog = { id?: string; uid?: string; action?: string; module?: string; entity?: string; entityId?: string; detail?: any; ts?: { seconds?: number } };
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; cas?: number; raf?: number; facture?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null };
 // Méta des commandes matérialisées. Les lignes sont désormais dans les chunks commandesRows/{i}
