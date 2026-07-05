@@ -1,9 +1,9 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
-import { useState, useMemo, type FC } from "react";
+import { useState, useMemo, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, DangerBtn, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { DateField } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
@@ -557,8 +557,11 @@ function OrderForm({ onDone }: { onDone?: () => void }) {
 }
 
 // Édition inline d'une commande P&L / manuelle : CAS, RAF, client, AM, année de PO, correction du N° FP.
+// Correction d'une commande P&L/manuelle : ouvre une MODALE (formulaire propre) plutôt que d'entasser
+// les champs dans une cellule étroite du tableau (rendu illisible / cassé sinon).
 function OrderEditor({ row }: { row: Order }) {
   const fp = row.fp!;
+  const [open, setOpen] = useState(false);
   const [cas, setCas] = useState("");
   const [raf, setRaf] = useState("");
   const [client, setClient] = useState("");
@@ -567,22 +570,31 @@ function OrderEditor({ row }: { row: Order }) {
   const [nf, setNf] = useState("");
   const yearMissing = !(row.yearPo && row.yearPo > 0);
   const anyField = cas !== "" || raf !== "" || client.trim() !== "" || am.trim() !== "";
+  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
+    <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
+  );
   return (
-    <span className="inline-flex gap-1 items-center flex-wrap">
-      <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="CAS" value={cas} onChange={(e) => setCas(e.target.value)} />
-      <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
-      <input className="field w-24 !py-1 text-xs" aria-label={`Client ${fp}`} placeholder="Client" value={client} onChange={(e) => setClient(e.target.value)} />
-      <input className="field w-20 !py-1 text-xs" aria-label={`AM ${fp}`} placeholder="AM" value={am} onChange={(e) => setAm(e.target.value)} />
-      {anyField && (
-        <Busy variant="ghost" label="MàJ" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined, client: client.trim() || undefined, am: am.trim() || undefined })} />
-      )}
-      {yearMissing && (
-        <><input className="field w-16 !py-1 text-xs" aria-label={`Année de PO ${fp}`} placeholder="Année" value={y} onChange={(e) => setY(e.target.value)} />
-          <Busy variant="ghost" label="An" okMsg="Année fixée" fn={() => patchOrder({ fp, yearPo: Number(y) || 0 })} /></>
-      )}
-      <input className="field w-24 !py-1 text-xs" aria-label={`Corriger le N° FP ${fp}`} placeholder="Corriger FP" value={nf} onChange={(e) => setNf(e.target.value)} />
-      {nf.trim() && <Busy variant="ghost" label="FP" okMsg="FP corrigé" fn={() => patchOrder({ fp, newFp: nf })} />}
-    </span>
+    <>
+      <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setOpen(true)}>Corriger</button>
+      <Modal open={open} onClose={() => setOpen(false)} size="md"
+        title={<>Corriger la commande <span className="text-gold">{fp}</span></>}
+        actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          <Field label="CAS"><input className="field !py-1.5" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="montant" value={cas} onChange={(e) => setCas(e.target.value)} /></Field>
+          <Field label="RAF"><input className="field !py-1.5" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="reste à facturer" value={raf} onChange={(e) => setRaf(e.target.value)} /></Field>
+          <Field label="Client"><input className="field !py-1.5" aria-label={`Client ${fp}`} placeholder="nom du client" value={client} onChange={(e) => setClient(e.target.value)} /></Field>
+          <Field label="AM"><input className="field !py-1.5" aria-label={`AM ${fp}`} placeholder="commercial" value={am} onChange={(e) => setAm(e.target.value)} /></Field>
+          {yearMissing && <Field label="Année de PO"><input className="field !py-1.5" aria-label={`Année de PO ${fp}`} placeholder="ex. 2026" value={y} onChange={(e) => setY(e.target.value)} /></Field>}
+          <Field label="Corriger le N° FP"><input className="field !py-1.5" aria-label={`Corriger le N° FP ${fp}`} placeholder="nouveau N° FP" value={nf} onChange={(e) => setNf(e.target.value)} /></Field>
+        </div>
+        <div className="flex gap-2 mt-4 flex-wrap">
+          {anyField && <Busy label="Enregistrer" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined, client: client.trim() || undefined, am: am.trim() || undefined }).then(() => setOpen(false))} />}
+          {yearMissing && y.trim() && <Busy variant="ghost" label="Fixer l'année" okMsg="Année fixée" fn={() => patchOrder({ fp, yearPo: Number(y) || 0 }).then(() => setOpen(false))} />}
+          {nf.trim() && <Busy variant="ghost" label="Corriger le FP" okMsg="FP corrigé" fn={() => patchOrder({ fp, newFp: nf }).then(() => setOpen(false))} />}
+          {!anyField && !nf.trim() && !(yearMissing && y.trim()) && <span className="text-[12px] text-faint self-center">Renseignez un champ à corriger.</span>}
+        </div>
+      </Modal>
+    </>
   );
 }
 
