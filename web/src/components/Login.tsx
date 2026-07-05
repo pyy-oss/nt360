@@ -29,7 +29,7 @@ export default function Login() {
         <div className="flex items-center gap-3 mb-2">
           <div className="grid place-items-center w-9 h-9 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
           <div>
-            <div className="font-display font-bold text-lg leading-none">Pilote Revenu</div>
+            <div className="font-display font-bold text-lg leading-none">Neurone360</div>
             <div className="text-[11px] text-muted mt-0.5">Neurones Technologies CI</div>
           </div>
         </div>
