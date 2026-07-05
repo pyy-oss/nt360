@@ -162,6 +162,14 @@ describe("Agrégats & audit", () => {
   it("direction lit tout agrégat, même non classé (superviseur)", async () => {
     await assertSucceeds(getDoc(doc(as("direction"), "summaries/nouvelleMarge_2026")));
   });
+  it("summaries/alertsMargin (marge) : commercial (rentabilite=none) refusé, lecture (rentabilite=read) OK", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/alertsMargin")));
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/alertsMargin")));
+  });
+  it("config/* : allowlist fail-closed (config/alerts lisible, config non listé refusé même pour direction)", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "config/alerts")));
+    await assertFails(getDoc(doc(as("direction"), "config/secretFutur")));
+  });
   it("personne n'écrit summaries (Functions only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "summaries/overview_2026"), { certitudes: 2 }));
   });

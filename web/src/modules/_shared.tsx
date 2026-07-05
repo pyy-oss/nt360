@@ -399,9 +399,14 @@ export function FilterNote({ dims }: { dims?: string }) {
 // Centre d'alertes (bandeau) — actionnable : chaque alerte ouvre le module concerné
 // (si l'utilisateur y a accès) et affiche ses références (FP / fournisseurs).
 export function AlertsBanner() {
+  const canMargin = useCanSeeMargin();
   const { data } = useDocData<AlertsSummary>("summaries/alerts");
+  // Alertes dérivées de la marge : lues SÉPARÉMENT et seulement si le rôle a l'accès « rentabilité »
+  // (summaries/alertsMargin est gaté serveur) → recomposées dans le même bandeau.
+  const { data: dataMargin } = useDocData<AlertsSummary>(canMargin ? "summaries/alertsMargin" : null);
   const { go, canGo } = useNav();
-  const items = data?.items || [];
+  const rank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const items = [...(data?.items || []), ...(dataMargin?.items || [])].sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));
   if (!items.length) return null;
   const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   return (

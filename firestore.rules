@@ -36,6 +36,9 @@ service cloud.firestore {
         : id.matches('clients.*') ? 'clients'
         : id.matches('domaines.*') ? 'domaines'
         : id.matches('commandes.*') ? 'overview'
+        // Alertes DÉRIVÉES DE LA MARGE (marge négative / achats > vente) isolées → « Rentabilité »
+        // requis (avant alerts.* qui matcherait aussi « alertsMargin »).
+        : id.matches('alertsMargin.*') ? 'rentabilite'
         : id.matches('alerts.*') ? 'overview'
         : id.matches('dataQuality.*') ? 'overview'
         : id.matches('trends.*') ? 'overview'
@@ -95,7 +98,9 @@ service cloud.firestore {
     match /config/notifications { allow read: if canWrite('habilitations'); allow write: if false; }
     // Table d'alias de normalisation clients : éditée via setClientAliases, lue par l'écran Admin.
     match /config/clientAliases { allow read: if canWrite('habilitations'); allow write: if false; }
-    match /config/{id}        { allow read: if signedIn() && id != 'notifications'; allow write: if false; }
+    // Repli config/* : ALLOWLIST fail-closed (les docs sensibles ont leur propre règle ci-dessus ;
+    // un futur doc config/* non listé n'est PAS lisible par défaut).
+    match /config/{id}        { allow read: if signedIn() && id in ['alerts', 'projection', 'periods', 'fiscal']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }

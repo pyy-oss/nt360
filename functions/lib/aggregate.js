@@ -180,11 +180,16 @@ async function recomputeAll(db, only) {
   if (want("atterrissage")) {
     w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
-    // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
-    // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier PAR DÉFAUT pour les projets SANS
-    // jalons (RAF projetable restant en N réparti uniformément sur 3 jalons jusqu'au 31/12). Ainsi la
-    // tendance couvre TOUT le backlog, pas seulement les projets manuellement échéancés. Aucun effet de
-    // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0).
+  }
+  // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
+  // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier PAR DÉFAUT pour les projets SANS
+  // jalons (RAF projetable restant en N réparti uniformément sur 3 jalons jusqu'au 31/12). Ainsi la
+  // tendance couvre TOUT le backlog, pas seulement les projets manuellement échéancés. Aucun effet de
+  // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0).
+  // Calculée dès qu'atterrissage / news / alertes sont (re)construits : l'Actualité (bulletins de
+  // facturation) dépend de `trendForNews` — sinon un recompute partiel « alerts »-only reconstruisait
+  // l'Actualité SANS ces bulletins (trendForNews resté null).
+  if (want("atterrissage") || want("news") || want("alerts")) {
     const trendMilestones = Object.values(milestonesByFp).flat();
     for (const o of orders) {
       const k = fpKey(o.fp);
@@ -195,11 +200,18 @@ async function recomputeAll(db, only) {
     }
     const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
     trendForNews = trend;
-    w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
+    if (want("atterrissage")) w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
-  if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr), fy: currentFy, ...stamp } });
+  if (want("alerts")) {
+    // Isolation marge : les alertes dérivées de la marge (marge négative / achats > vente) exposent le
+    // SIGNE de la marge par affaire nommée → écrites dans summaries/alertsMargin (gaté « rentabilite »),
+    // jamais dans summaries/alerts (lisible à « overview »).
+    const allAlerts = alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr);
+    w.push({ path: "summaries/alerts", data: { items: allAlerts.filter((a) => !a.margin), fy: currentFy, ...stamp } });
+    w.push({ path: "summaries/alertsMargin", data: { items: allAlerts.filter((a) => a.margin), fy: currentFy, ...stamp } });
+  }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
   if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
