@@ -312,9 +312,17 @@ function guarded(action, handler) {
 
 // onCall enveloppé par guarded() (observabilité). Supporte onCall(handler) ET onCall(opts, handler).
 // Fonction DÉCLARÉE (hoistée) car utilisée par des exports définis plus haut dans le fichier.
+//
+// App Check (F8) — ENFORCEMENT côté serveur, piloté par la variable d'environnement APPCHECK_ENFORCE.
+// OFF par défaut : activer (APPCHECK_ENFORCE=true) UNIQUEMENT une fois la clé reCAPTCHA v3 déployée
+// au client (VITE_APPCHECK_SITE_KEY) ET App Check enregistré dans la console Firebase — sinon TOUS
+// les appels callables seraient rejetés. Le drapeau est lu au chargement, à l'enregistrement de
+// chaque callable ; il permet de basculer par simple variable d'env, sans modifier le code.
 function onCallG(action, opts, handler) {
   if (typeof opts === "function") { handler = opts; opts = {}; }
-  return onCall(opts, guarded(action, handler));
+  // enforceAppCheck ajouté quand le drapeau est actif ; un opts explicite reste prioritaire.
+  const merged = process.env.APPCHECK_ENFORCE === "true" ? { enforceAppCheck: true, ...opts } : opts;
+  return onCall(merged, guarded(action, handler));
 }
 
 // Autorisation d'ÉCRITURE d'un callable, GOUVERNÉE PAR LA MATRICE OPPOSABLE (config/permissions) —
