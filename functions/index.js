@@ -283,6 +283,27 @@ exports.logLogin = onCallG("logLogin", async (req) => {
   return { ok: true };
 });
 
+// --- Journal d'ERREURS CLIENT (observabilité front) : capture des erreurs JS non gérées et des
+// crashs de rendu côté navigateur, remontées par le front (fenêtre onerror / unhandledrejection /
+// ErrorBoundary) → collection errorLog, lisible en Admin. Réservé aux sessions AUTHENTIFIÉES
+// (anti-abus). Champs bornés (garde-fou de taille / coût). N'échoue jamais côté client (best-effort). ---
+exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  const d = req.data || {};
+  const s = (v, n) => (v == null ? null : String(v).slice(0, n));
+  await db.collection("errorLog").add({
+    uid: req.auth.uid,
+    role: req.auth.token.role || null,
+    message: s(d.message, 1000) || "(sans message)",
+    stack: s(d.stack, 4000),
+    url: s(d.url, 500),
+    module: s(d.module, 120),
+    ua: s(d.ua, 300),
+    ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+});
+
 // --- F3 : recalcul des agrégats à la demande (admin) ---
 // Ressources alignées sur importDelta : recomputeAll lit TOUTES les collections et reconstruit
 // tous les summaries (boucle sur chaque période) — le défaut 256 MiB / 60 s provoquait un

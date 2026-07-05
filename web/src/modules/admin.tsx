@@ -6,7 +6,7 @@ import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
 import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
-import type { PermissionsConfig, UserRow, OpsLog } from "../types";
+import type { PermissionsConfig, UserRow, OpsLog, ErrorLog } from "../types";
 
 export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
@@ -25,6 +25,7 @@ export const Habilitations: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       {canWrite && <DataImportCard />}
       {canWrite && <OpsHealthCard />}
+      {canWrite && <ClientErrorsCard />}
       {canWrite && <ProjectionConfigCard />}
       {canWrite && <AlertThresholdsCard />}
       {canWrite && <NotificationCard />}
@@ -59,6 +60,26 @@ export const Habilitations: FC<Props> = () => {
     </div>
   );
 };
+
+// Observabilité FRONT : dernières erreurs client (JS non gérées / rejets / crashs de rendu),
+// remontées par logClientError → errorLog. Vide = aucune erreur remontée (bon signe).
+function ClientErrorsCard() {
+  const { rows } = useCollectionData<ErrorLog>("errorLog", [orderBy("ts", "desc"), limit(20)], "recent20");
+  return (
+    <Card title={`Erreurs client récentes${rows.length ? ` · ${rows.length}` : ""}`}>
+      {rows.length ? (
+        <Table columns={[
+          colText("Quand", (e: ErrorLog) => <span className="text-faint tabnum">{relTime(e.ts) || "—"}</span>, (e: ErrorLog) => (e.ts?.seconds ?? 0)),
+          colText("Message", (e: ErrorLog) => <span className="text-clay">{e.message || "—"}</span>, (e: ErrorLog) => e.message || ""),
+          colText("Source", (e: ErrorLog) => e.module || "—", (e: ErrorLog) => e.module || ""),
+          colText("Rôle", (e: ErrorLog) => e.role || "—", (e: ErrorLog) => e.role || ""),
+          colText("URL", (e: ErrorLog) => <span className="text-faint truncate max-w-[220px] inline-block align-bottom" title={e.url || ""}>{e.url || "—"}</span>, (e: ErrorLog) => e.url || ""),
+        ]} rows={rows} />
+      ) : <div className="text-[13px] text-muted">Aucune erreur client remontée récemment.</div>}
+      <Tip>Erreurs JavaScript non gérées, rejets de promesses et crashs de rendu remontés par les navigateurs des utilisateurs (sessions authentifiées) → dédoublonnées et plafonnées par session. Un pic ici signale une régression à investiguer.</Tip>
+    </Card>
+  );
+}
 
 // Exploitation : santé des FONCTIONS (recomputes + callables + tâches planifiées) via opsLog.
 // Visibilité durable sur les échecs inattendus (observabilité), au-delà des logs Cloud.

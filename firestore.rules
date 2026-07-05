@@ -91,6 +91,9 @@ service cloud.firestore {
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }
+    // Erreurs client (observabilité front) : lisibles par les administrateurs ; écrites uniquement
+    // par la Cloud Function logClientError (jamais en direct).
+    match /errorLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /imports/{id}       { allow read: if canWrite('habilitations'); allow write: if false; }
     match /users/{uid}        { allow read: if canWrite('habilitations') || request.auth.uid == uid; allow write: if false; }
   }
