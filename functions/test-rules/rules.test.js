@@ -49,6 +49,7 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/qualityHistory"), { days: [] });
     await setDoc(doc(db, "config/cancelOrders"), { items: [] });
     await setDoc(doc(db, "config/cancelInvoices"), { items: [] });
+    await setDoc(doc(db, "summaries/cashScenario"), { horizon: 0 });
     await setDoc(doc(db, "summaries/relancesCreances"), { count: 0 });
     await setDoc(doc(db, "summaries/relancesBc"), { count: 0 });
     await setDoc(doc(db, "summaries/relancesJalons"), { count: 0 });
@@ -178,6 +179,10 @@ describe("Agrégats & audit", () => {
   });
   it("summaries/qualityHistory (mappé overview) lisible par lecture", async () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/qualityHistory")));
+  });
+  it("summaries/cashScenario (prévision cash) cloisonné facturation comme cashflow", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/cashScenario")));   // facturation=none
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/cashScenario")));    // facturation=read
   });
   it("plan de relance : cloisonné par module (créances→facturation, bc→fournisseurs, jalons→backlog)", async () => {
     await assertFails(getDoc(doc(as("commercial"), "summaries/relancesCreances")));   // facturation=none

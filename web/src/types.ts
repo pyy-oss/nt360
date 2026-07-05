@@ -98,6 +98,13 @@ export interface ReceivablesSummary {
   topAR?: { key: string; value: number }[];
 }
 export type CashMonth = { month: string; ar: number; backlog: number; cumulAr: number; decaissement?: number; net?: number; cumulNet?: number };
+// Prévision cash avancée : scénarios best/base/worst + tension (position cumulée pire sous plancher).
+export type ScenarioTriplet = { best: number; base: number; worst: number };
+export type CashScenarioMonth = { month: string; enc: ScenarioTriplet; dec: ScenarioTriplet; net: ScenarioTriplet; cum: ScenarioTriplet };
+export interface CashScenarioSummary {
+  asOf?: string; horizon?: number; opening?: number; months?: CashScenarioMonth[];
+  tension?: { floor?: number; firstMonth?: string | null; monthsCount?: number; trough?: { month?: string | null; value?: number } };
+}
 export interface CashflowSummary {
   asOf?: string; horizon?: number; months?: CashMonth[];
   overdue?: number; overdueCount?: number; beyond?: number;

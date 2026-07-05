@@ -15,6 +15,7 @@ const { buildNews } = require("../domain/news");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
+const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
 const { dataQuality } = require("../domain/dataQuality");
 const { relances } = require("../domain/relances");
@@ -188,6 +189,13 @@ async function recomputeAll(db, only) {
       decaissementEtaCompleteness: dec.etaCompleteness, decaissementNoEtaCount: dec.noEtaCount,
       ...stamp,
     } });
+    // Prévision cash AVANCÉE : scénarios best/base/worst + tension, à partir du MÊME échéancier (AR
+    // par mois + échus ; décaissements par mois + échus). Cloisonné « facturation » comme cashflow.
+    const scen = cashScenario(
+      { asOf, months: cf.months.map((m) => ({ month: m.month, ar: m.ar, out: decBy[m.month] || 0 })), overdueAr: cf.overdue, overduePay: dec.overdue },
+      { opening: Number(projCfg.cashOpening) || 0 },
+    );
+    w.push({ path: "summaries/cashScenario", data: { ...scen, ...stamp } });
   }
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, milestonesByFp);
   // La marge reportée est de la DONNÉE MARGE → isolée dans un doc gaté « rentabilite » (jamais dans

@@ -11,7 +11,7 @@ import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -219,6 +219,7 @@ export const Prevision: FC<Props> = () => {
   const { data: attMargin } = useDocData<{ reporteMarge?: number }>(canMargin && cfg?.currentFy ? `summaries/atterrissageMargin_${cfg.currentFy}` : null);
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const { data: cf } = useDocData<CashflowSummary>("summaries/cashflow");
+  const { data: scen } = useDocData<CashScenarioSummary>("summaries/cashScenario");
   // Tendance de facturation (réalisé vs planifié par les jalons) jusqu'au 31/12 — accès facturation.
   const { data: billTrend } = useDocData<BillingTrendSummary>(cfg?.currentFy ? `summaries/billingTrend_${cfg.currentFy}` : null);
   if (!bl && !pl && !att) return <EmptyState />;
@@ -346,6 +347,42 @@ export const Prevision: FC<Props> = () => {
               {(cf.decaissementNoEtaCount || 0) > 0 && (
                 <> La <b>fiabilité</b> ({pct(fiab)}) reflète la part du montant BC à ETA connue : <b>{cf.decaissementNoEtaCount}</b> ligne{(cf.decaissementNoEtaCount || 0) > 1 ? "s" : ""} sans ETA {(cf.decaissementNoEtaCount || 0) > 1 ? "sont rabattues" : "est rabattue"} sur le mois courant — renseigner leur ETA affine la ventilation.</>
               )}
+            </Tip>
+          </Card>
+        );
+      })()}
+      {scen && (scen.months?.length || 0) > 0 && (() => {
+        const months = scen.months || [];
+        const t = scen.tension || {};
+        const inTension = (t.monthsCount || 0) > 0;
+        const opening = scen.opening || 0;
+        const endWorst = months[months.length - 1].cum.worst;
+        const endBest = months[months.length - 1].cum.best;
+        return (
+          <Card title={`Prévision cash — scénarios & tension (${scen.horizon || months.length} mois glissants)`}>
+            <div className={grid4}>
+              <Kpi label="Position fin d'horizon (pire)" value={fmt(endWorst)} tone={endWorst < 0 ? "clay" : "emerald"} sub="worst : recouvrement lent, paiement rapide" />
+              <Kpi label="Position fin d'horizon (optimiste)" value={fmt(endBest)} tone={endBest < 0 ? "clay" : "emerald"} sub="best : recouvrement rapide, paiement différé" />
+              <Kpi label="Mois en tension (pire)" value={(t.monthsCount || 0).toLocaleString("fr-FR")} tone={inTension ? "clay" : "emerald"} sub={inTension ? `dès ${t.firstMonth}` : "aucun sous le plancher"} />
+              <Kpi label="Creux de trésorerie (pire)" value={fmt(t.trough?.value || 0)} tone={(t.trough?.value || 0) < 0 ? "clay" : "steel"} sub={t.trough?.month ? `en ${t.trough.month}` : "—"} />
+            </div>
+            {inTension && (
+              <div className="mt-3 rounded-lg border border-clay/40 bg-clay/10 px-3 py-2 text-[13px] text-clay">
+                <b>Tension de trésorerie projetée</b> dès <b>{t.firstMonth}</b> — la position cumulée du scénario pessimiste passe sous le plancher{opening ? "" : " (variation cumulée depuis aujourd'hui, hors solde d'ouverture)"}. Creux à <b>{fmt(t.trough?.value || 0)}</b> en {t.trough?.month}. Anticiper : accélérer le recouvrement (Relances), différer des décaissements, ou mobiliser une ligne de trésorerie.
+              </div>
+            )}
+            <div className="mt-3">
+              <MultiLine
+                data={months.map((m) => ({ name: m.month.slice(5), Pessimiste: m.cum.worst, Base: m.cum.base, Optimiste: m.cum.best }))}
+                series={[
+                  { key: "Optimiste", color: T.emerald, name: "Optimiste (best)" },
+                  { key: "Base", color: T.gold, name: "Base" },
+                  { key: "Pessimiste", color: T.clay, name: "Pessimiste (worst)" },
+                ]}
+              />
+            </div>
+            <Tip>
+              Position de trésorerie <b>cumulée</b> par mois selon trois scénarios{opening ? <> (solde d'ouverture {fmt(opening)})</> : <> (variation depuis aujourd'hui — <b>solde d'ouverture non renseigné</b>)</>}. <b>Optimiste</b> : AR recouvré à 100 % et vite, payables échus différés. <b>Pessimiste</b> : recouvrement partiel et lent, payables échus réglés immédiatement. La <b>tension</b> est un mois où la trajectoire pessimiste passe sous le plancher — signal d'anticipation, pas une fatalité.
             </Tip>
           </Card>
         );
