@@ -4,9 +4,9 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
-import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice } from "../lib/writes";
+import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN } from "../lib/thresholds";
@@ -195,6 +195,7 @@ export const InvoiceList: FC<Props> = () => {
             colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
             ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id ? <FpFixer id={r.id} /> : null), () => 0)] : []),
             ...(canImport ? [colText("Dates", (r: Invoice) => <InvoiceDateFixer inv={r} />, () => 0)] : []),
+            ...(canImport ? [colText("Assainir", (r: Invoice) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la facture ${r.numero || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("invoices", r.id!)} /> : null), () => 0)] : []),
           ]}
         />
       </Card>

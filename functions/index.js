@@ -593,6 +593,37 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, id, fp };
 });
 
+// --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
+// imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
+// record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute
+// derrière. Le DELTA reste prioritaire : si une future ligne source réintroduit ce record (même
+// clé), il réapparaît — la suppression assainit l'existant, elle ne verrouille pas contre la source.
+// Les identifiants sont des DOC IDS (pas de re-transformation : safeId n'est pas idempotent). ---
+const DELETABLE = { orders: "import", invoices: "import", bcLines: "bc", projectSheets: "rentabilite", opportunities: "pipeline" };
+exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+  const d = req.data || {};
+  const collection = String(d.collection || "");
+  const module = DELETABLE[collection];
+  if (!module) throw new HttpsError("invalid-argument", "collection non assainissable");
+  await requireWrite(req, module);
+  const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter(Boolean).slice(0, 1000);
+  if (!ids.length) throw new HttpsError("invalid-argument", "aucun identifiant fourni");
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = db.batch();
+    for (const id of ids.slice(i, i + 400)) {
+      batch.delete(db.doc(`${collection}/${id}`));
+      if (collection === "projectSheets") batch.delete(db.doc(`projectSheetsMargin/${id}`)); // marge isolée liée
+    }
+    await batch.commit();
+  }
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "delete_records", module, entity: collection, entityId: String(ids.length),
+    detail: { collection, count: ids.length }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, count: ids.length };
+});
+
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
 // il reste piloté par la source). Recalcule l'échéancier cash + la qualité des données. ---

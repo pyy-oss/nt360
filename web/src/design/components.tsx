@@ -312,6 +312,26 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
   );
 }
 
+/** Bouton d'action DESTRUCTIVE : confirmation obligatoire avant exécution (annulation silencieuse),
+ *  puis état + toast. Sert à l'assainissement (suppression d'enregistrements). */
+export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée" }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string }) {
+  const [s, setS] = useState<"" | "busy">("");
+  const toast = useToast();
+  return (
+    <button
+      className="btn-ghost text-clay hover:opacity-80"
+      disabled={s === "busy"}
+      onClick={async () => {
+        if (typeof window !== "undefined" && !window.confirm(confirm)) return; // annulation → no-op silencieux
+        setS("busy");
+        try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
+      }}
+    >
+      {s === "busy" ? "…" : label}
+    </button>
+  );
+}
+
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
