@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
-import { LogOut } from "lucide-react";
+import { LogOut, Sun, Moon } from "lucide-react";
 import { auth } from "./lib/firebase";
+import { currentTheme, toggleTheme, type Theme } from "./lib/theme";
 import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
@@ -36,6 +37,7 @@ export default function App() {
   // contexte périmé ; posée par `go(id, intent)` lors d'un drill-through.
   const [intent, setIntent] = useState<NavIntent | null>(null);
   const openManual = (id: string) => { setActive(id); setIntent(null); };
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
 
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
   const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none"), [can]);
@@ -128,6 +130,7 @@ export default function App() {
             </div>
             <span className="text-xs text-muted hidden md:inline">{user.email}</span>
             <span className="rounded-md bg-gold/15 text-gold px-2 py-1 text-[11px] font-semibold">{role ?? "sans rôle"}</span>
+            <button onClick={() => setTheme(toggleTheme())} className="btn-ghost !px-2.5 !py-1.5 min-h-[36px]" aria-label={theme === "light" ? "Passer au thème sombre" : "Passer au thème clair"} title={theme === "light" ? "Thème sombre" : "Thème clair"}>{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</button>
             <button onClick={() => signOut(auth)} className="btn-ghost !px-2.5 !py-1.5 min-h-[36px]" aria-label="Déconnexion" title="Déconnexion"><LogOut size={16} /></button>
           </div>
         </header>

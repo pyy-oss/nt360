@@ -65,7 +65,7 @@ export function Segmented<T extends string>({ value, onChange, options, ariaLabe
         return (
           <button key={o.value} type="button" role="tab" aria-selected={on} disabled={o.disabled} title={o.title} onClick={() => !o.disabled && onChange(o.value)}
             className={cx("inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium min-h-[34px] transition-colors",
-              o.disabled ? "text-faint opacity-40 cursor-not-allowed" : on ? "bg-gold/20 text-gold" : "text-muted hover:text-ink hover:bg-white/[.03]")}>
+              o.disabled ? "text-faint opacity-40 cursor-not-allowed" : on ? "bg-gold/20 text-gold" : "text-muted hover:text-ink hover:bg-ink/[.06]")}>
             {o.label}{o.count != null && <span className={cx("tabnum", on ? "text-gold/70" : "text-faint")}>{o.count}</span>}
           </button>
         );
@@ -135,7 +135,7 @@ export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; e
         </thead>
         <tbody>
           {sorted.map((r, ri) => (
-            <tr key={ri} className="odd:bg-white/[.015] hover:bg-white/[.04] transition-colors">
+            <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
               {columns.map((c, ci) => (
                 <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
               ))}
@@ -183,7 +183,7 @@ export function DataGate({ loading, error, empty, skeleton, children }:
 
 export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return <div className={cx("relative overflow-hidden rounded-lg bg-panel2", className)} style={style}>
-    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite] bg-gradient-to-r from-transparent via-ink/[.06] to-transparent" />
   </div>;
 }
 export function KpiSkeletons({ n = 4 }: { n?: number }) {
@@ -248,7 +248,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             </thead>
             <tbody>
               {slice.map((r, ri) => (
-                <tr key={ri} className="odd:bg-white/[.015] hover:bg-white/[.04] transition-colors">
+                <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
                   {columns.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
                 </tr>
               ))}

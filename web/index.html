@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0E1613" />
     <title>Pilote Revenu NT CI</title>
+    <!-- Applique le thème choisi AVANT le premier rendu (évite le flash de thème). Sans choix
+         explicite, aucun attribut → le CSS retombe sur prefers-color-scheme (préférence système). -->
+    <script>
+      try { var t = localStorage.getItem("nt360-theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,17 +1,19 @@
 // Design "Forest & Gold" — palette et helpers (BUILD_KIT §12, aligné au prototype).
+// Les valeurs référencent les VARIABLES CSS de thème (définies dans index.css) : ainsi les styles
+// inline et les couleurs de graphes (Recharts) suivent automatiquement le thème clair/sombre.
 export const T = {
-  bg: "#0E1613",
-  panel: "#151F1A",
-  panel2: "#1B2721",
-  line: "#26352D",
-  ink: "#EEF3EF",
-  dim: "#8FA89B",
-  faint: "#5E7268",
-  gold: "#C9A24B",
-  emerald: "#46C08A",
-  clay: "#D9694C",
-  steel: "#6E9DC0",
-  plum: "#A98AC4",
+  bg: "rgb(var(--bg))",
+  panel: "rgb(var(--panel))",
+  panel2: "rgb(var(--panel2))",
+  line: "rgb(var(--line))",
+  ink: "rgb(var(--ink))",
+  dim: "rgb(var(--muted))",
+  faint: "rgb(var(--faint))",
+  gold: "rgb(var(--gold))",
+  emerald: "rgb(var(--emerald))",
+  clay: "rgb(var(--clay))",
+  steel: "rgb(var(--steel))",
+  plum: "rgb(var(--plum))",
 } as const;
 
 export const colors = T; // alias historique
