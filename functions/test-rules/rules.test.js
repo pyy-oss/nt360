@@ -130,8 +130,10 @@ describe("Objectifs", () => {
 });
 
 describe("Matrice de droits (habilitations)", () => {
-  it("direction édite config/permissions", async () => {
-    await assertSucceeds(setDoc(doc(as("direction"), "config/permissions"), { matrix }));
+  // config/permissions n'est plus éditable EN DIRECT (write:false) : l'édition passe par le callable
+  // setPermissions (schéma validé + audité). Même direction ne peut pas écrire le doc directement.
+  it("config/permissions n'est PAS éditable en direct — même par direction (callable-only)", async () => {
+    await assertFails(setDoc(doc(as("direction"), "config/permissions"), { matrix }));
   });
   it("pmo ne peut PAS éditer config/permissions", async () => {
     await assertFails(setDoc(doc(as("pmo"), "config/permissions"), { matrix }));
@@ -150,6 +152,15 @@ describe("Agrégats & audit", () => {
   });
   it("achats (fournisseurs=write) lit summaries/suppliers", async () => {
     await assertSucceeds(getDoc(doc(as("achats"), "summaries/suppliers")));
+  });
+  it("summaries/trends (mappé overview) lisible par lecture", async () => {
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/trends")));
+  });
+  it("agrégat NON classé → refusé par défaut (fail-closed) pour un rôle non-direction", async () => {
+    await assertFails(getDoc(doc(as("lecture"), "summaries/nouvelleMarge_2026")));
+  });
+  it("direction lit tout agrégat, même non classé (superviseur)", async () => {
+    await assertSucceeds(getDoc(doc(as("direction"), "summaries/nouvelleMarge_2026")));
   });
   it("personne n'écrit summaries (Functions only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "summaries/overview_2026"), { certitudes: 2 }));
