@@ -41,12 +41,6 @@ export async function patchBcLine(data: { id: string; fp?: string; amountXof?: n
   await httpsCallable(functions, "patchBcLine")(data);
 }
 
-/** Reporte (montant FCFA) une part du RAF d'un projet sur l'exercice N+1 (0 = retirer). Direction/PMO. */
-export async function setCarryover(fp: string, amount: number) {
-  const res = await httpsCallable(functions, "setCarryover")({ fp, amount });
-  return res.data as { ok: boolean; fp: string; amount: number };
-}
-
 export type BillingMilestone = { date: string; amount: number };
 /** Enregistre l'échéancier de facturation d'un projet (≤ 15 jalons). Direction/PMO. Recalcule. */
 export async function setBillingMilestones(fp: string, milestones: BillingMilestone[]) {

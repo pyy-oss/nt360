@@ -11,7 +11,6 @@ export interface OverviewSummary {
   mb?: number; pipelineWon?: number; perdu?: number; ratios?: Ratios;
 }
 
-export type Carryover = { fp?: string; amount?: number; updatedAt?: unknown };
 export type BillingMilestonesDoc = { fp?: string; milestones?: { date: string; amount: number }[]; updatedAt?: unknown };
 export type BillingTrendMonth = { month: string; realise: number; planifie: number; retenu: number; cumulRealise: number; cumulTrajectoire: number };
 export interface BillingTrendSummary {
