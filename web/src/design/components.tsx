@@ -1,5 +1,5 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
-import { Component, createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X } from "lucide-react";
 import { fmt, pct } from "./tokens";
@@ -199,10 +199,16 @@ export function Tip({ children }: { children: ReactNode }) {
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
-export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "" }:
-  { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string }) {
+export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey }:
+  { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string;
+    // Détail masquable sous la ligne : `expand(row)` rend le panneau déplié (null ⇒ ligne non extensible).
+    // `rowKey` identifie la ligne de façon stable (l'ouverture survit au tri/pagination/recherche).
+    expand?: (row: any) => ReactNode; rowKey?: (row: any) => string }) {
   const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
+  const toggleRow = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
   // corriger), on pré-remplit le filtre. Se met à jour si l'intention change (nouvelle anomalie).
   useEffect(() => { if (initialSearch) { setQ(initialSearch); setPage(0); } }, [initialSearch]);
@@ -238,6 +244,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
           <table className="w-full text-sm rtable">
             <thead>
               <tr className="text-muted">
+                {expand && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
                 {columns.map((c, i) => (
                   <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                     className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
@@ -251,11 +258,34 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
               </tr>
             </thead>
             <tbody>
-              {slice.map((r, ri) => (
-                <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
-                  {columns.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
-                </tr>
-              ))}
+              {slice.map((r, ri) => {
+                const k = keyOf(r, ri);
+                const detail = expand ? expand(r) : null;
+                const isOpen = expand ? open.has(k) : false;
+                return (
+                <Fragment key={k}>
+                  <tr className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
+                    {expand && (
+                      <td className="px-2 py-2 border-t border-line/60 align-middle">
+                        {detail ? (
+                          <button type="button" onClick={() => toggleRow(k)} aria-expanded={isOpen}
+                            className="grid place-items-center w-6 h-6 rounded-md text-muted hover:text-ink hover:bg-panel2 transition-colors"
+                            aria-label={isOpen ? "Masquer le détail" : "Afficher le détail"}>
+                            {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          </button>
+                        ) : null}
+                      </td>
+                    )}
+                    {columns.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                  </tr>
+                  {isOpen && detail && (
+                    <tr className="bg-panel2/40">
+                      <td colSpan={columns.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
+                    </tr>
+                  )}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
