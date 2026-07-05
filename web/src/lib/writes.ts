@@ -74,6 +74,12 @@ export async function setBillingMilestones(fp: string, milestones: BillingMilest
   return res.data as { ok: boolean; fp: string; milestones: BillingMilestone[] };
 }
 
+/** Corrige une fiche affaire : prix de vente et/ou de revient (marge recalculée). Donnée de marge —
+ *  droit « rentabilité ». Comble « fiche sans prix de vente ». onCall : recalcule. */
+export async function patchProjectSheet(data: { fp: string; saleTotal?: number; costTotal?: number }) {
+  await httpsCallable(functions, "patchProjectSheet")(data);
+}
+
 /** Crée/met à jour une ligne de crédit fournisseur (onCall : recalcule exposition + alertes). */
 export async function upsertCreditLine(id: string, data: { authorized: number; outstanding: number }) {
   await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, outstanding: data.outstanding });

@@ -598,6 +598,39 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, id };
 });
 
+// --- Correction d'une fiche affaire : prix de VENTE et/ou de REVIENT (comble « fiche sans prix de
+// vente »). Donnée de MARGE → droit « rentabilite » requis, et écriture dans projectSheetsMargin
+// (collection isolée, mêmes règles que le reste de la marge). Marge & %MB recalculés. Le prix de
+// vente d'une fiche pilote le CAS quand la commande est de source fiche → recalcul complet. ---
+exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "rentabilite");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const d = req.data || {};
+  const fp = fpKey(d.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la fiche requis");
+  const id = safeId(fp);
+  const baseSnap = await db.doc(`projectSheets/${id}`).get();
+  const mSnap = await db.doc(`projectSheetsMargin/${id}`).get();
+  if (!baseSnap.exists && !mSnap.exists) throw new HttpsError("not-found", "fiche affaire introuvable");
+  const cur = { ...(baseSnap.data() || {}), ...(mSnap.data() || {}) };
+  const provided = (v) => v !== undefined && String(v) !== "";
+  if (!provided(d.saleTotal) && !provided(d.costTotal)) throw new HttpsError("invalid-argument", "prix de vente ou de revient requis");
+  const saleTotal = provided(d.saleTotal) ? Number(d.saleTotal) : (cur.saleTotal ?? null);
+  const costTotal = provided(d.costTotal) ? Number(d.costTotal) : (cur.costTotal ?? null);
+  if (saleTotal != null && (!Number.isFinite(saleTotal) || saleTotal < 0)) throw new HttpsError("invalid-argument", "prix de vente invalide");
+  if (costTotal != null && (!Number.isFinite(costTotal) || costTotal < 0)) throw new HttpsError("invalid-argument", "prix de revient invalide");
+  const margin = (saleTotal != null && costTotal != null) ? saleTotal - costTotal : (cur.margin ?? null);
+  const marginPct = (margin != null && saleTotal) ? margin / saleTotal : (cur.marginPct ?? null);
+  await db.doc(`projectSheetsMargin/${id}`).set({ _id: id, fp, saleTotal, costTotal, margin, marginPct }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "patch_fiche", module: "rentabilite", entity: "projectSheet", entityId: id,
+    detail: { fp, saleTotal, costTotal }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
+  return { ok: true, fp };
+});
+
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
 exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
