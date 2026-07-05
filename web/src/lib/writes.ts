@@ -26,9 +26,17 @@ export async function setInvoiceFp(id: string, fp: string) {
   await httpsCallable(functions, "setInvoiceFp")({ id, fp });
 }
 
-/** Corrige une commande P&L : année de PO manquante et/ou N° FP erroné (onCall : recalcule). */
-export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string }) {
+/** Corrige une commande P&L : année de PO, CAS, RAF et/ou N° FP erroné (onCall : recalcule). */
+export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string; cas?: number; raf?: number }) {
   await httpsCallable(functions, "patchOrder")(data);
+}
+
+/** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
+ *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
+ *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */
+export async function createOrder(data: { fp: string; cas: number; client?: string; designation?: string; bu?: string; am?: string; yearPo?: number; raf?: number }) {
+  const res = await httpsCallable(functions, "createOrder")(data);
+  return res.data as { ok: boolean; fp: string };
 }
 
 /** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */

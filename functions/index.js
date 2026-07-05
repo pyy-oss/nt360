@@ -594,6 +594,19 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
     if (y < 2015 || y > new Date().getFullYear() + 3) throw new HttpsError("invalid-argument", "année de PO invalide");
     patch.yearPo = y;
   }
+  // CAS / RAF éditables (saisie in-app). CAS > 0 (commande signée) ; RAF ≥ 0. Attention : sur une
+  // commande dont le CAS est GOUVERNÉ à la source (opp gagnée / fiche affaire), le CAS édité ici
+  // est ré-écrasé au prochain recompute — l'UI ne propose l'édition CAS que sur les lignes P&L/manuelles.
+  if (d.cas != null && String(d.cas) !== "") {
+    const c = Number(d.cas);
+    if (!Number.isFinite(c) || c <= 0) throw new HttpsError("invalid-argument", "CAS (> 0) invalide");
+    patch.cas = c;
+  }
+  if (d.raf != null && String(d.raf) !== "") {
+    const rf = Number(d.raf);
+    if (!Number.isFinite(rf) || rf < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
+    patch.raf = rf;
+  }
   const newFp = d.newFp ? fpKey(d.newFp) : null;
   if (d.newFp && !newFp) throw new HttpsError("invalid-argument", "nouveau N° FP invalide");
 
@@ -608,14 +621,60 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
   } else if (Object.keys(patch).length) {
     await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else {
-    throw new HttpsError("invalid-argument", "rien à modifier (année ou nouveau FP requis)");
+    throw new HttpsError("invalid-argument", "rien à modifier (année, CAS, RAF ou nouveau FP requis)");
   }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
-    detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null }, ts: FieldValue.serverTimestamp(),
+    detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries();
   return { ok: true, fp: newFp || fp };
+});
+
+// --- createOrder : CRÉE une commande (ligne P&L) DIRECTEMENT dans l'app — sans passer par l'Excel.
+// Réservé aux profils ayant le droit « import » (comme patchOrder). Deux usages : réconcilier une
+// opp GAGNÉE sans ligne P&L (inscription pré-remplie depuis l'opp), ou saisir une commande manuelle.
+// « P&L STRICT / Excel curaté prioritaire » préservé : on REFUSE si un orders/{fp} existe déjà, et
+// au ré-import une ligne P&L du même FP écrase cette saisie (upsert par FP) — la saisie app ne
+// persiste que tant que le FP est absent de l'Excel. source='manuel' → visible comme telle. ---
+exports.createOrder = onCallG("createOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey, cleanBu } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const d = req.data || {};
+  const fp = fpKey(d.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP requis (format FP/AAAA/N)");
+  const cas = Number(d.cas);
+  if (!Number.isFinite(cas) || cas <= 0) throw new HttpsError("invalid-argument", "CAS (> 0) requis");
+  const id = safeId(fp);
+  const ref = db.doc(`orders/${id}`);
+  if ((await ref.get()).exists) throw new HttpsError("already-exists", "une commande existe déjà pour ce FP — utilisez la correction (CAS/RAF/année)");
+  let yearPo = 0;
+  if (d.yearPo != null && String(d.yearPo) !== "") {
+    yearPo = Math.trunc(Number(d.yearPo)) || 0;
+    if (yearPo && (yearPo < 2015 || yearPo > new Date().getFullYear() + 3)) throw new HttpsError("invalid-argument", "année de PO invalide");
+  }
+  const raf = d.raf != null && String(d.raf) !== "" ? Math.max(Number(d.raf) || 0, 0) : null; // null → RAF dérivé (CAS − facturé)
+  const order = {
+    _id: id, fp,
+    client: String(d.client || "").trim(),
+    designation: String(d.designation || "").trim(),
+    bu: cleanBu(d.bu),
+    am: String(d.am || "").trim(),
+    yearPo, cas, raf,
+    suppliers: [],
+    source: "manuel",
+    createdBy: req.auth.uid,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  await ref.set(order, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "create_order", module: "overview", entity: "order", entityId: id,
+    detail: { fp, cas, source: "manuel" }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, fp };
 });
 
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
