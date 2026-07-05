@@ -126,9 +126,63 @@ exports.setUserRole = onCallG("setUserRole", async (req) => {
   const { uid, role } = req.data || {};
   if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (∈ 6 profils) requis");
   await getAuth().setCustomUserClaims(uid, { role });
+  // Reflète le rôle courant dans l'annuaire users/ (le rôle « source de vérité » reste le custom
+  // claim ; ce miroir sert l'affichage de l'écran Habilitations et évite un rôle invisible).
+  await db.collection("users").doc(uid).set({ role }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "perm_change", module: "habilitations",
     entity: "user", entityId: uid, detail: { role }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+});
+
+// --- createUser : provisionne un compte (Auth) + rôle (custom claim) + fiche users/, admin
+// uniquement. Aucune création d'utilisateur n'existait dans l'app (seul le seed d'amorçage) ;
+// ce callable comble le manque. Le mot de passe initial est fixé par l'admin (communiqué hors
+// bande) ; l'utilisateur pourra le changer. Un email déjà pris est REFUSÉ (jamais de
+// réinitialisation silencieuse d'un compte existant). ---
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+exports.createUser = onCallG("createUser", async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const email = String(d.email || "").trim().toLowerCase();
+  const role = d.role;
+  const password = String(d.password || "");
+  const name = String(d.name || "").trim() || email.split("@")[0];
+  if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "email invalide");
+  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (∈ 6 profils) requis");
+  if (password.length < 8) throw new HttpsError("invalid-argument", "mot de passe : 8 caractères minimum");
+  const auth = getAuth();
+  let existing = null;
+  try { existing = await auth.getUserByEmail(email); } catch (e) { if (e.code !== "auth/user-not-found") throw e; }
+  if (existing) throw new HttpsError("already-exists", "un compte existe déjà pour cet email");
+  const user = await auth.createUser({ email, password, displayName: name, emailVerified: true });
+  await auth.setCustomUserClaims(user.uid, { role });
+  await db.collection("users").doc(user.uid).set(
+    { email, name, active: true, role, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "user_create", module: "habilitations",
+    entity: "user", entityId: user.uid, detail: { email, role }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true, uid: user.uid };
+});
+
+// --- setUserActive : active/désactive un compte (Auth `disabled` + fiche users.active), admin
+// uniquement. Un compte désactivé ne peut plus se connecter (ses jetons existants cessent d'être
+// rafraîchis, expiration ≤ 1 h). On interdit de désactiver son PROPRE compte (verrouillage). ---
+exports.setUserActive = onCallG("setUserActive", async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { uid, active } = req.data || {};
+  if (!uid || typeof active !== "boolean") throw new HttpsError("invalid-argument", "uid et active (booléen) requis");
+  if (uid === req.auth.uid && active === false) throw new HttpsError("failed-precondition", "impossible de désactiver son propre compte");
+  await getAuth().updateUser(uid, { disabled: !active });
+  await db.collection("users").doc(uid).set({ active }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "user_active", module: "habilitations",
+    entity: "user", entityId: uid, detail: { active }, ts: FieldValue.serverTimestamp(),
   });
   return { ok: true };
 });
