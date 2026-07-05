@@ -218,6 +218,13 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
   const w = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
   const tier = (k, dw) => ({ active: d?.[k]?.active === undefined ? true : !!d[k].active, weight: w(d?.[k]?.weight, dw) });
   const cfg = { certitudes: tier("certitudes", 1), forecast: tier("forecast", 0.2), pipe: tier("pipe", 0.05) };
+  // Solde d'OUVERTURE de trésorerie (SOA global) : base de la position cash projetée. Peut être
+  // négatif (découvert). Non fourni → champ inchangé (merge). Fourni → borné à un ordre de grandeur
+  // raisonnable pour éviter une saisie aberrante.
+  if (d.cashOpening !== undefined) {
+    const co = Number(d.cashOpening);
+    cfg.cashOpening = Number.isFinite(co) ? Math.max(-1e15, Math.min(1e15, co)) : 0;
+  }
   await db.doc("config/projection").set(cfg, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "projection_config", module: "habilitations",
