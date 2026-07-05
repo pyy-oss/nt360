@@ -25,6 +25,8 @@ const DEFAULT_THR = {
   overdueArPct: 0.25,          // créances échues > 25 % de l'AR total
   factRetardTol: 0.15,         // facturation en retard si réalisé < plan échu × (1 − tol)
   qualiteMin: 0.85,            // score qualité de données plancher
+  concentrationClient: 0.4,    // un client > 40 % du backlog = concentration
+  dormantBacklogPct: 0.15,     // > 15 % du backlog sur des millésimes anciens = dormant
 };
 
 function pushIf(list, cond, b) { if (cond) list.push(b); }
@@ -55,6 +57,26 @@ function buildNews(x) {
     title: "Atterrissage CAS sous l'objectif",
     detail: `Projeté ${fmt(att.projete)} vs objectif ${fmt(objCas)} — écart ${fmt(att.ecart)} (${pctTxt(PCT(att.projete, objCas))} de l'objectif).`,
     action: "Prioriser les affaires du pipeline qui comblent l'écart à l'objectif CAS.",
+  });
+  // Objectif annuel non défini : l'atterrissage ne peut être mesuré contre une cible.
+  pushIf(B, !(objCas > 0) && num(att.projete) > 0, {
+    id: "objectif_absent", domain: "commandes", severity: "info", module: "objectifs",
+    title: "Objectif annuel CAS non défini",
+    detail: `Aucun objectif CAS pour l'exercice ${fy || ""} — l'atterrissage (${fmt(att.projete)} projeté) ne peut pas être mesuré contre une cible.`,
+    action: "Définir l'objectif annuel de CAS (écran Objectifs).",
+  });
+  // Opportunités GAGNÉES non transformées en commande (sans N° FP ou sans ligne P&L) : CAS/backlog
+  // absents. Désormais corrigeable en 1 clic (corriger l'opp / inscrire au P&L).
+  const wonNoFp = (dq.issues || []).find((i) => i.type === "opps_gagnees_sans_fp");
+  const wonNoPnl = (dq.issues || []).find((i) => i.type === "opps_gagnees_sans_pnl");
+  const reconCount = num(wonNoFp && wonNoFp.count) + num(wonNoPnl && wonNoPnl.count);
+  pushIf(B, reconCount > 0, {
+    id: "opps_a_reconcilier", domain: "commandes", severity: "high",
+    module: wonNoFp && wonNoFp.count ? "opplist" : "orderlist",
+    title: `${reconCount} affaire(s) gagnée(s) à transformer en commande`,
+    detail: "Des opportunités gagnées n'ont pas de N° FP ou de ligne P&L — leur CAS et leur backlog n'existent pas encore.",
+    action: "Corriger le N° FP de l'opp (Pipeline) ou l'inscrire au P&L (Commandes).",
+    refs: [...((wonNoFp && wonNoFp.refs) || []), ...((wonNoPnl && wonNoPnl.refs) || [])].slice(0, 8),
   });
   const objCaf = num(att.objectifCaf);
   pushIf(B, objCaf > 0 && num(att.ecartCaf) < -thr.ecartObjectifPct * objCaf, {
@@ -128,6 +150,28 @@ function buildNews(x) {
     id: "report_n1_eleve", domain: "backlog", severity: "info", module: "backlog",
     title: "Part importante reportée sur N+1",
     detail: `${fmt(att.reporteCaf)} de CA reporté sur l'exercice suivant, soit ${pctTxt(PCT(att.reporteCaf, projetable))} du backlog projetable.`,
+  });
+  // Concentration client du backlog : un client pèse une part majeure → risque de dépendance.
+  const byClient = bk.byClient || {};
+  const clTop = Object.entries(byClient).sort((a, b) => num(b[1]) - num(a[1]))[0];
+  const clTotal = Object.values(byClient).reduce((s, v) => s + num(v), 0);
+  pushIf(B, clTop && clTotal > 0 && PCT(num(clTop[1]), clTotal) > thr.concentrationClient, {
+    id: "backlog_concentration_client", domain: "backlog", severity: "medium", module: "overview",
+    title: "Backlog concentré sur un client",
+    detail: `${clTop ? clTop[0] : ""} représente ${pctTxt(PCT(clTop ? num(clTop[1]) : 0, clTotal))} du backlog (${fmt(clTop ? clTop[1] : 0)}) — risque de dépendance commerciale.`,
+    refs: clTop ? [clTop[0]] : [],
+    action: "Diversifier le carnet : sécuriser d'autres comptes pour réduire la dépendance.",
+  });
+  // Backlog dormant : RAF porté par des commandes de millésimes anciens (≤ exercice − 2).
+  const byVintage = bk.byVintage || {};
+  const dormant = Object.entries(byVintage)
+    .filter(([y]) => Number(y) > 0 && Number(y) <= (Number(fy) || 0) - 2)
+    .reduce((s, [, v]) => s + num(v), 0);
+  pushIf(B, bkTotal > 0 && dormant > 0 && PCT(dormant, bkTotal) > thr.dormantBacklogPct, {
+    id: "backlog_dormant", domain: "backlog", severity: "medium", module: "backlog",
+    title: "Backlog dormant (millésimes anciens)",
+    detail: `${fmt(dormant)} de backlog sur des commandes d'un millésime ≤ ${(Number(fy) || 0) - 2} — soit ${pctTxt(PCT(dormant, bkTotal))} du carnet, à solder ou clôturer.`,
+    action: "Revoir les commandes anciennes : soldées ? factures manquantes ? à clôturer ?",
   });
 
   // — FACTURATION / CASH —
