@@ -187,12 +187,15 @@ async function recomputeAll(db, only) {
       totalDecaissement: dec.total, decaissementBeyond: dec.beyond,
       decaissementOverdue: dec.overdue, decaissementOverdueCount: dec.overdueCount, bcOpenCount: dec.openCount,
       decaissementEtaCompleteness: dec.etaCompleteness, decaissementNoEtaCount: dec.noEtaCount,
+      // Engagement (BC non facturés) : sortie POTENTIELLE, hors position nette de base (règle SOA).
+      decaissementEngaged: dec.engagedTotal, decaissementEngagedCount: dec.engagedCount, decaissementEngagedBeyond: dec.engagedBeyond,
       ...stamp,
     } });
     // Prévision cash AVANCÉE : scénarios best/base/worst + tension, à partir du MÊME échéancier (AR
-    // par mois + échus ; décaissements par mois + échus). Cloisonné « facturation » comme cashflow.
+    // par mois + payables facturés + échus). L'ENGAGEMENT alimente le seul scénario prudent (worst).
+    // Cloisonné « facturation » comme cashflow.
     const scen = cashScenario(
-      { asOf, months: cf.months.map((m) => ({ month: m.month, ar: m.ar, out: decBy[m.month] || 0 })), overdueAr: cf.overdue, overduePay: dec.overdue },
+      { asOf, months: cf.months.map((m) => ({ month: m.month, ar: m.ar, out: decBy[m.month] || 0 })), overdueAr: cf.overdue, overduePay: dec.overdue, engagement: dec.engagedTotal },
       { opening: Number(projCfg.cashOpening) || 0 },
     );
     w.push({ path: "summaries/cashScenario", data: { ...scen, ...stamp } });

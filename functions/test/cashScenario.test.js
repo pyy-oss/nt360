@@ -52,6 +52,16 @@ describe("cashScenario — scénarios best/base/worst & tension trésorerie", ()
     expect(s.tension.trough.value).toBeLessThan(0);
   });
 
+  it("engagement (BC non facturés) alourdit le SEUL scénario pessimiste (décaissement)", () => {
+    const withEng = cashScenario({ ...input, engagement: 900 });
+    // best/base inchangés vs sans engagement ; worst décaissement augmenté (900 étalé sur 3 mois).
+    expect(withEng.months[0].dec.best).toBe(s.months[0].dec.best);
+    expect(withEng.months[0].dec.base).toBe(s.months[0].dec.base);
+    expect(withEng.months[0].dec.worst).toBe(s.months[0].dec.worst + 300); // 900/3
+    // Position pessimiste dégradée par l'engagement.
+    expect(withEng.months[2].cum.worst).toBeLessThan(s.months[2].cum.worst);
+  });
+
   it("solde d'ouverture décale la position", () => {
     const s2 = cashScenario(input, { opening: 100000 });
     expect(s2.months[0].cum.worst).toBe(100000 + s.months[0].net.worst);

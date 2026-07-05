@@ -29,6 +29,7 @@ function cashScenario(input, params = {}) {
   const out = months.map((m) => m.out || 0);
   const overdueAr = input.overdueAr || 0;
   const overduePay = input.overduePay || 0;
+  const engagement = input.engagement || 0; // BC non facturés : sortie POTENTIELLE (scénario prudent)
 
   // Étale un montant sur `count` premiers mois (borné à l'horizon) ; `first` le met au mois 1.
   const spread = (amount, count) => {
@@ -54,9 +55,12 @@ function cashScenario(input, params = {}) {
   const payBest = spread(overduePay, H);
   const payBase = spread(overduePay, P.recoveryMonths);
   const payWorst = first(overduePay);
+  // Prudence (worst) : l'ENGAGEMENT (BC non encore facturés) finit facturé & payé → étalé sur
+  // l'horizon dans le seul scénario pessimiste. Best/base ne le comptent pas (pas encore dû).
+  const engWorst = spread(engagement, H);
   const decBest = out.map((v, k) => v + payBest[k]);
   const decBase = out.map((v, k) => v + payBase[k]);
-  const decWorst = out.map((v, k) => v + payWorst[k]);
+  const decWorst = out.map((v, k) => v + payWorst[k] + engWorst[k]);
 
   let cB = P.opening, cM = P.opening, cW = P.opening;
   const rows = months.map((m, k) => {

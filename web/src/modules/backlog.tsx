@@ -325,14 +325,14 @@ export const Prevision: FC<Props> = () => {
           <Card title={`Prévision de trésorerie — position nette (${cf.horizon || 6} mois glissants)`}>
             <div className={grid4}>
               <Kpi label="Encaissements attendus (AR)" value={fmt(cf.arHorizon)} tone="emerald" sub={`${cf.openCount || 0} créances · échéancier`} />
-              <Kpi label="Décaissements attendus (BC)" value={fmt(months.reduce((s, m) => s + (m.decaissement || 0), 0))} tone="clay" sub={`${cf.bcOpenCount || 0} lignes BC ouvertes`} />
-              <Kpi label="Position nette horizon" value={fmt(netHorizon)} tone={netHorizon < 0 ? "clay" : "emerald"} sub="AR attendu − décaissements" />
-              <Kpi label="Échus (recouvrer / payer)" value={`${fmt(cf.overdue)} / ${fmt(cf.decaissementOverdue)}`} tone={(cf.decaissementOverdue || 0) > 0 ? "clay" : "steel"} sub={`${cf.overdueCount || 0} créances · ${cf.decaissementOverdueCount || 0} BC échus`} />
+              <Kpi label="Décaissements (facturés)" value={fmt(months.reduce((s, m) => s + (m.decaissement || 0), 0))} tone="clay" sub={`${cf.bcOpenCount || 0} BC facturés · règle SOA`} />
+              <Kpi label="Position nette horizon" value={fmt(netHorizon)} tone={netHorizon < 0 ? "clay" : "emerald"} sub="AR attendu − payables facturés" />
+              <Kpi label="Engagement (non facturé)" value={fmt(cf.decaissementEngaged)} tone="steel" sub={`${cf.decaissementEngagedCount || 0} BC en cours · sortie potentielle`} />
             </div>
             <GroupedBars
-              data={months.map((m) => ({ name: m.month, Encaissements: m.ar || 0, Décaissements: m.decaissement || 0 }))}
-              series={[{ key: "Encaissements", color: T.emerald, name: "Encaissements (AR)" }, { key: "Décaissements", color: T.clay, name: "Décaissements (BC)" }]}
-              h={220} size={26}
+              data={months.map((m) => ({ name: m.month, Encaissements: m.ar || 0, "Décaissements (facturés)": m.decaissement || 0, "Engagement (potentiel)": m.engaged || 0 }))}
+              series={[{ key: "Encaissements", color: T.emerald, name: "Encaissements (AR)" }, { key: "Décaissements (facturés)", color: T.clay, name: "Décaissements (facturés)" }, { key: "Engagement (potentiel)", color: T.steel, name: "Engagement (BC non facturés)" }]}
+              h={220} size={20}
             />
             {/* Indicateur de fiabilité : complétude ETA des décaissements. */}
             <div className="mt-3 flex items-center gap-3">
@@ -343,7 +343,7 @@ export const Prevision: FC<Props> = () => {
               <Badge tone={fiabTone}>{pct(fiab)}</Badge>
             </div>
             <Tip>
-              <b>Position nette</b> = encaissements AR attendus (créances émises, ancrées sur leur échéance) − décaissements fournisseurs attendus (lignes BC non soldées, ancrées sur leur ETA réel/contractuel). Les <b>échus</b> sont isolés des deux côtés (jamais empilés sur le mois courant). Le <b>backlog RAF</b> reste indicatif et hors du net.
+              <b>Position nette</b> = encaissements AR attendus (créances émises, ancrées sur leur échéance) − <b>décaissements facturés</b> (BC au statut « facturé », non payés — <b>règle SOA</b> : seule une facture est due). Les <b>échus</b> sont isolés des deux côtés. L'<b>engagement</b> (BC commandés non encore facturés) est une sortie <b>potentielle</b>, affichée à part et <b>hors position nette</b> (elle alourdit le seul scénario pessimiste ci-dessous). Le <b>backlog RAF</b> reste indicatif et hors du net.
               {(cf.decaissementNoEtaCount || 0) > 0 && (
                 <> La <b>fiabilité</b> ({pct(fiab)}) reflète la part du montant BC à ETA connue : <b>{cf.decaissementNoEtaCount}</b> ligne{(cf.decaissementNoEtaCount || 0) > 1 ? "s" : ""} sans ETA {(cf.decaissementNoEtaCount || 0) > 1 ? "sont rabattues" : "est rabattue"} sur le mois courant — renseigner leur ETA affine la ventilation.</>
               )}
@@ -382,7 +382,7 @@ export const Prevision: FC<Props> = () => {
               />
             </div>
             <Tip>
-              Position de trésorerie <b>cumulée</b> par mois selon trois scénarios{opening ? <> (solde d'ouverture {fmt(opening)})</> : <> (variation depuis aujourd'hui — <b>solde d'ouverture non renseigné</b>)</>}. <b>Optimiste</b> : AR recouvré à 100 % et vite, payables échus différés. <b>Pessimiste</b> : recouvrement partiel et lent, payables échus réglés immédiatement. La <b>tension</b> est un mois où la trajectoire pessimiste passe sous le plancher — signal d'anticipation, pas une fatalité.
+              Position de trésorerie <b>cumulée</b> par mois selon trois scénarios{opening ? <> (solde d'ouverture {fmt(opening)})</> : <> (variation depuis aujourd'hui — <b>solde d'ouverture non renseigné</b>)</>}. <b>Optimiste</b> : AR recouvré à 100 % et vite, payables échus différés. <b>Pessimiste</b> : recouvrement partiel et lent, payables échus réglés immédiatement, et l'<b>engagement</b> (BC non facturés) supposé facturé & payé sur l'horizon. La <b>tension</b> est un mois où la trajectoire pessimiste passe sous le plancher — signal d'anticipation, pas une fatalité.
             </Tip>
           </Card>
         );

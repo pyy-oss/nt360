@@ -97,7 +97,7 @@ export interface ReceivablesSummary {
   buckets?: { notDue?: number; b0_30?: number; b31_60?: number; b61_90?: number; b90p?: number };
   topAR?: { key: string; value: number }[];
 }
-export type CashMonth = { month: string; ar: number; backlog: number; cumulAr: number; decaissement?: number; net?: number; cumulNet?: number };
+export type CashMonth = { month: string; ar: number; backlog: number; cumulAr: number; decaissement?: number; engaged?: number; net?: number; cumulNet?: number };
 // Prévision cash avancée : scénarios best/base/worst + tension (position cumulée pire sous plancher).
 export type ScenarioTriplet = { best: number; base: number; worst: number };
 export type CashScenarioMonth = { month: string; enc: ScenarioTriplet; dec: ScenarioTriplet; net: ScenarioTriplet; cum: ScenarioTriplet };
@@ -111,6 +111,8 @@ export interface CashflowSummary {
   totalAR?: number; arHorizon?: number; totalRaf?: number; openCount?: number;
   totalDecaissement?: number; decaissementBeyond?: number; decaissementOverdue?: number; decaissementOverdueCount?: number; bcOpenCount?: number;
   decaissementEtaCompleteness?: number; decaissementNoEtaCount?: number;
+  // Engagement (BC non facturés) : sortie potentielle, hors position nette de base (règle SOA).
+  decaissementEngaged?: number; decaissementEngagedCount?: number; decaissementEngagedBeyond?: number;
 }
 export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
 
