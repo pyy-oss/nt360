@@ -23,6 +23,8 @@ service cloud.firestore {
         : id.matches('facturation.*') ? 'facturation'
         : id.matches('receivables.*') ? 'facturation'
         : id.matches('cashflow.*') ? 'facturation'
+        // Prévision cash avancée (scénarios/tension) : même assiette que cashflow → « facturation ».
+        : id.matches('cashScenario.*') ? 'facturation'
         : id.matches('billingTrend.*') ? 'facturation'
         : id.matches('rentabilite.*') ? 'rentabilite'
         // Marge par entité isolée → accès « Rentabilité » requis (avant les règles clients/domaines).
