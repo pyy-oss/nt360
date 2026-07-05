@@ -1,5 +1,5 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
-import { useState, type FC } from "react";
+import { useState, useMemo, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
@@ -8,9 +8,9 @@ import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
-import { patchOrder, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, setBillingMilestones, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -462,25 +462,112 @@ export const Simulateur: FC<Props> = () => {
   );
 };
 
-// Correction inline d'une commande P&L : année de PO manquante et/ou N° FP erroné.
-function OrderFixer({ fp, yearMissing }: { fp: string; yearMissing: boolean }) {
+const parseNum = (s: string) => Number(String(s).replace(",", ".").replace(/\s/g, ""));
+
+// Champ de formulaire compact (saisie commande).
+function Field({ label, v, set, placeholder, mode }: { label: string; v: string; set: (s: string) => void; placeholder?: string; mode?: "decimal" | "numeric" }) {
+  return (
+    <label className="flex flex-col gap-1 text-[13px]">
+      <span className="text-muted">{label}</span>
+      <input className="field !py-1" value={v} inputMode={mode} placeholder={placeholder} onChange={(e) => set(e.target.value)} aria-label={label} />
+    </label>
+  );
+}
+
+// Saisie d'une NOUVELLE commande (ligne P&L) directement dans l'app — sans passer par l'Excel.
+// N° FP + CAS obligatoires ; RAF vide = dérivé (CAS − facturé). createOrder refuse un FP déjà présent.
+function OrderForm({ onDone }: { onDone?: () => void }) {
+  const [fp, setFp] = useState("");
+  const [cas, setCas] = useState("");
+  const [client, setClient] = useState("");
+  const [affaire, setAffaire] = useState("");
+  const [bu, setBu] = useState("");
+  const [am, setAm] = useState("");
+  const [year, setYear] = useState("");
+  const [raf, setRaf] = useState("");
+  const submit = async () => {
+    const f = fp.trim();
+    if (!f) throw new Error("N° FP requis");
+    const c = parseNum(cas);
+    if (!(c > 0)) throw new Error("CAS (> 0) requis");
+    await createOrder({
+      fp: f, cas: c, client: client.trim(), designation: affaire.trim(), bu: bu.trim(), am: am.trim(),
+      yearPo: year ? Math.trunc(parseNum(year)) : undefined, raf: raf !== "" ? parseNum(raf) : undefined,
+    });
+    setFp(""); setCas(""); setClient(""); setAffaire(""); setBu(""); setAm(""); setYear(""); setRaf("");
+    onDone?.();
+  };
+  return (
+    <div className="mb-3 rounded-lg border border-line bg-panel2 p-3">
+      <div className="grid gap-2.5 sm:grid-cols-3">
+        <Field label="N° FP (obligatoire)" v={fp} set={setFp} placeholder="FP/2026/13" />
+        <Field label="CAS (obligatoire)" v={cas} set={setCas} placeholder="0" mode="decimal" />
+        <Field label="RAF (vide = dérivé)" v={raf} set={setRaf} placeholder="auto" mode="decimal" />
+        <Field label="Client" v={client} set={setClient} />
+        <Field label="Affaire" v={affaire} set={setAffaire} />
+        <Field label="BU" v={bu} set={setBu} />
+        <Field label="AM" v={am} set={setAm} />
+        <Field label="Millésime (année PO)" v={year} set={setYear} placeholder="2026" mode="numeric" />
+      </div>
+      <div className="mt-2.5 flex justify-end">
+        <Busy label="Créer la commande" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée" fn={submit} />
+      </div>
+      <Tip>La commande est créée en <b>source manuelle</b>. Au prochain import, une ligne P&L Excel du même FP restera <b>prioritaire</b> (elle écrase la saisie). Le CAS doit être &gt; 0.</Tip>
+    </div>
+  );
+}
+
+// Édition inline d'une commande P&L / manuelle : CAS, RAF, année de PO, correction du N° FP.
+function OrderEditor({ row }: { row: Order }) {
+  const fp = row.fp!;
+  const [cas, setCas] = useState("");
+  const [raf, setRaf] = useState("");
   const [y, setY] = useState("");
   const [nf, setNf] = useState("");
+  const yearMissing = !(row.yearPo && row.yearPo > 0);
   return (
     <span className="inline-flex gap-1 items-center flex-wrap">
+      <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="CAS" value={cas} onChange={(e) => setCas(e.target.value)} />
+      <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
+      {(cas !== "" || raf !== "") && (
+        <Busy variant="ghost" label="MàJ" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined })} />
+      )}
       {yearMissing && (
-        <><input className="field w-16 !py-1 text-xs" aria-label="Année de PO" placeholder="Année" value={y} onChange={(e) => setY(e.target.value)} />
+        <><input className="field w-16 !py-1 text-xs" aria-label={`Année de PO ${fp}`} placeholder="Année" value={y} onChange={(e) => setY(e.target.value)} />
           <Busy variant="ghost" label="An" okMsg="Année fixée" fn={() => patchOrder({ fp, yearPo: Number(y) || 0 })} /></>
       )}
-      <input className="field w-28 !py-1 text-xs" aria-label="Corriger le N° FP" placeholder="Corriger FP" value={nf} onChange={(e) => setNf(e.target.value)} />
-      <Busy variant="ghost" label="FP" okMsg="FP corrigé" fn={() => patchOrder({ fp, newFp: nf })} />
+      <input className="field w-24 !py-1 text-xs" aria-label={`Corriger le N° FP ${fp}`} placeholder="Corriger FP" value={nf} onChange={(e) => setNf(e.target.value)} />
+      {nf.trim() && <Busy variant="ghost" label="FP" okMsg="FP corrigé" fn={() => patchOrder({ fp, newFp: nf })} />}
     </span>
+  );
+}
+
+// Réconciliation : opportunités GAGNÉES (stage 6) portant un N° FP mais SANS ligne P&L → elles ne
+// comptent pas en commande (CAS/backlog absents). « Inscrire au P&L » crée la commande depuis l'opp
+// (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
+function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
+  const { rows: opps, loading } = useCollectionData<Opportunity>("opportunities");
+  const won = opps.filter((o) => o.stage === 6 && o.fp && !commandeFps.has(o.fp));
+  if (loading || !won.length) return null;
+  return (
+    <Card title={`Opportunités gagnées sans commande P&L · ${won.length}`}>
+      <Table columns={[
+        colText("FP", (o: Opportunity) => o.fp || "—", (o: Opportunity) => o.fp || ""),
+        colText("Client", (o: Opportunity) => o.client || "—", (o: Opportunity) => o.client || ""),
+        colText("AM", (o: Opportunity) => o.am || "—", (o: Opportunity) => o.am || ""),
+        colNum("Montant", (o: Opportunity) => money(o.amount || 0), (o: Opportunity) => o.amount || 0),
+        colText("", (o: Opportunity) => (o.amount && o.amount > 0
+          ? <Busy label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Inscription refusée" fn={() => createOrder({ fp: o.fp!, cas: o.amount!, client: o.client, am: o.am, bu: o.bu })} />
+          : <span className="text-[11px] text-clay">montant manquant</span>), () => 0),
+      ]} rows={won} />
+      <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. « Inscrire au P&L » crée la commande depuis l'opportunité (CAS = montant de l'opp). Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
+    </Card>
   );
 }
 
 // Liste Commandes — vue fusionnée (fiche affaire > opp gagnée > P&L), matérialisée
 // dans summaries/commandes par le recompute.
-const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagnée", pnl: "P&L", legacy: "Legacy" };
+const SRC_LABEL: Record<string, string> = { fiche: "Fiche", opp_won: "Opp. gagnée", pnl: "P&L", manuel: "Manuelle", legacy: "Legacy" };
 // Provenance des données P&L (marge/coût) : saisie manuelle (import P&L Excel) ou fiche affaire.
 const PNL_SRC: Record<string, { label: string; tone: "steel" | "gold" }> = {
   manuel: { label: "Manuel", tone: "steel" },
@@ -496,12 +583,23 @@ export const OrderList: FC<Props> = () => {
   const rows = all.filter((r) => match(r, ["bu", "am", "client"]));
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
+  const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
+  const [showNew, setShowNew] = useState(false);
+  const commandeFps = useMemo(() => new Set(all.map((r) => r.fp).filter(Boolean) as string[]), [all]);
   if (loading && !all.length) return <CardSkeleton />;
-  if (!all.length) return <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />;
+  if (!all.length) return (
+    <div className="flex flex-col gap-2">
+      <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire, ou créez une commande." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />
+      {canImport && <Card title="Créer une commande"><OrderForm /></Card>}
+      {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
+    </div>
+  );
   return (
     <div className="flex flex-col gap-2">
     <FilterNote dims="BU / AM / client" />
-    <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`}>
+    {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
+    <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
+      {showNew && <OrderForm onDone={() => setShowNew(false)} />}
       <ListView
         rows={rows}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.affaire || ""]}
@@ -521,9 +619,9 @@ export const OrderList: FC<Props> = () => {
           ] : []),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
           colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
-          ...(canImport ? [colText("Corriger", (r: Order) => (r.source === "pnl" && r.fp
-            ? <OrderFixer fp={r.fp} yearMissing={!(r.yearPo && r.yearPo > 0)} />
-            : <span className="text-[11px] text-faint">source</span>), () => 0)] : []),
+          ...(canImport ? [colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
+            ? <OrderEditor row={r} />
+            : <span className="text-[11px] text-faint">à la source</span>), () => 0)] : []),
         ]}
       />
     </Card>
