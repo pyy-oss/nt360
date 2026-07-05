@@ -178,8 +178,7 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
 // direction/PMO. La règle « Σ jalons = RAF » est validée à l'éditeur ; le serveur normalise (≤ 15,
 // dates ISO, montants > 0) et borne le report dérivé au RAF (aucune incohérence même en cas de dérive). ---
 exports.setBillingMilestones = onCallG("setBillingMilestones", async (req) => {
-  const role = req.auth?.token?.role;
-  if (role !== "direction" && role !== "pmo") throw new HttpsError("permission-denied", "direction ou PMO requis");
+  await requireWrite(req, "backlog"); // gouverné par la matrice (module « backlog »)
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const { normalizeMilestones } = require("./domain/milestones");
@@ -191,7 +190,9 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", async (req) => {
     uid: req.auth.uid, action: "billing_milestones", module: "backlog",
     entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0) }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["atterrissage"]);
+  // 'atterrissage' (report N+1 + tendance de facturation) ET 'news' : sinon l'Actualité (retard de
+  // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
+  await recomputeSummaries(["atterrissage", "news"]);
   return { ok: true, fp, milestones };
 });
 
