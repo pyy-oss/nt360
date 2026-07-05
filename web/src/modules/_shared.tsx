@@ -11,6 +11,7 @@ import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
+import { Select } from "../design/inputs";
 import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
 import type { AlertsSummary, AmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
 
@@ -370,19 +371,16 @@ export function FilterBar() {
   const amOpts = (ams?.rows || []).map((r) => r.am).filter(Boolean);
   const cliOpts = (cli?.rows || []).map((r) => r.key).filter(Boolean);
   const BU = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
-  const sel = "field !py-1 text-xs";
+  const sel = "!py-1 text-xs";
   return (
     <div className="flex items-center gap-2 flex-wrap text-xs">
       <span className="inline-flex items-center gap-1 text-faint"><Filter size={13} aria-hidden="true" /> Filtre <span className="hidden sm:inline">(listes)</span></span>
-      <select className={sel} aria-label="Filtrer par BU" value={f.bu} onChange={(e) => set({ bu: e.target.value })}>
-        <option value="">BU · toutes</option>{BU.map((b) => <option key={b} value={b}>{b}</option>)}
-      </select>
-      <select className={sel} aria-label="Filtrer par commercial" value={f.am} onChange={(e) => set({ am: e.target.value })}>
-        <option value="">AM · tous</option>{amOpts.map((a) => <option key={a} value={a}>{a}</option>)}
-      </select>
-      <select className={sel} aria-label="Filtrer par client" value={f.client} onChange={(e) => set({ client: e.target.value })}>
-        <option value="">Client · tous</option>{cliOpts.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
+      <Select className={sel} ariaLabel="Filtrer par BU" value={f.bu} onChange={(v) => set({ bu: v })} placeholder="BU · toutes"
+        options={[{ value: "", label: "BU · toutes" }, ...BU.map((b) => ({ value: b, label: b }))]} />
+      <Select className={sel} ariaLabel="Filtrer par commercial" value={f.am} onChange={(v) => set({ am: v })} placeholder="AM · tous"
+        options={[{ value: "", label: "AM · tous" }, ...amOpts.map((a) => ({ value: a, label: a }))]} />
+      <Select className={sel} ariaLabel="Filtrer par client" value={f.client} onChange={(v) => set({ client: v })} placeholder="Client · tous"
+        options={[{ value: "", label: "Client · tous" }, ...cliOpts.map((c) => ({ value: c, label: c }))]} />
       {active && <button onClick={clear} className="inline-flex items-center gap-1 text-clay hover:underline" aria-label="Effacer le filtre"><X size={13} /> Effacer</button>}
     </div>
   );

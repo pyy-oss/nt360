@@ -4,6 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, colText, colNum, money } from "../design/components";
+import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
@@ -143,9 +144,8 @@ export const Am360: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Commercial (Account Manager)">
-        <select className="field w-full md:w-80" aria-label="Choisir un commercial" value={sel.am} onChange={(e) => setAm(e.target.value)}>
-          {rows.map((r) => <option key={r.am} value={r.am}>{r.am}</option>)}
-        </select>
+        <Select className="w-full md:w-80" ariaLabel="Choisir un commercial" value={sel.am} onChange={setAm}
+          options={rows.map((r) => ({ value: r.am, label: r.am }))} />
       </Card>
       <div className={grid4}>
         <Kpi label="Prise de commande (CAS)" value={fmt(sel.cas)} tone="steel" sub={`${sel.orderCount} commande(s)`} />
@@ -212,12 +212,12 @@ export const OppList: FC<Props> = () => {
             <input className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} />
             <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
             <input className="field w-36" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
-            <select aria-label="Business Unit" className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
+            <Select ariaLabel="Business Unit" className="w-36" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => ({ value: b, label: b }))} />
             <input className="field w-28" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-            <select aria-label="Étape du pipeline" className="field" value={f.stage} onChange={(e) => setStage(e.target.value)}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
+            <Select ariaLabel="Étape du pipeline" className="w-44" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} />
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
             <input className="field w-28" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
-            <input className="field" aria-label="Date de clôture prévue" type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
+            <DateField className="w-40" ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" />
             <Busy label={f.patch ? "Corriger" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
               fn={async () => {
                 if (f.patch) {
