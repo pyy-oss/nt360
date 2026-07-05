@@ -116,8 +116,8 @@ export function FreshnessGuard() {
 }
 
 export type Props = { period: string };
-export const grid4 = "grid gap-3 grid-cols-2 lg:grid-cols-4";
-export const cols2 = "grid gap-3 md:grid-cols-2";
+export const grid4 = "grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4";
+export const cols2 = "grid gap-2 sm:gap-3 md:grid-cols-2";
 
 export const objToArr = (o: Record<string, number> = {}) =>
   Object.entries(o).map(([name, v]) => ({ name, v: Number(v) || 0 })).sort((a, b) => b.v - a.v);

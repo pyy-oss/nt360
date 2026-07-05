@@ -105,12 +105,12 @@ export default function App() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded-lg focus:bg-gold focus:text-bg focus:px-3 focus:py-2 focus:text-sm focus:font-semibold">Aller au contenu</a>
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
         {/* Header */}
-        <header className="flex items-center justify-between flex-wrap gap-3 py-4">
+        <header className="flex items-center justify-between flex-wrap gap-3 py-3 sm:py-4">
           <div className="flex items-center gap-3">
             <div className="grid place-items-center w-9 h-9 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
             <div>
               <div className="font-display font-bold text-lg leading-none">Pilote Revenu</div>
-              <div className="text-[11px] text-muted mt-0.5">Neurones Technologies CI · cockpit P&amp;L + Facturation DF</div>
+              <div className="text-[11px] text-muted mt-0.5 hidden sm:block">Neurones Technologies CI · cockpit P&amp;L + Facturation DF</div>
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -136,7 +136,7 @@ export default function App() {
         </header>
 
         {/* Navigation à 2 niveaux — niveau 1 : domaines ; niveau 2 : onglets du domaine actif. */}
-        <div className="mb-6 flex flex-col gap-2">
+        <div className="mb-4 sm:mb-6 flex flex-col gap-2">
           {/* Niveau 1 : domaines. Cliquer un domaine ouvre son 1er onglet (sauf s'il contient déjà l'actif). */}
           <nav aria-label="Domaines" className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:h-0">
             {groups.map((g) => {
@@ -186,7 +186,7 @@ export default function App() {
           <FreshnessGuard />
           {allowed ? (
             <ErrorBoundary key={allowed.id}>
-              <h1 className="font-display text-2xl font-bold mb-4">{allowed.label}</h1>
+              <h1 className="font-display text-xl sm:text-2xl font-bold mb-3 sm:mb-4">{allowed.label}</h1>
               <ActiveModule mod={allowed} period={period} />
             </ErrorBoundary>
           ) : (
