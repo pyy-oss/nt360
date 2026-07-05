@@ -20,6 +20,7 @@ const { dataQuality } = require("../domain/dataQuality");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 const { fpKey, plausibleYear } = require("./ids");
+const { safeId } = require("./sheets");
 
 async function readAll(db, name, withId = false) {
   const snap = await db.collection(name).get();
@@ -72,7 +73,7 @@ async function recomputeAll(db, only) {
   const needObj = need(["atterrissage", "ams", "pipeline"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
     readAll(db, "orders"),
-    readAll(db, "invoices"),
+    readAll(db, "invoices", true), // id nécessaire pour l'exclusion des factures annulées (overlay)
     readAll(db, "opportunities"),
     needBc ? readAll(db, "bcLines") : Promise.resolve([]),
     needCredit ? readAll(db, "creditLines", true) : Promise.resolve([]),
@@ -92,6 +93,17 @@ async function recomputeAll(db, only) {
   }
   for (const b of bcLines) if (b && b.customer != null && b.customer !== "") b.customer = normClient(b.customer);
 
+  // OVERLAY D'ANNULATION (statut « Annulée » persistant, hors delta) : les commandes/factures dont
+  // l'id figure ici sont EXCLUES de tous les agrégats (carnet, CAS, backlog, facturation, cash,
+  // rentabilité, qualité). Stocké en overlay config/cancellations (et non sur le doc) → l'exclusion
+  // SURVIT à un ré-import delta. Les docs sources restent (historique) ; seul le recompute les écarte.
+  const [cxlO, cxlI] = await Promise.all([db.doc("config/cancelOrders").get(), db.doc("config/cancelInvoices").get()]);
+  const itemsOf = (snap) => { const v = (snap.data() || {}).items; return new Set((Array.isArray(v) ? v : []).map((e) => e && e.id).filter(Boolean)); };
+  const cancelledOrders = itemsOf(cxlO);
+  const cancelledInvoices = itemsOf(cxlI);
+  // Factures annulées : écartées AVANT la fusion (n'alimentent pas le facturé d'une commande).
+  for (let i = invoices.length - 1; i >= 0; i--) if (cancelledInvoices.has(invoices[i].id)) invoices.splice(i, 1);
+
   // Fiches complètes reconstituées pour les calculs serveur (mergeCommandes, dataQuality).
   const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
   const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));
@@ -105,6 +117,9 @@ async function recomputeAll(db, only) {
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
   const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
+  // Commandes annulées : écartées de la source de vérité fusionnée → exclues de TOUS les agrégats
+  // en aval (carnet, CAS, backlog, byEntity, exposition fournisseurs, rentabilité, qualité).
+  if (cancelledOrders.size) for (let i = orders.length - 1; i >= 0; i--) if (cancelledOrders.has(safeId(orders[i].fp))) orders.splice(i, 1);
 
   const fiscal = (await db.doc("config/fiscal").get()).data() || {};
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables

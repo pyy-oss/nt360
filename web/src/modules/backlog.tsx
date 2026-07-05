@@ -9,9 +9,9 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -583,6 +583,28 @@ const pnlBadge = (s?: string | null) => {
   const m = s ? PNL_SRC[s] : null;
   return m ? <Badge tone={m.tone}>{m.label}</Badge> : <span className="text-faint">—</span>;
 };
+// Bandeau des commandes ANNULÉES (statut « Annulée » persistant, hors agrégats) : listées à part
+// avec rétablissement. La liste principale ne les contient plus (le recompute les écarte).
+function CancelledOrders() {
+  const { data: cxl } = useDocData<CancellationsDoc>("config/cancelOrders");
+  const items = cxl?.items || [];
+  if (!items.length) return null;
+  return (
+    <Card title={`Commandes annulées · ${items.length}`}>
+      <Table columns={[
+        colText("FP", (e: { label?: string; id: string }) => e.label || e.id, (e: any) => e.label || e.id),
+        colText("Client", (e: { client?: string }) => e.client || "—", (e: any) => e.client || ""),
+        colText("Rétablir", (e: { id: string; label?: string }) => (
+          <DangerBtn label="Rétablir" tone="steel" okMsg="Commande rétablie" errMsg="Rétablissement refusé"
+            confirm={`Rétablir la commande ${e.label || e.id} ? Elle réintègre le carnet, le CAS et le backlog.`}
+            fn={() => setCancellation("orders", e.id, false)} />
+        ), () => 0),
+      ]} rows={items} />
+      <Tip>Ces commandes restent conservées (historique) mais sont <b>exclues de tous les agrégats</b> (carnet, CAS, backlog, rentabilité). L'annulation survit à un ré-import delta.</Tip>
+    </Card>
+  );
+}
+
 export const OrderList: FC<Props> = () => {
   const { rows: all, loading } = useCommandesRows();
   const { match } = useFilters();
@@ -605,6 +627,7 @@ export const OrderList: FC<Props> = () => {
     <div className="flex flex-col gap-2">
     <FilterNote dims="BU / AM / client" />
     {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
+    {canImport && <CancelledOrders />}
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
       <ListView
@@ -635,6 +658,13 @@ export const OrderList: FC<Props> = () => {
           ...(canImport ? [colText("Assainir", (r: Order) => (r.fp && r.source !== "fiche"
             ? <DangerBtn label="Suppr." confirm={`Supprimer la commande ${r.fp} (ligne P&L) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("orders", fpDocId(r.fp!))} />
             : <span className="text-[11px] text-faint">{r.source === "fiche" ? "fiche" : "—"}</span>), () => 0)] : []),
+          // Annulation (statut « Annulée » persistant) : la commande quitte le carnet/CAS/backlog mais
+          // reste conservée (rétablissable ci-dessus). Survit à un ré-import delta (overlay).
+          ...(canImport ? [colText("Annuler", (r: Order) => (r.fp
+            ? <DangerBtn label="Annuler" tone="gold" okMsg="Commande annulée" errMsg="Annulation refusée"
+                confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
+                fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />
+            : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
         ]}
       />
     </Card>

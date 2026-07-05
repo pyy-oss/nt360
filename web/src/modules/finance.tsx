@@ -6,11 +6,11 @@ import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
-import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord } from "../lib/writes";
+import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN } from "../lib/thresholds";
-import type { FacturationSummary, RentabiliteSummary, Objective, Invoice } from "../types";
+import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -159,6 +159,10 @@ function InvoiceDateFixer({ inv }: { inv: Invoice }) {
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Invoice>("invoices");
+  // Overlay des factures ANNULÉES (statut persistant, hors agrégats). La facture reste lisible ici
+  // (collection brute) mais est exclue côté serveur de la facturation/cash/créances/qualité.
+  const { data: cxl } = useDocData<CancellationsDoc>("config/cancelInvoices");
+  const cancelled = new Set((cxl?.items || []).map((e) => e.id));
   const { match } = useFilters();
   const rows = allRows.filter((r) => match(r, ["bu", "client"])); // les factures ne portent pas d'AM
   const canImport = useCanImport();
@@ -167,7 +171,8 @@ export const InvoiceList: FC<Props> = () => {
   // Drill-through depuis le Centre d'alertes (« factures non rattachées ») → segment pré-sélectionné.
   useEffect(() => { if (intent?.segment === "orphan") setF("orphan"); }, [intent]);
   if (loading && !allRows.length) return <CardSkeleton />;
-  const orphan = rows.filter((r) => r.linked !== true);
+  // Une facture annulée n'est pas une orpheline à traiter (elle est déjà écartée des agrégats).
+  const orphan = rows.filter((r) => r.linked !== true && !cancelled.has(r.id!));
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
   const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
   return (
@@ -192,10 +197,16 @@ export const InvoiceList: FC<Props> = () => {
             colText("Date", (r) => r.date || "—", (r) => r.date || ""),
             colText("Échéance", (r) => r.dueDate || "—", (r) => r.dueDate || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
-            colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
-            ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id ? <FpFixer id={r.id} /> : null), () => 0)] : []),
-            ...(canImport ? [colText("Dates", (r: Invoice) => <InvoiceDateFixer inv={r} />, () => 0)] : []),
+            colText("Statut", (r) => (cancelled.has(r.id!) ? <Badge tone="clay">Annulée</Badge> : (r.paymentStatus || "—")), (r) => (cancelled.has(r.id!) ? "zzz" : r.paymentStatus || "")),
+            ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id && !cancelled.has(r.id) ? <FpFixer id={r.id} /> : null), () => 0)] : []),
+            ...(canImport ? [colText("Dates", (r: Invoice) => (cancelled.has(r.id!) ? null : <InvoiceDateFixer inv={r} />), () => 0)] : []),
             ...(canImport ? [colText("Assainir", (r: Invoice) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la facture ${r.numero || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("invoices", r.id!)} /> : null), () => 0)] : []),
+            // Annulation (statut « Annulée » persistant) : la facture sort de la facturation/cash/créances
+            // mais reste conservée (rétablissable). Survit à un ré-import delta (overlay).
+            ...(canImport ? [colText("Annuler", (r: Invoice) => (r.id ? (cancelled.has(r.id)
+              ? <DangerBtn label="Rétablir" tone="steel" okMsg="Facture rétablie" errMsg="Rétablissement refusé" confirm={`Rétablir la facture ${r.numero || r.id} ? Elle réintègre la facturation et le cash.`} fn={() => setCancellation("invoices", r.id!, false)} />
+              : <DangerBtn label="Annuler" tone="gold" okMsg="Facture annulée" errMsg="Annulation refusée" confirm={`Annuler la facture ${r.numero || r.id} ? Elle sort de la facturation, du cash et des créances (conservée, rétablissable). L'annulation survit à un ré-import.`} fn={() => setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client })} />
+            ) : null), () => 0)] : []),
           ]}
         />
       </Card>

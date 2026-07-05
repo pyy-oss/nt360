@@ -33,6 +33,7 @@ const ACTION_LABEL: Record<string, string> = {
   patch_invoice: "Facture corrigée", patch_fiche: "Fiche corrigée", bc_patch: "BC corrigé",
   create_order: "Commande créée", set_invoice_fp: "Facture rattachée", client_aliases: "Alias clients",
   upsert_opp: "Opp. saisie", add_bc: "BC ajouté", bc_status: "Statut BC",
+  cancel_record: "Annulation", restore_record: "Rétablissement",
 };
 const CLEANUP_ACTIONS = new Set(Object.keys(ACTION_LABEL));
 

@@ -624,6 +624,38 @@ exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSecond
   return { ok: true, count: ids.length };
 });
 
+// --- ANNULATION d'une commande / facture (statut « Annulée » persistant). Non destructif : le doc
+// source reste (historique) mais son id est ajouté à l'overlay config/cancellations → le recompute
+// l'EXCLUT de tous les agrégats. Overlay (et non un champ du doc) pour SURVIVRE à un ré-import delta.
+// Gouverné par le même module que la suppression (« import ») ; audité ; recompute complet derrière. ---
+// Docs séparés (et non un doc unique) : chaque overlay est lisible AU NIVEAU DE SON MODULE
+// (cancelOrders → overview, cancelInvoices → facturation) — pas de fuite d'un libellé facturation
+// vers un rôle sans droit facturation. Écriture réservée au callable (rules : write false).
+const CANCELLABLE = { orders: { module: "import", doc: "config/cancelOrders" }, invoices: { module: "import", doc: "config/cancelInvoices" } };
+exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+  const d = req.data || {};
+  const collection = String(d.collection || "");
+  const spec = CANCELLABLE[collection];
+  if (!spec) throw new HttpsError("invalid-argument", "objet non annulable");
+  await requireWrite(req, spec.module);
+  const id = String(d.id || "");
+  if (!id) throw new HttpsError("invalid-argument", "identifiant requis");
+  const cancelled = d.cancelled !== false; // défaut = annuler
+  const ref = db.doc(spec.doc);
+  const cur = (await ref.get()).data() || {};
+  const list = (Array.isArray(cur.items) ? cur.items : []).filter((e) => e && e.id !== id);
+  if (cancelled) {
+    list.push({ id, label: String(d.label || "").slice(0, 120), client: String(d.client || "").slice(0, 120), uid: req.auth.uid, ts: Date.now() });
+  }
+  await ref.set({ items: list.slice(0, 5000), updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module,
+    entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
+  return { ok: true, id, cancelled };
+});
+
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
 // il reste piloté par la source). Recalcule l'échéancier cash + la qualité des données. ---

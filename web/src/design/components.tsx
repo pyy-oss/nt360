@@ -314,12 +314,13 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
 
 /** Bouton d'action DESTRUCTIVE : confirmation obligatoire avant exécution (annulation silencieuse),
  *  puis état + toast. Sert à l'assainissement (suppression d'enregistrements). */
-export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée" }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string }) {
+export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée", tone = "clay" }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string; tone?: "clay" | "gold" | "steel" }) {
   const [s, setS] = useState<"" | "busy">("");
   const toast = useToast();
+  const toneCls = tone === "gold" ? "text-gold" : tone === "steel" ? "text-steel" : "text-clay";
   return (
     <button
-      className="btn-ghost text-clay hover:opacity-80"
+      className={cx("btn-ghost hover:opacity-80", toneCls)}
       disabled={s === "busy"}
       onClick={async () => {
         if (typeof window !== "undefined" && !window.confirm(confirm)) return; // annulation → no-op silencieux
