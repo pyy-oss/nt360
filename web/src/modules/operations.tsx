@@ -8,7 +8,7 @@ import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
-import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
+import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
@@ -31,6 +31,7 @@ export const PnlProjet: FC<Props> = () => {
   const base = allRows.filter((r) => match(r, ["client"])); // fiches : filtre client uniquement
   const rows = canMargin ? base.map((r) => ({ ...r, ...(marginBy.get(r.fp) || {}) })) : base;
   const canImport = useCanImport();
+  const canEditFiche = useCan("rentabilite") === "write"; // saisie du prix de vente = donnée de marge
   if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
@@ -62,6 +63,7 @@ export const PnlProjet: FC<Props> = () => {
               colNum("Marge", (r: ProjectSheet) => money(r.margin), (r: ProjectSheet) => r.margin || 0),
               colNum("%MB", (r: ProjectSheet) => <Badge tone={((r.marginPct || 0) < MARGIN.LOW ? "clay" : (r.marginPct || 0) < MARGIN.OK ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r: ProjectSheet) => r.marginPct || 0),
             ] : []),
+            ...(canEditFiche ? [colText("Corriger", (r: ProjectSheet) => <FicheFixer row={r} />, () => 0)] : []),
           ]}
         />
       </Card>
@@ -73,6 +75,22 @@ export const PnlProjet: FC<Props> = () => {
     </div>
   );
 };
+
+// Correction inline d'une fiche affaire : prix de vente et/ou de revient (marge recalculée
+// côté serveur). Comble « fiche sans prix de vente ». Donnée de marge → droit « rentabilité ».
+function FicheFixer({ row }: { row: ProjectSheet }) {
+  const [sale, setSale] = useState("");
+  const [cost, setCost] = useState("");
+  const changed = sale.trim() !== "" || cost.trim() !== "";
+  const num = (s: string) => Number(String(s).replace(/[^\d.-]/g, ""));
+  return (
+    <span className="inline-flex gap-1 items-center flex-wrap">
+      <input className="field w-24 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de vente ${row.fp}`} placeholder="Vente" value={sale} onChange={(e) => setSale(e.target.value)} />
+      <input className="field w-24 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de revient ${row.fp}`} placeholder="Revient" value={cost} onChange={(e) => setCost(e.target.value)} />
+      {changed && row.fp && <Busy variant="ghost" label="MàJ" okMsg="Fiche mise à jour" fn={() => patchProjectSheet({ fp: row.fp!, saleTotal: sale.trim() !== "" ? num(sale) : undefined, costTotal: cost.trim() !== "" ? num(cost) : undefined })} />}
+    </span>
+  );
+}
 
 // 9 — Crédit Fournisseurs
 export const Fournisseurs: FC<Props> = () => {
@@ -470,7 +488,7 @@ export const DataQuality: FC<Props> = () => {
           </div>
         ) : <EmptyState label="Aucune anomalie détectée — données propres." />}
       </Card>
-      <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> (champs manquants, rattachements rompus, incohérences) pour fiabiliser les imports — distinct du Centre d'alertes (alertes métier). Corrige les sources puis ré-importe : les anomalies se recalculent automatiquement.</Tip>
+      <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> (champs manquants, rattachements rompus, incohérences) pour fiabiliser les données — distinct du Centre d'alertes (alertes métier). <b>Clique une anomalie</b> pour ouvrir l'écran où la corriger directement dans l'app (rattacher, corriger l'opp/la commande/le BC/la facture, saisir le prix de vente…) ; les anomalies se recalculent automatiquement. Un ré-import reste possible pour les corrections de masse.</Tip>
     </div>
   );
 };
