@@ -39,6 +39,30 @@ export const PnlProjet: FC<Props> = () => {
   const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
   const marge = rows.reduce((s, r) => s + (r.margin || 0), 0);
   const pmb = vente > 0 ? marge / vente : 0;
+  // Lignes BC indexées par N° FP → détail des coûts (type / fournisseur) masquable sous chaque affaire.
+  const bcByFp = new Map<string, BcLine[]>();
+  for (const b of bc) { const k = b.fp || ""; if (!k) continue; (bcByFp.get(k) || bcByFp.set(k, []).get(k)!).push(b); }
+  // Panneau déplié : ventilation des coûts de l'affaire par type de dépense et par fournisseur.
+  const affaireDetail = (r: ProjectSheet) => {
+    const lines = (r.fp && bcByFp.get(r.fp)) || [];
+    if (!lines.length) return <div className="text-xs text-muted py-1">Aucune ligne BC rattachée à cette affaire.</div>;
+    const total = lines.reduce((s, b) => s + (b.amountXof || 0), 0);
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="text-[11px] text-faint">{lines.length} ligne{lines.length > 1 ? "s" : ""} BC · coût total {money(total)}</div>
+        <div className={cols2}>
+          <div>
+            <div className="text-xs font-semibold text-muted mb-1.5">Coût par type</div>
+            <HBars rows={sumBy(lines, (b) => b.expenseType, (b) => b.amountXof || 0)} colorFn={() => T.steel} />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-muted mb-1.5">Coût par fournisseur (top 10)</div>
+            <HBars rows={sumBy(lines, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} />
+          </div>
+        </div>
+      </div>
+    );
+  };
   return (
     <div className="flex flex-col gap-4">
       <FilterNote dims="client" />
@@ -55,6 +79,8 @@ export const PnlProjet: FC<Props> = () => {
           rows={rows}
           initialSearch={intent?.search}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
+          rowKey={(r) => r.id || r.fp || ""}
+          expand={affaireDetail}
           columns={[
             colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
             colText("Client", (r) => r.client, (r) => r.client),
@@ -71,11 +97,7 @@ export const PnlProjet: FC<Props> = () => {
           ]}
         />
       </Card>
-      <div className={cols2}>
-        <Card title="Coût par type (lignes BC)">{bc.length ? <HBars rows={sumBy(bc, (b) => b.expenseType, (b) => b.amountXof || 0)} colorFn={() => T.steel} /> : <EmptyState label="Pas de lignes BC." />}</Card>
-        <Card title="Coût par fournisseur (top 10)">{bc.length ? <HBars rows={sumBy(bc, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} /> : <EmptyState label="Pas de lignes BC." />}</Card>
-      </div>
-      <Tip>Marge issue des fiches affaire. Coûts ventilés par type de dépense et par fournisseur à partir des lignes BC (mêmes N° FP).</Tip>
+      <Tip>Marge issue des fiches affaire. <b>Déplie une affaire</b> (chevron) pour voir la ventilation de ses coûts par type de dépense et par fournisseur, à partir des lignes BC portant le même N° FP.</Tip>
     </div>
   );
 };
