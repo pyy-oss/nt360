@@ -3,7 +3,7 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
@@ -251,7 +251,7 @@ export const Prevision: FC<Props> = () => {
               <Gauge value={att.probaAtteinte || 0} color={(att.ecart || 0) < 0 ? T.clay : T.emerald} />
               {(att.objectif || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-                <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(att.projete)}</div></div>
+                <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(att.projete)}</div></div>
                 <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{(att.objectif || 0) > 0 ? fmt(att.objectif) : "—"}</div></div>
                 <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", (att.ecart || 0) < 0 ? "text-clay" : "text-emerald")}>{(att.objectif || 0) > 0 ? fmt(att.ecart) : "—"}</div></div>
               </div>
@@ -261,7 +261,7 @@ export const Prevision: FC<Props> = () => {
               <Gauge value={att.probaAtteinteCaf || 0} color={(att.ecartCaf || 0) < 0 ? T.clay : T.emerald} />
               {(att.objectifCaf || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-                <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(att.cafProjete)}</div></div>
+                <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(att.cafProjete)}</div></div>
                 <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{(att.objectifCaf || 0) > 0 ? fmt(att.objectifCaf) : "—"}</div></div>
                 <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", (att.ecartCaf || 0) < 0 ? "text-clay" : "text-emerald")}>{(att.objectifCaf || 0) > 0 ? fmt(att.ecartCaf) : "—"}</div></div>
               </div>
@@ -300,13 +300,14 @@ export const Prevision: FC<Props> = () => {
               { key: "Trajectoire (→ 31/12)", color: T.gold, name: "Trajectoire (réalisé + planifié)" },
             ]}
           />
-          <Card title="Réalisé vs planifié par mois">
+          <div className="mt-4 border-t border-line/60 pt-3">
+            <Eyebrow>Réalisé vs planifié par mois</Eyebrow>
             <GroupedBars
               data={(billTrend.months || []).map((m) => ({ name: m.month.slice(5), Réalisé: m.realise, Planifié: m.planifie }))}
               series={[{ key: "Réalisé", color: T.emerald, name: "Réalisé" }, { key: "Planifié", color: T.steel, name: "Planifié (jalons)" }]}
               h={220} size={16} interval={0}
             />
-          </Card>
+          </div>
           <Tip>La <b>trajectoire</b> combine le <b>réalisé</b> (factures datées) pour les mois échus et le <b>planifié</b> (jalons de facturation) pour les mois à venir → <b>projeté de facturation au 31/12</b>. L'écart réalisé/planifié par mois révèle l'avance ou le retard sur le plan.</Tip>
         </Card>
       )}

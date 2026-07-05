@@ -25,9 +25,9 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard,
     <Card title={title} actions={hasObj ? <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">R/O {roBadge(realise, objectif)}</span> : undefined}>
       <Gauge value={proba || 0} color={(ecart || 0) < 0 ? T.clay : T.emerald} h={170} />
       {hasObj && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
-      <div className="grid grid-cols-4 gap-2 mt-2 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-center">
         <div><div className="text-[11px] text-muted">Réalisé</div><div className="font-display tabnum">{fmt(realise)}</div></div>
-        <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum">{fmt(projete)}</div></div>
+        <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projete)}</div></div>
         <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{hasObj ? fmt(objectif) : "—"}</div></div>
         <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", (ecart || 0) < 0 ? "text-clay" : "text-emerald")}>{hasObj ? fmt(ecart) : "—"}</div></div>
       </div>
