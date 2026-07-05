@@ -6,7 +6,7 @@ import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
@@ -123,9 +123,6 @@ function BcImport() {
   const [pdf, setPdf] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const toast = useToast();
-  const seg = (id: "batch" | "unitaire", label: string) => (
-    <button onClick={() => setMode(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", mode === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>{label}</button>
-  );
   // À la sélection du PDF : extraction serveur (pdfjs) + pré-remplissage best-effort du formulaire.
   const onPdf = async (file: File | null) => {
     setPdf(file);
@@ -154,7 +151,7 @@ function BcImport() {
     }
   };
   return (
-    <Card title="Importer des BC fournisseurs" actions={<div className="flex gap-1.5">{seg("batch", "Batch (Excel)")}{seg("unitaire", "Unitaire (PDF)")}</div>}>
+    <Card title="Importer des BC fournisseurs" actions={<Segmented value={mode} onChange={setMode} ariaLabel="Mode d'import BC" options={[{ value: "batch", label: "Batch (Excel)" }, { value: "unitaire", label: "Unitaire (PDF)" }]} />}>
       {mode === "batch" ? (
         <div className="flex flex-col gap-2">
           <p className="text-[13px] text-muted">Chargez le fichier de suivi logistique (feuille « PO List »). Les BC sont détectés puis fusionnés par clé métier — ré-import sans doublon, statuts logistiques mappés sur le cycle À émettre → Émis → Livré → Facturé → Soldé.</p>
@@ -216,11 +213,6 @@ export const BC: FC<Props> = () => {
   const solde = byStatus["solde"] || 0;
   const lateCount = rows.filter(isLate).length;
   const filtered = flt === "late" ? rows.filter(isLate) : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
-  const seg = (id: typeof flt, label: string, n?: number) => (
-    <button onClick={() => setFlt(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", flt === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>
-      {label}{n != null && <span className="ml-1 opacity-70">{n.toLocaleString("fr-FR")}</span>}
-    </button>
-  );
   return (
     <div className="flex flex-col gap-4">
       {canWrite && <BcImport />}
@@ -236,7 +228,7 @@ export const BC: FC<Props> = () => {
         <Kpi label="Taux d'exécution (soldé)" value={pct(rows.length ? solde / rows.length : 0)} tone="emerald" />
         <Kpi label="BC en retard" value={lateCount.toLocaleString("fr-FR")} tone={lateCount ? "clay" : "steel"} sub="ETA dépassée, non livré" />
       </div>
-      <Card title={`Lignes BC · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5">{seg("all", "Toutes")}{seg("open", "Non soldés")}{seg("late", "En retard", lateCount)}</div>}>
+      <Card title={`Lignes BC · ${rows.length.toLocaleString("fr-FR")}`} actions={<Segmented value={flt} onChange={setFlt} ariaLabel="Filtrer les lignes BC" options={[{ value: "all", label: "Toutes" }, { value: "open", label: "Non soldés" }, { value: "late", label: "En retard", count: lateCount }]} />}>
         <ListView
           rows={filtered}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}

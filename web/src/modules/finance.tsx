@@ -4,7 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
@@ -155,11 +155,6 @@ export const InvoiceList: FC<Props> = () => {
   const orphan = rows.filter((r) => r.linked !== true);
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
   const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
-  const seg = (id: typeof f, label: string, n?: number) => (
-    <button onClick={() => setF(id)} className={cx("rounded-md px-2.5 py-1 text-xs font-semibold transition-colors", f === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>
-      {label}{n != null && <span className="ml-1 opacity-70">{n.toLocaleString("fr-FR")}</span>}
-    </button>
-  );
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / client" />
@@ -168,7 +163,7 @@ export const InvoiceList: FC<Props> = () => {
           <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />
         </div>
       )}
-      <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap">{seg("all", "Toutes")}{seg("linked", "Rattachées")}{seg("orphan", "Non rattachées", orphan.length)}{canImport && <ImportButton label="Importer un delta" />}</div>}>
+      <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap"><Segmented value={f} onChange={setF} ariaLabel="Filtrer les factures" options={[{ value: "all", label: "Toutes" }, { value: "linked", label: "Rattachées" }, { value: "orphan", label: "Non rattachées", count: orphan.length }]} />{canImport && <ImportButton label="Importer un delta" />}</div>}>
         <ListView
           rows={filtered}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
@@ -212,20 +207,13 @@ export const Rentabilite: FC<Props> = ({ period }) => {
   const filterActive = active; // la Rentabilité lit un agrégat pré-calculé GLOBAL : le filtre transverse ne s'y applique pas
   const baseLbl = view === "commande" ? "CAS" : "Facturé";
   const baseSub = view === "commande" ? "Marge P&L sur la prise de commande" : "Marge reconnue au prorata du facturé (CAF)";
-  const seg = (id: "commande" | "facture", label: string, disabled?: boolean) => (
-    <button
-      onClick={() => !disabled && setView(id)}
-      disabled={disabled}
-      title={disabled ? "Recalculer les agrégats pour activer cette perspective" : undefined}
-      className={cx("rounded-md px-3 py-1 text-xs font-semibold transition-colors", view === id ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink", disabled && "opacity-40 cursor-not-allowed")}
-    >{label}</button>
-  );
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <span className="text-[11px] uppercase tracking-wide text-faint">Perspective</span>
-        <div className="flex gap-1.5">{seg("commande", "Commande")}{seg("facture", "Facturé", !hasFac)}</div>
+        <Segmented value={view} onChange={setView} ariaLabel="Perspective de marge"
+          options={[{ value: "commande", label: "Commande" }, { value: "facture", label: "Facturé", disabled: !hasFac, title: !hasFac ? "Recalculer les agrégats pour activer cette perspective" : undefined }]} />
       </div>
       {filterActive && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client) ne s'applique pas ici (agrégat pré-calculé). La marge filtrée est lisible dans la Vue d'ensemble.</div>}
       <div className={grid4}>
