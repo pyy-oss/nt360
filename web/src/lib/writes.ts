@@ -75,9 +75,10 @@ export async function deleteObjective(id: string) {
   await deleteDoc(doc(db, "objectives", id));
 }
 
-/** Met à jour la matrice de droits (profil habilitations). */
+/** Met à jour la matrice de droits via le callable setPermissions (schéma validé + audité côté
+ *  serveur). Plus d'écriture directe : la règle Firestore de config/permissions est en write:false. */
 export async function updateMatrix(matrix: Record<string, Record<string, string>>) {
-  await setDoc(doc(db, "config", "permissions"), { matrix }, { merge: true });
+  await httpsCallable(functions, "setPermissions")({ matrix });
 }
 
 /** Pose un rôle sur un utilisateur (Cloud Function admin). */

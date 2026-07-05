@@ -233,6 +233,35 @@ function onCallG(action, opts, handler) {
   return onCall(opts, guarded(action, handler));
 }
 
+// Autorisation d'ÉCRITURE d'un callable, GOUVERNÉE PAR LA MATRICE OPPOSABLE (config/permissions) —
+// même source que les Security Rules et le front. Révoquer un droit dans Habilitations a donc un
+// effet RÉEL sur les mutations serveur. `direction` = superviseur (write partout). Lève sinon.
+async function requireWrite(req, module) {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  const role = req.auth.token?.role;
+  if (role === "direction") return;
+  const { canWrite } = require("./domain/authz");
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  if (!canWrite(matrix, role, module)) throw new HttpsError("permission-denied", `droit d'écriture « ${module} » requis`);
+}
+
+// --- Matrice de droits : édition via CALLABLE validé + audité (jamais en écriture directe). Réservé
+// aux détenteurs du droit « habilitations » (direction incluse). Valide le schéma avant écriture pour
+// interdire une matrice malformée qui casserait la résolution de niveau pour tous (DoS RBAC). ---
+exports.setPermissions = onCallG("setPermissions", async (req) => {
+  await requireWrite(req, "habilitations");
+  const { validateMatrix } = require("./domain/authz");
+  const matrix = req.data?.matrix;
+  const v = validateMatrix(matrix);
+  if (!v.ok) throw new HttpsError("invalid-argument", `matrice invalide : ${v.error}`);
+  await db.doc("config/permissions").set({ matrix }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "perm_matrix", module: "habilitations",
+    entity: "config", entityId: "permissions", detail: { roles: Object.keys(matrix).length }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+});
+
 exports.setNotificationConfig = onCallG("setNotificationConfig", { timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
@@ -745,12 +774,18 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!EXPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit de rapport requis");
   const ExcelJS = require("exceljs");
+  const { canRead } = require("./domain/authz");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};
-  const [ov, ovm, bl, pl, fiscal] = await Promise.all([
-    get(`summaries/overview_${period}`), get(`summaries/overviewMargin_${period}`), get("summaries/backlog_fy"),
+  // La MARGE n'entre dans l'export que si le rôle appelant a le droit « rentabilite » DANS LA MATRICE
+  // (pas selon une liste figée) : révoquer rentabilite retire la marge de l'export, comme partout.
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  const canMargin = canRead(matrix, req.auth.token?.role, "rentabilite");
+  const [ov, bl, pl, fiscal] = await Promise.all([
+    get(`summaries/overview_${period}`), get("summaries/backlog_fy"),
     get("summaries/pipeline"), get("config/fiscal"),
   ]);
+  const ovm = canMargin ? await get(`summaries/overviewMargin_${period}`) : {};
   const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`);
 
   const wb = new ExcelJS.Workbook();
@@ -761,7 +796,9 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   ws.addRow(["Indicateur", "Valeur"]);
   [
     ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
-    ["Backlog (RAF)", bl.total], ["Marge brute", ovm.mb], ["Taux facturation", ov.ratios?.tauxFacturation],
+    ["Backlog (RAF)", bl.total],
+    ...(canMargin ? [["Marge brute", ovm.mb]] : []),
+    ["Taux facturation", ov.ratios?.tauxFacturation],
     ["Pipeline actif pondéré", pl.tot?.weighted], ["Atterrissage projeté", att.projete],
     ["Objectif CAS", att.objectif], ["Écart", att.ecart],
   ].forEach((r) => ws.addRow(r));
