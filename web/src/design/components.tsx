@@ -1,6 +1,7 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
-import { Component, createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff } from "lucide-react";
+import { Component, createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X } from "lucide-react";
 import { fmt, pct } from "./tokens";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -270,32 +271,89 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   );
 }
 
-// --- Toaster ---
+// --- Toaster (premium) : glisse depuis la droite, accent + icône par type, fermeture manuelle ---
 type Toast = { id: number; msg: string; type: "ok" | "err" | "info" };
 const ToastCtx = createContext<(msg: string, type?: Toast["type"]) => void>(() => {});
+const TOAST_SKIN = {
+  ok: { bar: "bg-emerald", ring: "bg-emerald/12 text-emerald", Icon: CheckCircle2 },
+  err: { bar: "bg-clay", ring: "bg-clay/12 text-clay", Icon: XCircle },
+  info: { bar: "bg-steel", ring: "bg-steel/12 text-steel", Icon: AlertTriangle },
+} as const;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  let seq = 0;
+  const seq = useRef(0);
+  const dismiss = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
   const push = (msg: string, type: Toast["type"] = "info") => {
-    const id = ++seq + Date.now();
+    const id = ++seq.current;
     setToasts((t) => [...t, { id, msg, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+    setTimeout(() => dismiss(id), type === "err" ? 5000 : 3500);
   };
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-50 flex flex-col gap-2 sm:max-w-[360px]">
-        {toasts.map((t) => (
-          <div key={t.id} className={cx("card px-3 py-2 text-sm flex items-center gap-2 animate-fade-in border-l-2", t.type === "ok" && "border-l-emerald", t.type === "err" && "border-l-clay", t.type === "info" && "border-l-steel")}>
-            {t.type === "ok" ? <CheckCircle2 size={16} className="text-emerald" /> : t.type === "err" ? <XCircle size={16} className="text-clay" /> : <AlertTriangle size={16} className="text-steel" />}
-            <span>{t.msg}</span>
-          </div>
-        ))}
+      <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-[90] flex flex-col gap-2 sm:max-w-[380px] pointer-events-none">
+        {toasts.map((t) => {
+          const sk = TOAST_SKIN[t.type];
+          return (
+            <div key={t.id} className="pointer-events-auto card overflow-hidden flex items-stretch gap-0 animate-slide-in shadow-card">
+              <span className={cx("w-1 shrink-0", sk.bar)} aria-hidden="true" />
+              <div className="flex items-center gap-2.5 px-3 py-2.5 text-sm flex-1 min-w-0">
+                <span className={cx("shrink-0 grid place-items-center w-6 h-6 rounded-full", sk.ring)}><sk.Icon size={14} /></span>
+                <span className="flex-1 min-w-0 break-words">{t.msg}</span>
+                <button onClick={() => dismiss(t.id)} aria-label="Fermer" className="shrink-0 text-faint hover:text-ink transition-colors"><X size={15} /></button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </ToastCtx.Provider>
   );
 }
 export const useToast = () => useContext(ToastCtx);
+
+// --- Toggle (interrupteur premium) : remplace les cases à cocher d'activation ---
+export function Toggle({ checked, onChange, ariaLabel, disabled }: { checked: boolean; onChange: (v: boolean) => void; ariaLabel?: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button" role="switch" aria-checked={checked} aria-label={ariaLabel} disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={cx("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-gold/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",
+        checked ? "bg-gold" : "bg-line", disabled && "opacity-50 cursor-not-allowed")}
+    >
+      <span className={cx("inline-block h-5 w-5 rounded-full bg-bg shadow-sm transition-transform duration-200 ease-out", checked ? "translate-x-[22px]" : "translate-x-0.5")} />
+    </button>
+  );
+}
+
+// --- Modal (portail + overlay flou, Échap / clic-fond pour fermer, focus initial) ---
+export function Modal({ open, onClose, title, children, actions, size = "sm" }:
+  { open: boolean; onClose: () => void; title?: ReactNode; children?: ReactNode; actions?: ReactNode; size?: "sm" | "md" }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden"; // fige le scroll d'arrière-plan
+    ref.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [open, onClose]);
+  if (!open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[100] grid place-items-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
+      <div ref={ref} className={cx("relative card p-4 sm:p-5 w-full animate-scale-in", size === "md" ? "max-w-lg" : "max-w-sm")}>
+        <div className="flex items-start justify-between gap-3 mb-2">
+          {title ? <h2 className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
+          <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>
+        </div>
+        {children && <div className="text-[13px] text-muted leading-relaxed">{children}</div>}
+        {actions && <div className="flex items-center justify-end gap-2 mt-4">{actions}</div>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /** Bouton d'action asynchrone avec état + toast. */
 export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Action refusée" }: { label: string; fn: () => Promise<any>; variant?: "gold" | "ghost"; okMsg?: string; errMsg?: string }) {
@@ -314,22 +372,30 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
 
 /** Bouton d'action DESTRUCTIVE : confirmation obligatoire avant exécution (annulation silencieuse),
  *  puis état + toast. Sert à l'assainissement (suppression d'enregistrements). */
-export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée", tone = "clay" }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string; tone?: "clay" | "gold" | "steel" }) {
+export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée", tone = "clay", confirmLabel }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string; tone?: "clay" | "gold" | "steel"; confirmLabel?: string }) {
   const [s, setS] = useState<"" | "busy">("");
+  const [open, setOpen] = useState(false);
   const toast = useToast();
   const toneCls = tone === "gold" ? "text-gold" : tone === "steel" ? "text-steel" : "text-clay";
+  // Ton du bouton de confirmation dans la modale : rouge (clay) pour destructif, doré/acier sinon.
+  const confirmBtnCls = tone === "clay" ? "btn bg-clay text-bg hover:bg-clay/90" : tone === "steel" ? "btn bg-steel text-bg hover:bg-steel/90" : "btn-gold";
+  const run = async () => {
+    setOpen(false); setS("busy");
+    try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
+  };
   return (
-    <button
-      className={cx("btn-ghost hover:opacity-80", toneCls)}
-      disabled={s === "busy"}
-      onClick={async () => {
-        if (typeof window !== "undefined" && !window.confirm(confirm)) return; // annulation → no-op silencieux
-        setS("busy");
-        try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
-      }}
-    >
-      {s === "busy" ? "…" : label}
-    </button>
+    <>
+      <button className={cx("btn-ghost hover:opacity-80", toneCls)} disabled={s === "busy"} onClick={() => setOpen(true)}>
+        {s === "busy" ? "…" : label}
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Confirmer l'action"
+        actions={<>
+          <button className="btn-ghost" onClick={() => setOpen(false)}>Annuler</button>
+          <button className={confirmBtnCls} data-autofocus onClick={run}>{confirmLabel || label}</button>
+        </>}>
+        {confirm}
+      </Modal>
+    </>
   );
 }
 

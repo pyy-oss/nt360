@@ -30,9 +30,15 @@ export default {
       keyframes: {
         "fade-in": { from: { opacity: 0, transform: "translateY(4px)" }, to: { opacity: 1, transform: "none" } },
         shimmer: { "100%": { transform: "translateX(100%)" } },
+        "scale-in": { from: { opacity: 0, transform: "translateY(8px) scale(.97)" }, to: { opacity: 1, transform: "none" } },
+        "slide-in": { from: { opacity: 0, transform: "translateX(16px)" }, to: { opacity: 1, transform: "none" } },
+        "overlay-in": { from: { opacity: 0 }, to: { opacity: 1 } },
       },
       animation: {
         "fade-in": "fade-in .25s ease-out both",
+        "scale-in": "scale-in .18s cubic-bezier(.2,.8,.2,1) both",
+        "slide-in": "slide-in .22s cubic-bezier(.2,.8,.2,1) both",
+        "overlay-in": "overlay-in .15s ease-out both",
       },
     },
   },
