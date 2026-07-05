@@ -57,15 +57,15 @@ export function Badge({ children, tone = "neutral" }: { children: ReactNode; ton
 
 /** Contrôle segmenté (filtres rapides / bascule de vue). Cibles tactiles ≥ 34 px, repli en wrap. */
 export function Segmented<T extends string>({ value, onChange, options, ariaLabel }:
-  { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; count?: number }[]; ariaLabel?: string }) {
+  { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; count?: number; disabled?: boolean; title?: string }[]; ariaLabel?: string }) {
   return (
     <div role="tablist" aria-label={ariaLabel} className="inline-flex flex-wrap gap-0.5 rounded-lg bg-panel2 p-0.5">
       {options.map((o) => {
         const on = value === o.value;
         return (
-          <button key={o.value} type="button" role="tab" aria-selected={on} onClick={() => onChange(o.value)}
+          <button key={o.value} type="button" role="tab" aria-selected={on} disabled={o.disabled} title={o.title} onClick={() => !o.disabled && onChange(o.value)}
             className={cx("inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium min-h-[34px] transition-colors",
-              on ? "bg-gold/20 text-gold" : "text-muted hover:text-ink hover:bg-white/[.03]")}>
+              o.disabled ? "text-faint opacity-40 cursor-not-allowed" : on ? "bg-gold/20 text-gold" : "text-muted hover:text-ink hover:bg-white/[.03]")}>
             {o.label}{o.count != null && <span className={cx("tabnum", on ? "text-gold/70" : "text-faint")}>{o.count}</span>}
           </button>
         );
