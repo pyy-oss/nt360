@@ -74,6 +74,37 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(t.am_invalide.refs).toContain("FP/2026/1");
     expect(t.am_invalide.severity).toBe("medium");
   });
+  it("doublons probables (ré-import en delta) : opps + BC signalés, un seul par groupe", () => {
+    const opps2 = [
+      { client: "ACME", amount: 1000, stage: 3, am: "DATCHA", fp: "FP/2026/1", closingDate: "2026-05-01" },
+      { client: "ACME", amount: 1000, stage: 3, am: "DATCHA", fp: "FP/2026/1", closingDate: "2026-05-01" }, // doublon exact
+      { client: "BETA", amount: 500, stage: 2, am: "X", fp: "FP/2026/2", closingDate: "2026-06-01" }, // unique
+    ];
+    const bc2 = [
+      { fp: "FP/2026/1", supplier: "HDF", amountXof: 100, expenseType: "MAT", bcNumber: "BC1" },
+      { fp: "FP/2026/1", supplier: "HDF", amountXof: 100, expenseType: "MAT", bcNumber: "BC1" }, // doublon
+      { fp: "FP/2026/3", supplier: "MTN", amountXof: 200, expenseType: "SVC", bcNumber: "BC2" }, // unique
+    ];
+    const q4 = dataQuality([], [], opps2, bc2, []);
+    const t = Object.fromEntries(q4.issues.map((i) => [i.type, i]));
+    expect(t.opps_doublons.count).toBe(1); // 1 groupe en doublon (ACME), signalé une fois
+    expect(t.opps_doublons.severity).toBe("medium");
+    expect(t.bc_doublons.count).toBe(1); // 1 groupe (BC1)
+    expect(t.bc_doublons.severity).toBe("low");
+  });
+  it("pas de faux doublon quand la signature diffère ou est vide", () => {
+    // Deux opps même client mais montants différents → pas doublon. Deux lignes toutes vides → clé vide, ignorées.
+    const q5 = dataQuality(
+      [],
+      [],
+      [{ client: "ACME", amount: 1000, stage: 3 }, { client: "ACME", amount: 2000, stage: 3 }],
+      [{}, {}],
+      [],
+    );
+    const t = Object.fromEntries(q5.issues.map((i) => [i.type, i]));
+    expect(t.opps_doublons).toBeUndefined();
+    expect(t.bc_doublons).toBeUndefined();
+  });
   it("issues triées par sévérité (high avant medium avant low)", () => {
     const ranks = q.issues.map((i) => ({ high: 0, medium: 1, low: 2 }[i.severity]));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
