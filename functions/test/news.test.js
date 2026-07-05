@@ -57,6 +57,38 @@ describe("news — moteur d'actualité (bulletins + recommandations)", () => {
     expect(bc.title).toContain("1 "); // une seule ligne en retard (la « fiche » est exclue, la 2030 pas échue)
   });
 
+  it("objectif annuel non défini → bulletin info actionnable", () => {
+    const r = buildNews({ ...base, att: { objectif: 0, projete: 500 } });
+    expect(ids(r)).toContain("objectif_absent");
+    const b = r.bulletins.find((x) => x.id === "objectif_absent");
+    expect(b.module).toBe("objectifs");
+  });
+
+  it("opportunités gagnées à réconcilier (sans FP / sans P&L) → bulletin high", () => {
+    const r = buildNews({ ...base, dataQuality: { issues: [
+      { type: "opps_gagnees_sans_fp", count: 2, refs: ["ACME", "MTN"] },
+      { type: "opps_gagnees_sans_pnl", count: 3, refs: ["FP/2026/1"] },
+    ] } });
+    const b = r.bulletins.find((x) => x.id === "opps_a_reconcilier");
+    expect(b).toBeTruthy();
+    expect(b.severity).toBe("high");
+    expect(b.title).toContain("5"); // 2 + 3
+    expect(b.module).toBe("opplist"); // sans FP présent → on route vers le Pipeline
+    expect(b.refs).toContain("FP/2026/1");
+  });
+
+  it("concentration client + backlog dormant détectés", () => {
+    const r = buildNews({ ...base, backlog: {
+      total: 1000, totalDerive: 0,
+      byClient: { ORANGE: 700, MTN: 300 },              // ORANGE 70 % > 40 %
+      byVintage: { "2026": 600, "2023": 400 },          // 2023 ≤ 2026−2 → 400/1000 = 40 % > 15 %
+    } });
+    const conc = r.bulletins.find((b) => b.id === "backlog_concentration_client");
+    expect(conc).toBeTruthy();
+    expect(conc.refs).toContain("ORANGE");
+    expect(ids(r)).toContain("backlog_dormant");
+  });
+
   it("tri par sévérité : high avant medium avant info", () => {
     const r = buildNews({ ...base,
       att: { objectif: 1000, realiseCas: 100, projete: 300, ecart: -700 }, // high
