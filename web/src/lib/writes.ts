@@ -86,6 +86,18 @@ export async function callSetUserRole(uidTarget: string, role: string) {
   await httpsCallable(functions, "setUserRole")({ uid: uidTarget, role });
 }
 
+/** Provisionne un compte : Auth (email + mot de passe initial) + rôle + fiche users/. Direction
+ *  uniquement. Refuse un email déjà utilisé. Renvoie l'uid créé. */
+export async function callCreateUser(input: { email: string; name?: string; role: string; password: string }) {
+  const res = await httpsCallable(functions, "createUser")(input);
+  return res.data as { ok: boolean; uid: string };
+}
+
+/** Active/désactive un compte (Auth `disabled` + fiche users.active). Direction uniquement. */
+export async function callSetUserActive(uid: string, active: boolean) {
+  await httpsCallable(functions, "setUserActive")({ uid, active });
+}
+
 export type AlertThresholds = { concentration: number; surfacturationPct: number; rafEcartPct: number; dormantYears: number };
 /** Enregistre les seuils d'alerte (admin) : recompute alertes + qualité côté serveur. */
 export async function callSetAlertThresholds(cfg: AlertThresholds) {

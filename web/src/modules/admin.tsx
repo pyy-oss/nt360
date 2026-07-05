@@ -4,9 +4,13 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog } from "../types";
+
+// Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
+const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
@@ -49,13 +53,16 @@ export const Habilitations: FC<Props> = () => {
           </table>
         </div>
       </Card>
+      {canWrite && <CreateUserCard />}
       <Card title="Utilisateurs & rôles">
         <Table columns={[
           colText("Email", (u) => u.email), colText("Nom", (u) => u.name),
-          colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
-          ...(canWrite ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} />)] : []),
+          canWrite
+            ? colText("Actif", (u: UserRow) => <ActiveToggle uid={u.id!} active={u.active} />, (u: UserRow) => (u.active ? 1 : 0))
+            : colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
+          ...(canWrite ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} current={u.role} />)] : []),
         ]} rows={users} />
-        <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée).</Tip>
+        <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée). Après un changement de rôle ou une désactivation, l'utilisateur concerné doit rafraîchir sa session (reconnexion) pour que l'effet soit immédiat.</Tip>
       </Card>
     </div>
   );
@@ -288,12 +295,72 @@ function DedupeCard() {
   );
 }
 
-function RoleSetter({ uid }: { uid: string }) {
+// Provisionnement d'un compte : email + nom + rôle + mot de passe initial. Direction uniquement
+// (le callable createUser rejette tout autre appelant). Le compte est créé actif, email vérifié.
+function CreateUserCard() {
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [role, setRole] = useState("lecture");
+  const [pwd, setPwd] = useState("");
+  // Mot de passe aléatoire lisible (14 car., alphabet sans caractères ambigus) — l'admin le copie
+  // et le communique à l'utilisateur, qui pourra le changer.
+  const gen = () => {
+    const cs = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789@#%";
+    const a = new Uint32Array(14); crypto.getRandomValues(a);
+    setPwd(Array.from(a, (n) => cs[n % cs.length]).join(""));
+  };
+  const create = async () => {
+    const em = email.trim();
+    if (!EMAIL_RE.test(em)) throw new Error("email invalide");
+    if (pwd.length < 8) throw new Error("mot de passe : 8 caractères minimum");
+    await callCreateUser({ email: em, name: name.trim(), role, password: pwd });
+    setEmail(""); setName(""); setPwd(""); setRole("lecture");
+  };
+  return (
+    <Card title="Créer un utilisateur" actions={<Busy label="Créer le compte" okMsg="Compte créé" errMsg="Création refusée" fn={create} />}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-[13px]">
+          <span className="text-ink font-medium">Email</span>
+          <input className="field !py-1" type="email" autoComplete="off" placeholder="prenom.nom@nt.ci" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Email du nouvel utilisateur" />
+        </label>
+        <label className="flex flex-col gap-1 text-[13px]">
+          <span className="text-ink font-medium">Nom</span>
+          <input className="field !py-1" placeholder="(défaut : partie avant @)" value={name} onChange={(e) => setName(e.target.value)} aria-label="Nom du nouvel utilisateur" />
+        </label>
+        <label className="flex flex-col gap-1 text-[13px]">
+          <span className="text-ink font-medium">Rôle</span>
+          <select className="field !py-1" value={role} onChange={(e) => setRole(e.target.value)} aria-label="Rôle du nouvel utilisateur">
+            {ROLE_LIST.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[13px]">
+          <span className="text-ink font-medium">Mot de passe initial</span>
+          <div className="flex gap-1.5">
+            <input className="field !py-1 flex-1" type="text" autoComplete="new-password" placeholder="8 caractères minimum" value={pwd} onChange={(e) => setPwd(e.target.value)} aria-label="Mot de passe initial" />
+            <button type="button" className="btn-ghost whitespace-nowrap" onClick={gen}>Générer</button>
+          </div>
+        </label>
+      </div>
+      <Tip>Compte créé <b>actif</b>, email vérifié. Communiquez le mot de passe initial à l'utilisateur (hors bande) ; il pourra le changer. Un email déjà utilisé est refusé.</Tip>
+    </Card>
+  );
+}
+
+function ActiveToggle({ uid, active }: { uid: string; active?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Badge tone={active ? "emerald" : "clay"}>{active ? "oui" : "non"}</Badge>
+      <Busy variant="ghost" label={active ? "Désactiver" : "Réactiver"} okMsg={active ? "Compte désactivé" : "Compte réactivé"} fn={() => callSetUserActive(uid, !active)} />
+    </span>
+  );
+}
+
+function RoleSetter({ uid, current }: { uid: string; current?: string }) {
+  const [role, setRole] = useState(current && ROLE_LIST.includes(current) ? current : "lecture");
   return (
     <span className="inline-flex gap-1.5">
       <select aria-label="Rôle de l'utilisateur" className="field !py-1" value={role} onChange={(e) => setRole(e.target.value)}>
-        {["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"].map((r) => <option key={r}>{r}</option>)}
+        {ROLE_LIST.map((r) => <option key={r}>{r}</option>)}
       </select>
       <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
     </span>
