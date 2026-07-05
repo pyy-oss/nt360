@@ -39,6 +39,12 @@ describe("fpKey — normalisation clé d'or N° FP", () => {
     // « 13 » et « 013 » convergent → une seule clé, pas de double comptage.
     expect(fpKey("FP/2026/013")).toBe(fpKey("FP/2026/13"));
   });
+  it("rejette une année à 5+ chiffres (pas de troncature/collision silencieuse)", () => {
+    // « FP/20244/13 » ne doit PAS devenir « FP/2024/4 » (qui collisionnerait avec une autre commande).
+    expect(fpKey("FP/20244/13")).toBeNull();
+    expect(fpKey("FP/20244/13")).not.toBe(fpKey("FP/2024/4"));
+    expect(fpKey("FP/2024/4")).toBe("FP/2024/4"); // la vraie clé reste valide
+  });
 });
 
 describe("cleanName — fusion des doublons logiques", () => {

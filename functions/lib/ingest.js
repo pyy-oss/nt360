@@ -55,15 +55,20 @@ function hasLogistics(wb) {
   });
 }
 
-/** Types de sources présents dans le classeur (fiche est exclusive). */
-function detectKinds(wb) {
-  if (isFiche(wb)) return ["fiche"];
+/** Types NON-fiche présents dans le classeur (P&L / LIVE / DF / logistics). */
+function detectNonFiche(wb) {
   const kinds = [];
   if (hasPnl(wb)) kinds.push("pnl");
   if (hasLive(wb)) kinds.push("salesData");
   if (hasDf(wb)) kinds.push("facturationDf");
   if (hasLogistics(wb)) kinds.push("logistics");
   return kinds;
+}
+
+/** Types de sources présents dans le classeur (fiche est exclusive à la détection). */
+function detectKinds(wb) {
+  if (isFiche(wb)) return ["fiche"];
+  return detectNonFiche(wb);
 }
 
 /** Compat : 1er type détecté (utilisé par certains tests). */
@@ -80,14 +85,24 @@ function pathFor(kind, id) {
  * @returns {{kinds:string[], writes:{path,data}[], report:object}}
  */
 function buildWrites(wb) {
-  const kinds = detectKinds(wb);
+  let kinds = detectKinds(wb);
+  // Repli ANTI-PERTE SILENCIEUSE (#1) : un classeur classé « fiche » mais dont AUCUNE fiche n'est
+  // réellement parsable (faux positif — ex. un P&L contenant « prix de revient » + « prix de vente »)
+  // était jeté en entier (rapport « fiche · 0 l. »). On retombe alors sur les AUTRES types s'il y en a
+  // (P&L/LIVE/DF/logistics), pour ne pas perdre le classeur. S'il n'y a rien d'autre, on garde « fiche »
+  // (le rapport « FP manquant » reste pertinent).
+  let ficheCache = null;
+  if (kinds.length === 1 && kinds[0] === "fiche") {
+    ficheCache = parseFicheAll(wb);
+    if (!ficheCache.length) { const nf = detectNonFiche(wb); if (nf.length) kinds = nf; }
+  }
   const writes = [];
   const byKind = {};
   let rowsIn = 0, rowsOk = 0, rowsSkipped = 0;
 
   for (const kind of kinds) {
     if (kind === "fiche") {
-      const fiches = parseFicheAll(wb); // une fiche par onglet (import groupé)
+      const fiches = ficheCache || parseFicheAll(wb); // une fiche par onglet (import groupé) — réutilise le cache du repli
       if (!fiches.length) { byKind.fiche = { rowsIn: 1, rowsOk: 0, rowsSkipped: 1, error: "FP manquant" }; continue; }
       let ok = 0;
       for (const { sheet, bcLines } of fiches) {

@@ -31,6 +31,15 @@ describe("detectKind — signatures de colonnes/cellules (§9)", () => {
     expect(kinds).toContain("pnl");
     expect(kinds).not.toContain("fiche");
   });
+  it("classé « fiche » à tort (revient+vente) mais 0 fiche parsable → REPLI sur P&L (pas de perte)", () => {
+    // Un P&L contenant à la fois « Prix de revient » ET « Prix de vente » est détecté « fiche » (couple),
+    // mais parseFicheAll n'y trouve aucune fiche cellulaire → repli sur la détection non-fiche → P&L
+    // conservé (avant : classeur entier jeté « fiche · 0 l. »).
+    const { kinds, writes } = buildWrites(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, "Prix de revient": 80, "Prix de vente": 100 }]));
+    expect(kinds).toContain("pnl");
+    expect(kinds).not.toContain("fiche");
+    expect(writes.some((w) => w.path === "orders/FP_2026_1")).toBe(true);
+  });
   it("faux positif LIVE évité : « Valid Client » ne matche pas « id c »", () => {
     const kinds = detectKinds(wb("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, "Valid Client": "ACME" }]));
     expect(kinds).toEqual(["pnl"]); // pas de salesData parasite

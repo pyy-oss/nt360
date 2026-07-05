@@ -6,7 +6,10 @@
  *  de la séquence (« 013 » ⇒ « 13 ») pour qu'un même FP zero-paddé différemment (courant en
  *  export Excel) ne produise pas deux clés → sinon double comptage CAS/backlog. */
 const fpKey = (v) => {
-  const m = String(v || "").match(/FP\/?\s*(\d{4})\/?\s*(\d+)/i);
+  // `(?!\d)` après l'année : une année à 5+ chiffres (coquille, ex. « FP/20244/13 ») ne doit PAS être
+  // tronquée à 4 chiffres (→ « FP/2024/4 ») et collisionner avec une AUTRE commande. Forme ambiguë →
+  // aucun match → null (rejetée), plutôt que fusionnée par erreur.
+  const m = String(v || "").match(/FP\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);
   if (!m) return null;
   if (/^0+$/.test(m[2])) return null; // FP factice .../0000
   const seq = String(parseInt(m[2], 10)); // « 013 » → « 13 », « 13 » → « 13 »
