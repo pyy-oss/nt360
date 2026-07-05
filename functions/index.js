@@ -170,6 +170,36 @@ exports.createUser = onCallG("createUser", async (req) => {
   return { ok: true, uid: user.uid };
 });
 
+// --- attachUser : RATTACHE un compte Firebase DÉJÀ EXISTANT (créé par une autre application du même
+// projet — l'authentification Firebase est partagée à l'échelle du projet) à cette app : pose le rôle
+// (custom claim, FUSIONNÉ pour ne pas écraser les claims d'une autre app) + crée/actualise la fiche
+// users/{uid}. Ne recrée PAS le compte et NE TOUCHE PAS au mot de passe. Direction uniquement, audité. ---
+exports.attachUser = onCallG("attachUser", async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const email = String(d.email || "").trim().toLowerCase();
+  const role = d.role;
+  if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "email invalide");
+  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (∈ 6 profils) requis");
+  const auth = getAuth();
+  let user;
+  try { user = await auth.getUserByEmail(email); }
+  catch (e) { if (e.code === "auth/user-not-found") throw new HttpsError("not-found", "aucun compte Firebase pour cet email (ni dans ce projet, ni dans ses autres apps)"); throw e; }
+  const name = String(d.name || "").trim() || user.displayName || email.split("@")[0];
+  // FUSION des claims : préserve d'éventuels claims d'une autre app du projet, ajoute/écrase `role`.
+  await auth.setCustomUserClaims(user.uid, { ...(user.customClaims || {}), role });
+  await db.collection("users").doc(user.uid).set(
+    { email, name, active: true, role, attachedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "user_attach", module: "habilitations",
+    entity: "user", entityId: user.uid, detail: { email, role }, ts: FieldValue.serverTimestamp(),
+  });
+  // Le compte devant rafraîchir sa session pour voir le nouveau claim (comme setUserRole).
+  return { ok: true, uid: user.uid, attached: true };
+});
+
 // --- setUserActive : active/désactive un compte (Auth `disabled` + fiche users.active), admin
 // uniquement. Un compte désactivé ne peut plus se connecter (ses jetons existants cessent d'être
 // rafraîchis, expiration ≤ 1 h). On interdit de désactiver son PROPRE compte (verrouillage). ---
