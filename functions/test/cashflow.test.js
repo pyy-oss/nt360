@@ -59,38 +59,46 @@ describe("cashflow — échéancier des encaissements", () => {
   });
 });
 
-describe("decaissements — sorties de cash (BC non soldés)", () => {
+describe("decaissements — payable = BC FACTURÉ (règle SOA), engagement à part", () => {
   const BC = [
-    { amountXof: 1000, status: "emis", etaContrat: "2026-08-15" },  // mois +1
-    { amountXof: 500, status: "livre", etaReel: "2026-06-01" },     // ETA passée → ISOLÉE (overdue)
-    { amountXof: 300, status: "emis" },                             // sans ETA → mois courant
-    { amountXof: 200, status: "emis", etaContrat: "2027-06-01" },   // au-delà de l'horizon
-    { amountXof: 999, status: "solde", etaContrat: "2026-08-01" },  // soldé → exclu
-    { amountXof: 0, status: "emis", etaContrat: "2026-08-01" },     // montant nul → exclu
+    { amountXof: 1000, status: "facture", etaContrat: "2026-08-15" }, // FACTURÉ → payable mois +1
+    { amountXof: 500, status: "facture", etaReel: "2026-06-01" },     // FACTURÉ, ETA passée → overdue
+    { amountXof: 300, status: "facture" },                            // FACTURÉ sans ETA → mois courant
+    { amountXof: 200, status: "facture", etaContrat: "2027-06-01" },  // FACTURÉ au-delà de l'horizon
+    { amountXof: 700, status: "emis", etaContrat: "2026-08-15" },     // engagé (non facturé) → engagement
+    { amountXof: 400, status: "livre", etaReel: "2026-06-01" },       // engagé, ETA passée → engagement imminent
+    { amountXof: 999, status: "solde", etaContrat: "2026-08-01" },    // payé → exclu
+    { amountXof: 0, status: "facture", etaContrat: "2026-08-01" },    // montant nul → exclu
   ];
   const d = decaissements(BC, "2026-07-01", { horizon: 6 });
-  it("échéancier des sorties par ETA ; ETA inconnue → mois courant, ETA passée → isolée (overdue)", () => {
-    expect(d.months[0].out).toBe(300);  // sans ETA seulement (l'ETA passée est isolée en overdue)
-    expect(d.months[1].out).toBe(1000); // ETA 08-15
-    expect(d.overdue).toBe(500);        // ETA passée (2026-06) → en retard, hors échéancier
+  it("payable (facturé) : ETA inconnue → mois courant, ETA passée → overdue, au-delà à part", () => {
+    expect(d.months[0].out).toBe(300);  // facturé sans ETA
+    expect(d.months[1].out).toBe(1000); // facturé ETA 08-15
+    expect(d.overdue).toBe(500);        // facturé ETA passée
     expect(d.overdueCount).toBe(1);
+    expect(d.total).toBe(2000);         // 1000 + 500 + 300 + 200 (que du facturé)
+    expect(d.beyond).toBe(200);
+    expect(d.openCount).toBe(4);        // 4 lignes facturées
   });
-  it("exclut les BC soldés et montants nuls ; au-delà de l'horizon à part ; additivité", () => {
-    expect(d.total).toBe(2000);   // 1000 + 500 + 300 + 200 (soldé & 0 exclus)
-    expect(d.beyond).toBe(200);   // ETA 2027
-    expect(d.openCount).toBe(4);
-    // Additivité : Σ échéancier + au-delà + en retard = total.
-    const sumMonths = d.months.reduce((s, m) => s + m.out, 0);
-    expect(sumMonths + d.beyond + d.overdue).toBe(d.total);
+  it("engagement (BC non facturés) compté À PART, hors payable", () => {
+    expect(d.engagedTotal).toBe(1100);  // 700 (emis) + 400 (livre)
+    expect(d.engagedCount).toBe(2);
+    expect(d.months[1].engaged).toBe(700); // emis ETA 08-15
+    expect(d.months[0].engaged).toBe(400); // livre ETA passée → imminent (mois courant)
   });
-  it("complétude ETA : part du montant à ETA connue (fiabilité de la ventilation)", () => {
-    expect(d.etaKnown).toBe(1700);        // 1000 + 500 + 200 (à ETA), 300 sans ETA exclu
-    expect(d.noEtaCount).toBe(1);         // une seule ligne sans ETA
-    expect(d.etaCompleteness).toBeCloseTo(0.85); // 1700 / 2000
+  it("les BC engagés n'entrent PAS dans le payable (total/out)", () => {
+    const sumOut = d.months.reduce((s, m) => s + m.out, 0);
+    expect(sumOut + d.beyond + d.overdue).toBe(d.total); // additivité sur le seul facturé
   });
-  it("complétude = 1 quand rien d'ouvert (aucune division par zéro)", () => {
-    const empty = decaissements([], "2026-07-01");
+  it("complétude ETA sur le payable facturé", () => {
+    expect(d.etaKnown).toBe(1700);        // facturés à ETA : 1000 + 500 + 200
+    expect(d.noEtaCount).toBe(1);         // un facturé sans ETA (300)
+    expect(d.etaCompleteness).toBeCloseTo(0.85);
+  });
+  it("complétude = 1 quand rien de facturé (aucune division par zéro)", () => {
+    const empty = decaissements([{ amountXof: 500, status: "emis" }], "2026-07-01");
+    expect(empty.total).toBe(0);
     expect(empty.etaCompleteness).toBe(1);
-    expect(empty.noEtaCount).toBe(0);
+    expect(empty.engagedTotal).toBe(500);
   });
 });

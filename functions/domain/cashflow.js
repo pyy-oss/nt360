@@ -75,15 +75,17 @@ function cashflow(invoices, orders, asOf, opts = {}) {
 }
 
 /**
- * Décaissements fournisseurs attendus : échéancier des sorties de cash à partir des lignes BC
- * NON SOLDÉES (on doit encore payer), positionnées au mois de leur ETA (réel sinon contractuel).
- * SYMÉTRIQUE avec l'AR (cashflow) : ETA inconnue → mois courant ; ETA PASSÉE → isolée « en retard »
- * (overdue), HORS échéancier futur — sinon la position nette (AR − décaissements) serait biaisée
- * (elle nettait des payables échus empilés sur le mois courant contre un AR échu, lui, sorti).
+ * Décaissements fournisseurs attendus. RÈGLE SOA : seule une FACTURE fournisseur est due — on ne
+ * paie pas un BC non encore facturé. Le PAYABLE (position de trésorerie) = BC au statut « facturé »
+ * (non payés), positionné au mois de son ETA (réel sinon contractuel). ETA inconnue → mois courant ;
+ * ETA passée → isolée « en retard » (overdue), HORS échéancier futur (symétrique avec l'AR).
+ * Les BC NON facturés (a_emettre/emis/livre) forment un ENGAGEMENT à venir (engaged*), compté À PART
+ * — sortie de cash POTENTIELLE, hors position nette de base (repris en scénario prudent).
  * @param {object[]} bcLines lignes BC (amountXof, status, etaReel, etaContrat)
  * @param {string} asOf date du jour (YYYY-MM-DD)
  * @param {{horizon?: number}} [opts]
  */
+const COMMITTED_BC = new Set(["a_emettre", "emis", "livre"]);
 function decaissements(bcLines, asOf, opts = {}) {
   const horizon = Math.max(1, opts.horizon || 6);
   const today = asOf || new Date().toISOString().slice(0, 10);
@@ -91,26 +93,36 @@ function decaissements(bcLines, asOf, opts = {}) {
   const curMonth = months[0];
   const inHorizon = new Set(months);
   const out = Object.fromEntries(months.map((m) => [m, 0]));
-  let beyond = 0, total = 0, overdue = 0, overdueCount = 0;
+  const engagedOut = Object.fromEntries(months.map((m) => [m, 0]));
+  let beyond = 0, total = 0, overdue = 0, overdueCount = 0, payableCount = 0;
+  let engagedTotal = 0, engagedCount = 0, engagedBeyond = 0;
+  let etaKnown = 0, noEtaCount = 0; // fiabilité de la prévision : part du payable à ETA connue
 
-  const open = (bcLines || []).filter((b) => b.status !== "solde" && (b.amountXof || 0) > 0);
-  let etaKnown = 0, noEtaCount = 0; // fiabilité de la prévision : part du montant ouvert à ETA connue
-  for (const b of open) {
+  for (const b of bcLines || []) {
     const amt = b.amountXof || 0;
-    total += amt;
+    if (amt <= 0) continue;
     const eta = b.etaReel || b.etaContrat;
-    if (!eta) { out[curMonth] += amt; noEtaCount++; continue; } // ETA inconnue → dû ce mois (comme AR sans échéance)
-    etaKnown += amt;
-    if (cmpDay(eta) < today) { overdue += amt; overdueCount++; continue; } // ETA passée → isolée (comme AR échu)
-    const mk = String(eta).slice(0, 7);
-    if (inHorizon.has(mk)) out[mk] += amt;
-    else beyond += amt;
+    const mk = eta ? String(eta).slice(0, 7) : null;
+    if (b.status === "facture") {
+      // PAYABLE : facture fournisseur due (règle SOA).
+      total += amt; payableCount++;
+      if (!eta) { out[curMonth] += amt; noEtaCount++; continue; }
+      etaKnown += amt;
+      if (cmpDay(eta) < today) { overdue += amt; overdueCount++; continue; }
+      if (inHorizon.has(mk)) out[mk] += amt; else beyond += amt;
+    } else if (COMMITTED_BC.has(b.status)) {
+      // ENGAGEMENT : commandé non facturé → sortie potentielle, hors position nette de base.
+      engagedTotal += amt; engagedCount++;
+      if (!eta || cmpDay(eta) < today) { engagedOut[curMonth] += amt; continue; } // pas d'ETA / ETA passée → imminent
+      if (inHorizon.has(mk)) engagedOut[mk] += amt; else engagedBeyond += amt;
+    }
+    // status 'solde' (payé) → hors compte.
   }
-  // etaCompleteness : plus il est bas, moins la ventilation mensuelle est fiable (montants sans ETA
-  // rabattus par défaut sur le mois courant). 1 si rien d'ouvert.
   return {
-    months: months.map((m) => ({ month: m, out: out[m] })), total, beyond, overdue, overdueCount,
-    openCount: open.length, etaKnown, noEtaCount, etaCompleteness: total > 0 ? etaKnown / total : 1,
+    months: months.map((m) => ({ month: m, out: out[m], engaged: engagedOut[m] })),
+    total, beyond, overdue, overdueCount, openCount: payableCount,
+    etaKnown, noEtaCount, etaCompleteness: total > 0 ? etaKnown / total : 1,
+    engagedTotal, engagedCount, engagedBeyond,
   };
 }
 
