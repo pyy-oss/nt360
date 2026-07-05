@@ -95,8 +95,10 @@ function parseSalesData(wb) {
       probability,
       weighted: amount * probability,
       closingDate,
-      marginPct: ((v) => (Math.abs(v) > 1.5 ? v / 100 : v))(num(val(r, keys, "mb%", "mb %", "% mb"))), // base 100→1, cohérent avec la fiche
-
+      // Pas de marge sur l'opportunité : `opportunities` est lisible au niveau « pipeline » (pas
+      // « rentabilite ») → y stocker un %MB fuiterait la marge hors du cloisonnement. La marge des
+      // affaires vit dans les fiches/commandes (projectSheetsMargin, orders), gatées « rentabilite ».
+      // L'opp→commande conserve d'ailleurs la marge P&L, jamais celle de l'opp (mergeCommandes).
       source: "salesData",
     });
   }
