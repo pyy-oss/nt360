@@ -11,6 +11,7 @@ const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage, projetableBacklog } = require("../domain/atterrissage");
 const { defaultMilestones } = require("../domain/milestones");
+const { buildNews } = require("../domain/news");
 const { alerts } = require("../domain/alerts");
 const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
@@ -104,7 +105,9 @@ async function recomputeAll(db, only) {
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...pipeline(opps, asOf, tiers), ...stamp } }); // global (rétro-compat)
+  const plSummary = pipeline(opps, asOf, tiers); // réutilisé par l'Actualité (couverture, closing, conversion…)
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, ...stamp } }); // global (rétro-compat)
+  let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
@@ -153,13 +156,22 @@ async function recomputeAll(db, only) {
       trendMilestones.push(...defaultMilestones(bp, asOf, currentFy));
     }
     const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
+    trendForNews = trend;
     w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   if (want("alerts")) w.push({ path: "summaries/alerts", data: { items: alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr), fy: currentFy, ...stamp } });
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-  if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr), ...stamp } });
+  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
+  if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
+  // ACTUALITÉ : bulletins d'événements clés (opportunités/commandes/facturation/backlog/fournisseurs)
+  // + recommandations majeures, à partir des agrégats calculés. Revenu/pipeline uniquement (SANS marge)
+  // → lisible au niveau « overview ». Recalculé avec les alertes.
+  if (want("alerts") || want("news")) {
+    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, fy: currentFy, asOf, thr: alertThr });
+    w.push({ path: "summaries/news", data: { ...news, ...stamp } });
+  }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
   // Découpées en CHUNKS (commandesRows/{i}) pour ne PAS dépasser la limite Firestore ~1 Mio/doc :
   // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).

@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -19,6 +19,7 @@ const from = (loader: () => Promise<Record<string, unknown>>, name: string): Mod
   lazy(() => loader().then((m) => ({ default: m[name] as Mod }))) as unknown as Mod;
 
 const Overview = from(() => import("./overview"), "Overview");
+const Actualite = from(() => import("./news"), "Actualite");
 const Pipeline = from(() => import("./pipeline"), "Pipeline");
 const OppList = from(() => import("./pipeline"), "OppList");
 const Am360 = from(() => import("./pipeline"), "Am360");
@@ -43,6 +44,7 @@ const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
 
 export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
+  { id: "news", key: "overview", label: "Actualité", icon: Newspaper, Component: Actualite },
   { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
   { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },
   { id: "am360", key: "pipeline", label: "AM 360°", icon: UserRound, Component: Am360 },
@@ -66,7 +68,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
 export const GROUPS: { label: string; ids: string[] }[] = [
-  { label: "Cockpit", ids: ["overview"] },
+  { label: "Cockpit", ids: ["overview", "news"] },
   { label: "Commercial", ids: ["pipeline", "opplist", "am360"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
