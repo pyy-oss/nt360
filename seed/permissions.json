@@ -1,34 +1,100 @@
 {
   "matrix": {
     "direction": {
-      "overview": "write", "pipeline": "write", "objectifs": "write", "facturation": "write",
-      "backlog": "write", "prevision": "write", "rentabilite": "write", "pnlprojet": "write",
-      "fournisseurs": "write", "bc": "write", "clients": "write", "domaines": "write", "habilitations": "write"
+      "overview": "write",
+      "pipeline": "write",
+      "objectifs": "write",
+      "facturation": "write",
+      "backlog": "write",
+      "prevision": "write",
+      "rentabilite": "write",
+      "pnlprojet": "write",
+      "fournisseurs": "write",
+      "bc": "write",
+      "clients": "write",
+      "domaines": "write",
+      "habilitations": "write",
+      "import": "write"
     },
     "commercial_dir": {
-      "overview": "read", "pipeline": "write", "objectifs": "read", "facturation": "read",
-      "backlog": "read", "prevision": "read", "rentabilite": "read", "pnlprojet": "none",
-      "fournisseurs": "none", "bc": "none", "clients": "read", "domaines": "read", "habilitations": "none"
+      "overview": "read",
+      "pipeline": "write",
+      "objectifs": "read",
+      "facturation": "read",
+      "backlog": "read",
+      "prevision": "read",
+      "rentabilite": "read",
+      "pnlprojet": "none",
+      "fournisseurs": "none",
+      "bc": "none",
+      "clients": "read",
+      "domaines": "read",
+      "habilitations": "none",
+      "import": "write"
     },
     "commercial": {
-      "overview": "read", "pipeline": "write", "objectifs": "none", "facturation": "none",
-      "backlog": "none", "prevision": "none", "rentabilite": "none", "pnlprojet": "none",
-      "fournisseurs": "none", "bc": "none", "clients": "read", "domaines": "none", "habilitations": "none"
+      "overview": "read",
+      "pipeline": "write",
+      "objectifs": "none",
+      "facturation": "none",
+      "backlog": "none",
+      "prevision": "none",
+      "rentabilite": "none",
+      "pnlprojet": "none",
+      "fournisseurs": "none",
+      "bc": "none",
+      "clients": "read",
+      "domaines": "none",
+      "habilitations": "none",
+      "import": "none"
     },
     "pmo": {
-      "overview": "read", "pipeline": "none", "objectifs": "none", "facturation": "none",
-      "backlog": "read", "prevision": "none", "rentabilite": "read", "pnlprojet": "write",
-      "fournisseurs": "read", "bc": "write", "clients": "none", "domaines": "read", "habilitations": "none"
+      "overview": "read",
+      "pipeline": "none",
+      "objectifs": "none",
+      "facturation": "none",
+      "backlog": "read",
+      "prevision": "none",
+      "rentabilite": "read",
+      "pnlprojet": "write",
+      "fournisseurs": "read",
+      "bc": "write",
+      "clients": "none",
+      "domaines": "read",
+      "habilitations": "none",
+      "import": "write"
     },
     "achats": {
-      "overview": "read", "pipeline": "none", "objectifs": "none", "facturation": "none",
-      "backlog": "read", "prevision": "none", "rentabilite": "none", "pnlprojet": "read",
-      "fournisseurs": "write", "bc": "write", "clients": "none", "domaines": "none", "habilitations": "none"
+      "overview": "read",
+      "pipeline": "none",
+      "objectifs": "none",
+      "facturation": "none",
+      "backlog": "read",
+      "prevision": "none",
+      "rentabilite": "none",
+      "pnlprojet": "read",
+      "fournisseurs": "write",
+      "bc": "write",
+      "clients": "none",
+      "domaines": "none",
+      "habilitations": "none",
+      "import": "write"
     },
     "lecture": {
-      "overview": "read", "pipeline": "read", "objectifs": "read", "facturation": "read",
-      "backlog": "read", "prevision": "read", "rentabilite": "read", "pnlprojet": "read",
-      "fournisseurs": "read", "bc": "read", "clients": "read", "domaines": "read", "habilitations": "none"
+      "overview": "read",
+      "pipeline": "read",
+      "objectifs": "read",
+      "facturation": "read",
+      "backlog": "read",
+      "prevision": "read",
+      "rentabilite": "read",
+      "pnlprojet": "read",
+      "fournisseurs": "read",
+      "bc": "read",
+      "clients": "read",
+      "domaines": "read",
+      "habilitations": "none",
+      "import": "none"
     }
   }
 }

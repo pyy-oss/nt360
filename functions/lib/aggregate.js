@@ -34,7 +34,27 @@ const filterInvoices = (invoices, period) =>
  * @param {FirebaseFirestore.Firestore} db
  * @param {string[]} [only] sous-ensemble d'agrégats (optionnel, sinon tout)
  */
+// Migration RBAC ADD-ONLY : garantit le module « import » dans la matrice opposable (config/permissions).
+// Ce module gouverne la capacité d'import/fiabilisation (importDelta/setInvoiceFp/patchOrder), que les
+// callables lisent désormais via requireWrite('import'). La clé n'est ajoutée QUE si absente pour un rôle
+// (jamais d'écrasement d'une valeur existante) → aucun verrouillage des rôles d'import après bascule, sans
+// toucher aux choix d'admin. Idempotent (no-op une fois la clé posée).
+const IMPORT_CAPABLE = ["direction", "commercial_dir", "pmo", "achats"];
+async function ensureImportPermission(db) {
+  const ref = db.doc("config/permissions");
+  const matrix = ((await ref.get()).data() || {}).matrix;
+  if (!matrix || typeof matrix !== "object") return;
+  const patch = {};
+  for (const [role, row] of Object.entries(matrix)) {
+    if (row && typeof row === "object" && !("import" in row)) {
+      patch[`matrix.${role}.import`] = IMPORT_CAPABLE.includes(role) ? "write" : "none";
+    }
+  }
+  if (Object.keys(patch).length) await ref.update(patch);
+}
+
 async function recomputeAll(db, only) {
+  try { await ensureImportPermission(db); } catch (e) { /* migration best-effort, ne bloque pas le recompute */ }
   // Recompute PARTIEL : orders/invoices/opps/projectSheets alimentent toujours mergeCommandes ;
   // bcLines/creditLines/objectives ne sont lus QUE si un summary demandé en a besoin. Un recompute
   // ciblé (ex. après un changement de statut BC → ["suppliers","alerts"]) évite ainsi des lectures.

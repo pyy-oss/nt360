@@ -406,7 +406,8 @@ exports.syncSalesDataNow = onCallG("syncSalesDataNow", { memoryMiB: 512, timeout
 // --- Import de delta à la demande : fichier XLSX (modèle Facturation DF / P&L / LIVE)
 // envoyé en base64 par l'UI. Réutilise le parsing testé (buildWrites), upsert idempotent
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
-const IMPORT_ROLES = ["direction", "commercial_dir", "pmo", "achats"];
+// Capacité d'IMPORT / fiabilisation (importDelta, setInvoiceFp, patchOrder) gouvernée par le module
+// « import » de la matrice opposable (requireWrite) — plus de liste de rôles figée.
 // Bornes de robustesse à l'import (anti-OOM / anti-bombe de décompression / anti-timeout).
 const MAX_SHEETS = 60;                        // onglets par classeur
 const MAX_ZIP_ENTRIES = 100;                  // classeurs par ZIP
@@ -414,8 +415,7 @@ const MAX_ENTRY_BYTES = 50 * 1024 * 1024;     // décompressé par classeur
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024;    // décompressé cumulé sur le ZIP
 
 exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import requis");
+  await requireWrite(req, "import");
   const b64 = req.data?.fileB64;
   const filename = String(req.data?.filename || "delta.xlsx");
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
@@ -503,8 +503,7 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
 // --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.
 // Recalcule ensuite (rattachement, taux de facturation, RAF dérivé des commandes opp/fiche). ---
 exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
+  await requireWrite(req, "import");
   const { fpKey } = require("./lib/ids");
   const id = String(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id facture requis");
@@ -524,8 +523,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds:
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
 exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!IMPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit d'import/données requis");
+  await requireWrite(req, "import");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const d = req.data || {};
