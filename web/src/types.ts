@@ -21,7 +21,10 @@ export type AtterrissageNext = {
   projete?: number; cafProjete?: number; objectif?: number; ecart?: number; objectifCaf?: number; ecartCaf?: number;
 };
 export interface AtterrissageSummary {
-  fy?: number; next?: AtterrissageNext; realiseCas?: number; backlog?: number; backlogProjete?: number; reporteCaf?: number; pipelinePondere?: number;
+  fy?: number; next?: AtterrissageNext; realiseCas?: number;
+  // Assiette opposable : signé/facturé non daté, exclu du réalisé (à dater pour fiabiliser le R/O).
+  realiseCasUndated?: number; realiseCasUndatedCount?: number; factureNUndated?: number; factureNUndatedCount?: number;
+  backlog?: number; backlogProjete?: number; reporteCaf?: number; pipelinePondere?: number;
   pipelineRetard?: number; pipelineRetardCount?: number;
   projete?: number; cafProjete?: number;
   objectif?: number; ecart?: number; probaAtteinte?: number;

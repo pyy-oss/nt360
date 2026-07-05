@@ -5,7 +5,7 @@
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
 const { reportedFromMilestones } = require("./milestones");
-const { fpKey } = require("../lib/ids");
+const { fpKey, plausibleYear } = require("../lib/ids");
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 
@@ -27,7 +27,15 @@ const projetableBacklog = (o) => Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o
  */
 function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, milestonesByFp) {
   const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
-  const realiseCas = sum(orders.filter((o) => (o.yearPo || 0) === fy), (o) => o.cas);
+  // ASSIETTE OPPOSABLE du Réalisé CAS : année de PO BORNÉE (plausibleYear écarte une année aberrante,
+  // ex. 20226). Les commandes annulées sont déjà exclues en amont (overlay). Le CAS signé dont l'année
+  // de PO est MANQUANTE/INVALIDE n'est attribuable à aucun exercice → exclu du réalisé, mais EXPOSÉ
+  // (montant + nb) pour fiabiliser le R/O : ce sont des commandes « à dater » (via « Corriger »).
+  const orderYear = (o) => plausibleYear(o.yearPo) || 0;
+  const realiseCas = sum(orders.filter((o) => orderYear(o) === fy), (o) => o.cas);
+  const undatedOrders = orders.filter((o) => (o.cas || 0) > 0 && !orderYear(o));
+  const realiseCasUndated = sum(undatedOrders, (o) => o.cas);
+  const realiseCasUndatedCount = undatedOrders.length;
   const backlog = sum(orders.filter((o) => (o.raf || 0) > 0), (o) => Math.max(o.raf || 0, 0));
   // Fenêtre D Prev = l'EXERCICE (D Prev dans l'année {fy}). Les certitudes GLISSENT jusqu'à
   // l'année en cours : une D Prev déjà PASSÉE dans l'exercice compte toujours (elle n'est pas
@@ -61,6 +69,11 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
 
   const factureN = sum(invoices.filter((i) => yearOf(i.date) === String(fy)), (i) => i.amountHt);
   const factureN1 = sum(invoices.filter((i) => yearOf(i.date) === String(fy - 1)), (i) => i.amountHt);
+  // Assiette opposable du Réalisé CAF : factures sans DATE → non attribuables à un exercice, exclues
+  // du réalisé, exposées (à dater via « Factures »).
+  const undatedInv = invoices.filter((i) => (i.amountHt || 0) > 0 && !yearOf(i.date));
+  const factureNUndated = sum(undatedInv, (i) => i.amountHt);
+  const factureNUndatedCount = undatedInv.length;
 
   // Projection CAF (facturation) : ce qui sera in fine facturé = déjà facturé (CAF réalisé)
   // + backlog écoulable (RAF des commandes signées, reste à facturer) + pipeline pondéré
@@ -95,7 +108,7 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
   // en commande) et le réalisé / facturé DÉJÀ enregistrés pour N+1. Le RAF glissant N'y entre PAS
   // (il est facturé en N) : seule la part reportée constitue le backlog entrant en N+1.
   const fyNext = fy + 1;
-  const realiseCasNext = sum(orders.filter((o) => (o.yearPo || 0) === fyNext), (o) => o.cas);
+  const realiseCasNext = sum(orders.filter((o) => orderYear(o) === fyNext), (o) => o.cas);
   const factureNext = sum(invoices.filter((i) => yearOf(i.date) === String(fyNext)), (i) => i.amountHt);
   const pipelineNext = sum(opps.filter((o) => isActive(o) && yearOf(o.closingDate) === String(fyNext) && !alreadyBooked(o)), pw);
   const objGlobalNext = objectives.filter((o) => Number(o.fiscalYear) === fyNext && (!o.scope || o.scope === "global"));
@@ -117,6 +130,10 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
     fy,
     next,                  // amorce de projection de l'exercice suivant (alimentée par le reporté)
     realiseCas,
+    // Assiette opposable : part du signé/facturé NON attribuable à l'exercice (année/date manquante),
+    // exclue du réalisé et donc du R/O. À dater pour fiabiliser le ratio.
+    realiseCasUndated, realiseCasUndatedCount,
+    factureNUndated, factureNUndatedCount,
     backlog,
     backlogProjete,        // RAF plafonné à (CAS − facturé), NET du report N+1, utilisé dans cafProjete
     reporteCaf,            // CA reporté sur l'exercice suivant (exclu du cafProjete courant)
