@@ -41,6 +41,7 @@ service cloud.firestore {
         : id.matches('alertsMargin.*') ? 'rentabilite'
         : id.matches('alerts.*') ? 'overview'
         : id.matches('dataQuality.*') ? 'overview'
+        : id.matches('qualityHistory.*') ? 'overview'
         : id.matches('trends.*') ? 'overview'
         : id.matches('news.*') ? 'overview'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :

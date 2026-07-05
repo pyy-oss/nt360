@@ -214,7 +214,19 @@ async function recomputeAll(db, only) {
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
-  if (want("alerts") || want("dataQuality")) w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
+  if (want("alerts") || want("dataQuality")) {
+    w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
+    // Snapshot QUOTIDIEN de la qualité (tendance d'assainissement) : un point par jour (clé = asOf),
+    // écrase le point du jour, borné à 90 jours. Non sensible (score + compteurs), lisible à overview.
+    const day = String(asOf || "").slice(0, 10);
+    if (day) {
+      const prev = (await db.doc("summaries/qualityHistory").get()).data() || {};
+      const days = (Array.isArray(prev.days) ? prev.days : []).filter((d) => d && d.date !== day);
+      days.push({ date: day, score: dqSummary.score, anomalies: (dqSummary.issues || []).reduce((s, i) => s + (i.count || 0), 0), types: (dqSummary.issues || []).length });
+      days.sort((a, b) => (a.date < b.date ? -1 : 1));
+      w.push({ path: "summaries/qualityHistory", data: { days: days.slice(-90), ...stamp } });
+    }
+  }
   // ACTUALITÉ : bulletins d'événements clés (opportunités/commandes/facturation/backlog/fournisseurs)
   // + recommandations majeures, à partir des agrégats calculés. Revenu/pipeline uniquement (SANS marge)
   // → lisible au niveau « overview ». Recalculé avec les alertes.
