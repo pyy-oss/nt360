@@ -215,13 +215,13 @@ export const OppList: FC<Props> = () => {
             <select aria-label="Business Unit" className="field" value={f.bu} onChange={(e) => setF({ ...f, bu: e.target.value })}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
             <input className="field w-28" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
             <select aria-label="Étape du pipeline" className="field" value={f.stage} onChange={(e) => setStage(e.target.value)}>{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => <option key={s} value={s}>{s} · {STAGE_SHORT[s]}</option>)}</select>
-            {/* Proba = IdC : dérivée de la source pour une opp importée → non éditée par la correction. */}
-            <input className="field w-28" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} disabled={f.patch} onChange={(e) => setF({ ...f, probability: e.target.value })} />
+            {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
+            <input className="field w-28" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
             <input className="field" aria-label="Date de clôture prévue" type="date" value={f.closingDate} onChange={(e) => setF({ ...f, closingDate: e.target.value })} />
             <Busy label={f.patch ? "Corriger" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
               fn={async () => {
                 if (f.patch) {
-                  await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu });
+                  await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined });
                 } else {
                   await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined });
                 }

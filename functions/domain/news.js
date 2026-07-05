@@ -109,7 +109,9 @@ function buildNews(x) {
     action: "Requalifier ou re-dater les opportunités en retard (ou passer en perdu).",
   });
   const byAm = pl.byAM || {};
-  const amTop = Object.entries(byAm).sort((a, b) => b[1] - a[1])[0];
+  // « AUTRE » = seau des opps sans AM (groupSum) : ce n'est pas un commercial → exclu du candidat de
+  // concentration (sinon fausse alerte de dépendance attribuée à « AUTRE »). Dénominateur inchangé.
+  const amTop = Object.entries(byAm).filter(([k]) => k && k !== "AUTRE").sort((a, b) => num(b[1]) - num(a[1]))[0];
   const amTotal = Object.values(byAm).reduce((s, v) => s + num(v), 0);
   pushIf(B, amTop && amTotal > 0 && PCT(amTop[1], amTotal) > thr.concentrationAm, {
     id: "pipeline_concentration", domain: "pipeline", severity: "medium", module: "am360",
@@ -153,7 +155,8 @@ function buildNews(x) {
   });
   // Concentration client du backlog : un client pèse une part majeure → risque de dépendance.
   const byClient = bk.byClient || {};
-  const clTop = Object.entries(byClient).sort((a, b) => num(b[1]) - num(a[1]))[0];
+  // « AUTRE » = commandes sans client → exclu du candidat de concentration (pas un vrai client).
+  const clTop = Object.entries(byClient).filter(([k]) => k && k !== "AUTRE").sort((a, b) => num(b[1]) - num(a[1]))[0];
   const clTotal = Object.values(byClient).reduce((s, v) => s + num(v), 0);
   pushIf(B, clTop && clTotal > 0 && PCT(num(clTop[1]), clTotal) > thr.concentrationClient, {
     id: "backlog_concentration_client", domain: "backlog", severity: "medium", module: "overview",
@@ -212,12 +215,14 @@ function buildNews(x) {
   });
 
   // — FOURNISSEURS / BC —
-  const saturated = (sup.bySupplier || []).filter((s) => s.state === "saturation");
+  // Liste COMPLÈTE des fournisseurs saturés (noms) — `sup.saturated` n'est pas tronqué, contrairement
+  // à `sup.bySupplier` (top 50 par exposition) qui manquerait les saturations à faible exposition.
+  const saturated = sup.saturated || [];
   pushIf(B, saturated.length > 0, {
     id: "fournisseur_sature", domain: "fournisseurs", severity: "medium", module: "fournisseurs",
     title: `${saturated.length} fournisseur(s) en saturation de crédit`,
     detail: "L'encours atteint ou dépasse la ligne de crédit autorisée — risque de blocage d'approvisionnement.",
-    refs: saturated.slice(0, 8).map((s) => s.name),
+    refs: saturated.slice(0, 8),
     action: "Renégocier la ligne de crédit ou solder les encours des fournisseurs saturés.",
   });
   const today = String(x.asOf || "").slice(0, 10);

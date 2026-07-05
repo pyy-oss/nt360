@@ -456,7 +456,7 @@ export const DataQuality: FC<Props> = () => {
       <div className={cols2}>
         <Card title="Score de complétude des données">
           <Gauge value={score} color={score >= QUALITY.GOOD ? T.emerald : score >= QUALITY.FAIR ? T.gold : T.clay} />
-          <div className="text-[11px] text-faint text-center mt-1">1 − anomalies pondérées / enregistrements</div>
+          <div className="text-[11px] text-faint text-center mt-1">enregistrements / (enregistrements + anomalies pondérées)</div>
         </Card>
         <Card title="Volumes ingérés">
           <div className="grid grid-cols-2 gap-2">
