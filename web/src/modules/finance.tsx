@@ -5,6 +5,7 @@ import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
+import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
@@ -85,10 +86,10 @@ export const Objectifs: FC<Props> = () => {
             <label className="flex flex-col gap-1 text-xs text-muted">Année fiscale
               <input className="field" type="number" min={2000} placeholder="2026" value={f.fiscalYear} onChange={(e) => set("fiscalYear", e.target.value)} /></label>
             <label className="flex flex-col gap-1 text-xs text-muted">Périmètre
-              <select className="field" value={f.scope} onChange={(e) => set("scope", e.target.value)}>{SCOPES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select></label>
+              <Select value={f.scope} onChange={(v) => set("scope", v)} ariaLabel="Périmètre" options={SCOPES.map((s) => ({ value: s.v, label: s.label }))} /></label>
             <label className="flex flex-col gap-1 text-xs text-muted">{f.scope === "global" ? "Valeur (— global)" : f.scope === "bu" ? "BU" : f.scope === "commercial" ? "Commercial (AM)" : "Client"}
               {f.scope === "bu"
-                ? <select className="field" value={f.scopeValue} onChange={(e) => set("scopeValue", e.target.value)}>{["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => <option key={b}>{b}</option>)}</select>
+                ? <Select value={f.scopeValue} onChange={(v) => set("scopeValue", v)} ariaLabel="BU" options={["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => ({ value: b, label: b }))} />
                 : <input className="field" disabled={f.scope === "global"} placeholder={f.scope === "global" ? "all" : "nom / identifiant"} value={f.scope === "global" ? "all" : f.scopeValue} onChange={(e) => set("scopeValue", e.target.value)} />}</label>
             <label className="flex flex-col gap-1 text-xs text-muted">Libellé (optionnel)
               <input className="field" placeholder="ex. Objectif CODIR 2026" value={f.label} onChange={(e) => set("label", e.target.value)} /></label>
@@ -149,8 +150,8 @@ function InvoiceDateFixer({ inv }: { inv: Invoice }) {
   const changed = date !== (inv.date || "") || due !== (inv.dueDate || "");
   return (
     <span className="inline-flex gap-1 items-center">
-      <input className="field w-32 !py-1 text-xs" type="date" aria-label="Date de facturation" value={date} onChange={(e) => setDate(e.target.value)} />
-      <input className="field w-32 !py-1 text-xs" type="date" aria-label="Date d'échéance" value={due} onChange={(e) => setDue(e.target.value)} />
+      <DateField className="w-36 !py-1 text-xs" ariaLabel="Date de facturation" value={date} onChange={setDate} placeholder="facturation" />
+      <DateField className="w-36 !py-1 text-xs" ariaLabel="Date d'échéance" value={due} onChange={setDue} placeholder="échéance" />
       {changed && inv.id && <Busy variant="ghost" label="MàJ" okMsg="Facture mise à jour" fn={() => patchInvoice({ id: inv.id!, date: date || null, dueDate: due || null })} />}
     </span>
   );

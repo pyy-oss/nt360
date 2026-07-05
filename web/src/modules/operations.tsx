@@ -7,6 +7,7 @@ import { useNav } from "../lib/nav";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
+import { Select, DateField } from "../design/inputs";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
@@ -137,7 +138,7 @@ function CreditEditor({ name, authorized, opening, openingDate }: { name: string
     <span className="inline-flex gap-1.5 items-center flex-wrap justify-end">
       <input className="field w-24 !py-1" aria-label={`Crédit autorisé ${name}`} value={a} onChange={(e) => setA(e.target.value)} placeholder="autorisé" />
       <input className="field w-24 !py-1" aria-label={`Solde d'ouverture ${name}`} value={o} onChange={(e) => setO(e.target.value)} placeholder="ouverture" />
-      <input className="field w-32 !py-1" type="date" aria-label={`Date d'ouverture ${name}`} value={d} onChange={(e) => setD(e.target.value)} />
+      <DateField className="w-36 !py-1" ariaLabel={`Date d'ouverture ${name}`} value={d} onChange={setD} placeholder="date SOA" />
       <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, openingBalance: Number(o) || 0, openingDate: d || null })} />
     </span>
   );
@@ -192,10 +193,10 @@ function BcImport() {
             <input className="field" placeholder="N° BC" aria-label="Numéro de BC" value={f.bcNumber} onChange={(e) => setF({ ...f, bcNumber: e.target.value })} />
             <input className="field" placeholder="Fournisseur" aria-label="Fournisseur" value={f.supplier} onChange={(e) => setF({ ...f, supplier: e.target.value })} />
             <input className="field w-40" placeholder="N° FP (optionnel)" aria-label="Numéro FP" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
-            <select className="field" aria-label="Type de dépense" value={f.expenseType} onChange={(e) => setF({ ...f, expenseType: e.target.value })}>{["Hardware", "Licence", "Software", "Support", "Service Pro", "Mixte"].map((t) => <option key={t}>{t}</option>)}</select>
+            <Select className="w-40" ariaLabel="Type de dépense" value={f.expenseType} onChange={(v) => setF({ ...f, expenseType: v })} options={["Hardware", "Licence", "Software", "Support", "Service Pro", "Mixte"].map((t) => ({ value: t, label: t }))} />
             <input className="field w-32" placeholder="Montant XOF" aria-label="Montant XOF" value={f.amountXof} onChange={(e) => setF({ ...f, amountXof: e.target.value })} />
-            <select className="field" aria-label="Statut du BC" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>{BC_STAGES.map((s) => <option key={s} value={s}>{bcLabel(s)}</option>)}</select>
-            <input className="field" type="date" aria-label="Date du BC" value={f.dateIn} onChange={(e) => setF({ ...f, dateIn: e.target.value })} />
+            <Select className="w-40" ariaLabel="Statut du BC" value={f.status} onChange={(v) => setF({ ...f, status: v })} options={BC_STAGES.map((s) => ({ value: s, label: bcLabel(s) }))} />
+            <DateField className="w-40" ariaLabel="Date du BC" value={f.dateIn} onChange={(v) => setF({ ...f, dateIn: v })} placeholder="date BC" />
             <input className="field" placeholder="Description" aria-label="Description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
             <label className={cx("btn-ghost !px-2.5 !py-1 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer", analyzing && "opacity-60 pointer-events-none")}>
               <Upload size={14} aria-hidden="true" />{analyzing ? "Analyse du PDF…" : pdf ? pdf.name : "Joindre le PDF (auto-remplit)"}
@@ -316,10 +317,9 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
   const [s, setS] = useState(status);
   const toast = useToast();
   return (
-    <select aria-label="Statut de la ligne BC" className="field !py-1" value={s}
-      onChange={async (e) => { const v = e.target.value; const prev = s; setS(v); try { await setBcStatus(id, v); toast("Statut mis à jour", "ok"); } catch { setS(prev); toast("Échec de la mise à jour du statut", "err"); } }}>
-      {BC_STAGES.map((x) => <option key={x} value={x}>{bcLabel(x)}</option>)}
-    </select>
+    <Select ariaLabel="Statut de la ligne BC" className="!py-1" value={s}
+      onChange={async (v) => { const prev = s; setS(v); try { await setBcStatus(id, v); toast("Statut mis à jour", "ok"); } catch { setS(prev); toast("Échec de la mise à jour du statut", "err"); } }}
+      options={BC_STAGES.map((x) => ({ value: x, label: bcLabel(x) }))} />
   );
 }
 

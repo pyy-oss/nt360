@@ -4,6 +4,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
+import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
@@ -265,10 +266,8 @@ function NotificationForm({ initial }: { initial: NotificationConfig }) {
         </label>
         <label className="flex flex-col gap-1 text-[13px]">
           <span className="text-ink font-medium">Sévérité minimale</span>
-          <select className="field !py-1" value={sev} onChange={(e) => setSev(e.target.value as "high" | "medium")} aria-label="Sévérité minimale">
-            <option value="high">Critiques seulement (high)</option>
-            <option value="medium">Moyennes et critiques</option>
-          </select>
+          <Select className="!py-1" value={sev} onChange={(v) => setSev(v as "high" | "medium")} ariaLabel="Sévérité minimale"
+            options={[{ value: "high", label: "Critiques seulement (high)" }, { value: "medium", label: "Moyennes et critiques" }]} />
         </label>
         <label className="flex flex-col gap-1 text-[13px] sm:col-span-2">
           <span className="text-ink font-medium">URL du webhook (Slack / Teams)</span>
@@ -348,9 +347,8 @@ function CreateUserCard() {
         </label>
         <label className="flex flex-col gap-1 text-[13px]">
           <span className="text-ink font-medium">Rôle</span>
-          <select className="field !py-1" value={role} onChange={(e) => setRole(e.target.value)} aria-label="Rôle du nouvel utilisateur">
-            {ROLE_LIST.map((r) => <option key={r}>{r}</option>)}
-          </select>
+          <Select className="!py-1" value={role} onChange={setRole} ariaLabel="Rôle du nouvel utilisateur"
+            options={ROLE_LIST.map((r) => ({ value: r, label: r }))} />
         </label>
         <label className="flex flex-col gap-1 text-[13px]">
           <span className="text-ink font-medium">Mot de passe initial</span>
@@ -409,9 +407,8 @@ function RoleSetter({ uid, current }: { uid: string; current?: string }) {
   const [role, setRole] = useState(current && ROLE_LIST.includes(current) ? current : "lecture");
   return (
     <span className="inline-flex gap-1.5">
-      <select aria-label="Rôle de l'utilisateur" className="field !py-1" value={role} onChange={(e) => setRole(e.target.value)}>
-        {ROLE_LIST.map((r) => <option key={r}>{r}</option>)}
-      </select>
+      <Select ariaLabel="Rôle de l'utilisateur" className="!py-1" value={role} onChange={setRole}
+        options={ROLE_LIST.map((r) => ({ value: r, label: r }))} />
       <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
     </span>
   );

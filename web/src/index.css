@@ -38,6 +38,13 @@
        ont leur propre overflow-x isolé). Empêche un débordement résiduel de casser le mobile. */
     overflow-x: hidden;
   }
+  /* Cases à cocher / radios aux couleurs du thème (accent doré) — cohérence avec les contrôles premium. */
+  input[type="checkbox"], input[type="radio"] {
+    accent-color: rgb(var(--gold));
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+  }
   /* Scrollbars discrètes (couleur = token line) */
   * {
     scrollbar-width: thin;
