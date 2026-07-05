@@ -3,7 +3,7 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
@@ -89,6 +89,7 @@ function CarryoverCard() {
   const { rows: orders } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
   const { rows: mstones } = useCollectionData<BillingMilestonesDoc>(canEdit ? "billingMilestones" : null);
   const [editFp, setEditFp] = useState<string | null>(null);
+  const [seg, setSeg] = useState<"all" | "ms" | "drift" | "none">("all");
   if (!canEdit) return null;
   const msBy = new Map<string, BillingMilestone[]>();
   for (const m of mstones) if (m.fp) msBy.set(m.fp.toUpperCase(), (m.milestones || []) as BillingMilestone[]);
@@ -99,37 +100,65 @@ function CarryoverCard() {
     if (!ms) return 0;
     return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
   };
+  const msOf = (o: OpenOrder) => msBy.get((o.fp || "").toUpperCase());
+  const driftOf = (o: OpenOrder) => { const ms = msOf(o); return !!ms?.length && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(o.projetable); };
   const open: OpenOrder[] = orders
     .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
     .filter((o) => o.projetable > 0)
     .sort((a, b) => b.projetable - a.projetable);
+  const totalRaf = open.reduce((s, o) => s + o.projetable, 0);
   const totalReporte = open.reduce((s, o) => s + repOf(o), 0);
   const totalMarge = open.reduce((s, o) => s + rateOf(o) * repOf(o), 0);
+  const withMs = open.filter((o) => msOf(o)?.length);
+  const drifting = open.filter(driftOf);
+  // Filtre segmenté : concentrer sur ce qui demande une action (à réconcilier) plutôt que défiler 569 lignes.
+  const SEGS = [
+    { value: "all" as const, label: "Tous", count: open.length },
+    { value: "ms" as const, label: "À jalons", count: withMs.length },
+    { value: "drift" as const, label: "À réconcilier", count: drifting.length },
+    { value: "none" as const, label: "Sans jalon", count: open.length - withMs.length },
+  ];
+  const shown = seg === "ms" ? withMs : seg === "drift" ? drifting : seg === "none" ? open.filter((o) => !msOf(o)?.length) : open;
   const editing = editFp ? open.find((o) => o.fp === editFp) : null;
+  // Rendu atténué d'un zéro (réduit le bruit visuel des colonnes majoritairement nulles).
+  const num = (v: number, tone = "text-steel") => v > 0 ? <span className={cx("tabnum", tone)}>{fmt(v)}</span> : <span className="tabnum text-faint">·</span>;
   return (
     <Card title="Jalons de facturation (par projet)">
-      {totalReporte > 0 && (
-        <div className={grid4}>
-          <Kpi label="Total reporté sur N+1" value={fmt(totalReporte)} tone="steel" sub="CA exclu du Projeté CAF courant" />
-          {canMargin && <Kpi label="Marge reportée sur N+1" value={fmt(totalMarge)} tone="steel" sub="au prorata du CA reporté" />}
-        </div>
+      {/* Synthèse : contexte avant les lignes. Total reporté N+1 (et marge) mis en avant s'il existe. */}
+      <div className={grid4}>
+        <Kpi label="Projets ouverts" value={open.length.toLocaleString("fr-FR")} sub={`${fmt(totalRaf)} RAF projetable`} />
+        <Kpi label="Échéancés (jalons)" value={withMs.length.toLocaleString("fr-FR")} tone="gold" sub={drifting.length ? `${drifting.length} à réconcilier` : "à jour"} />
+        <Kpi label="Reporté sur N+1" value={fmt(totalReporte)} tone="steel" sub="exclu du Projeté CAF courant" />
+        {canMargin && <Kpi label="Marge reportée N+1" value={fmt(totalMarge)} tone="steel" sub="au prorata du CA reporté" />}
+      </div>
+      {drifting.length > 0 && (
+        <button type="button" onClick={() => setSeg("drift")} className="mt-3 flex w-full items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-left text-[13px] text-ink hover:bg-gold/15">
+          <span aria-hidden="true">⚠</span><span><b>{drifting.length} projet{drifting.length > 1 ? "s" : ""} à réconcilier</b> — la facturation a progressé, Σ jalons ≠ RAF projetable. Réajuste l'échéancier.</span>
+        </button>
       )}
+      <div className="mt-3 mb-2">
+        <Segmented value={seg} onChange={setSeg} options={SEGS} ariaLabel="Filtrer les projets" />
+      </div>
       {editing && <MilestoneEditor fp={editing.fp!} raf={editing.projetable} initial={msBy.get((editing.fp || "").toUpperCase()) || []} fy={fy} onClose={() => setEditFp(null)} />}
       <ListView
-        rows={open}
+        rows={shown}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire || ""]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colNum("RAF projetable", (r) => money(r.projetable), (r) => r.projetable),
-          colNum("Reporté N+1", (r: OpenOrder) => <span className="tabnum text-steel" title="Dérivé des jalons (Σ après le 31/12), borné au RAF projetable">{money(repOf(r))}</span>, (r: OpenOrder) => repOf(r)),
-          ...(canMargin ? [colNum("Marge reportée", (r: OpenOrder) => money(rateOf(r) * repOf(r)), (r: OpenOrder) => rateOf(r) * repOf(r))] : []),
-          colText("Jalons", (r: OpenOrder) => {
-            const ms = msBy.get((r.fp || "").toUpperCase());
-            const drift = !!ms && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(r.projetable);
-            return <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditFp(r.fp!)}>{ms?.length ? `${ms.length} jalon${ms.length > 1 ? "s" : ""}` : "Définir"}{drift ? " ⚠" : ""}</button>;
-          }, (r: OpenOrder) => (msBy.get((r.fp || "").toUpperCase())?.length || 0)),
+          colNum("Reporté N+1", (r: OpenOrder) => <span title="Dérivé des jalons (Σ après le 31/12), borné au RAF projetable">{num(repOf(r))}</span>, (r: OpenOrder) => repOf(r)),
+          ...(canMargin ? [colNum("Marge reportée", (r: OpenOrder) => num(rateOf(r) * repOf(r)), (r: OpenOrder) => rateOf(r) * repOf(r))] : []),
+          colNum("Jalons", (r: OpenOrder) => {
+            const ms = msOf(r);
+            return (
+              <button className="btn-ghost !px-2.5 !py-1 text-xs min-h-[34px] inline-flex items-center gap-1.5 justify-end" onClick={() => setEditFp(r.fp!)} title={ms?.length ? "Modifier l'échéancier" : "Définir l'échéancier"}>
+                {ms?.length ? <><span className="tabnum text-ink">{ms.length}</span><span className="text-muted">jalon{ms.length > 1 ? "s" : ""}</span></> : <span className="text-gold">Définir</span>}
+                {driftOf(r) && <Badge tone="gold">⚠</Badge>}
+              </button>
+            );
+          }, (r: OpenOrder) => (msOf(r)?.length || 0)),
         ]}
       />
       <Tip><b>Jalons</b> (≤ 15, date + montant) : échéancier prévisionnel de facturation, <b>source unique</b> du report N+1. <b>Reporté N+1</b> (lecture seule) = Σ des jalons datés <b>après le 31/12</b>, borné au RAF projetable — ce CA (et sa marge) est <b>exclu du Projeté CAF</b> courant (Prévision / Vue d'ensemble) et amorce l'exercice N+1. Un <b>⚠</b> signale une <b>réconciliation</b> (Σ jalons ≠ RAF, la facturation a progressé). L'enregistrement relance le calcul.</Tip>

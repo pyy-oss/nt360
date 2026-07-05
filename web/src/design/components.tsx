@@ -55,6 +55,25 @@ export function Badge({ children, tone = "neutral" }: { children: ReactNode; ton
   return <span className={cx("inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold", BADGE[tone])}>{children}</span>;
 }
 
+/** Contrôle segmenté (filtres rapides / bascule de vue). Cibles tactiles ≥ 34 px, repli en wrap. */
+export function Segmented<T extends string>({ value, onChange, options, ariaLabel }:
+  { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; count?: number }[]; ariaLabel?: string }) {
+  return (
+    <div role="tablist" aria-label={ariaLabel} className="inline-flex flex-wrap gap-0.5 rounded-lg bg-panel2 p-0.5">
+      {options.map((o) => {
+        const on = value === o.value;
+        return (
+          <button key={o.value} type="button" role="tab" aria-selected={on} onClick={() => onChange(o.value)}
+            className={cx("inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium min-h-[34px] transition-colors",
+              on ? "bg-gold/20 text-gold" : "text-muted hover:text-ink hover:bg-white/[.03]")}>
+            {o.label}{o.count != null && <span className={cx("tabnum", on ? "text-gold/70" : "text-faint")}>{o.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // --- Chaîne de valeur (Overview) ---
 export function Stage({ idx, label, value, accent, sub }: { idx: number; label: string; value: string; accent: string; sub?: string }) {
   return (
