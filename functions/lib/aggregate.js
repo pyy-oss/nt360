@@ -21,8 +21,38 @@ const { dataQuality } = require("../domain/dataQuality");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
-const { fpKey, plausibleYear } = require("./ids");
+const { fpKey, plausibleYear, num } = require("./ids");
 const { safeId } = require("./sheets");
+
+// Coercition numérique DÉFENSIVE : un import brut peut stocker un montant en CHAÎNE ("1 000 000",
+// "(1 000)", "12,5") ou une valeur non finie. Laissé tel quel, il propage NaN dans les agrégats —
+// que l'émulateur tolère mais que PRODUCTION Firestore REFUSE (l'écriture échoue en « internal »).
+// On ne touche QUE les champs PRÉSENTS et non déjà numériques finis (les absents restent absents,
+// pour ne pas changer la sémantique d'un `!= null`).
+function coerceNums(rows, keys) {
+  for (const r of rows) {
+    if (!r) continue;
+    for (const k of keys) {
+      const v = r[k];
+      if (v != null && (typeof v !== "number" || !Number.isFinite(v))) r[k] = num(v);
+    }
+  }
+}
+
+// Filet de sécurité à l'ÉCRITURE : remplace tout nombre non fini (NaN/±Infinity) par 0 et retire les
+// undefined, en PRÉSERVANT les sentinelles FieldValue (serverTimestamp/delete). Garantit qu'aucun
+// agrégat ne peut faire échouer le recompute en production, quelle que soit la saleté des sources.
+function sanitizeForFirestore(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (Array.isArray(v)) return v.map(sanitizeForFirestore);
+  if (v && typeof v === "object") {
+    if (v.constructor && v.constructor.name !== "Object") return v; // FieldValue & co. → intacts
+    const o = {};
+    for (const k of Object.keys(v)) { const s = sanitizeForFirestore(v[k]); if (s !== undefined) o[k] = s; }
+    return o;
+  }
+  return v; // string / boolean / null / undefined
+}
 
 async function readAll(db, name, withId = false) {
   const snap = await db.collection(name).get();
@@ -83,6 +113,18 @@ async function recomputeAll(db, only) {
     readAll(db, "projectSheets"),
     readAll(db, "projectSheetsMargin"), // marge isolée (rules) — le serveur (Admin SDK) la re-fusionne
   ]);
+  // Coercition numérique des champs monétaires/quantitatifs (contre les montants en chaîne des
+  // imports bruts) — AVANT tout calcul, pour ne pas propager de NaN dans les agrégats.
+  coerceNums(pnlOrders, ["cas", "raf", "mb", "facture", "costTotal", "marginPct", "yearPo"]);
+  for (const o of pnlOrders) if (Array.isArray(o.suppliers)) for (const s of o.suppliers) { if (s && s.amount != null && (typeof s.amount !== "number" || !Number.isFinite(s.amount))) s.amount = num(s.amount); }
+  coerceNums(invoices, ["amountHt"]);
+  coerceNums(oppsRaw, ["amount", "probability", "weighted", "stage"]);
+  coerceNums(bcLines, ["amountXof", "amount"]);
+  coerceNums(sheetsBase, ["cas", "raf", "costTotal", "saleTotal", "margin", "marginPct"]);
+  coerceNums(sheetsMargin, ["costTotal", "saleTotal", "margin", "marginPct"]);
+  coerceNums(objectives, ["targetCas", "targetInvoiced", "targetMargin", "targetMarginPct", "fiscalYear"]);
+  coerceNums(creditLines, ["authorized", "openingBalance", "outstanding"]);
+
   // NORMALISATION des noms de clients (règles déterministes + table d'alias config/clientAliases),
   // appliquée EN MÉMOIRE avant tout calcul : tous les regroupements (byClient, concentration,
   // EntityView, atterrissage) utilisent le nom CANONIQUE. NON DESTRUCTIF — les documents bruts
@@ -130,7 +172,7 @@ async function recomputeAll(db, only) {
   // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 (Σ des jalons après le 31/12
   // de l'exercice). Aucun mécanisme manuel concurrent. Keyé par le fpKey STOCKÉ (champ `fp`).
   const milestonesByFp = {};
-  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones; });
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -356,6 +398,10 @@ async function recomputeAll(db, only) {
   // commande dans un seul document — au-delà d'un certain volume il dépasse la limite et le
   // batch.commit() échoue avec une erreur opaque (« internal »). On détecte le doc fautif AVANT
   // l'écriture et on lève un message explicite (path + taille) plutôt qu'une erreur illisible.
+  // Filet de sécurité : neutralise tout résidu non fini (NaN/Infinity) et undefined avant écriture,
+  // pour qu'aucune valeur illégale ne fasse échouer le batch en production (erreur « internal »).
+  for (const it of w) it.data = sanitizeForFirestore(it.data);
+
   const DOC_LIMIT = 1_000_000; // marge sous la limite dure de 1 048 576 octets
   for (const it of w) {
     const bytes = Buffer.byteLength(JSON.stringify(it.data ?? {}), "utf8");
@@ -386,4 +432,4 @@ async function recomputeAll(db, only) {
   return { written: w.map((x) => x.path), currentFy, periods };
 }
 
-module.exports = { recomputeAll, filterInvoices };
+module.exports = { recomputeAll, filterInvoices, sanitizeForFirestore, coerceNums };
