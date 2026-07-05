@@ -21,13 +21,25 @@ export async function deleteOpportunity(id: string) {
   await httpsCallable(functions, "deleteOpportunity")({ id });
 }
 
+/** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
+ *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string }) {
+  await httpsCallable(functions, "patchOpportunity")(data);
+}
+
 /** Rattache une facture orpheline à sa commande en corrigeant son N° FP (onCall : recalcule). */
 export async function setInvoiceFp(id: string, fp: string) {
   await httpsCallable(functions, "setInvoiceFp")({ id, fp });
 }
 
-/** Corrige une commande P&L : année de PO, CAS, RAF et/ou N° FP erroné (onCall : recalcule). */
-export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string; cas?: number; raf?: number }) {
+/** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
+ *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
+export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {
+  await httpsCallable(functions, "patchInvoice")(data);
+}
+
+/** Corrige une commande P&L : année/CAS/RAF/N° FP + client/AM/BU/désignation (onCall : recalcule). */
+export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string; cas?: number; raf?: number; client?: string; am?: string; bu?: string; designation?: string }) {
   await httpsCallable(functions, "patchOrder")(data);
 }
 
@@ -44,8 +56,9 @@ export async function setBcStatus(id: string, status: string) {
   await httpsCallable(functions, "setBcStatus")({ id, status });
 }
 
-/** Fiabilise une ligne BC : rattache un N° FP et/ou corrige le montant XOF (onCall : recalcule). */
-export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number }) {
+/** Fiabilise une ligne BC : N° FP, montant XOF, fournisseur, type de dépense, description, date
+ *  d'entrée (onCall : recalcule exposition + alertes + décaissements). */
+export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number; supplier?: string; expenseType?: string; description?: string; dateIn?: string | null }) {
   await httpsCallable(functions, "patchBcLine")(data);
 }
 
