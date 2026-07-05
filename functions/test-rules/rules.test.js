@@ -46,6 +46,9 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/overview_2026"), { certitudes: 1 });
     await setDoc(doc(db, "summaries/suppliers"), { totalExpo: 1 });
     await setDoc(doc(db, "summaries/facturation_2026"), { total: 1 });
+    await setDoc(doc(db, "summaries/qualityHistory"), { days: [] });
+    await setDoc(doc(db, "config/cancelOrders"), { items: [] });
+    await setDoc(doc(db, "config/cancelInvoices"), { items: [] });
     await setDoc(doc(db, "auditLog/A1"), { action: "seed" });
   });
 });
@@ -169,6 +172,15 @@ describe("Agrégats & audit", () => {
   it("config/* : allowlist fail-closed (config/alerts lisible, config non listé refusé même pour direction)", async () => {
     await assertSucceeds(getDoc(doc(as("commercial"), "config/alerts")));
     await assertFails(getDoc(doc(as("direction"), "config/secretFutur")));
+  });
+  it("summaries/qualityHistory (mappé overview) lisible par lecture", async () => {
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/qualityHistory")));
+  });
+  it("overlays d'annulation : cancelOrders au niveau overview, cancelInvoices cloisonné facturation", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "config/cancelOrders")));   // overview=read
+    await assertFails(getDoc(doc(as("commercial"), "config/cancelInvoices")));    // facturation=none
+    await assertSucceeds(getDoc(doc(as("lecture"), "config/cancelInvoices")));    // facturation=read
+    await assertFails(setDoc(doc(as("direction"), "config/cancelOrders"), { items: [] })); // écriture = callable only
   });
   it("personne n'écrit summaries (Functions only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "summaries/overview_2026"), { certitudes: 2 }));

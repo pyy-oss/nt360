@@ -163,6 +163,15 @@ export async function deleteRecords(collection: string, ids: string[]) {
 /** Supprime un seul enregistrement (assainissement). */
 export const deleteRecord = (collection: string, id: string) => deleteRecords(collection, [id]);
 
+/** ANNULATION — bascule le statut « Annulée » d'une commande / facture. Non destructif : l'objet
+ *  reste (historique) mais est EXCLU de tous les agrégats (carnet, CAS, backlog, facturation, cash).
+ *  Stocké en overlay (config/cancellations) → survit à un ré-import delta. `id` = DOC ID (commande =
+ *  fpDocId(fp)). meta = libellé/nom non monétaires pour l'affichage de la liste des annulées. */
+export async function setCancellation(collection: "orders" | "invoices", id: string, cancelled: boolean, meta?: { label?: string; client?: string }) {
+  const res = await httpsCallable(functions, "setCancellation")({ collection, id, cancelled, ...(meta || {}) });
+  return res.data as { ok: boolean; id: string; cancelled: boolean };
+}
+
 /** Doc id Firestore d'un N° FP (miroir de functions/lib/sheets safeId — NON idempotent). Sert à
  *  cibler orders/{safeId(fp)} depuis une ligne de commande (qui ne porte que le FP). */
 export const fpDocId = (fp: string) => String(fp || "").trim().replace(/_/g, "%5F").replace(/\//g, "_").replace(/\s+/g, "");
