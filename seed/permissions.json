@@ -53,7 +53,7 @@
       "pipeline": "none",
       "objectifs": "none",
       "facturation": "none",
-      "backlog": "read",
+      "backlog": "write",
       "prevision": "none",
       "rentabilite": "read",
       "pnlprojet": "write",

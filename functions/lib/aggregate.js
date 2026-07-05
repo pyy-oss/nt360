@@ -34,11 +34,13 @@ const filterInvoices = (invoices, period) =>
  * @param {FirebaseFirestore.Firestore} db
  * @param {string[]} [only] sous-ensemble d'agrégats (optionnel, sinon tout)
  */
-// Migration RBAC ADD-ONLY : garantit le module « import » dans la matrice opposable (config/permissions).
-// Ce module gouverne la capacité d'import/fiabilisation (importDelta/setInvoiceFp/patchOrder), que les
-// callables lisent désormais via requireWrite('import'). La clé n'est ajoutée QUE si absente pour un rôle
-// (jamais d'écrasement d'une valeur existante) → aucun verrouillage des rôles d'import après bascule, sans
-// toucher aux choix d'admin. Idempotent (no-op une fois la clé posée).
+// Migration RBAC de la matrice opposable (config/permissions), SANS jamais restreindre un accès.
+//  • Module « import » (importDelta/setInvoiceFp/patchOrder → requireWrite('import')) : ajouté UNIQUEMENT
+//    s'il est absent pour un rôle (write pour les rôles d'import historiques, none sinon).
+//  • pmo/backlog : setBillingMilestones passe sous requireWrite('backlog') ; pmo éditait déjà les jalons
+//    → on PRÉSERVE cette capacité en montant son niveau backlog `read`→`write`. On RESPECTE un `none`
+//    explicite (choix d'admin de masquer le backlog à pmo) — on ne remonte que depuis `read`.
+// Jamais d'écrasement d'un choix restrictif ; idempotent (no-op une fois posé).
 const IMPORT_CAPABLE = ["direction", "commercial_dir", "pmo", "achats"];
 async function ensureImportPermission(db) {
   const ref = db.doc("config/permissions");
@@ -49,6 +51,10 @@ async function ensureImportPermission(db) {
     if (row && typeof row === "object" && !("import" in row)) {
       patch[`matrix.${role}.import`] = IMPORT_CAPABLE.includes(role) ? "write" : "none";
     }
+  }
+  // Préservation de la capacité d'édition des jalons pour pmo (read→write uniquement).
+  if (matrix.pmo && typeof matrix.pmo === "object" && matrix.pmo.backlog === "read") {
+    patch["matrix.pmo.backlog"] = "write";
   }
   if (Object.keys(patch).length) await ref.update(patch);
 }

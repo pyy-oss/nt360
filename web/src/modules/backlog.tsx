@@ -1,7 +1,7 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCanImport, useCanSeeMargin, useClaims } from "../lib/rbac";
+import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
@@ -80,8 +80,7 @@ type OpenOrder = Order & { projetable: number };
 //  • jalons (≤ 15, date + montant) : échéancier prévisionnel — SOURCE UNIQUE du report N+1 (Σ après
 //    le 31/12) quand ils existent. Persistés hors des commandes, non écrasés par les réimports.
 function CarryoverCard() {
-  const { role } = useClaims();
-  const canEdit = role === "direction" || role === "pmo";
+  const canEdit = useCan("backlog") === "write"; // gouverné par la matrice (comme le serveur : requireWrite('backlog'))
   const canMargin = useCanSeeMargin();
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const fy = cfg?.currentFy;
