@@ -429,7 +429,7 @@ export const Simulateur: FC<Props> = () => {
           <Gauge value={probaCas} color={ecartCas < 0 ? T.clay : T.emerald} />
           {objectifCas > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-            <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum">{fmt(projeteCas)}</div></div>
+            <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projeteCas)}</div></div>
             <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCas > 0 ? fmt(objectifCas) : "—"}</div></div>
             <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", ecartCas < 0 ? "text-clay" : "text-emerald")}>{objectifCas > 0 ? fmt(ecartCas) : "—"}</div></div>
           </div>
@@ -438,7 +438,7 @@ export const Simulateur: FC<Props> = () => {
           <Gauge value={probaCaf} color={ecartCaf < 0 ? T.clay : T.emerald} />
           {objectifCaf > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-            <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum">{fmt(projeteCaf)}</div></div>
+            <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projeteCaf)}</div></div>
             <div><div className="text-[11px] text-muted">Objectif</div><div className="font-display tabnum">{objectifCaf > 0 ? fmt(objectifCaf) : "—"}</div></div>
             <div><div className="text-[11px] text-muted">Écart</div><div className={cx("font-display tabnum", ecartCaf < 0 ? "text-clay" : "text-emerald")}>{objectifCaf > 0 ? fmt(ecartCaf) : "—"}</div></div>
           </div>
