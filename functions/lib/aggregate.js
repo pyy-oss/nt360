@@ -80,6 +80,18 @@ async function recomputeAll(db, only) {
     readAll(db, "projectSheets"),
     readAll(db, "projectSheetsMargin"), // marge isolée (rules) — le serveur (Admin SDK) la re-fusionne
   ]);
+  // NORMALISATION des noms de clients (règles déterministes + table d'alias config/clientAliases),
+  // appliquée EN MÉMOIRE avant tout calcul : tous les regroupements (byClient, concentration,
+  // EntityView, atterrissage) utilisent le nom CANONIQUE. NON DESTRUCTIF — les documents bruts
+  // conservent leur nom d'origine ; seul le recompute canonise.
+  const { buildClientResolver } = require("../domain/clientName");
+  const aliasPairs = ((await db.doc("config/clientAliases").get()).data() || {}).pairs || [];
+  const normClient = buildClientResolver(aliasPairs);
+  for (const rows of [pnlOrders, invoices, oppsRaw, sheetsBase]) {
+    for (const r of rows) if (r && r.client != null && r.client !== "") r.client = normClient(r.client);
+  }
+  for (const b of bcLines) if (b && b.customer != null && b.customer !== "") b.customer = normClient(b.customer);
+
   // Fiches complètes reconstituées pour les calculs serveur (mergeCommandes, dataQuality).
   const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
   const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));

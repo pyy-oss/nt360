@@ -146,6 +146,13 @@ export async function callSetNotificationConfig(cfg: NotificationConfig & { test
   await httpsCallable(functions, "setNotificationConfig")(cfg);
 }
 
+/** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
+ *  entière ; recalcule tous les agrégats client. */
+export async function setClientAliases(pairs: { from: string; to: string }[]) {
+  const res = await httpsCallable(functions, "setClientAliases")({ pairs });
+  return res.data as { ok: boolean; count: number };
+}
+
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});

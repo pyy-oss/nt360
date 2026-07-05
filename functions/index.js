@@ -227,6 +227,28 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
   return { ok: true, ...cfg };
 });
 
+// --- Table d'ALIAS de normalisation des noms de clients (config/clientAliases) : fusionne les
+// graphies distinctes d'un même client (ex. « SGBCI » ↔ « Société Générale »). Édité par la
+// direction ; recompute COMPLET (le nom canonique pilote tous les regroupements client). Remplace
+// intégralement (merge:false) → retirer une paire la supprime réellement. Bornée à 500 paires. ---
+exports.setClientAliases = onCallG("setClientAliases", async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const raw = Array.isArray(req.data && req.data.pairs) ? req.data.pairs : [];
+  const pairs = [];
+  for (const p of raw.slice(0, 500)) {
+    const from = String((p && p.from) || "").trim();
+    const to = String((p && p.to) || "").trim();
+    if (from && to) pairs.push({ from, to });
+  }
+  await db.doc("config/clientAliases").set({ pairs, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "client_aliases", module: "habilitations", entity: "config", entityId: "clientAliases",
+    detail: { count: pairs.length }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // les noms canoniques pilotent byClient/concentration/EntityView/atterrissage
+  return { ok: true, count: pairs.length };
+});
+
 // --- Jalons de facturation par projet (billingMilestones/{safeId(fp)}) : échéancier prévisionnel
 // (≤ 15 jalons {date, montant}), SOURCE UNIQUE du report N+1 (Σ jalons après le 31/12). Édité par
 // direction/PMO. La règle « Σ jalons = RAF » est validée à l'éditeur ; le serveur normalise (≤ 15,

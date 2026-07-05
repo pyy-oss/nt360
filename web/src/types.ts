@@ -142,6 +142,7 @@ export type NewsRecommendation = { priority: number; text: string; domain?: stri
 export interface NewsSummary { generatedFor?: number; bulletins?: NewsBulletin[]; recommendations?: NewsRecommendation[]; counts?: { high?: number; medium?: number; info?: number } }
 
 export type PeriodsConfig = { available?: string[]; currentFy?: number; lastRecomputeAt?: any };
+export interface ClientAliasConfig { pairs?: { from: string; to: string }[]; updatedAt?: any }
 // Journal d'exploitation (recompute manuel/planifié + échecs).
 export type OpsLog = { id?: string; kind?: string; action?: string; trigger?: string; status?: string; ms?: number; error?: string; detail?: { summaries?: number; currentFy?: number; count?: number }; ts?: any };
 // Journal d'erreurs client (observabilité front) — écrit par le callable logClientError, lu en Admin.

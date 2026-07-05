@@ -2,11 +2,11 @@
 import { useState, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useClaims } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
-import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
-import type { PermissionsConfig, UserRow, OpsLog, ErrorLog } from "../types";
+import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
 const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
@@ -16,6 +16,7 @@ export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
   const { rows: users } = useCollectionData<UserRow>("users");
   const canWrite = useCan("habilitations") === "write";
+  const isDirection = useClaims().role === "direction"; // setClientAliases est direction-only
   const [draft, setDraft] = useState<Record<string, Record<string, string>> | null>(null);
   const matrix = draft || data?.matrix || {};
   const roles = Object.keys(matrix);
@@ -34,6 +35,7 @@ export const Habilitations: FC<Props> = () => {
       {canWrite && <AlertThresholdsCard />}
       {canWrite && <NotificationCard />}
       {canWrite && <DedupeCard />}
+      {isDirection && <ClientAliasCard />}
       <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -352,6 +354,37 @@ function ActiveToggle({ uid, active }: { uid: string; active?: boolean }) {
       <Badge tone={active ? "emerald" : "clay"}>{active ? "oui" : "non"}</Badge>
       <Busy variant="ghost" label={active ? "Désactiver" : "Réactiver"} okMsg={active ? "Compte désactivé" : "Compte réactivé"} fn={() => callSetUserActive(uid, !active)} />
     </span>
+  );
+}
+
+// Normalisation des noms de clients : règles déterministes (serveur) + table d'alias éditable pour
+// fusionner les graphies distinctes d'un même client. L'enregistrement relance un recalcul complet.
+function ClientAliasCard() {
+  const { data } = useDocData<ClientAliasConfig>("config/clientAliases");
+  const [draft, setDraft] = useState<{ from: string; to: string }[] | null>(null);
+  const list = draft ?? (data?.pairs || []);
+  const set = (i: number, k: "from" | "to", v: string) => setDraft(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const add = () => setDraft([...list, { from: "", to: "" }]);
+  const del = (i: number) => setDraft(list.filter((_, j) => j !== i));
+  const save = async () => { await setClientAliases(list.filter((r) => r.from.trim() && r.to.trim())); setDraft(null); };
+  return (
+    <Card title="Normalisation clients — alias" actions={
+      <div className="flex gap-2">
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Alias</button>
+        <Busy label="Enregistrer" okMsg="Alias enregistrés (recalcul lancé)" fn={save} />
+      </div>}>
+      <div className="flex flex-col gap-1.5">
+        {list.length ? list.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input className="field !py-1 flex-1" placeholder="Variante (ex. SGBCI)" value={r.from} onChange={(e) => set(i, "from", e.target.value)} aria-label={`Variante ${i + 1}`} />
+            <span className="text-muted" aria-hidden="true">→</span>
+            <input className="field !py-1 flex-1" placeholder="Nom canonique (ex. Société Générale)" value={r.to} onChange={(e) => set(i, "to", e.target.value)} aria-label={`Nom canonique ${i + 1}`} />
+            <button className="btn-ghost !px-2 !py-1" onClick={() => del(i)} aria-label={`Supprimer l'alias ${i + 1}`}>×</button>
+          </div>
+        )) : <div className="text-[13px] text-muted">Aucun alias — les noms sont normalisés par règles automatiques.</div>}
+      </div>
+      <Tip>Les noms de clients sont d'abord normalisés par <b>règles</b> (MAJUSCULES, accents, ponctuation, formes juridiques SA/SARL…, suffixe « Côte d'Ivoire »/« CI »). Ajoutez un <b>alias</b> pour fusionner deux graphies que les règles ne rapprochent pas (ex. « SGBCI » → « Société Générale »). L'enregistrement relance un recalcul complet ; les <b>documents sources ne sont pas modifiés</b>.</Tip>
+    </Card>
   );
 }
 
