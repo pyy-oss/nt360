@@ -55,6 +55,19 @@ function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
   // Fiches affaire
   add("fiches_sans_vente", "low", sheets.filter((s) => !(s.saleTotal > 0)), "Fiches affaire sans prix de vente", (s) => s.fp);
 
+  // DOUBLONS PROBABLES (import en DELTA) : quand une clé métier change à la source ou que l'ordre des
+  // lignes bouge, le ré-import crée un nouveau document et LAISSE l'ancien → doublon. On ne SUPPRIME
+  // rien (mode delta) : on SIGNALE les groupes de même signature métier pour arbitrage manuel.
+  const dupGroups = (arr, keyFn) => {
+    const g = {};
+    for (const x of arr) { const k = keyFn(x); if (!k || /^\|+$/.test(k)) continue; (g[k] = g[k] || []).push(x); }
+    return Object.values(g).filter((grp) => grp.length > 1);
+  };
+  const oppDups = dupGroups(opps, (o) => [o.client, o.amount, o.stage, o.am, o.fp, o.closingDate].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
+  add("opps_doublons", "medium", oppDups, "Opportunités en doublon probable (même client/montant/étape/AM/FP/D Prev — ré-import en delta)", (o) => o.fp || o.client);
+  const bcDups = dupGroups(bcLines, (b) => [b.fp, b.supplier, b.amountXof, b.expenseType, b.bcNumber].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
+  add("bc_doublons", "low", bcDups, "Lignes BC en doublon probable (même FP/fournisseur/montant/type)", (b) => b.bcNumber || b.supplier || b.fp);
+
   issues.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || (b.count - a.count));
 
   // Score de complétude : 1 − (anomalies pondérées / total d'enregistrements), borné [0,1].
