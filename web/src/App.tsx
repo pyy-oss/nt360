@@ -78,6 +78,17 @@ export default function App() {
     activeTabRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [allowed?.id]);
 
+  // Accessibilité SPA (WCAG 2.4.3) : au changement de module (onglet OU drill-through), déplacer le
+  // focus sur la zone de contenu — le lecteur d'écran annonce la nouvelle vue et l'utilisateur clavier
+  // repart du contenu sans retraverser la navigation. `preventScroll` : ne perturbe pas le défilement ;
+  // focus programmatique ⇒ pas d'anneau :focus-visible pour la souris. On saute le tout premier rendu.
+  const mainRef = useRef<HTMLElement | null>(null);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    mainRef.current?.focus({ preventScroll: true });
+  }, [allowed?.id]);
+
   if (loading) {
     return <div className="min-h-screen grid place-items-center text-muted">Chargement…</div>;
   }
@@ -88,6 +99,8 @@ export default function App() {
     <FilterProvider>
     <NavFilterBridge />
     <div className="min-h-screen">
+      {/* Lien d'évitement (WCAG 2.4.1) : caché jusqu'au focus clavier, saute la navigation → contenu. */}
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded-lg focus:bg-gold focus:text-bg focus:px-3 focus:py-2 focus:text-sm focus:font-semibold">Aller au contenu</a>
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
         {/* Header */}
         <header className="flex items-center justify-between flex-wrap gap-3 py-4">
@@ -166,7 +179,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <main>
+        <main id="main" ref={mainRef} tabIndex={-1} className="outline-none scroll-mt-4">
           <FreshnessGuard />
           {allowed ? (
             <ErrorBoundary key={allowed.id}>
