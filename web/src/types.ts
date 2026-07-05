@@ -136,6 +136,11 @@ export type Objective = {
 };
 export type UserRow = { id?: string; email?: string; name?: string; active?: boolean };
 
+// Actualité : bulletins d'événements clés + recommandations (moteur functions/domain/news).
+export type NewsBulletin = { id: string; domain: string; severity: "high" | "medium" | "info"; title: string; detail?: string; refs?: string[]; module?: string; segment?: string; action?: string };
+export type NewsRecommendation = { priority: number; text: string; domain?: string; module?: string; severity?: string };
+export interface NewsSummary { generatedFor?: number; bulletins?: NewsBulletin[]; recommendations?: NewsRecommendation[]; counts?: { high?: number; medium?: number; info?: number } }
+
 export type PeriodsConfig = { available?: string[]; currentFy?: number; lastRecomputeAt?: any };
 // Journal d'exploitation (recompute manuel/planifié + échecs).
 export type OpsLog = { id?: string; kind?: string; action?: string; trigger?: string; status?: string; ms?: number; error?: string; detail?: { summaries?: number; currentFy?: number; count?: number }; ts?: any };
