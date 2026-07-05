@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -39,6 +39,7 @@ const Fp360 = from(() => import("./operations"), "Fp360");
 const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
+const Relances = from(() => import("./relances"), "Relances");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -52,6 +53,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", icon: Target, Component: Objectifs },
   { id: "facturation", key: "facturation", label: "Facturation", icon: Receipt, Component: Facturation },
   { id: "invoicelist", key: "facturation", label: "Factures", icon: FileSpreadsheet, Component: InvoiceList },
+  { id: "relances", key: "overview", label: "Relances", icon: BellRing, Component: Relances },
   { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
   { id: "orderlist", key: "overview", label: "Commandes", icon: ShoppingCart, Component: OrderList },
   { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
@@ -72,7 +74,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
 export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Cockpit", ids: ["overview", "news"] },
   { label: "Commercial", ids: ["pipeline", "opplist", "am360"] },
-  { label: "Revenu", ids: ["facturation", "invoicelist", "objectifs"] },
+  { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["clients", "domaines", "dataquality"] },

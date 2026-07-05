@@ -17,6 +17,7 @@ const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
 const { am360 } = require("../domain/am360");
 const { dataQuality } = require("../domain/dataQuality");
+const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
 const { fpKey, plausibleYear } = require("./ids");
@@ -68,7 +69,7 @@ async function recomputeAll(db, only) {
   const need = (keys) => !only || keys.some((k) => only.includes(k));
   // NB : ces ensembles DOIVENT couvrir tous les summaries qui utilisent la collection — y compris
   // les co-déclenchements (cashflow s'écrit aussi sur want("facturation") ; ams sur want("pipeline")).
-  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation"]);
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances"]);
   const needCredit = need(["suppliers", "alerts"]);
   const needObj = need(["atterrissage", "ams", "pipeline"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
@@ -241,6 +242,15 @@ async function recomputeAll(db, only) {
       days.sort((a, b) => (a.date < b.date ? -1 : 1));
       w.push({ path: "summaries/qualityHistory", data: { days: days.slice(-90), ...stamp } });
     }
+  }
+  // RELANCE & anticipation : trois familles d'actions datées par responsable. Écrites dans TROIS
+  // summaries CLOISONNÉS par module (facturation / fournisseurs / backlog) — le montant d'une créance
+  // (facturation) ne fuite pas vers un rôle sans droit facturation, etc. Recalculé avec les alertes.
+  if (want("relances") || want("overview") || want("alerts")) {
+    const rel = relances(invoices, orders, bcLines, milestonesByFp, asOf);
+    w.push({ path: "summaries/relancesCreances", data: { ...rel.creances, ...stamp } });
+    w.push({ path: "summaries/relancesBc", data: { ...rel.bc, ...stamp } });
+    w.push({ path: "summaries/relancesJalons", data: { ...rel.jalons, ...stamp } });
   }
   // ACTUALITÉ : bulletins d'événements clés (opportunités/commandes/facturation/backlog/fournisseurs)
   // + recommandations majeures, à partir des agrégats calculés. Revenu/pipeline uniquement (SANS marge)
