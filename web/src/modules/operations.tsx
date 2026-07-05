@@ -242,7 +242,7 @@ export const BC: FC<Props> = () => {
             colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
             colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
-            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} />, () => 0)] : []),
+            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} />, () => 0)] : []),
           ]}
         />
         {planned > 0 && <Tip>{planned.toLocaleString("fr-FR")} ligne(s) d'achat planifiées par les fiches affaire sont suivies en P&amp;L Projet / FP 360°, pas ici. L'Exécution BC n'est alimentée que par l'import BC (Logistics / PDF).</Tip>}
@@ -253,17 +253,24 @@ export const BC: FC<Props> = () => {
 
 // Fiabilisation inline d'une ligne BC : rattacher un N° FP et/ou saisir la contre-valeur XOF
 // (ex. BC en devise étrangère → montant XOF nul). Pré-remplit les champs à corriger.
-function BcFixer({ id, fp, amountXof }: { id: string; fp?: string; amountXof?: number }) {
+function BcFixer({ id, fp, amountXof, supplier }: { id: string; fp?: string; amountXof?: number; supplier?: string }) {
   const [nf, setNf] = useState("");
   const [amt, setAmt] = useState("");
+  const [sup, setSup] = useState("");
   const noFp = !fp;
   const noAmt = !((amountXof || 0) > 0);
-  if (!noFp && !noAmt) return <span className="text-[11px] text-faint">ok</span>;
+  const noSup = !(supplier && supplier.trim());
+  if (!noFp && !noAmt && !noSup) return <span className="text-[11px] text-faint">ok</span>;
   return (
     <span className="inline-flex gap-1 items-center flex-wrap">
       {noFp && <>
         <input className="field w-28 !py-1 text-xs" aria-label="Rattacher un N° FP" placeholder="FP/2026/…" value={nf} onChange={(e) => setNf(e.target.value)} />
         <Busy variant="ghost" label="FP" okMsg="FP rattaché" fn={() => patchBcLine({ id, fp: nf })} />
+      </>}
+      {noSup && <>
+        <input className="field w-28 !py-1 text-xs" aria-label="Fournisseur" placeholder="Fournisseur" value={sup} onChange={(e) => setSup(e.target.value)} />
+        <Busy variant="ghost" label="Frns" okMsg="Fournisseur corrigé" errMsg="Fournisseur invalide"
+          fn={() => { if (!sup.trim()) throw new Error("saisir un fournisseur"); return patchBcLine({ id, supplier: sup }); }} />
       </>}
       {noAmt && <>
         <input className="field w-24 !py-1 text-xs" inputMode="numeric" aria-label="Montant XOF" placeholder="XOF" value={amt} onChange={(e) => setAmt(e.target.value)} />

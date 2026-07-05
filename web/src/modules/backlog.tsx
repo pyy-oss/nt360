@@ -517,20 +517,25 @@ function OrderForm({ onDone }: { onDone?: () => void }) {
   );
 }
 
-// Édition inline d'une commande P&L / manuelle : CAS, RAF, année de PO, correction du N° FP.
+// Édition inline d'une commande P&L / manuelle : CAS, RAF, client, AM, année de PO, correction du N° FP.
 function OrderEditor({ row }: { row: Order }) {
   const fp = row.fp!;
   const [cas, setCas] = useState("");
   const [raf, setRaf] = useState("");
+  const [client, setClient] = useState("");
+  const [am, setAm] = useState("");
   const [y, setY] = useState("");
   const [nf, setNf] = useState("");
   const yearMissing = !(row.yearPo && row.yearPo > 0);
+  const anyField = cas !== "" || raf !== "" || client.trim() !== "" || am.trim() !== "";
   return (
     <span className="inline-flex gap-1 items-center flex-wrap">
       <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="CAS" value={cas} onChange={(e) => setCas(e.target.value)} />
       <input className="field w-20 !py-1 text-xs" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
-      {(cas !== "" || raf !== "") && (
-        <Busy variant="ghost" label="MàJ" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined })} />
+      <input className="field w-24 !py-1 text-xs" aria-label={`Client ${fp}`} placeholder="Client" value={client} onChange={(e) => setClient(e.target.value)} />
+      <input className="field w-20 !py-1 text-xs" aria-label={`AM ${fp}`} placeholder="AM" value={am} onChange={(e) => setAm(e.target.value)} />
+      {anyField && (
+        <Busy variant="ghost" label="MàJ" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined, client: client.trim() || undefined, am: am.trim() || undefined })} />
       )}
       {yearMissing && (
         <><input className="field w-16 !py-1 text-xs" aria-label={`Année de PO ${fp}`} placeholder="Année" value={y} onChange={(e) => setY(e.target.value)} />

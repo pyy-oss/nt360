@@ -6,7 +6,7 @@ import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
-import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp } from "../lib/writes";
+import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN } from "../lib/thresholds";
@@ -141,6 +141,21 @@ function FpFixer({ id }: { id: string }) {
   );
 }
 
+// Correction inline d'une facture : date de facturation + date d'échéance (le montant n'est pas
+// éditable — il reste piloté par la source). Comble « factures sans date / sans échéance ».
+function InvoiceDateFixer({ inv }: { inv: Invoice }) {
+  const [date, setDate] = useState(inv.date || "");
+  const [due, setDue] = useState(inv.dueDate || "");
+  const changed = date !== (inv.date || "") || due !== (inv.dueDate || "");
+  return (
+    <span className="inline-flex gap-1 items-center">
+      <input className="field w-32 !py-1 text-xs" type="date" aria-label="Date de facturation" value={date} onChange={(e) => setDate(e.target.value)} />
+      <input className="field w-32 !py-1 text-xs" type="date" aria-label="Date d'échéance" value={due} onChange={(e) => setDue(e.target.value)} />
+      {changed && inv.id && <Busy variant="ghost" label="MàJ" okMsg="Facture mise à jour" fn={() => patchInvoice({ id: inv.id!, date: date || null, dueDate: due || null })} />}
+    </span>
+  );
+}
+
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Invoice>("invoices");
@@ -174,9 +189,11 @@ export const InvoiceList: FC<Props> = () => {
             colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
             colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1)),
             colText("Date", (r) => r.date || "—", (r) => r.date || ""),
+            colText("Échéance", (r) => r.dueDate || "—", (r) => r.dueDate || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
             colText("Statut", (r) => r.paymentStatus || "—", (r) => r.paymentStatus || ""),
             ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id ? <FpFixer id={r.id} /> : null), () => 0)] : []),
+            ...(canImport ? [colText("Dates", (r: Invoice) => <InvoiceDateFixer inv={r} />, () => 0)] : []),
           ]}
         />
       </Card>

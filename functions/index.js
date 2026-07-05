@@ -575,6 +575,29 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, id, fp };
 });
 
+// --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
+// dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
+// il reste piloté par la source). Recalcule l'échéancier cash + la qualité des données. ---
+exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "import");
+  const id = String(req.data?.id || "");
+  if (!id) throw new HttpsError("invalid-argument", "id facture requis");
+  const ref = db.doc(`invoices/${id}`);
+  if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
+  const d = req.data || {};
+  const patch = { updatedAt: FieldValue.serverTimestamp() };
+  if (d.date !== undefined) patch.date = d.date || null;
+  if (d.dueDate !== undefined) patch.dueDate = d.dueDate || null;
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date ou échéance requise)");
+  await ref.set(patch, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "patch_invoice", module: "facturation", entity: "invoice", entityId: id,
+    detail: { date: patch.date ?? null, dueDate: patch.dueDate ?? null }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // date/échéance → échéancier cash, encours âgés, qualité des données
+  return { ok: true, id };
+});
+
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
 exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
@@ -607,6 +630,12 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
     if (!Number.isFinite(rf) || rf < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
     patch.raf = rf;
   }
+  // Champs descriptifs éditables (source P&L/manuelle). Sur une ligne opp_won/fiche, client/am sont
+  // gouvernés à la source → ré-écrasés au recompute ; l'UI ne propose l'édition que sur pnl/manuel.
+  if (d.client !== undefined) patch.client = String(d.client || "").trim();
+  if (d.am !== undefined) patch.am = String(d.am || "").trim();
+  if (d.bu !== undefined) { const { cleanBu } = require("./lib/ids"); patch.bu = cleanBu(d.bu); }
+  if (d.designation !== undefined) patch.designation = String(d.designation || "").trim();
   const newFp = d.newFp ? fpKey(d.newFp) : null;
   if (d.newFp && !newFp) throw new HttpsError("invalid-argument", "nouveau N° FP invalide");
 
@@ -621,11 +650,11 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
   } else if (Object.keys(patch).length) {
     await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else {
-    throw new HttpsError("invalid-argument", "rien à modifier (année, CAS, RAF ou nouveau FP requis)");
+    throw new HttpsError("invalid-argument", "rien à modifier (année, CAS, RAF, client/AM/BU ou nouveau FP requis)");
   }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
-    detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null }, ts: FieldValue.serverTimestamp(),
+    detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null, client: patch.client ?? null, am: patch.am ?? null }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries();
   return { ok: true, fp: newFp || fp };
@@ -725,6 +754,50 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
   return { ok: true };
 });
 
+// --- Correction d'une opportunité EXISTANTE (importée ou saisie) : N° FP, D Prev (date de clôture),
+// montant, étape, AM, BU. Contrairement à upsertOpportunity (qui ne crée/édite que des saisies),
+// ce callable corrige N'IMPORTE QUELLE opp SANS toucher à sa `source` — donc pas de détournement
+// (la règle Firestore continue d'interdire au client de basculer une opp importée en 'saisie').
+// Comble le blocage majeur « opp GAGNÉE importée sans N° FP » (non corrigeable in-app jusqu'ici).
+// Au ré-import Sales_DATA, la source reste prioritaire (elle réécrit l'opp) — cohérent « Excel prioritaire ». ---
+exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { fpKey } = require("./lib/ids");
+  const { STAGE_LABEL } = require("./parsers/salesData");
+  const d = req.data || {};
+  const id = String(d.id || "");
+  if (!id) throw new HttpsError("invalid-argument", "id opportunité requis");
+  const ref = db.doc(`opportunities/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "opportunité introuvable");
+  const cur = snap.data() || {};
+  const patch = { updatedAt: FieldValue.serverTimestamp() };
+  if (d.fp !== undefined) patch.fp = fpKey(d.fp) || null; // '' → détache le FP
+  if (d.closingDate !== undefined) patch.closingDate = d.closingDate || null;
+  if (d.am !== undefined) patch.am = String(d.am || "").trim();
+  if (d.bu !== undefined) patch.bu = String(d.bu || "").trim().toUpperCase();
+  if (d.stage !== undefined) {
+    const stage = Math.min(9, Math.max(1, Math.trunc(Number(d.stage)) || 1));
+    patch.stage = stage;
+    patch.stageLabel = STAGE_LABEL[stage] || String(stage);
+  }
+  if (d.amount !== undefined && String(d.amount) !== "") {
+    const a = Number(d.amount);
+    if (!Number.isFinite(a) || a < 0) throw new HttpsError("invalid-argument", "montant invalide");
+    patch.amount = a;
+  }
+  // Pondéré recalculé si le montant change (proba issue de l'IdC de la source conservée).
+  if (patch.amount !== undefined) patch.weighted = patch.amount * (Number(cur.probability) || 0);
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger");
+  await ref.set(patch, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
+    detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries(); // l'opp peut devenir/réconcilier une commande → recalcul complet
+  return { ok: true, id };
+});
+
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 
 exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
@@ -797,7 +870,8 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
 exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "bc");
   const { fpKey } = require("./lib/ids");
-  const { id, fp, amountXof } = req.data || {};
+  const d = req.data || {};
+  const { id, fp, amountXof } = d;
   if (!id) throw new HttpsError("invalid-argument", "id requis");
   const patch = { updatedAt: FieldValue.serverTimestamp() };
   // On n'écrit le FP que s'il donne une clé canonique NON vide : un fp vide/blanc n'est pas un
@@ -809,11 +883,16 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
     if (!Number.isFinite(n) || n < 0) throw new HttpsError("invalid-argument", "montant XOF invalide");
     patch.amountXof = n;
   }
-  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (FP ou montant valide requis)");
+  // Champs descriptifs éditables (fournisseur mal mappé, type de dépense, description, date d'entrée).
+  if (d.supplier !== undefined) patch.supplier = String(d.supplier || "").replace(/\s+/g, " ").trim().toUpperCase();
+  if (d.expenseType !== undefined) patch.expenseType = String(d.expenseType || "").trim();
+  if (d.description !== undefined) patch.description = String(d.description || "").trim();
+  if (d.dateIn !== undefined) patch.dateIn = d.dateIn || null;
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (FP, montant, fournisseur ou champ valide requis)");
   await db.doc(`bcLines/${id}`).set(patch, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,
-    detail: { fp: patch.fp, amountXof: patch.amountXof }, ts: FieldValue.serverTimestamp(),
+    detail: { fp: patch.fp ?? null, amountXof: patch.amountXof ?? null, supplier: patch.supplier ?? null }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
   return { ok: true };
