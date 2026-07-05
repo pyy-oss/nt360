@@ -71,9 +71,6 @@ service cloud.firestore {
     }
 
     match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if canWrite('fournisseurs'); }
-    // Reports de CA sur N+1 (par projet) : lisibles par qui voit le backlog ; écrits uniquement par
-    // la Cloud Function setCarryover (direction/PMO) — jamais en direct.
-    match /carryovers/{id}    { allow read: if canRead('backlog');      allow write: if false; }
     // Jalons de facturation (échéancier prévisionnel par projet) : lisibles par qui voit le backlog ;
     // écrits uniquement par la Cloud Function setBillingMilestones (direction/PMO).
     match /billingMilestones/{id} { allow read: if canRead('backlog');  allow write: if false; }

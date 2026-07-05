@@ -8,9 +8,9 @@ import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
-import { patchOrder, setCarryover, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import { patchOrder, setBillingMilestones, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, Carryover, BillingMilestonesDoc, BillingTrendSummary } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -87,21 +87,17 @@ function CarryoverCard() {
   const fy = cfg?.currentFy;
   const cutoff = fy ? `${fy}-12-31` : "9999-12-31";
   const { rows: orders } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
-  const { rows: carry } = useCollectionData<Carryover>(canEdit ? "carryovers" : null);
   const { rows: mstones } = useCollectionData<BillingMilestonesDoc>(canEdit ? "billingMilestones" : null);
   const [editFp, setEditFp] = useState<string | null>(null);
   if (!canEdit) return null;
-  const cby = new Map<string, number>();
-  for (const c of carry) if (c.fp) cby.set(c.fp.toUpperCase(), c.amount || 0);
   const msBy = new Map<string, BillingMilestone[]>();
   for (const m of mstones) if (m.fp) msBy.set(m.fp.toUpperCase(), (m.milestones || []) as BillingMilestone[]);
   const rateOf = (o: Order) => ((o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : (o.marginPct || 0));
-  // Report N+1 dérivé des jalons (Σ après le 31/12, borné au RAF) si présents ; sinon report manuel.
+  // Report N+1 : SOURCE UNIQUE = les jalons (Σ après le 31/12, borné au RAF). Nul sans jalon post-31/12.
   const repOf = (o: OpenOrder) => {
-    const fpU = (o.fp || "").toUpperCase();
-    const ms = msBy.get(fpU);
-    if (ms) return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
-    return Math.min(cby.get(fpU) || 0, o.projetable);
+    const ms = msBy.get((o.fp || "").toUpperCase());
+    if (!ms) return 0;
+    return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
   };
   const open: OpenOrder[] = orders
     .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
@@ -111,7 +107,7 @@ function CarryoverCard() {
   const totalMarge = open.reduce((s, o) => s + rateOf(o) * repOf(o), 0);
   const editing = editFp ? open.find((o) => o.fp === editFp) : null;
   return (
-    <Card title="Report & jalons de facturation (par projet)">
+    <Card title="Jalons de facturation (par projet)">
       {totalReporte > 0 && (
         <div className={grid4}>
           <Kpi label="Total reporté sur N+1" value={fmt(totalReporte)} tone="steel" sub="CA exclu du Projeté CAF courant" />
@@ -127,9 +123,7 @@ function CarryoverCard() {
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colNum("RAF projetable", (r) => money(r.projetable), (r) => r.projetable),
-          colNum("Reporté N+1", (r: OpenOrder) => (msBy.has((r.fp || "").toUpperCase())
-            ? <span className="tabnum text-steel" title="Dérivé des jalons (Σ après le 31/12)">{money(repOf(r))}</span>
-            : <CarryoverEditor fp={r.fp!} current={cby.get((r.fp || "").toUpperCase()) || 0} max={r.projetable} />), (r: OpenOrder) => repOf(r)),
+          colNum("Reporté N+1", (r: OpenOrder) => <span className="tabnum text-steel" title="Dérivé des jalons (Σ après le 31/12), borné au RAF projetable">{money(repOf(r))}</span>, (r: OpenOrder) => repOf(r)),
           ...(canMargin ? [colNum("Marge reportée", (r: OpenOrder) => money(rateOf(r) * repOf(r)), (r: OpenOrder) => rateOf(r) * repOf(r))] : []),
           colText("Jalons", (r: OpenOrder) => {
             const ms = msBy.get((r.fp || "").toUpperCase());
@@ -138,7 +132,7 @@ function CarryoverCard() {
           }, (r: OpenOrder) => (msBy.get((r.fp || "").toUpperCase())?.length || 0)),
         ]}
       />
-      <Tip><b>Report simple</b> : montant du RAF facturé en N+1 (exclu du Projeté CAF). <b>Jalons</b> (≤ 15, date + montant) : échéancier prévisionnel qui devient la <b>source unique</b> du report (Σ des jalons <b>après le 31/12</b>) — un <b>⚠</b> signale une <b>réconciliation</b> à faire (Σ jalons ≠ RAF, la facturation a progressé). Le CA et sa marge reportés sont exclus du Projeté CAF (Prévision / Vue d'ensemble). L'enregistrement relance le calcul.</Tip>
+      <Tip><b>Jalons</b> (≤ 15, date + montant) : échéancier prévisionnel de facturation, <b>source unique</b> du report N+1. <b>Reporté N+1</b> (lecture seule) = Σ des jalons datés <b>après le 31/12</b>, borné au RAF projetable — ce CA (et sa marge) est <b>exclu du Projeté CAF</b> courant (Prévision / Vue d'ensemble) et amorce l'exercice N+1. Un <b>⚠</b> signale une <b>réconciliation</b> (Σ jalons ≠ RAF, la facturation a progressé). L'enregistrement relance le calcul.</Tip>
     </Card>
   );
 }
@@ -185,18 +179,6 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
     </div>
   );
 }
-function CarryoverEditor({ fp, current, max }: { fp: string; current: number; max: number }) {
-  const [v, setV] = useState(current ? String(current) : "");
-  const num = Number(String(v).replace(/\s/g, "").replace(",", "."));
-  const eff = Number.isFinite(num) && num > 0 ? Math.min(num, max) : 0;
-  return (
-    <span className="inline-flex gap-1 items-center justify-end">
-      <input className="field w-32 !py-1 text-xs text-right" inputMode="numeric" placeholder="0" value={v} onChange={(e) => setV(e.target.value)} aria-label={`Report N+1 pour ${fp}`} />
-      <Busy variant="ghost" label="OK" okMsg="Report enregistré (recalcul lancé)" fn={() => setCarryover(fp, eff)} />
-    </span>
-  );
-}
-
 // 6 — Prévision (ancrée FY, cohérente avec l'atterrissage)
 export const Prevision: FC<Props> = () => {
   const { data: bl } = useDocData<BacklogSummary>("summaries/backlog_fy");

@@ -71,12 +71,8 @@ async function recomputeAll(db, only) {
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
   const projCfg = (await db.doc("config/projection").get()).data() || {}; // niveaux de projection configurables
   const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
-  // Reports de CA sur N+1 par projet (montant FCFA). Keyé par le fpKey STOCKÉ (champ `fp`) — PAS par
-  // doc.id (= safeId, avec « _ ») que l'atterrissage ne saurait pas retrouver (il cherche par fpKey).
-  const carryovers = {};
-  (await db.collection("carryovers").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && (v.amount || 0) > 0) carryovers[v.fp] = v.amount; });
-  // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 quand ils existent (Σ des
-  // jalons après le 31/12 de l'exercice), sinon repli sur le report manuel. Keyé par fpKey stocké.
+  // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 (Σ des jalons après le 31/12
+  // de l'exercice). Aucun mécanisme manuel concurrent. Keyé par le fpKey STOCKÉ (champ `fp`).
   const milestonesByFp = {};
   (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones; });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
@@ -136,7 +132,7 @@ async function recomputeAll(db, only) {
       ...stamp,
     } });
   }
-  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, carryovers, milestonesByFp);
+  const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, milestonesByFp);
   // La marge reportée est de la DONNÉE MARGE → isolée dans un doc gaté « rentabilite » (jamais dans
   // le summary atterrissage public, lu au niveau « overview »).
   const { reporteMarge, ...attPublic } = att;
@@ -147,16 +143,14 @@ async function recomputeAll(db, only) {
     // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier PAR DÉFAUT pour les projets SANS
     // jalons (RAF projetable restant en N réparti uniformément sur 3 jalons jusqu'au 31/12). Ainsi la
     // tendance couvre TOUT le backlog, pas seulement les projets manuellement échéancés. Aucun effet de
-    // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0) ni double compte : le report
-    // manuel éventuel (carryover) est retranché de la part défaut in-year, exactement comme l'atterrissage.
+    // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0).
     const trendMilestones = Object.values(milestonesByFp).flat();
     for (const o of orders) {
       const k = fpKey(o.fp);
       if (k && milestonesByFp[k]) continue; // FP à jalons saisis → déjà pris en compte
       const bp = projetableBacklog(o);
       if (bp <= 0) continue;
-      const rep = Math.min(Math.max((k && carryovers[k]) || 0, 0), bp); // report manuel → exclu de l'in-year
-      trendMilestones.push(...defaultMilestones(bp - rep, asOf, currentFy));
+      trendMilestones.push(...defaultMilestones(bp, asOf, currentFy));
     }
     const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
     w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });

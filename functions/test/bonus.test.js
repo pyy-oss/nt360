@@ -68,36 +68,43 @@ describe("atterrissage (§7)", () => {
     expect(r.backlogProjete).toBe(40);    // projection : plafonné à 100 − 60
     expect(r.cafProjete).toBe(100);       // 60 (facturé) + 40 (RAF plafonné) + 0 pipeline = 100 (= CAS), pas 160
   });
-  it("report de CA sur N+1 : montant exclu du Projeté CAF + marge reportée au prorata (taux × reporté)", () => {
+  it("report de CA sur N+1 (jalons post-31/12) : montant exclu du Projeté CAF + marge reportée au prorata", () => {
     const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }]; // RAF projetable = 400 ; taux 20 %
-    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": 250 });
+    const ms = { "FP/2026/1": [{ date: "2027-02-01", amount: 250 }] }; // 250 échéancé en N+1
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, ms);
     expect(a.reporteCaf).toBe(250);
     expect(a.backlogProjete).toBe(150); // 400 − 250 reporté
     expect(a.cafProjete).toBe(150);     // 0 facturé + 150 (backlog net) + 0 pipeline
     expect(a.reporteMarge).toBe(50);    // 20 % × 250 reporté (marge suit le CA au prorata)
   });
-  it("projection N+1 : le CA reporté alimente l'exercice suivant (amorce du CAF N+1)", () => {
+  it("projection N+1 : le CA reporté (jalons N+1) alimente l'exercice suivant (amorce du CAF N+1)", () => {
     const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }];
+    const ms = { "FP/2026/1": [{ date: "2027-02-01", amount: 250 }] };
     const op = [{ fp: "FP/2027/9", stage: 4, probability: 0.95, amount: 500, closingDate: "2027-05-01" }]; // pipeline D Prev en N+1
-    const a2 = atterrissage(ord, [], op, [], 2026, "2026-03-01", undefined, { "FP/2026/1": 250 });
+    const a2 = atterrissage(ord, [], op, [], 2026, "2026-03-01", undefined, ms);
     expect(a2.cafProjete).toBe(150);          // N : 400 RAF − 250 reporté
     expect(a2.next.fy).toBe(2027);
     expect(a2.next.reporteEntrant).toBe(250); // reporté depuis N → amorce N+1
     expect(a2.next.pipelinePondere).toBe(500); // pipeline D Prev 2027 (≥90 % → 100 %)
     expect(a2.next.cafProjete).toBe(750);     // 0 facturé N+1 + 250 reporté + 500 pipeline
   });
-  it("jalons = source unique du report N+1 (Σ jalons après le 31/12), priment sur le report manuel", () => {
+  it("jalons = source UNIQUE du report N+1 (Σ jalons après le 31/12) : part in-year reste facturable", () => {
     const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }]; // RAF projetable 400
     const ms = { "FP/2026/1": [{ date: "2026-06-01", amount: 150 }, { date: "2027-02-01", amount: 250 }] };
-    // Un report manuel de 999 est présent MAIS ignoré car des jalons existent (source unique).
-    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": 999 }, ms);
-    expect(a.reporteCaf).toBe(250);     // Σ jalons après 2026-12-31 = 250 (pas 999)
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, ms);
+    expect(a.reporteCaf).toBe(250);     // Σ jalons après 2026-12-31 = 250 (150 in-year exclu du report)
     expect(a.backlogProjete).toBe(150); // 400 − 250
     expect(a.reporteMarge).toBe(50);    // 20 % × 250
   });
-  it("report borné au RAF projetable (report > RAF n'engendre pas de CAF négatif)", () => {
+  it("sans jalon post-31/12 : report N+1 nul (aucun mécanisme manuel de repli)", () => {
+    const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }];
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/1": [{ date: "2026-06-01", amount: 400 }] });
+    expect(a.reporteCaf).toBe(0);        // tout in-year → rien reporté
+    expect(a.backlogProjete).toBe(400);  // RAF entier projeté en N
+  });
+  it("report borné au RAF projetable (jalons N+1 > RAF n'engendre pas de CAF négatif)", () => {
     const ord = [{ fp: "FP/2026/2", yearPo: 2026, cas: 500, raf: 500, facture: 0 }];
-    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/2": 9999 });
+    const a = atterrissage(ord, [], [], [], 2026, "2026-03-01", undefined, { "FP/2026/2": [{ date: "2027-01-01", amount: 9999 }] });
     expect(a.reporteCaf).toBe(500); // plafonné à 500
     expect(a.backlogProjete).toBe(0);
   });
