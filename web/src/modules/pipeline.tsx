@@ -3,9 +3,9 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, ListView, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, colText, colNum, money } from "../design/components";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
@@ -270,7 +270,10 @@ export const OppList: FC<Props> = () => {
                 <Busy variant="ghost" label="Suppr." okMsg="Supprimée" fn={() => deleteOpportunity(r.oppId || r.id || "")} />
               </span>
             ) : (
-              <button onClick={() => { fixOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs" title="Corriger N° FP / D Prev / montant / étape (opp importée)">Corriger</button>
+              <span className="inline-flex gap-2 items-center">
+                <button onClick={() => { fixOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs" title="Corriger N° FP / D Prev / montant / étape (opp importée)">Corriger</button>
+                <DangerBtn label="Suppr." confirm={`Supprimer l'opportunité importée ${r.client || r.fp || r.oppId || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("opportunities", r.oppId || r.id || "")} />
+              </span>
             )))] : []),
           ]}
         />

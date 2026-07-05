@@ -153,6 +153,20 @@ export async function setClientAliases(pairs: { from: string; to: string }[]) {
   return res.data as { ok: boolean; count: number };
 }
 
+/** ASSAINISSEMENT — supprime des enregistrements erronés/fantômes (les imports delta ne purgent
+ *  jamais). Gouverné par le module RBAC de la donnée, audité, recompute derrière. Les identifiants
+ *  sont des DOC IDS. Collections : orders / invoices / bcLines / projectSheets / opportunities. */
+export async function deleteRecords(collection: string, ids: string[]) {
+  const res = await httpsCallable(functions, "deleteRecords")({ collection, ids });
+  return res.data as { ok: boolean; count: number };
+}
+/** Supprime un seul enregistrement (assainissement). */
+export const deleteRecord = (collection: string, id: string) => deleteRecords(collection, [id]);
+
+/** Doc id Firestore d'un N° FP (miroir de functions/lib/sheets safeId — NON idempotent). Sert à
+ *  cibler orders/{safeId(fp)} depuis une ligne de commande (qui ne porte que le FP). */
+export const fpDocId = (fp: string) => String(fp || "").trim().replace(/_/g, "%5F").replace(/\//g, "_").replace(/\s+/g, "");
+
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});

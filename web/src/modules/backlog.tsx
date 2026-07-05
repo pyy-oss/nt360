@@ -3,13 +3,13 @@ import { useState, useMemo, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import { patchOrder, createOrder, setBillingMilestones, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity } from "../types";
 
@@ -630,6 +630,11 @@ export const OrderList: FC<Props> = () => {
           ...(canImport ? [colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
             ? <OrderEditor row={r} />
             : <span className="text-[11px] text-faint">à la source</span>), () => 0)] : []),
+          // Assainissement : supprime la ligne P&L orders/{safeId(fp)}. Pour une commande de source
+          // « fiche » (dérivée de projectSheets, sans doc orders), on renvoie vers l'écran Fiches.
+          ...(canImport ? [colText("Assainir", (r: Order) => (r.fp && r.source !== "fiche"
+            ? <DangerBtn label="Suppr." confirm={`Supprimer la commande ${r.fp} (ligne P&L) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("orders", fpDocId(r.fp!))} />
+            : <span className="text-[11px] text-faint">{r.source === "fiche" ? "fiche" : "—"}</span>), () => 0)] : []),
         ]}
       />
     </Card>
