@@ -548,11 +548,10 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
 // --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les
 // agrégats pipeline, sinon l'opp restait invisible des summaries jusqu'au recompute admin/quotidien. ---
-const PIPELINE_WRITE_ROLES = ["direction", "commercial_dir", "commercial"];
+// Autorisation pipeline/BC/fournisseurs : gouvernée par la MATRICE (requireWrite), plus de liste figée.
 
 exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
+  await requireWrite(req, "pipeline");
   const { fpKey } = require("./lib/ids");
   const { DEFAULT_PROBA, STAGE_LABEL } = require("./parsers/salesData");
   const d = req.data || {};
@@ -585,8 +584,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
 });
 
 exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!PIPELINE_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit pipeline requis");
+  await requireWrite(req, "pipeline");
   const id = String(req.data?.id || "");
   if (!id.startsWith("saisie_")) throw new HttpsError("failed-precondition", "seules les opportunités saisies sont supprimables");
   await db.doc(`opportunities/${id}`).delete();
@@ -594,12 +592,10 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
   return { ok: true };
 });
 
-const BC_WRITE_ROLES = ["direction", "pmo", "achats"];
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 
 exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  await requireWrite(req, "bc");
   const { fpKey } = require("./lib/ids");
   const { hashId } = require("./lib/sheets");
   const f = req.data?.fields || {};
@@ -651,8 +647,7 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---
 exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  await requireWrite(req, "bc");
   const { id, status } = req.data || {};
   if (!id || !BC_STAGES.includes(status)) throw new HttpsError("invalid-argument", "id + statut (∈ cycle BC) requis");
   await db.doc(`bcLines/${id}`).set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -667,8 +662,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
 // --- Fiabilisation d'une ligne BC réelle : rattacher un N° FP et/ou corriger le montant XOF
 // (ex. BC en devise étrangère non convertie → montant 0). Recalcule exposition + décaissements. ---
 exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  await requireWrite(req, "bc");
   const { fpKey } = require("./lib/ids");
   const { id, fp, amountXof } = req.data || {};
   if (!id) throw new HttpsError("invalid-argument", "id requis");
@@ -692,10 +686,8 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
   return { ok: true };
 });
 
-const SUPPLIER_WRITE_ROLES = ["direction", "achats"];
 exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!SUPPLIER_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit fournisseurs requis");
+  await requireWrite(req, "fournisseurs");
   // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
   const id = String(req.data?.id || "").trim().toUpperCase();
   if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
@@ -715,8 +707,7 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
 // mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
 // avant enregistrement via addBcLine. Ne persiste rien. ---
 exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!BC_WRITE_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit BC requis");
+  await requireWrite(req, "bc");
   const b64 = req.data?.pdfB64;
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "PDF requis (pdfB64)");
   const { extractPdfText, parseBcText } = require("./parsers/bcPdf");
