@@ -407,6 +407,11 @@ exports.syncSalesDataNow = onCallG("syncSalesDataNow", { memoryMiB: 512, timeout
 // envoyé en base64 par l'UI. Réutilise le parsing testé (buildWrites), upsert idempotent
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
 const IMPORT_ROLES = ["direction", "commercial_dir", "pmo", "achats"];
+// Bornes de robustesse à l'import (anti-OOM / anti-bombe de décompression / anti-timeout).
+const MAX_SHEETS = 60;                        // onglets par classeur
+const MAX_ZIP_ENTRIES = 100;                  // classeurs par ZIP
+const MAX_ENTRY_BYTES = 50 * 1024 * 1024;     // décompressé par classeur
+const MAX_TOTAL_BYTES = 200 * 1024 * 1024;    // décompressé cumulé sur le ZIP
 
 exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
@@ -426,6 +431,8 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   const files = [];
   let rowsIn = 0, rowsOk = 0, rowsSkipped = 0;
   const processWb = (wb, name) => {
+    // Garde-fou : un classeur à des milliers d'onglets ferait autant de parses → timeout/OOM.
+    if ((wb.SheetNames && wb.SheetNames.length || 0) > MAX_SHEETS) { files.push({ file: name, error: `trop d'onglets (> ${MAX_SHEETS})` }); return; }
     const r = buildWrites(wb);
     if (!r.kinds.length) { files.push({ file: name, error: "aucune source reconnue" }); return; }
     r.kinds.forEach((k) => kindsSet.add(k));
@@ -436,19 +443,33 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
 
   if (/\.zip$/i.test(filename)) {
     const { unzipSync } = require("fflate");
+    // Anti-BOMBE DE DÉCOMPRESSION : le plafond ~22 Mo ne borne QUE l'entrée compressée ; un ZIP peut
+    // se décompresser en plusieurs Go. Le `filter` de fflate décide AVANT décompression (via la taille
+    // déclarée `originalSize` du répertoire central) : on n'ouvre que les .xlsx, on plafonne la taille
+    // décompressée PAR classeur, le CUMUL et le NOMBRE de classeurs — les entrées au-delà ne sont pas
+    // décompressées (mémoire bornée) et l'import est refusé avec un message clair.
+    let total = 0, count = 0, truncated = false;
     let entries;
-    try { entries = unzipSync(new Uint8Array(buf)); }
-    catch (e) { throw new HttpsError("invalid-argument", "ZIP illisible"); }
-    const names = Object.keys(entries).filter((n) => {
-      const base = n.split("/").pop() || n;
-      return /\.xlsx?$/i.test(base) && !n.startsWith("__MACOSX/") && !base.startsWith("~$");
-    });
+    try {
+      entries = unzipSync(new Uint8Array(buf), { filter: (f) => {
+        const base = (f.name.split("/").pop() || f.name);
+        if (!/\.xlsx?$/i.test(base) || f.name.startsWith("__MACOSX/") || base.startsWith("~$")) return false;
+        const sz = f.originalSize || 0;
+        if (sz > MAX_ENTRY_BYTES || count + 1 > MAX_ZIP_ENTRIES || total + sz > MAX_TOTAL_BYTES) { truncated = true; return false; }
+        count += 1; total += sz; return true;
+      } });
+    } catch (e) { throw new HttpsError("invalid-argument", "ZIP illisible"); }
+    if (truncated) throw new HttpsError("failed-precondition", `ZIP trop volumineux (bombe de décompression ?) : max ${MAX_ZIP_ENTRIES} classeurs, ${MAX_ENTRY_BYTES / 1048576} Mo/classeur, ${MAX_TOTAL_BYTES / 1048576} Mo cumulés — divise l'import.`);
+    const names = Object.keys(entries);
     if (!names.length) throw new HttpsError("failed-precondition", "aucun classeur XLSX dans le ZIP");
     for (const n of names) {
       let wb;
       try { wb = XLSX.read(Buffer.from(entries[n]), { cellDates: true }); }
       catch (e) { files.push({ file: n, error: "classeur illisible" }); continue; }
-      processWb(wb, n);
+      // Isolation PAR FICHIER du parsing : un classeur au format inattendu qui ferait échouer un
+      // parseur ne casse plus l'import entier (les classeurs valides sont conservés).
+      try { processWb(wb, n); }
+      catch (e) { files.push({ file: n, error: "parsing impossible" }); }
     }
   } else {
     let wb;
