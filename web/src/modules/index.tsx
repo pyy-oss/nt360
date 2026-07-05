@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -38,6 +38,7 @@ const EntityView = from(() => import("./operations"), "EntityView") as Component
 const Fp360 = from(() => import("./operations"), "Fp360");
 const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
+const Cleanup = from(() => import("./cleanup"), "Cleanup");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -63,6 +64,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
   { id: "dataquality", key: "overview", label: "Qualité données", icon: ShieldCheck, Component: DataQuality },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
+  { id: "cleanup", key: "import", label: "Assainissement", icon: Eraser, Component: Cleanup },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
 ];
 
@@ -74,5 +76,5 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["clients", "domaines", "dataquality"] },
-  { label: "Admin", ids: ["habilitations"] },
+  { label: "Admin", ids: ["cleanup", "habilitations"] },
 ];
