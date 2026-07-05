@@ -322,11 +322,13 @@ async function requireWrite(req, module) {
   if (!canWrite(matrix, role, module)) throw new HttpsError("permission-denied", `droit d'écriture « ${module} » requis`);
 }
 
-// --- Matrice de droits : édition via CALLABLE validé + audité (jamais en écriture directe). Réservé
-// aux détenteurs du droit « habilitations » (direction incluse). Valide le schéma avant écriture pour
-// interdire une matrice malformée qui casserait la résolution de niveau pour tous (DoS RBAC). ---
+// --- Matrice de droits : édition via CALLABLE validé + audité (jamais en écriture directe). RÉSERVÉ
+// À LA DIRECTION : réécrire la matrice = pouvoir s'auto-accorder « write » partout (escalade). On
+// aligne donc sa garde sur les autres actions Habilitations (création de compte, rôle, configs), qui
+// sont toutes direction-only — plutôt que sur requireWrite('habilitations') qui l'ouvrirait à un
+// délégataire. Valide le schéma avant écriture (une matrice malformée casserait level() pour tous). ---
 exports.setPermissions = onCallG("setPermissions", async (req) => {
-  await requireWrite(req, "habilitations");
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { validateMatrix } = require("./domain/authz");
   const matrix = req.data?.matrix;
   const v = validateMatrix(matrix);
@@ -655,6 +657,28 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 256, timeo
   return { ok: true, fp };
 });
 
+// Migration des satellites clés par FP lors d'une ré-clé de commande (patchOrder newFp). Les champs
+// `fp` (factures, lignes BC — stockés en forme canonique fpKey) sont réécrits ; les docs clés par
+// safeId(fp) (fiche affaire + marge isolée, jalons de facturation) sont déplacés sous le nouvel ID.
+async function migrateFpSatellites(oldFp, newFp) {
+  const { safeId } = require("./lib/sheets");
+  for (const col of ["invoices", "bcLines"]) {
+    const qs = await db.collection(col).where("fp", "==", oldFp).get();
+    for (let i = 0; i < qs.docs.length; i += 400) {
+      const batch = db.batch();
+      for (const doc of qs.docs.slice(i, i + 400)) batch.set(doc.ref, { fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await batch.commit();
+    }
+  }
+  const oldI = safeId(oldFp), newI = safeId(newFp);
+  for (const col of ["projectSheets", "projectSheetsMargin", "billingMilestones"]) {
+    const s = await db.doc(`${col}/${oldI}`).get();
+    if (!s.exists) continue;
+    await db.doc(`${col}/${newI}`).set({ ...s.data(), _id: newI, fp: newFp }, { merge: true });
+    await db.doc(`${col}/${oldI}`).delete();
+  }
+}
+
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
 exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
@@ -705,6 +729,9 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
     if ((await db.doc(`orders/${newId}`).get()).exists) throw new HttpsError("failed-precondition", `une commande existe déjà pour ${newFp} — ré-clé refusée (fusion destructive)`);
     await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await ref.delete();
+    // Le FP est la clé de jointure : on migre aussi les satellites (factures, BC, fiche, jalons),
+    // sinon ils resteraient orphelins sous l'ancien FP (facturé=0, RAF gonflé, marge & report perdus).
+    await migrateFpSatellites(fp, newFp);
   } else if (Object.keys(patch).length) {
     await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else {

@@ -20,12 +20,15 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   opps = opps || [];
   const T = { ...ALERT_DEFAULTS, ...(thr || {}) };
 
+  // `margin: true` = alerte DÉRIVÉE DE LA MARGE : le signe de marge par affaire nommée (refs=FP) est
+  // confidentiel → l'agrégation isole ces items dans summaries/alertsMargin (gaté « rentabilite »),
+  // jamais dans summaries/alerts (lisible à « overview »).
   const neg = orders.filter((o) => (o.mb || 0) < 0);
-  if (neg.length) out.push({ type: "marge_negative", severity: "high", count: neg.length, message: `${neg.length} commande(s) à marge négative`, refs: neg.slice(0, 10).map((o) => o.fp) });
+  if (neg.length) out.push({ type: "marge_negative", severity: "high", margin: true, count: neg.length, message: `${neg.length} commande(s) à marge négative`, refs: neg.slice(0, 10).map((o) => o.fp) });
 
   // Achats fournisseurs > vente (Σsuppliers > CAS).
   const achatSup = orders.filter((o) => (o.suppliers || []).reduce((s, x) => s + (x.amount || 0), 0) > (o.cas || 0) && o.cas > 0);
-  if (achatSup.length) out.push({ type: "achat_sup_vente", severity: "high", count: achatSup.length, message: `${achatSup.length} commande(s) où les achats dépassent la vente`, refs: achatSup.slice(0, 10).map((o) => o.fp) });
+  if (achatSup.length) out.push({ type: "achat_sup_vente", severity: "high", margin: true, count: achatSup.length, message: `${achatSup.length} commande(s) où les achats dépassent la vente`, refs: achatSup.slice(0, 10).map((o) => o.fp) });
 
   // --- Cohérence financière (identité CAS = Facturé + RAF) ---
   const invByFp = {};
