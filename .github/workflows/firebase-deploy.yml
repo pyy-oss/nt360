@@ -37,11 +37,17 @@ jobs:
       # Retry : `firebase deploy` renvoie parfois une erreur transitoire à l'upload des fonctions.
       - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
         run: |
+          # NB : « storage » est VOLONTAIREMENT hors des cibles --only. Le déploiement des Storage
+          # rules interroge le bucket Storage par défaut du projet (firebasestorage.defaultBucket.get) ;
+          # le compte de service n'a pas ce droit (ou le bucket n'existe pas) → HTTP 403 qui faisait
+          # ÉCHOUER TOUT le déploiement (donc hosting + functions non livrés). Le Storage n'est pas
+          # gaté par des rules côté app (accès serveur via Admin SDK). Réintégrer « storage » ci-dessous
+          # uniquement après avoir créé le bucket + accordé le droit au SA.
           export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,storage,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport,functions:upsertOpportunity,functions:deleteOpportunity,functions:setInvoiceFp,functions:patchOrder,functions:patchBcLine,functions:scheduledRecompute,functions:setAlertThresholds,functions:setNotificationConfig,functions:alertDigest,functions:setProjectionConfig,functions:setBillingMilestones,functions:logClientError,functions:setPermissions,functions:createUser,functions:setUserActive,functions:createOrder,functions:patchOpportunity,functions:patchInvoice,functions:patchProjectSheet,functions:setClientAliases,functions:deleteRecords,functions:setCancellation" \
+              --only "hosting,firestore:rules,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport,functions:upsertOpportunity,functions:deleteOpportunity,functions:setInvoiceFp,functions:patchOrder,functions:patchBcLine,functions:scheduledRecompute,functions:setAlertThresholds,functions:setNotificationConfig,functions:alertDigest,functions:setProjectionConfig,functions:setBillingMilestones,functions:logClientError,functions:setPermissions,functions:createUser,functions:setUserActive,functions:createOrder,functions:patchOpportunity,functions:patchInvoice,functions:patchProjectSheet,functions:setClientAliases,functions:deleteRecords,functions:setCancellation" \
               --project propulse-business-87f7a --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi
