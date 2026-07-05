@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -40,6 +40,7 @@ const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
 const Relances = from(() => import("./relances"), "Relances");
+const Guide = from(() => import("./guide"), "Guide");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -68,11 +69,12 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
   { id: "cleanup", key: "import", label: "Assainissement", icon: Eraser, Component: Cleanup },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
+  { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
 ];
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
 export const GROUPS: { label: string; ids: string[] }[] = [
-  { label: "Cockpit", ids: ["overview", "news"] },
+  { label: "Cockpit", ids: ["overview", "news", "guide"] },
   { label: "Commercial", ids: ["pipeline", "opplist", "am360"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
