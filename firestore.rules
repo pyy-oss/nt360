@@ -93,6 +93,8 @@ service cloud.firestore {
     match /config/permissions { allow read: if signedIn();              allow write: if false; }
     // config/notifications contient l'URL de webhook (sensible) → lecture réservée aux habilitations.
     match /config/notifications { allow read: if canWrite('habilitations'); allow write: if false; }
+    // Table d'alias de normalisation clients : éditée via setClientAliases, lue par l'écran Admin.
+    match /config/clientAliases { allow read: if canWrite('habilitations'); allow write: if false; }
     match /config/{id}        { allow read: if signedIn() && id != 'notifications'; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
