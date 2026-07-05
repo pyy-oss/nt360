@@ -49,6 +49,9 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/qualityHistory"), { days: [] });
     await setDoc(doc(db, "config/cancelOrders"), { items: [] });
     await setDoc(doc(db, "config/cancelInvoices"), { items: [] });
+    await setDoc(doc(db, "summaries/relancesCreances"), { count: 0 });
+    await setDoc(doc(db, "summaries/relancesBc"), { count: 0 });
+    await setDoc(doc(db, "summaries/relancesJalons"), { count: 0 });
     await setDoc(doc(db, "auditLog/A1"), { action: "seed" });
   });
 });
@@ -175,6 +178,14 @@ describe("Agrégats & audit", () => {
   });
   it("summaries/qualityHistory (mappé overview) lisible par lecture", async () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/qualityHistory")));
+  });
+  it("plan de relance : cloisonné par module (créances→facturation, bc→fournisseurs, jalons→backlog)", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/relancesCreances")));   // facturation=none
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/relancesCreances")));    // facturation=read
+    await assertFails(getDoc(doc(as("commercial"), "summaries/relancesBc")));          // fournisseurs=none
+    await assertSucceeds(getDoc(doc(as("achats"), "summaries/relancesBc")));           // fournisseurs=write
+    await assertFails(getDoc(doc(as("commercial"), "summaries/relancesJalons")));      // backlog=none
+    await assertSucceeds(getDoc(doc(as("pmo"), "summaries/relancesJalons")));          // backlog=write
   });
   it("overlays d'annulation : cancelOrders au niveau overview, cancelInvoices cloisonné facturation", async () => {
     await assertSucceeds(getDoc(doc(as("commercial"), "config/cancelOrders")));   // overview=read

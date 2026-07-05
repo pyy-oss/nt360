@@ -44,6 +44,10 @@ service cloud.firestore {
         : id.matches('qualityHistory.*') ? 'overview'
         : id.matches('trends.*') ? 'overview'
         : id.matches('news.*') ? 'overview'
+        // Plan de relance : CLOISONNÉ par module (le montant d'une créance ne fuite pas hors facturation).
+        : id.matches('relancesCreances.*') ? 'facturation'
+        : id.matches('relancesBc.*') ? 'fournisseurs'
+        : id.matches('relancesJalons.*') ? 'backlog'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';
