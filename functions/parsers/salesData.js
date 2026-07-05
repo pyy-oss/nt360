@@ -87,7 +87,7 @@ function parseSalesData(wb) {
       client,
       am,
       // Description / désignation de l'affaire (objet de l'opportunité).
-      designation: String(valLabel(r, keys, "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "descriptif", "opportunité", "opportunite", "opportunity name", "opportunity", "opp name", "deal name", "deal", "name", "nom du projet", "nom projet", "nom de l'affaire", "sujet", "titre", "title", "subject", "prestation", "mission", "nature", "solution", "offre") || "").trim(),
+      designation: String(valLabel(r, keys, "description du projet", "description projet", "désignation", "designation", "objet", "affaire", "projet", "libellé", "libelle", "intitulé", "intitule", "description", "descriptif", "opportunité", "opportunite", "opportunity name", "opportunity", "opp name", "deal name", "deal", "name", "nom du projet", "nom projet", "nom de l'affaire", "sujet", "titre", "title", "subject", "prestation", "mission", "nature", "solution", "offre") || "").trim(),
       bu: cleanBu(val(r, keys, "domaine", "bu")),
       amount,
       stage,
