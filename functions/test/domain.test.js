@@ -156,39 +156,45 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
   });
 });
 
-describe("suppliers — exposition/encours/couverture (§18.6)", () => {
+describe("suppliers — SOA : solde (facturé) vs engagement (§18.6)", () => {
   const bc = [
-    { fp: "FP/2026/1", supplier: "HIPERDIST", amountXof: 250, status: "emis" },
-    { fp: "FP/2026/1", supplier: "HIPERDIST", amountXof: 100, status: "solde" }, // soldé → exclu encours
+    { fp: "FP/2026/1", supplier: "HIPERDIST", amountXof: 250, status: "emis" },    // engagé (non facturé)
+    { fp: "FP/2026/1", supplier: "HIPERDIST", amountXof: 400, status: "facture" }, // FACTURÉ → solde
+    { fp: "FP/2026/1", supplier: "HIPERDIST", amountXof: 100, status: "solde" },   // payé → hors compte
   ];
-  const credit = [{ id: "WESTCON", authorized: 1000, outstanding: 150 }];
+  const credit = [{ id: "WESTCON", authorized: 1000, openingBalance: 150 }];
   const s = suppliers(ORDERS, bc, credit);
   it("exposition = Σ suppliers.amount", () => {
     expect(s.totalExpo).toBe(600); // 300 + 200 + 100
   });
-  it("achat commandes ouvertes (RAF>0) NETTÉ du BC déjà émis (pas de double compte)", () => {
-    // HIPERDIST FP/2026/1 : 300 − 250 (BC non soldé même FP/fournisseur) = 50 ; FP/2026/3 : 100
-    // (aucun BC) = 100 → open = 150. WESTCON raf=0 → 0.
-    expect(s.openTotal).toBe(150);
-  });
-  it("encours calculé = Σ BC non soldés (HIPERDIST=250) ; saisi prioritaire (WESTCON=150)", () => {
+  it("SOLDE = ouverture + BC facturés (non payés) ; les BC engagés/soldés n'y entrent pas", () => {
     const hip = s.bySupplier.find((x) => x.name === "HIPERDIST");
+    expect(hip.solde).toBe(400);   // seul le BC « facturé » (400) ; émis (250) et soldé (100) exclus
+    expect(hip.encours).toBe(400); // rétro-compat = solde
     const wes = s.bySupplier.find((x) => x.name === "WESTCON");
-    expect(hip.encours).toBe(250);
-    expect(wes.encours).toBe(150);
+    expect(wes.solde).toBe(150);   // ouverture seule (aucun BC WESTCON)
   });
-  it("sans ligne de crédit (authorized=0) → non_suivi (pas de faux saturation)", () => {
+  it("ENGAGEMENT = BC non facturés + prévisionnel des commandes ouvertes (netté des BC)", () => {
+    // HIPERDIST : BC engagé 250 ; commandes ouvertes FP/2026/1 (300) + FP/2026/3 (100) = 400 d'achat,
+    // nettées des BC non soldés du couple (250+400=650 ≥ 300 pour FP1) → openPrev = 0 (FP1) + 100 (FP3).
     const hip = s.bySupplier.find((x) => x.name === "HIPERDIST");
-    expect(hip.state).toBe("non_suivi"); // aucune creditLine → non statué
-    const wes = s.bySupplier.find((x) => x.name === "WESTCON");
-    expect(wes.state).toBe("ok"); // authorized 1000, couverture positive
+    expect(hip.engagementBc).toBeUndefined(); // champ interne non exposé
+    expect(hip.engagement).toBe(250 + 100);   // 250 (BC émis) + 100 (FP/2026/3 sans BC)
   });
-  it("expose les listes COMPLÈTES saturated/tension (pour alertes non tronquées)", () => {
-    // Fournisseur saturé à FAIBLE exposition : encours saisi 200 > autorisé 100 → saturation.
+  it("solde d'ouverture SOA : openingBalance saisi (rétro-compat outstanding)", () => {
+    const s2 = suppliers([], [], [{ id: "ACME", authorized: 500, openingBalance: 120 }]);
+    expect(s2.bySupplier.find((x) => x.name === "ACME").solde).toBe(120);
+    const s3 = suppliers([], [], [{ id: "ACME", authorized: 500, outstanding: 90 }]); // ancien champ
+    expect(s3.bySupplier.find((x) => x.name === "ACME").solde).toBe(90);
+  });
+  it("état : saturation si solde+engagement > autorisé", () => {
+    const hip = s.bySupplier.find((x) => x.name === "HIPERDIST");
+    expect(hip.state).toBe("non_suivi"); // pas de creditLine HIPERDIST
+    // Fournisseur saturé : solde d'ouverture 200 > autorisé 100 → saturation.
     const s2 = suppliers(
       [{ fp: "FP/2026/1", raf: 100, suppliers: [{ name: "PETIT", amount: 10 }] }],
       [],
-      [{ id: "PETIT", authorized: 100, outstanding: 200 }],
+      [{ id: "PETIT", authorized: 100, openingBalance: 200 }],
     );
     expect(s2.saturated).toContain("PETIT");
     expect(Array.isArray(s2.tension)).toBe(true);

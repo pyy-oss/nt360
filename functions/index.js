@@ -1060,13 +1060,16 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
   // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
   const id = String(req.data?.id || "").trim().toUpperCase();
   if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
-  await db.doc(`creditLines/${id}`).set({
-    name: id, authorized: Number(req.data?.authorized) || 0, outstanding: Number(req.data?.outstanding) || 0,
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  // SOA : plafond autorisé + solde d'OUVERTURE (posé à date, « à jour maintenant »). Seule une FACTURE
+  // fournisseur (BC au statut « facturé ») bouge ensuite le solde ; l'ouverture est la base d'antériorité.
+  const d = req.data || {};
+  const patch = { name: id, authorized: Number(d.authorized) || 0, updatedAt: FieldValue.serverTimestamp() };
+  if (d.openingBalance !== undefined) patch.openingBalance = Number(d.openingBalance) || 0;
+  if (d.openingDate !== undefined) patch.openingDate = d.openingDate || null;
+  await db.doc(`creditLines/${id}`).set(patch, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "credit_line", module: "fournisseurs", entity: "creditLine", entityId: id,
-    detail: { authorized: req.data?.authorized, outstanding: req.data?.outstanding }, ts: FieldValue.serverTimestamp(),
+    detail: { authorized: patch.authorized, openingBalance: patch.openingBalance ?? null, openingDate: patch.openingDate ?? null }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries(["suppliers", "alerts"]);
   return { ok: true };

@@ -105,33 +105,40 @@ export const Fournisseurs: FC<Props> = () => {
   const badge: Record<string, string> = { saturation: "clay", tension: "gold", ok: "emerald", non_suivi: "neutral" };
   const cols = [
     colText("Fournisseur", (s: SupplierRow) => s.name, (s: SupplierRow) => s.name), colNum("Expo.", (s: SupplierRow) => money(s.expo), (s: SupplierRow) => s.expo),
-    colNum("Ouvert", (s: SupplierRow) => money(s.open), (s: SupplierRow) => s.open), colNum("Encours", (s: SupplierRow) => money(s.encours), (s: SupplierRow) => s.encours),
-    colNum("Couverture", (s: SupplierRow) => money(s.coverage), (s: SupplierRow) => s.coverage),
+    // SOA : le SOLDE (facturé) est distinct de l'ENGAGEMENT (BC non facturés + prévisionnel).
+    colNum("Solde compte", (s: SupplierRow) => money(s.solde), (s: SupplierRow) => s.solde),
+    colNum("Engagement", (s: SupplierRow) => money(s.engagement), (s: SupplierRow) => s.engagement),
+    colNum("Disponible", (s: SupplierRow) => (s.authorized ? <span className={cx((s.disponible ?? 0) < 0 && "text-clay font-medium")}>{money(s.disponible)}</span> : "—"), (s: SupplierRow) => s.disponible ?? 0),
     colNum("Util. %", (s: SupplierRow) => (s.authorized ? pct(s.util) : "—"), (s: SupplierRow) => s.util || 0),
-    colNum("Crédit reco.", (s: SupplierRow) => money(s.reco), (s: SupplierRow) => s.reco || 0),
     colNum("État", (s: SupplierRow) => <Badge tone={(badge[s.state || ""] || "neutral") as any}>{SUP_LABEL[s.state || ""] || s.state}</Badge>, (s: SupplierRow) => s.state || ""),
-    ...(canWrite ? [colNum("Ligne crédit", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} outstanding={s.encours || 0} />)] : []),
+    ...(canWrite ? [colNum("Ligne crédit (autorisé · ouverture)", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} opening={s.opening || 0} openingDate={s.openingDate || ""} />)] : []),
   ];
   return (
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <Kpi label="Exposition totale" value={fmt(data.totalExpo)} />
+        <Kpi label="Solde comptes (facturé)" value={fmt(data.soldeTotal ?? data.encoursTotal)} tone="clay" sub="SOA : ouverture + BC facturés" />
+        <Kpi label="Engagement (non facturé)" value={fmt(data.engagementTotal)} tone="steel" sub="BC en cours + prévisionnel" />
         <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone="steel" />
-        <Kpi label="Encours" value={fmt(data.encoursTotal)} />
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
-      <Card title="Par fournisseur"><Table columns={cols} rows={data.bySupplier || []} /></Card>
+      <Card title="Par fournisseur">
+        <Table columns={cols} rows={data.bySupplier || []} />
+        <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
+      </Card>
     </div>
   );
 };
-function CreditEditor({ name, authorized, outstanding }: { name: string; authorized: number; outstanding: number }) {
+function CreditEditor({ name, authorized, opening, openingDate }: { name: string; authorized: number; opening: number; openingDate: string }) {
   const [a, setA] = useState(String(authorized || ""));
-  const [o, setO] = useState(String(outstanding || ""));
+  const [o, setO] = useState(String(opening || ""));
+  const [d, setD] = useState(openingDate || "");
   return (
-    <span className="inline-flex gap-1.5 items-center">
+    <span className="inline-flex gap-1.5 items-center flex-wrap justify-end">
       <input className="field w-24 !py-1" aria-label={`Crédit autorisé ${name}`} value={a} onChange={(e) => setA(e.target.value)} placeholder="autorisé" />
-      <input className="field w-24 !py-1" aria-label={`Encours ${name}`} value={o} onChange={(e) => setO(e.target.value)} placeholder="encours" />
-      <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, outstanding: Number(o) || 0 })} />
+      <input className="field w-24 !py-1" aria-label={`Solde d'ouverture ${name}`} value={o} onChange={(e) => setO(e.target.value)} placeholder="ouverture" />
+      <input className="field w-32 !py-1" type="date" aria-label={`Date d'ouverture ${name}`} value={d} onChange={(e) => setD(e.target.value)} />
+      <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, openingBalance: Number(o) || 0, openingDate: d || null })} />
     </span>
   );
 }
