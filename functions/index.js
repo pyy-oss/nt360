@@ -613,19 +613,21 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 256, timeo
   const baseSnap = await db.doc(`projectSheets/${id}`).get();
   const mSnap = await db.doc(`projectSheetsMargin/${id}`).get();
   if (!baseSnap.exists && !mSnap.exists) throw new HttpsError("not-found", "fiche affaire introuvable");
+  const { computeFicheMargin } = require("./domain/mutations");
   const cur = { ...(baseSnap.data() || {}), ...(mSnap.data() || {}) };
   const provided = (v) => v !== undefined && String(v) !== "";
   if (!provided(d.saleTotal) && !provided(d.costTotal)) throw new HttpsError("invalid-argument", "prix de vente ou de revient requis");
-  const saleTotal = provided(d.saleTotal) ? Number(d.saleTotal) : (cur.saleTotal ?? null);
-  const costTotal = provided(d.costTotal) ? Number(d.costTotal) : (cur.costTotal ?? null);
-  if (saleTotal != null && (!Number.isFinite(saleTotal) || saleTotal < 0)) throw new HttpsError("invalid-argument", "prix de vente invalide");
-  if (costTotal != null && (!Number.isFinite(costTotal) || costTotal < 0)) throw new HttpsError("invalid-argument", "prix de revient invalide");
-  const margin = (saleTotal != null && costTotal != null) ? saleTotal - costTotal : (cur.margin ?? null);
-  const marginPct = (margin != null && saleTotal) ? margin / saleTotal : (cur.marginPct ?? null);
-  await db.doc(`projectSheetsMargin/${id}`).set({ _id: id, fp, saleTotal, costTotal, margin, marginPct }, { merge: true });
+  const m = computeFicheMargin({
+    saleTotal: provided(d.saleTotal) ? Number(d.saleTotal) : undefined,
+    costTotal: provided(d.costTotal) ? Number(d.costTotal) : undefined,
+    prev: cur,
+  });
+  if (m.saleTotal != null && (!Number.isFinite(m.saleTotal) || m.saleTotal < 0)) throw new HttpsError("invalid-argument", "prix de vente invalide");
+  if (m.costTotal != null && (!Number.isFinite(m.costTotal) || m.costTotal < 0)) throw new HttpsError("invalid-argument", "prix de revient invalide");
+  await db.doc(`projectSheetsMargin/${id}`).set({ _id: id, fp, saleTotal: m.saleTotal, costTotal: m.costTotal, margin: m.margin, marginPct: m.marginPct }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_fiche", module: "rentabilite", entity: "projectSheet", entityId: id,
-    detail: { fp, saleTotal, costTotal }, ts: FieldValue.serverTimestamp(),
+    detail: { fp, saleTotal: m.saleTotal, costTotal: m.costTotal }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
   return { ok: true, fp };
@@ -644,11 +646,12 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("failed-precondition", "commande P&L introuvable (opp gagnée / fiche : corriger à la source)");
 
+  const { validateYearPo } = require("./domain/mutations");
   const patch = {};
   if (d.yearPo != null && String(d.yearPo) !== "") {
-    const y = Math.trunc(Number(d.yearPo)) || 0;
-    if (y < 2015 || y > new Date().getFullYear() + 3) throw new HttpsError("invalid-argument", "année de PO invalide");
-    patch.yearPo = y;
+    const y = validateYearPo(d.yearPo, new Date().getFullYear());
+    if (!y.ok) throw new HttpsError("invalid-argument", "année de PO invalide");
+    patch.yearPo = y.value;
   }
   // CAS / RAF éditables (saisie in-app). CAS > 0 (commande signée) ; RAF ≥ 0. Attention : sur une
   // commande dont le CAS est GOUVERNÉ à la source (opp gagnée / fiche affaire), le CAS édité ici
@@ -749,10 +752,11 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   await requireWrite(req, "pipeline");
   const { fpKey } = require("./lib/ids");
   const { DEFAULT_PROBA, STAGE_LABEL } = require("./parsers/salesData");
+  const { clampStage, oppWeighted } = require("./domain/mutations");
   const d = req.data || {};
   const client = String(d.client || "").trim();
   if (!client) throw new HttpsError("invalid-argument", "client requis");
-  const stage = Math.min(9, Math.max(1, Math.trunc(Number(d.stage)) || 1));
+  const stage = clampStage(d.stage);
   const amount = Number(d.amount) || 0;
   // Proba : valeur fournie (0..1) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
   const pr = Number(d.probability);
@@ -765,7 +769,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     client, am: String(d.am || "").trim(), bu: String(d.bu || "AUTRE").trim().toUpperCase(),
     fp: fpKey(d.fp) || null,
     amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
-    probability, weighted: amount * probability,
+    probability, weighted: oppWeighted(amount, probability),
     closingDate: d.closingDate || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
@@ -797,6 +801,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   await requireWrite(req, "pipeline");
   const { fpKey } = require("./lib/ids");
   const { STAGE_LABEL } = require("./parsers/salesData");
+  const { clampStage, oppWeighted } = require("./domain/mutations");
   const d = req.data || {};
   const id = String(d.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id opportunité requis");
@@ -810,7 +815,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   if (d.am !== undefined) patch.am = String(d.am || "").trim();
   if (d.bu !== undefined) patch.bu = String(d.bu || "").trim().toUpperCase();
   if (d.stage !== undefined) {
-    const stage = Math.min(9, Math.max(1, Math.trunc(Number(d.stage)) || 1));
+    const stage = clampStage(d.stage);
     patch.stage = stage;
     patch.stageLabel = STAGE_LABEL[stage] || String(stage);
   }
@@ -820,7 +825,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     patch.amount = a;
   }
   // Pondéré recalculé si le montant change (proba issue de l'IdC de la source conservée).
-  if (patch.amount !== undefined) patch.weighted = patch.amount * (Number(cur.probability) || 0);
+  if (patch.amount !== undefined) patch.weighted = oppWeighted(patch.amount, cur.probability);
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({
