@@ -41,6 +41,11 @@ export async function patchBcLine(data: { id: string; fp?: string; amountXof?: n
   await httpsCallable(functions, "patchBcLine")(data);
 }
 
+/** Remonte une erreur client (observabilité). Réservé aux sessions authentifiées côté serveur. */
+export async function logClientError(payload: { message: string; stack?: string; url?: string; module?: string; ua?: string }) {
+  await httpsCallable(functions, "logClientError")(payload);
+}
+
 export type BillingMilestone = { date: string; amount: number };
 /** Enregistre l'échéancier de facturation d'un projet (≤ 15 jalons). Direction/PMO. Recalcule. */
 export async function setBillingMilestones(fp: string, milestones: BillingMilestone[]) {

@@ -139,4 +139,6 @@ export type UserRow = { id?: string; email?: string; name?: string; active?: boo
 export type PeriodsConfig = { available?: string[]; currentFy?: number; lastRecomputeAt?: any };
 // Journal d'exploitation (recompute manuel/planifié + échecs).
 export type OpsLog = { id?: string; kind?: string; action?: string; trigger?: string; status?: string; ms?: number; error?: string; detail?: { summaries?: number; currentFy?: number; count?: number }; ts?: any };
+// Journal d'erreurs client (observabilité front) — écrit par le callable logClientError, lu en Admin.
+export type ErrorLog = { id?: string; uid?: string; role?: string | null; message?: string; stack?: string | null; url?: string | null; module?: string | null; ua?: string | null; ts?: any };
 export type PermissionsConfig = { matrix?: Record<string, Record<string, string>> };

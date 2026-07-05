@@ -312,6 +312,11 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) {
+    // Remonte le crash de rendu à l'observabilité (best-effort ; import paresseux pour ne pas
+    // coupler la primitive au reporter et éviter tout cycle d'import).
+    import("../lib/errorReporter").then((m) => m.reportError(error?.message || "Crash de rendu", "ErrorBoundary", error?.stack)).catch(() => {});
+  }
   render() {
     if (this.state.error) {
       return (
