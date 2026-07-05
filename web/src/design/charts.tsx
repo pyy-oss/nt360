@@ -28,7 +28,9 @@ const H = ({ h = 230, label, children }: { h?: number; label?: string; children:
 
 /** Aire de tendance (ex. facturation mensuelle). data: [{name, v}] */
 export function AreaTrend({ data, color = T.emerald, name = "Valeur", h }: { data: any[]; color?: string; name?: string; h?: number }) {
-  const id = "g" + color.replace("#", "");
+  // id de dégradé : assaini en alphanumérique (la couleur peut être un rgb(var(--x)) → parenthèses/tirets
+  // interdits dans un id référencé par url(#…)).
+  const id = "g" + color.replace(/[^a-z0-9]/gi, "");
   return (
     <H h={h}>
       <AreaChart data={data} margin={{ left: -8, right: 8, top: 6 }}>
