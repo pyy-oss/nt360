@@ -1,22 +1,47 @@
 // Registre des modules (BUILD_KIT §2). Chaque module vit dans son propre fichier ;
 // ici uniquement : id de navigation + clé RBAC + libellé + icône + composant.
-import { type FC } from "react";
+//
+// Les composants sont chargés en LAZY (React.lazy + import dynamique) : le shell et l'écran de
+// connexion s'affichent sans embarquer le code des modules ni leurs dépendances lourdes (recharts).
+// Chaque fichier de modules devient un chunk chargé À LA DEMANDE, au premier affichage d'un de ses
+// onglets. App enveloppe le module actif dans un <Suspense> (squelette de chargement).
+import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
   Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
-import { Overview } from "./overview";
-import { Pipeline, OppList, Am360 } from "./pipeline";
-import { Objectifs, Facturation, InvoiceList, Rentabilite } from "./finance";
-import { Backlog, Prevision, OrderList, Simulateur } from "./backlog";
-import { PnlProjet, Fournisseurs, BC, EntityView, Fp360, DataQuality } from "./operations";
-import { Habilitations } from "./admin";
+
+type Mod = ComponentType<Props>;
+// Charge un export nommé d'un fichier de modules en lazy (le chunk est partagé entre les exports
+// d'un même fichier — Vite dédoublonne l'import dynamique).
+const from = (loader: () => Promise<Record<string, unknown>>, name: string): Mod =>
+  lazy(() => loader().then((m) => ({ default: m[name] as Mod }))) as unknown as Mod;
+
+const Overview = from(() => import("./overview"), "Overview");
+const Pipeline = from(() => import("./pipeline"), "Pipeline");
+const OppList = from(() => import("./pipeline"), "OppList");
+const Am360 = from(() => import("./pipeline"), "Am360");
+const Objectifs = from(() => import("./finance"), "Objectifs");
+const Facturation = from(() => import("./finance"), "Facturation");
+const InvoiceList = from(() => import("./finance"), "InvoiceList");
+const Rentabilite = from(() => import("./finance"), "Rentabilite");
+const Backlog = from(() => import("./backlog"), "Backlog");
+const Prevision = from(() => import("./backlog"), "Prevision");
+const OrderList = from(() => import("./backlog"), "OrderList");
+const Simulateur = from(() => import("./backlog"), "Simulateur");
+const PnlProjet = from(() => import("./operations"), "PnlProjet");
+const Fournisseurs = from(() => import("./operations"), "Fournisseurs");
+const BC = from(() => import("./operations"), "BC");
+const EntityView = from(() => import("./operations"), "EntityView") as ComponentType<Props & { kind: "clients" | "domaines" }>;
+const Fp360 = from(() => import("./operations"), "Fp360");
+const DataQuality = from(() => import("./operations"), "DataQuality");
+const Habilitations = from(() => import("./admin"), "Habilitations");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
 
-export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: FC<Props> }[] = [
+export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
   { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },

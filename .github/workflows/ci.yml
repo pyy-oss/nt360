@@ -41,3 +41,6 @@ jobs:
 
       - name: Build web
         run: pnpm --filter web build
+
+      - name: Budget de bundle (chunk d'entrée)
+        run: pnpm --filter web check:bundle
