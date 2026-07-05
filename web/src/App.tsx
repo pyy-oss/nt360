@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import { LogOut, Sun, Moon } from "lucide-react";
 import { auth } from "./lib/firebase";
@@ -6,7 +6,7 @@ import { currentTheme, toggleTheme, type Theme } from "./lib/theme";
 import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
-import { ErrorBoundary, cx } from "./design/components";
+import { ErrorBoundary, KpiSkeletons, CardSkeleton, cx } from "./design/components";
 import { NavContext, useNav, type NavIntent } from "./lib/nav";
 import { FilterProvider, useFilters } from "./lib/filters";
 import { FilterBar, FreshnessGuard } from "./modules/_shared";
@@ -187,7 +187,10 @@ export default function App() {
           {allowed ? (
             <ErrorBoundary key={allowed.id}>
               <h1 className="font-display text-xl sm:text-2xl font-bold mb-3 sm:mb-4">{allowed.label}</h1>
-              <ActiveModule mod={allowed} period={period} />
+              {/* Chargement paresseux du module : squelette pendant la récupération de son chunk. */}
+              <Suspense fallback={<div className="flex flex-col gap-4"><KpiSkeletons n={4} /><CardSkeleton h={160} /></div>}>
+                <ActiveModule mod={allowed} period={period} />
+              </Suspense>
             </ErrorBoundary>
           ) : (
             <div className="text-muted">Aucun module accessible pour ce profil.</div>
