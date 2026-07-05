@@ -48,7 +48,8 @@ describe("news — moteur d'actualité (bulletins + recommandations)", () => {
   it("créances échues + DSO élevé + fournisseur saturé + BC en retard", () => {
     const r = buildNews({ ...base,
       receivables: { totalAR: 1000, overdue: 400, overdueCount: 5, dso: 120 },
-      suppliers: { bySupplier: [{ name: "ACME", state: "saturation" }, { name: "X", state: "ok" }] },
+      // `saturated` = liste COMPLÈTE des noms (pas bySupplier, tronqué top-50).
+      suppliers: { saturated: ["ACME"], bySupplier: [{ name: "ACME", state: "saturation" }] },
       bcLines: [{ etaContrat: "2026-01-01", status: "emis" }, { etaContrat: "2030-01-01", status: "emis" }, { source: "fiche", etaContrat: "2026-01-01", status: "emis" }] });
     expect(ids(r)).toContain("creances_echues");
     expect(ids(r)).toContain("dso_eleve");
@@ -75,6 +76,18 @@ describe("news — moteur d'actualité (bulletins + recommandations)", () => {
     expect(b.title).toContain("5"); // 2 + 3
     expect(b.module).toBe("opplist"); // sans FP présent → on route vers le Pipeline
     expect(b.refs).toContain("FP/2026/1");
+  });
+
+  it("concentration : le faux seau « AUTRE » (opps/commandes sans AM/client) est ignoré", () => {
+    // AUTRE domine mais n'est pas un vrai AM/client → pas d'alerte de concentration attribuée à AUTRE.
+    const r = buildNews({ ...base,
+      pipeline: { byAM: { AUTRE: 900, Alice: 100 } },
+      backlog: { total: 1000, totalDerive: 0, byClient: { AUTRE: 900, ORANGE: 100 } } });
+    const am = r.bulletins.find((b) => b.id === "pipeline_concentration");
+    const cl = r.bulletins.find((b) => b.id === "backlog_concentration_client");
+    // Alice = 100/1000 = 10 % < 50 % ; ORANGE = 100/1000 = 10 % < 40 % → aucune alerte, et surtout jamais « AUTRE ».
+    expect(am).toBeUndefined();
+    expect(cl).toBeUndefined();
   });
 
   it("concentration client + backlog dormant détectés", () => {

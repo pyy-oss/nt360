@@ -2,7 +2,7 @@
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan, useCanExport, useCanSeeMargin } from "../lib/rbac";
+import { useCanExport, useCanSeeMargin, useClaims } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
@@ -52,7 +52,7 @@ export const Overview: FC<Props> = ({ period }) => {
   const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const objGlobal = useObjectives(period).get("global", "all"); // R/O global (si objectif de l'année sélectionnée)
-  const canWrite = useCan("overview") === "write";
+  const isDirection = useClaims().role === "direction"; // le callable recompute est direction-only
   const canExport = useCanExport();
   const [url, setUrl] = useState<string | null>(null);
   // Filtre transverse : quand un BU/AM/client est sélectionné, on RECALCULE la chaîne & les KPI
@@ -80,7 +80,7 @@ export const Overview: FC<Props> = ({ period }) => {
   const actions = (
     <div className="flex gap-2 items-center">
       {fresh && <span className="text-[11px] text-faint mr-1" title="Recompute planifié chaque jour à 05:00 ; « Recalculer » force la mise à jour.">Données à jour {fresh}</span>}
-      {canWrite && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
+      {isDirection && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
       {canExport && <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />}
       {url && <a className="text-gold text-xs underline" href={url} target="_blank" rel="noreferrer">Télécharger</a>}
     </div>

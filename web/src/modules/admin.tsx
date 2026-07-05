@@ -2,7 +2,7 @@
 import { useState, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan, useClaims } from "../lib/rbac";
+import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, colText, colNum, cx } from "../design/components";
 import { updateMatrix, callSetUserRole, callCreateUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
@@ -15,8 +15,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
   const { rows: users } = useCollectionData<UserRow>("users");
-  const canWrite = useCan("habilitations") === "write";
-  const isDirection = useClaims().role === "direction"; // setClientAliases est direction-only
+  const canWrite = useCan("habilitations") === "write"; // lecture des cartes d'observabilité (opsLog/errorLog)
+  const canImport = useCanImport(); // DataImportCard appelle importDelta (module « import »)
+  // La plupart des actions Habilitations (matrice, comptes, rôles, configs, dédoublonnage, alias) sont
+  // gouvernées DIRECTION-ONLY côté serveur → on masque leurs contrôles pour tout autre rôle (sinon
+  // boutons visibles qui échouent). Cohérent avec le durcissement de setPermissions.
+  const isDirection = useClaims().role === "direction";
   const [draft, setDraft] = useState<Record<string, Record<string, string>> | null>(null);
   const matrix = draft || data?.matrix || {};
   const roles = Object.keys(matrix);
@@ -28,15 +32,15 @@ export const Habilitations: FC<Props> = () => {
   const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
   return (
     <div className="flex flex-col gap-4">
-      {canWrite && <DataImportCard />}
+      {canImport && <DataImportCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
-      {canWrite && <ProjectionConfigCard />}
-      {canWrite && <AlertThresholdsCard />}
-      {canWrite && <NotificationCard />}
-      {canWrite && <DedupeCard />}
+      {isDirection && <ProjectionConfigCard />}
+      {isDirection && <AlertThresholdsCard />}
+      {isDirection && <NotificationCard />}
+      {isDirection && <DedupeCard />}
       {isDirection && <ClientAliasCard />}
-      <Card title="Matrice droits (profil × module)" actions={canWrite && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
+      <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
             <thead><tr><th className="px-2 py-1 text-left text-muted">Module</th>{roles.map((r) => <th key={r} className="px-2 py-1 text-muted font-medium">{r}</th>)}</tr></thead>
@@ -46,7 +50,7 @@ export const Habilitations: FC<Props> = () => {
                   <td className="px-2 py-1">{m}</td>
                   {roles.map((r) => (
                     <td key={r} className="px-1 py-1 text-center">
-                      <button disabled={!canWrite} aria-label={`Droit ${r} sur ${m} : ${matrix[r]?.[m] || "aucun"}`} title={`${r} · ${m} : ${matrix[r]?.[m] || "aucun"}`} onClick={() => canWrite && setCell(r, m)} className={cx("w-10 h-9 rounded font-semibold", tone[matrix[r]?.[m]] || "bg-panel2", canWrite && "hover:opacity-80")}>{glyph[matrix[r]?.[m]] ?? "–"}</button>
+                      <button disabled={!isDirection} aria-label={`Droit ${r} sur ${m} : ${matrix[r]?.[m] || "aucun"}`} title={`${r} · ${m} : ${matrix[r]?.[m] || "aucun"}`} onClick={() => isDirection && setCell(r, m)} className={cx("w-10 h-9 rounded font-semibold", tone[matrix[r]?.[m]] || "bg-panel2", isDirection && "hover:opacity-80")}>{glyph[matrix[r]?.[m]] ?? "–"}</button>
                     </td>
                   ))}
                 </tr>
@@ -55,14 +59,14 @@ export const Habilitations: FC<Props> = () => {
           </table>
         </div>
       </Card>
-      {canWrite && <CreateUserCard />}
+      {isDirection && <CreateUserCard />}
       <Card title="Utilisateurs & rôles">
         <Table columns={[
           colText("Email", (u) => u.email), colText("Nom", (u) => u.name),
-          canWrite
+          isDirection
             ? colText("Actif", (u: UserRow) => <ActiveToggle uid={u.id!} active={u.active} />, (u: UserRow) => (u.active ? 1 : 0))
             : colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
-          ...(canWrite ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} current={u.role} />)] : []),
+          ...(isDirection ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} current={u.role} />)] : []),
         ]} rows={users} />
         <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée). Après un changement de rôle ou une désactivation, l'utilisateur concerné doit rafraîchir sa session (reconnexion) pour que l'effet soit immédiat.</Tip>
       </Card>

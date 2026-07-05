@@ -476,12 +476,6 @@ exports.syncSalesData = onSchedule("every day 06:00", async () => {
   }
 });
 
-// Déclenchement manuel (admin) pour test / rejouabilité. Même recompute complet → mêmes ressources.
-exports.syncSalesDataNow = onCallG("syncSalesDataNow", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  return await runSalesSync(req.data?.objectKey);
-});
-
 // --- Import de delta à la demande : fichier XLSX (modèle Facturation DF / P&L / LIVE)
 // envoyé en base64 par l'UI. Réutilise le parsing testé (buildWrites), upsert idempotent
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
@@ -763,10 +757,14 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 256, timeoutSeconds: 1
   const id = safeId(fp);
   const ref = db.doc(`orders/${id}`);
   if ((await ref.get()).exists) throw new HttpsError("already-exists", "une commande existe déjà pour ce FP — utilisez la correction (CAS/RAF/année)");
+  // Année de PO : optionnelle (0 = non renseignée), mais si fournie elle est VALIDÉE (comme patchOrder)
+  // — une saisie non numérique est rejetée plutôt que ramenée silencieusement à 0.
   let yearPo = 0;
   if (d.yearPo != null && String(d.yearPo) !== "") {
-    yearPo = Math.trunc(Number(d.yearPo)) || 0;
-    if (yearPo && (yearPo < 2015 || yearPo > new Date().getFullYear() + 3)) throw new HttpsError("invalid-argument", "année de PO invalide");
+    const { validateYearPo } = require("./domain/mutations");
+    const y = validateYearPo(d.yearPo, new Date().getFullYear());
+    if (!y.ok) throw new HttpsError("invalid-argument", "année de PO invalide");
+    yearPo = y.value;
   }
   const raf = d.raf != null && String(d.raf) !== "" ? Math.max(Number(d.raf) || 0, 0) : null; // null → RAF dérivé (CAS − facturé)
   const order = {
@@ -873,8 +871,17 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     if (!Number.isFinite(a) || a < 0) throw new HttpsError("invalid-argument", "montant invalide");
     patch.amount = a;
   }
-  // Pondéré recalculé si le montant change (proba issue de l'IdC de la source conservée).
-  if (patch.amount !== undefined) patch.weighted = oppWeighted(patch.amount, cur.probability);
+  // Probabilité (IdC) éditable : la projection pondère par PALIER d'IdC, pas par étape — corriger
+  // l'étape sans pouvoir ajuster l'IdC laissait le pondéré figé. Bornée [0,1].
+  if (d.probability !== undefined && String(d.probability) !== "") {
+    const pr = Number(d.probability);
+    if (!Number.isFinite(pr) || pr < 0 || pr > 1) throw new HttpsError("invalid-argument", "probabilité (0..1) invalide");
+    patch.probability = pr;
+  }
+  // Pondéré recalculé si le montant OU la probabilité change (valeurs courantes conservées sinon).
+  if (patch.amount !== undefined || patch.probability !== undefined) {
+    patch.weighted = oppWeighted(patch.amount !== undefined ? patch.amount : cur.amount, patch.probability !== undefined ? patch.probability : cur.probability);
+  }
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({

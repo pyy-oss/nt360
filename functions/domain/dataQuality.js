@@ -70,13 +70,15 @@ function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
 
   issues.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || (b.count - a.count));
 
-  // Score de complétude : 1 − (anomalies pondérées / total d'enregistrements), borné [0,1].
-  // Le total inclut TOUTES les collections auditées (dont les fiches) — sinon une anomalie de
-  // fiche (fiches_sans_vente) est comptée au numérateur mais absente du dénominateur → score faussé.
+  // Indice de complétude : total / (total + anomalies pondérées), borné (0,1]. Le total inclut TOUTES
+  // les collections auditées (dont les fiches). Cette forme SMOOTH évite la saturation à 0 : un même
+  // enregistrement peut déclencher plusieurs anomalies (commande sans année + sans client + AM invalide…),
+  // ce qui faisait plonger « 1 − pondéré/total » à 0 dès quelques % de données imparfaites. Ici le score
+  // décroît continûment sans jamais s'effondrer, tout en restant ≈ identique sur des données propres.
   const W = { high: 1, medium: 0.5, low: 0.2 };
   const total = orders.length + invoices.length + opps.length + bcLines.length + sheets.length;
   const weighted = issues.reduce((s, i) => s + i.count * (W[i.severity] || 0), 0);
-  const score = total > 0 ? Math.max(0, Math.min(1, 1 - weighted / total)) : 1;
+  const score = total > 0 ? total / (total + weighted) : 1;
 
   return {
     issues, score,
