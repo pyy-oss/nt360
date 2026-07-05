@@ -61,4 +61,27 @@
   .tabnum {
     font-variant-numeric: tabular-nums;
   }
+  /* Table responsive : sous le point de rupture sm, chaque ligne devient une carte étiquetée
+     (fin du scroll horizontal sur mobile). Les <td> portent data-label = en-tête de colonne, rendu
+     en préfixe via ::before. Au-dessus de sm, table classique (les classes ci-dessous ne s'appliquent pas). */
+  @media (max-width: 639px) {
+    .rtable thead {
+      @apply hidden;
+    }
+    .rtable tr {
+      @apply block rounded-lg border border-line mb-2 p-1;
+    }
+    .rtable td {
+      @apply flex items-center justify-between gap-3 border-t-0 px-3 py-1.5 text-right;
+      min-height: 34px;
+    }
+    .rtable td::before {
+      content: attr(data-label);
+      @apply text-muted font-medium text-left text-xs shrink-0;
+    }
+    /* Cellule sans étiquette (colonne d'en-tête vide) : pas de préfixe. */
+    .rtable td[data-label=""]::before {
+      content: none;
+    }
+  }
 }
