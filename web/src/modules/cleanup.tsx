@@ -5,14 +5,26 @@
 //    commande) — en une action, plus un raccourci vers le dédoublonnage (doublons).
 // NON destructif par défaut : la purge demande confirmation et n'agit que sur des enregistrements
 // non rattachables. Le delta reste prioritaire (une source ré-important le record le recrée).
-import { useState, type FC } from "react";
+import { useState, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCanImport, useClaims } from "../lib/rbac";
+import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { Card, Tip, Badge, Busy, DangerBtn, EmptyState, Table, colText, colNum, cx } from "../design/components";
 import { deleteRecords, callDedupe, type DedupeResult } from "../lib/writes";
 import { Props } from "./_shared";
-import type { DataQualitySummary, Invoice } from "../types";
+import type { DataQualitySummary, Invoice, BcLine, Opportunity } from "../types";
+
+// Ligne de purge en lot : libellé + compteur + bouton (confirmation) qui supprime le lot d'ids.
+function PurgeRow({ label, hint, ids, collection, confirm, okMsg }: { label: string; hint?: ReactNode; ids: string[]; collection: string; confirm: string; okMsg: string }) {
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-[13px]">
+      <span className="text-ink font-medium">{label}</span>
+      <Badge tone={ids.length ? "clay" : "emerald"}>{ids.length}</Badge>
+      {hint && <span className="text-muted">{hint}</span>}
+      {ids.length > 0 && <DangerBtn label={`Purger ${ids.length}`} okMsg={okMsg} confirm={confirm} fn={() => deleteRecords(collection, ids)} />}
+    </div>
+  );
+}
 
 const DEDUPE_LABEL: Record<string, string> = { invoices: "Factures", opportunities: "Opportunités", bcLines: "BC fournisseurs" };
 
@@ -64,29 +76,44 @@ const FIX = (type: string): { module: string; segment?: string } | null => {
 export const Cleanup: FC<Props> = () => {
   const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const canImport = useCanImport();
+  const canBc = useCan("bc") !== "none";
+  const canPipe = useCan("pipeline") !== "none";
   const isDirection = useClaims().role === "direction"; // le dédoublonnage (callable) est direction-only
   const { go, canGo } = useNav();
-  // Factures orphelines chargées seulement si le rôle peut assainir (droit import).
+  // Collections chargées seulement si le rôle a l'accès (chaque purge est gouvernée par son module).
   const { rows: invoices } = useCollectionData<Invoice>(canImport ? "invoices" : null);
+  const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
+  const { rows: opps } = useCollectionData<Opportunity>(canPipe ? "opportunities" : null);
+
   const orphanIds = invoices.filter((r) => r.linked !== true && r.id).map((r) => r.id!) as string[];
   const orphanAmt = invoices.filter((r) => r.linked !== true).reduce((s, r) => s + (r.amountHt || 0), 0);
+  // BC NON RÉPARABLES : ni FP, ni fournisseur, ni N° BC, ni montant XOF → ligne vide/fantôme.
+  const junkBcIds = bcLines.filter((b) => b.id && !b.fp && !b.supplier && !b.bcNumber && !((b.amountXof || 0) > 0)).map((b) => b.id!) as string[];
+  // Opportunités PERDUES (7) / ANNULÉES (9) : mortes. Purge OPTIONNELLE (retire de l'historique).
+  const deadOppIds = opps.filter((o) => (o.stage === 7 || o.stage === 9) && o.id).map((o) => o.id!) as string[];
   const issues = data?.issues || [];
   const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   return (
     <div className="flex flex-col gap-4">
       <Card title="Purge en lot">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-3 flex-wrap text-[13px]">
-            <span className="text-ink font-medium">Factures orphelines</span>
-            <Badge tone={orphanIds.length ? "clay" : "emerald"}>{orphanIds.length}</Badge>
-            {orphanAmt > 0 && <span className="text-muted">{(orphanAmt / 1e9).toFixed(2)} Md non rattachés</span>}
-            {orphanIds.length > 0 && (
-              <DangerBtn label={`Purger ${orphanIds.length} facture(s)`} okMsg="Factures orphelines purgées (recalcul lancé)"
-                confirm={`Supprimer définitivement ${orphanIds.length} facture(s) non rattachée(s) à une commande ? À ne faire que si elles ne doivent pas exister. Un futur import delta les recréera si la source les contient encore.`}
-                fn={() => deleteRecords("invoices", orphanIds)} />
-            )}
-          </div>
-          <Tip>Une facture orpheline n'est reliée à aucune commande (N° FP inconnu). Si elle est <b>valide</b>, préférez la <b>rattacher</b> (Factures → Rattacher) ; si c'est un <b>déchet</b> (doublon, test, erreur), purgez-la ici.</Tip>
+        <div className="flex flex-col gap-2.5">
+          <PurgeRow label="Factures orphelines" collection="invoices" ids={orphanIds}
+            hint={orphanAmt > 0 ? `${(orphanAmt / 1e9).toFixed(2)} Md non rattachés` : undefined}
+            okMsg="Factures orphelines purgées (recalcul lancé)"
+            confirm={`Supprimer définitivement ${orphanIds.length} facture(s) non rattachée(s) à une commande ? À ne faire que si elles ne doivent pas exister. Un futur import delta les recréera si la source les contient encore.`} />
+          {canBc && (
+            <PurgeRow label="BC non réparables" collection="bcLines" ids={junkBcIds}
+              hint="ni FP, ni fournisseur, ni N° BC, ni montant"
+              okMsg="BC vides purgés (recalcul lancé)"
+              confirm={`Supprimer définitivement ${junkBcIds.length} ligne(s) BC vide(s) (aucun FP, fournisseur, N° BC ni montant) ? Ce sont des lignes fantômes non fiabilisables.`} />
+          )}
+          {canPipe && (
+            <PurgeRow label="Opportunités perdues / annulées" collection="opportunities" ids={deadOppIds}
+              hint="étapes 7-Perdu / 9-Annulé"
+              okMsg="Opportunités mortes purgées (recalcul lancé)"
+              confirm={`Supprimer définitivement ${deadOppIds.length} opportunité(s) perdue(s)/annulée(s) ? ATTENTION : elles disparaissent de l'historique (elles ne comptent plus dans les taux de conversion). Un futur import delta les recréera si la source les contient encore.`} />
+          )}
+          <Tip>Purges de MASSE des enregistrements clairement « déchet » (non rattachables / vides / morts). Chacune demande confirmation, ne touche que le lot indiqué, est auditée et gouvernée par les droits. Pour une facture <b>valide</b> non rattachée, préférez la <b>rattacher</b> (Factures → Rattacher) plutôt que la purger. Le delta reste prioritaire : une source ré-important un record le recrée.</Tip>
         </div>
       </Card>
 
