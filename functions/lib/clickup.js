@@ -114,6 +114,26 @@ async function listTasks(token, listId, opts) {
   return tasks;
 }
 
+// --- Commentaires & tags (Lot 3 : enrichissements app → ClickUp) ---
+/** Commentaires d'une tâche → [{id, comment_text, ...}]. Sert à retrouver notre commentaire marqué. */
+async function listComments(token, taskId) {
+  const d = await api(token, "GET", `/task/${taskId}/comment`);
+  return (d && d.comments) || [];
+}
+async function createComment(token, taskId, text) {
+  return api(token, "POST", `/task/${taskId}/comment`, { comment_text: text, notify_all: false });
+}
+async function updateComment(token, commentId, text) {
+  return api(token, "PUT", `/comment/${commentId}`, { comment_text: text });
+}
+/** Pose / retire un tag nommé sur une tâche (le tag doit exister dans l'espace ; ClickUp le crée sinon). */
+async function addTag(token, taskId, tagName) {
+  return api(token, "POST", `/task/${taskId}/tag/${encodeURIComponent(tagName)}`);
+}
+async function removeTag(token, taskId, tagName) {
+  return api(token, "DELETE", `/task/${taskId}/tag/${encodeURIComponent(tagName)}`);
+}
+
 // --- Webhooks (Lot 2 : temps réel) ---
 /** Liste les webhooks du workspace (pour éviter les doublons). */
 async function listWebhooks(token, teamId) {
@@ -133,4 +153,4 @@ async function deleteWebhook(token, webhookId) {
   return api(token, "DELETE", `/webhook/${webhookId}`);
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks, listWebhooks, createWebhook, updateWebhook, deleteWebhook };
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };

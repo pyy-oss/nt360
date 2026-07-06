@@ -87,6 +87,12 @@ export async function reconcileClickupLinks(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "reconcileClickupLinks", { timeout: 300_000 })({ listId: opts?.listId });
   return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithFp: number };
 }
+/** Enrichit les tâches ClickUp liées : commentaire de synthèse idempotent (CA/RAF, jalons, BC, qualité)
+ *  + tag « à risque ». Admin. Peut être long. */
+export async function enrichClickup() {
+  const res = await httpsCallable(functions, "enrichClickup", { timeout: 540_000 })({});
+  return res.data as { ok: boolean; enriched: number; failed?: number; tagged: number; total: number };
+}
 /** Diagnostic qualité de l'intégration ClickUp (couverture, orphelines, écarts CAF…). Admin. */
 export async function clickupHealth(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "clickupHealth", { timeout: 300_000 })({ listId: opts?.listId });

@@ -200,6 +200,17 @@ function buildNews(x) {
     refs: (x.bcClickupOverdueRefs || []).slice(0, 8),
   });
 
+  // Projets BLOQUÉS / priorité URGENTE (synchro ClickUp) : à débloquer ou traiter en priorité. Signal
+  // d'exécution remonté des tâches (tag « bloqué » ou priorité urgente).
+  const cuBlocked = num(x.clickupBlocked);
+  pushIf(B, cuBlocked > 0, {
+    id: "projet_bloque", domain: "backlog", severity: "high", module: "orderlist",
+    title: `${cuBlocked} projet(s) bloqué(s) ou en priorité urgente`,
+    detail: "Des tâches ClickUp liées sont marquées bloquées ou en priorité urgente — risque d'exécution.",
+    action: "Lever les blocages / arbitrer les priorités avec les PM (Commandes / ClickUp).",
+    refs: (x.clickupBlockedRefs || []).slice(0, 8),
+  });
+
   // — FACTURATION / CASH —
   const realiseYtd = num(trend.realiseYtd);
   const curMonth = String(x.asOf || "").slice(0, 7);

@@ -42,3 +42,27 @@ des bons de commande) vers Neurone360, sans attendre le tirage quotidien (`sched
 
 `taskStatusUpdated`, `taskUpdated` (inclut les champs personnalisés), `taskDeleted`, `taskMoved`,
 `taskCreated`. Une suppression de tâche liée retire le lien et l'overlay correspondants.
+
+---
+
+# Enrichissements croisés (Lots 3 & 4)
+
+## Lot 3 — app → ClickUp (synthèse + tag)
+
+Le bouton *Habilitations → Intégration ClickUp → **« Enrichir les tâches »*** (et un entretien quotidien
+`scheduledClickupEnrich`) pose sur **chaque tâche commande liée** :
+
+- Un **commentaire de synthèse idempotent** (1re ligne = marqueur `🔄 Synthèse Neurone360`) : CA signé /
+  facturé (%) / RAF, jalons de facturation à venir, **BC fournisseurs liés**, anomalies **qualité**,
+  retard de livraison. Retrouvé et **mis à jour** à chaque passage → jamais de doublon.
+- Un **tag « à risque (n360) »** posé/retiré selon les anomalies qualité ou le retard.
+
+La synthèse consolide jalons et BC dans un commentaire unique (plutôt que des sous-tâches / checklists
+recréées) pour garantir l'**idempotence**.
+
+## Lot 4 — ClickUp → app (avancement, priorité, blocage, temps)
+
+`readTaskSync` remonte désormais aussi, par tâche liée : **priorité**, **blocage** (tag « bloqué »),
+**avancement %** (agrégé des checklists) et **temps passé** (h). Ces champs sont fusionnés dans les
+lignes *Commandes* (colonnes de détail) et alimentent un bulletin d'Actualité **« projets bloqués ou en
+priorité urgente »**. Alimentés en temps réel par les webhooks (Lot 2) et par le tirage quotidien.

@@ -989,6 +989,11 @@ export const OrderList: FC<Props> = () => {
           det(colText("D. commande", (r) => r.dateCommande || "—", (r) => r.dateCommande || "")),
           det(colText("D. contract.", (r) => r.dateContractuelle || "—", (r) => r.dateContractuelle || "")),
           det(colText("D. prév. fin", (r) => r.dateFinPrev || "—", (r) => r.dateFinPrev || "")),
+          // Enrichissements ClickUp → app (Lot 4) : avancement (checklists), priorité, blocage, temps passé.
+          det(colNum("Avancement", (r) => (r.clickupProgress != null ? `${r.clickupProgress}%` : "—"), (r) => (r.clickupProgress ?? -1))),
+          det(colText("Priorité CU", (r) => (r.clickupPriority ? <Badge tone={/urgent/i.test(r.clickupPriority) ? "clay" : "steel"}>{r.clickupPriority}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupPriority || "")),
+          det(colText("Blocage", (r) => (r.clickupBlocked ? <Badge tone="clay">bloqué</Badge> : <span className="text-faint">—</span>), (r) => (r.clickupBlocked ? 1 : 0))),
+          det(colNum("Temps CU", (r) => (r.clickupTimeSpentH != null ? `${r.clickupTimeSpentH} h` : "—"), (r) => (r.clickupTimeSpentH ?? 0))),
           ...(canImport ? [det(colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
             ? <OrderEditor row={r} />
             : <span className="text-[11px] text-faint">à la source</span>), () => 0))] : []),

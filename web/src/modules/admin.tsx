@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -564,6 +564,7 @@ function ClickupCard() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [enrichBusy, setEnrichBusy] = useState(false);
   const [bcRecBusy, setBcRecBusy] = useState(false);
   const [bcBulkBusy, setBcBulkBusy] = useState(false);
   const [bcPullBusy, setBcPullBusy] = useState(false);
@@ -632,6 +633,17 @@ function ClickupCard() {
       // Un timeout client est possible sur un gros volume : le traitement se poursuit côté serveur.
       toast(detail.includes("deadline") || detail.includes("timeout") ? "Push lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Push refusé — ${detail}` : "Push : échec"), detail.includes("deadline") ? "ok" : "err");
     } finally { setBulkBusy(false); }
+  };
+  const enrich = async () => {
+    if (enrichBusy) return;
+    setEnrichBusy(true);
+    try {
+      const r = await enrichClickup();
+      toast(`Enrichissement — ${r.enriched} tâche(s) synthétisée(s), ${r.tagged} taguée(s) « à risque »${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Enrichissement refusé — ${detail}` : "Enrichissement : échec", "err");
+    } finally { setEnrichBusy(false); }
   };
   const bcReconcile = async () => {
     if (bcRecBusy) return;
@@ -718,6 +730,9 @@ function ClickupCard() {
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
           {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
+        </button>
+        <button type="button" className="btn-ghost !py-1.5" disabled={enrichBusy} onClick={enrich} title="Poser un commentaire de synthèse (CA/RAF, jalons, BC liés, qualité) + un tag « à risque » sur chaque tâche commande liée">
+          {enrichBusy ? "Enrichissement…" : "Enrichir les tâches"}
         </button>
       </div>
       <ClickupHealthPanel health={health} />
