@@ -79,7 +79,13 @@ export async function syncFromClickup() {
  *  les tâches déjà liées). Admin. Peut être long (timeout client possible, traitement poursuivi). */
 export async function pushAllOrdersToClickup(opts?: { force?: boolean; listId?: string }) {
   const res = await httpsCallable(functions, "pushAllOrdersToClickup", { timeout: 540_000 })({ force: opts?.force, listId: opts?.listId });
-  return res.data as { ok: boolean; created: number; updated: number; failed: number; skipped: number; total: number };
+  return res.data as { ok: boolean; created: number; updated: number; adopted: number; failed: number; skipped: number; total: number };
+}
+/** Réconciliation anti-doublons : rattache les commandes aux tâches ClickUp DÉJÀ existantes
+ *  (Opp ID = FP), sans rien créer. À lancer AVANT tout push en masse. Admin. */
+export async function reconcileClickupLinks(opts?: { listId?: string }) {
+  const res = await httpsCallable(functions, "reconcileClickupLinks", { timeout: 300_000 })({ listId: opts?.listId });
+  return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithFp: number };
 }
 /** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
 export async function listClickupMembers() {

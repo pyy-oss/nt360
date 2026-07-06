@@ -190,4 +190,28 @@ function readTaskSync(task) {
   };
 }
 
-module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority, readTaskSync };
+// N° FP porté par une tâche ClickUp : champ personnalisé « Opp ID » (repli : rien). PUR.
+function taskFp(task) {
+  const cfs = (task && task.custom_fields) || [];
+  const f = cfs.find((c) => norm(c.name) === norm(FIELD_NAMES.oppId));
+  const v = f && f.value != null ? String(f.value).trim() : "";
+  return v || null;
+}
+
+/**
+ * Index des tâches existantes par N° FP normalisé → taskId (première tâche gagne). Sert à la
+ * réconciliation anti-doublons : rattacher une commande à une tâche déjà créée (ex-formulaire) au
+ * lieu d'en créer une seconde. `normalize` (ex. fpKey) rend la comparaison robuste. PUR.
+ */
+function buildTaskFpIndex(tasks, normalize) {
+  const idx = {};
+  for (const t of tasks || []) {
+    const raw = taskFp(t);
+    if (!raw) continue;
+    const k = normalize ? normalize(raw) : raw;
+    if (k && !(k in idx)) idx[k] = t.id;
+  }
+  return idx;
+}
+
+module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority, readTaskSync, taskFp, buildTaskFpIndex };

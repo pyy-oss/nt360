@@ -104,4 +104,18 @@ async function getTask(token, taskId) {
   return api(token, "GET", `/task/${taskId}?include_subtasks=false`);
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask };
+/** Toutes les tâches d'une liste (paginé, champs personnalisés inclus) — pour la réconciliation.
+ *  include_closed par défaut (une tâche terminée/facturée existe toujours et ne doit pas être dupliquée). */
+async function listTasks(token, listId, opts) {
+  const includeClosed = !opts || opts.includeClosed !== false;
+  const tasks = [];
+  for (let page = 0; page < 50; page++) { // garde-fou : 50 pages × 100 = 5000 tâches max
+    const d = await api(token, "GET", `/list/${listId}/task?page=${page}&subtasks=false&include_closed=${includeClosed}`);
+    const batch = (d && d.tasks) || [];
+    tasks.push(...batch);
+    if (batch.length < 100 || d.last_page) break;
+  }
+  return tasks;
+}
+
+module.exports = { api, retryDelay, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask, listTasks };
