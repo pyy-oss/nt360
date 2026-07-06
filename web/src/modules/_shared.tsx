@@ -375,21 +375,34 @@ export function DataImportCard() {
 // Bouton de ré-ingestion (Direction) : confirme, appelle `reingest`, puis toast détaillé issu du
 // rapport serveur (objets ingérés, lignes, échecs). Ré-ingérer n'est pas destructif (upsert
 // merge), mais lance un recompute complet — d'où la confirmation et l'état occupé dédié.
+// Codes d'erreur qui traduisent un VRAI refus (droit, argument) — à distinguer d'une coupure
+// d'infrastructure sur un appel long. La ré-ingestion dure quelques minutes : le frontal Google
+// peut couper la connexion (503 → « internal » / « unavailable » / « deadline-exceeded ») ALORS QUE
+// la fonction continue et aboutit côté serveur. Dans ce cas on n'affiche PAS « refusé » (faux négatif).
+const REINGEST_REFUSAL = new Set(["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition", "not-found"]);
 function ReingestButton() {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const onClick = async () => {
     if (busy) return;
-    if (!window.confirm("Re-parser tous les classeurs sources de gs://nt360 ?\nÉcrase les champs recalculés (ex. désignation) sur l'existant, puis relance un recalcul complet. Aucune donnée n'est supprimée.")) return;
+    if (!window.confirm("Re-parser tous les classeurs sources de gs://nt360 ?\nÉcrase les champs recalculés (ex. désignation) sur l'existant, puis relance un recalcul complet. Aucune donnée n'est supprimée.\n\nL'opération prend quelques minutes ; son résultat apparaît dans le journal d'import ci-dessous.")) return;
     setBusy(true);
+    // Feedback immédiat : l'opération est longue, on ne laisse pas l'utilisateur devant un bouton figé.
+    toast("Ré-ingestion lancée — suivez l'avancement dans le journal d'import ci-dessous.", "info");
     try {
       const r = await callReingest();
       const failPart = r.objectsFailed ? ` · ${r.objectsFailed} ignoré(s)` : "";
       const kindsPart = r.kinds?.length ? ` · ${r.kinds.join(", ")}` : "";
-      toast(`Ré-ingestion : ${r.objectsIngested}/${r.objectsScanned} fichier(s) · ${r.rowsOk.toLocaleString("fr-FR")} ligne(s)${failPart}${kindsPart}`, r.objectsFailed && !r.objectsIngested ? "err" : "ok");
+      toast(`Ré-ingestion terminée : ${r.objectsIngested}/${r.objectsScanned} fichier(s) · ${r.rowsOk.toLocaleString("fr-FR")} ligne(s)${failPart}${kindsPart}`, r.objectsFailed && !r.objectsIngested ? "err" : "ok");
     } catch (e: any) {
-      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
-      toast(detail ? `Ré-ingestion refusée — ${detail}` : "Ré-ingestion refusée", "err");
+      const code = String(e?.code || "").replace(/^functions\//, "");
+      if (REINGEST_REFUSAL.has(code)) {
+        const detail = String(e?.message || code || "").replace(/^functions\//, "");
+        toast(`Ré-ingestion refusée — ${detail}`, "err");
+      } else {
+        // Coupure probable d'un appel long : la fonction poursuit côté serveur → pas un échec.
+        toast("Ré-ingestion en cours côté serveur (traitement long) — le résultat apparaîtra dans le journal d'import.", "info");
+      }
     } finally {
       setBusy(false);
     }
