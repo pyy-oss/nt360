@@ -438,13 +438,14 @@ exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeco
 // tous les summaries (boucle sur chaque période) — le défaut 256 MiB / 60 s provoquait un
 // timeout/OOM sur un gros volume, surfacé en « Action refusée » côté UI, alors que le même
 // recompute lancé APRÈS un import (512 MiB / 300 s) réussissait.
-exports.recompute = onCallG("recompute", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
   const t0 = Date.now();
   try {
     const res = await recomputeAll(db, req.data?.only);
     await logOps({ kind: "recompute", trigger: "manuel", status: "ok", ms: Date.now() - t0, uid: req.auth.uid, detail: { summaries: res.written.length, currentFy: res.currentFy } });
+    await maybeSyncCaf("recompute"); // entretien CAF→ClickUp (best-effort, uniquement les CAF changés)
     return { ok: true, ...res };
   } catch (e) {
     // Sans ce wrap, une exception non-HttpsError est renvoyée au client en « internal » SANS
@@ -458,12 +459,13 @@ exports.recompute = onCallG("recompute", { memoryMiB: 512, timeoutSeconds: 300 }
 
 // --- Recompute PLANIFIÉ quotidien : garantit des agrégats jamais datés, indépendamment des
 // imports/sync. Trace succès et échecs dans opsLog (observabilité). ---
-exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", memoryMiB: 512, timeoutSeconds: 300 }, async () => {
+exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async () => {
   const { recomputeAll } = require("./lib/aggregate");
   const t0 = Date.now();
   try {
     const res = await recomputeAll(db);
     await logOps({ kind: "recompute", trigger: "planifié", status: "ok", ms: Date.now() - t0, detail: { summaries: res.written.length, currentFy: res.currentFy } });
+    await maybeSyncCaf("scheduledRecompute"); // entretien CAF→ClickUp (best-effort)
   } catch (e) {
     logger.error("scheduledRecompute a échoué", { message: e && e.message, stack: e && e.stack });
     await logOps({ kind: "recompute", trigger: "planifié", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
@@ -1156,6 +1158,70 @@ exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_T
   try { members = await clickup.listMembers(token, cfg.teamId || CLICKUP_TEAM); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "membres illisibles"}`); }
   return { ok: true, members: members.map((m) => ({ name: m.username, email: m.email })).filter((m) => m.name) };
+});
+
+// CAF courant par clé safeId(fp), lu des commandes matérialisées (chunks commandesRows/{i}).
+async function loadCafByFp(safeId) {
+  const meta = (await db.doc("summaries/commandes").get()).data() || {};
+  const chunks = Number(meta.chunks || 0);
+  const out = {};
+  for (let i = 0; i < chunks; i++) {
+    const rows = ((await db.doc(`commandesRows/${i}`).get()).data() || {}).rows || [];
+    for (const r of rows) { if (r && r.fp) out[safeId(r.fp)] = Number(r.facture || 0); }
+  }
+  return out;
+}
+
+// Pousse le CAF (CA Facturé) des commandes vers leurs tâches ClickUp liées. force=false : uniquement
+// les CAF ayant changé depuis le dernier envoi (overlay config/clickupCaf) — cheap, appelé après
+// chaque recompute. force=true : toutes les tâches (bouton « Forcer la synchro »). Le token doit être
+// disponible (secret lié à la fonction appelante). Nécessite les champs de la liste par défaut pour
+// résoudre l'id du champ « CA Facturé » (partagé par les 3 listes pays).
+async function runCafSync({ force }) {
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) return { disabled: true, pushed: 0, skipped: 0, total: 0 };
+  const token = CLICKUP_TOKEN.value();
+  if (!token) return { pushed: 0, skipped: 0, total: 0, note: "token absent" };
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  if (!Object.keys(links).length) return { pushed: 0, skipped: 0, total: 0 };
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const { diffCaf } = require("./lib/clickupCaf");
+  const { safeId } = require("./lib/sheets");
+  const listId = String(cfg.defaultListId || CLICKUP_LIST_CI);
+  const fields = await clickup.listFields(token, listId);
+  const cafField = cf.findField(fields, cf.FIELD_NAMES.caFacture);
+  if (!cafField) throw new Error("champ « CA Facturé » introuvable dans la liste ClickUp");
+  const cafByFp = await loadCafByFp(safeId);
+  const last = ((await db.doc("config/clickupCaf").get()).data() || {}).map || {};
+  const { toPush, nextMap, skipped } = diffCaf(links, last, cafByFp, force);
+  let pushed = 0, failed = 0;
+  for (const t of toPush) {
+    try { await clickup.setField(token, t.taskId, cafField.id, t.caf); nextMap[t.key] = t.caf; pushed++; }
+    catch (e) { logger.warn("CAF→ClickUp: échec", { key: t.key, msg: e && e.message }); if (last[t.key] !== undefined) nextMap[t.key] = last[t.key]; failed++; }
+  }
+  await db.doc("config/clickupCaf").set({ map: nextMap, updatedAt: FieldValue.serverTimestamp() });
+  return { pushed, skipped, failed, total: Object.keys(links).length };
+}
+
+// Entretien automatique du CAF après un recompute (best-effort : n'échoue JAMAIS l'appelant).
+async function maybeSyncCaf(trigger) {
+  try {
+    const r = await runCafSync({ force: false });
+    if (r.pushed) logger.info("CAF→ClickUp entretenu", { trigger, ...r });
+  } catch (e) { logger.warn("CAF→ClickUp: entretien échoué", { trigger, msg: e && e.message }); }
+}
+
+// syncClickupCaf : force la synchro du CAF de TOUTES les tâches liées (bouton Habilitations). Direction.
+exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  let res;
+  try { res = await runCafSync({ force: true }); }
+  catch (e) { throw new HttpsError("internal", `CAF : ${(e && e.message) || e}`); }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_caf_sync", module: "habilitations", entity: "config", entityId: "clickupCaf", detail: res, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
 });
 
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats

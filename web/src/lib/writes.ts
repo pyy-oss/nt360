@@ -65,6 +65,11 @@ export async function setClickupConfig(cfg: { enabled?: boolean; teamId?: string
   const res = await httpsCallable(functions, "setClickupConfig")(cfg);
   return res.data as { ok: boolean; config: any };
 }
+/** Force la synchro du CAF (CA Facturé) de toutes les tâches ClickUp liées (admin). */
+export async function syncClickupCaf() {
+  const res = await httpsCallable(functions, "syncClickupCaf", { timeout: 300_000 })({});
+  return res.data as { ok: boolean; pushed: number; skipped: number; failed?: number; total: number };
+}
 /** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
 export async function listClickupMembers() {
   const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});
