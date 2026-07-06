@@ -747,7 +747,7 @@ function ClickupBtn({ row }: { row: Order }) {
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-1 text-xs" title="Créer / mettre à jour la tâche ClickUp">
-        {row.pm ? "ClickUp ↗" : "ClickUp"}
+        {row.clickupTaskId ? "ClickUp ↗" : "ClickUp"}
       </button>
       <Modal open={open} onClose={() => setOpen(false)} size="md"
         title={<>Tâche ClickUp — <span className="text-gold">{row.fp}</span></>}

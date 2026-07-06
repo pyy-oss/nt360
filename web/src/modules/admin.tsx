@@ -612,6 +612,8 @@ function ClickupCard() {
   };
   const bulkPush = async (force: boolean) => {
     if (bulkBusy) return;
+    const label = force ? "Resynchroniser TOUTES les tâches liées (cœur + CAF) ?" : "Créer les tâches ClickUp de toutes les commandes non liées ? (les tâches existantes sont adoptées, pas dupliquées)";
+    if (!window.confirm(label + "\n\nAstuce : lancez d'abord « Rattacher les tâches existantes ».")) return;
     setBulkBusy(true);
     try {
       const r = await pushAllOrdersToClickup({ force, listId: list });
