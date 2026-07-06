@@ -148,6 +148,10 @@ async function recomputeAll(db, only) {
   // AFFECTATION PMO (Project Manager par commande) : overlay config/orderPm { map: { <safeId(fp)>: pm } },
   // stocké hors des docs commandes → SURVIT au recompute et à un ré-import delta (comme l'annulation).
   const orderPmMap = ((await db.doc("config/orderPm").get()).data() || {}).map || {};
+  // SYNCHRO INVERSE ClickUp : overlay config/clickupSync { map: { <safeId(fp)>: { status, dateCommande,
+  // dateContractuelle, dateFinPrev } } } — statut projet + dates remontés de ClickUp, hors docs commandes
+  // → SURVIT au recompute (comme l'affectation PMO). Fusionné dans les rows commandes ci-dessous.
+  const clickupSyncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   // Factures annulées : écartées AVANT la fusion (n'alimentent pas le facturé d'une commande).
   for (let i = invoices.length - 1; i >= 0; i--) if (cancelledInvoices.has(invoices[i].id)) invoices.splice(i, 1);
 
@@ -330,11 +334,19 @@ async function recomputeAll(db, only) {
     // La MARGE par ligne (mb / costTotal / marginPct) est ISOLÉE dans commandesRowsMargin/{i}
     // (lecture réservée à « Rentabilité ») ; les chunks de base ne portent que des grandeurs non
     // sensibles → confidentialité opposable côté serveur (pas seulement masquage UI).
-    const base = orders.map((o) => ({
-      fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
-      cas: o.cas || 0, raf: o.raf || 0, facture: o.facture || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
-      pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
-    }));
+    const isoDay = (ms) => (Number.isFinite(Number(ms)) && Number(ms) > 0 ? new Date(Number(ms)).toISOString().slice(0, 10) : null);
+    const base = orders.map((o) => {
+      const cu = clickupSyncMap[safeId(o.fp)] || null; // synchro inverse ClickUp (statut projet + dates)
+      return {
+        fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
+        cas: o.cas || 0, raf: o.raf || 0, facture: o.facture || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
+        pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
+        clickupStatus: cu ? (cu.status || null) : null,
+        dateCommande: cu ? isoDay(cu.dateCommande) : null,
+        dateContractuelle: cu ? isoDay(cu.dateContractuelle) : null,
+        dateFinPrev: cu ? isoDay(cu.dateFinPrev) : null,
+      };
+    });
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));
     const CHUNK = 800; // ~800 lignes/doc reste très en deçà de la limite 1 Mio
     commandeChunks = Math.max(1, Math.ceil(base.length / CHUNK));

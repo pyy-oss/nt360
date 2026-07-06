@@ -1224,6 +1224,60 @@ exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], m
   return { ok: true, ...res };
 });
 
+// SENS INVERSE ClickUp → app : lit le statut projet + les dates des tâches liées et les stocke en
+// overlay config/clickupSync (survit au recompute). Recalcule ensuite les commandes pour fusionner
+// immédiatement ces champs dans les lignes. Préserve la dernière valeur connue si un getTask échoue.
+async function runClickupPull() {
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) return { disabled: true, pulled: 0, total: 0 };
+  const token = CLICKUP_TOKEN.value();
+  if (!token) return { pulled: 0, total: 0, note: "token absent" };
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const keys = Object.keys(links);
+  if (!keys.length) return { pulled: 0, total: 0 };
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const prev = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+  const map = {};
+  for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
+  let pulled = 0, failed = 0;
+  for (const key of keys) {
+    try {
+      const task = await clickup.getTask(token, links[key]);
+      map[key] = { ...cf.readTaskSync(task), taskId: links[key] };
+      pulled++;
+    } catch (e) { logger.warn("ClickUp pull: échec", { key, msg: e && e.message }); failed++; }
+  }
+  await db.doc("config/clickupSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes"]); }
+  catch (e) { logger.warn("ClickUp pull: recompute partiel échoué", { msg: e && e.message }); }
+  return { pulled, failed, total: keys.length };
+}
+
+// syncFromClickup : bouton « Synchroniser depuis ClickUp » (statut projet + dates). Direction.
+exports.syncFromClickup = onCallG("syncFromClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  let res;
+  try { res = await runClickupPull(); }
+  catch (e) { throw new HttpsError("internal", `ClickUp : ${(e && e.message) || e}`); }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_pull", module: "habilitations", entity: "config", entityId: "clickupSync", detail: res, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
+});
+
+// scheduledClickupPull : tirage QUOTIDIEN du statut + dates ClickUp → app (agrégats jamais périmés).
+exports.scheduledClickupPull = onSchedule({ schedule: "every day 04:30", secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async () => {
+  const t0 = Date.now();
+  try {
+    const res = await runClickupPull();
+    await logOps({ kind: "scheduled", action: "clickupPull", status: "ok", ms: Date.now() - t0, detail: { count: res.pulled } });
+  } catch (e) {
+    logger.error("scheduledClickupPull a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "scheduled", action: "clickupPull", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
+  }
+});
+
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---

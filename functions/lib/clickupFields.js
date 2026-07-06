@@ -163,4 +163,26 @@ function buildLogical(order, extra, only) {
   return logical;
 }
 
-module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority };
+/**
+ * Lecture PURE des champs remontés de ClickUp → app (sens inverse). Extrait de l'objet tâche :
+ *  - status            → statut projet (chaîne)
+ *  - dateCommande      ← start_date natif
+ *  - dateContractuelle ← due_date natif
+ *  - dateFinPrev       ← champ personnalisé « Délai Prévisonnel »
+ * Renvoie des epoch ms (ou null). Tolère task.status objet {status} ou chaîne.
+ */
+function readTaskSync(task) {
+  const t = task || {};
+  const cfs = t.custom_fields || [];
+  const byName = (name) => { const f = cfs.find((c) => norm(c.name) === norm(name)); return f ? f.value : undefined; };
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+  const status = t.status && typeof t.status === "object" ? (t.status.status || null) : (t.status || null);
+  return {
+    status: status || null,
+    dateCommande: num(t.start_date),
+    dateContractuelle: num(t.due_date),
+    dateFinPrev: num(byName(FIELD_NAMES.delaiPrev)),
+  };
+}
+
+module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority, readTaskSync };
