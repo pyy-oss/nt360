@@ -101,6 +101,14 @@ export type ClickupPmDelay = { pm: string; active: number; overdue: number; avgD
 export type ClickupStatusDist = { status: string; count: number; overdue: number };
 export type ClickupMonthRaf = { month: string; raf: number; count: number };
 export interface ClickupDelaysSummary { overdueTotal?: number; avgDaysLate?: number; byPm?: ClickupPmDelay[]; byStatus?: ClickupStatusDist[]; rafByMonth?: ClickupMonthRaf[] }
+// Diagnostic qualité de l'intégration ClickUp (summaries/clickupHealth).
+export interface ClickupHealthSummary {
+  commandesTotal?: number; linked?: number; unlinked?: number; unlinkedMatchable?: number; synced?: number;
+  tasksTotal?: number; tasksWithFp?: number; orphanTasks?: number; cafGapCount?: number; cafGapTotal?: number; coverage?: number;
+  unlinkedSample?: { fp?: string; client?: string; matchable?: boolean }[];
+  orphanSample?: { id?: string; name?: string; fp?: string | null }[];
+  listId?: string; at?: any;
+}
 export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; ar?: number; dso?: number; fy?: number };
 export interface TrendsSummary { points?: TrendPoint[] }
 export interface ReceivablesSummary {
