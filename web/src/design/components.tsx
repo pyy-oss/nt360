@@ -1,7 +1,7 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3 } from "lucide-react";
 import { fmt, pct } from "./tokens";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -102,48 +102,103 @@ export function Chain({ children }: { children: ReactNode[] }) {
 }
 
 // --- Table triable ---
-type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string };
-export function Table({ columns, rows, empty }: { columns: Col[]; rows: any[]; empty?: string }) {
+type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string };
+
+// --- Personnalisation des colonnes (afficher/masquer), persistée par liste dans localStorage ---
+// Identité stable d'une colonne : `key` explicite sinon l'entête (les entêtes sont uniques par liste).
+const colId = (c: Col, i: number) => c.key || c.header || `col${i}`;
+const HIDDEN_PREFIX = "nt360-cols-";
+function loadHiddenCols(storageKey: string): Set<string> {
+  try { const s = localStorage.getItem(HIDDEN_PREFIX + storageKey); const a = s ? JSON.parse(s) : []; return new Set(Array.isArray(a) ? a : []); }
+  catch { return new Set(); }
+}
+/** Gère la visibilité des colonnes d'une liste (état + persistance). Hook TOUJOURS appelé (même
+ *  sans `storageKey`) pour respecter les règles des hooks ; sans clé il n'a aucun effet. */
+function useColVisibility(storageKey: string | undefined, columns: Col[]) {
+  const [hidden, setHidden] = useState<Set<string>>(() => (storageKey ? loadHiddenCols(storageKey) : new Set()));
+  const toggle = (id: string) => setHidden((h) => {
+    const n = new Set(h); n.has(id) ? n.delete(id) : n.add(id);
+    if (storageKey) { try { localStorage.setItem(HIDDEN_PREFIX + storageKey, JSON.stringify([...n])); } catch { /* quota / mode privé */ } }
+    return n;
+  });
+  // Colonnes masquables = celles qui portent un entête (les colonnes d'action, entête vide, restent
+  // toujours visibles et hors du sélecteur). Repli de sécurité : ne jamais tout masquer.
+  const hideable = columns.filter((c) => (c.header || "").trim() !== "");
+  const visible = storageKey ? columns.filter((c, i) => !hidden.has(colId(c, i))) : columns;
+  const cols = visible.length ? visible : columns;
+  return { cols, hidden, toggle, hideable, enabled: !!storageKey };
+}
+
+// Sélecteur de colonnes : petit menu (cases à cocher) pour afficher/masquer les colonnes de la liste.
+function ColumnsMenu({ columns, hidden, onToggle }: { columns: Col[]; hidden: Set<string>; onToggle: (id: string) => void }) {
+  const items = columns.map((c, i) => ({ id: colId(c, i), header: c.header })).filter((x) => (x.header || "").trim() !== "");
+  const shown = items.filter((x) => !hidden.has(x.id)).length;
+  return (
+    <details className="relative shrink-0 [&_summary::-webkit-details-marker]:hidden">
+      <summary className="btn-ghost !px-2.5 !py-1 text-xs cursor-pointer list-none inline-flex items-center gap-1.5" title="Choisir les colonnes affichées">
+        <Columns3 size={14} aria-hidden="true" />Colonnes<span className="text-faint tabnum">{shown}/{items.length}</span>
+      </summary>
+      <div role="menu" className="absolute right-0 z-30 mt-1 w-56 max-h-72 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
+        {items.map((x) => {
+          const on = !hidden.has(x.id);
+          const last = on && shown <= 1; // ne pas masquer la dernière colonne visible
+          return (
+            <label key={x.id} className={cx("flex items-center gap-2 px-2 py-1.5 rounded text-[13px] cursor-pointer hover:bg-panel2", last && "opacity-60 cursor-not-allowed")}>
+              <input type="checkbox" checked={on} disabled={last} onChange={() => onToggle(x.id)} className="accent-gold" aria-label={`Colonne ${x.header}`} />
+              <span className="truncate">{x.header}</span>
+            </label>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string }) {
+  const { cols, hidden, toggle: toggleCol, enabled } = useColVisibility(colsKey, columns);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const sorted = useMemo(() => {
-    if (!sort || !columns[sort.i]?.sort) return rows;
-    const key = columns[sort.i].sort!;
+    if (!sort || !cols[sort.i]?.sort) return rows;
+    const key = cols[sort.i].sort!;
     return [...rows].sort((a, b) => {
       const va = key(a), vb = key(b);
       if (va < vb) return -1 * sort.dir;
       if (va > vb) return 1 * sort.dir;
       return 0;
     });
-  }, [rows, sort, columns]);
+  }, [rows, sort, cols]);
   if (!rows.length) return <EmptyState label={empty} />;
-  const toggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
+  const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   return (
-    <div className="overflow-x-auto -mx-1">
-      <table className="w-full text-sm rtable">
-        <thead>
-          <tr className="text-muted">
-            {columns.map((c, i) => (
-              <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
-                className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
-                {c.sort ? (
-                  <button type="button" onClick={() => toggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
-                    {c.header}{sort?.i === i ? (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : <ChevronsUpDown size={12} className="text-faint" />}
-                  </button>
-                ) : <span className="inline-flex items-center gap-1">{c.header}</span>}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r, ri) => (
-            <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
-              {columns.map((c, ci) => (
-                <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
+    <div className="flex flex-col gap-2">
+      {enabled && <div className="flex justify-end"><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></div>}
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full text-sm rtable">
+          <thead>
+            <tr className="text-muted">
+              {cols.map((c, i) => (
+                <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                  className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
+                  {c.sort ? (
+                    <button type="button" onClick={() => sortToggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
+                      {c.header}{sort?.i === i ? (sort.dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : <ChevronsUpDown size={12} className="text-faint" />}
+                    </button>
+                  ) : <span className="inline-flex items-center gap-1">{c.header}</span>}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sorted.map((r, ri) => (
+              <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
+                {cols.map((c, ci) => (
+                  <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -199,14 +254,16 @@ export function Tip({ children }: { children: ReactNode }) {
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
-export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey }:
+export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey }:
   { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string;
     // Détail masquable sous la ligne : `expand(row)` rend le panneau déplié (null ⇒ ligne non extensible).
     // `rowKey` identifie la ligne de façon stable (l'ouverture survit au tri/pagination/recherche).
-    expand?: (row: any) => ReactNode; rowKey?: (row: any) => string }) {
+    // `colsKey` active la personnalisation des colonnes (afficher/masquer), persistée sous cette clé.
+    expand?: (row: any) => ReactNode; rowKey?: (row: any) => string; colsKey?: string }) {
   const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const { cols, hidden, toggle: toggleCol, enabled: colsEnabled } = useColVisibility(colsKey, columns);
   const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
   const toggleRow = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
@@ -217,13 +274,13 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     let r = !s ? rows : rows.filter((row) => searchKeys.some((k) => String(k(row) ?? "").toLowerCase().includes(s)));
-    if (sort && columns[sort.i]?.sort) {
-      const key = columns[sort.i].sort!;
+    if (sort && cols[sort.i]?.sort) {
+      const key = cols[sort.i].sort!;
       r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
     }
     return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, sort, columns]);
+  }, [rows, q, sort, cols]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const cur = Math.min(page, pages - 1);
@@ -237,7 +294,10 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
           <Search size={14} aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
           <input className="field pl-8 w-full" aria-label={placeholder} placeholder={placeholder} value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
         </div>
-        <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
+          {colsEnabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
+        </div>
       </div>
       {slice.length === 0 ? <EmptyState label="Aucun résultat." /> : (
         <div className="overflow-x-auto -mx-1">
@@ -245,7 +305,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             <thead>
               <tr className="text-muted">
                 {expand && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
-                {columns.map((c, i) => (
+                {cols.map((c, i) => (
                   <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                     className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
                     {c.sort ? (
@@ -276,11 +336,11 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                         ) : null}
                       </td>
                     )}
-                    {columns.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                    {cols.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
                   </tr>
                   {isOpen && detail && (
                     <tr className="bg-panel2/40">
-                      <td colSpan={columns.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
+                      <td colSpan={cols.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
                     </tr>
                   )}
                 </Fragment>
