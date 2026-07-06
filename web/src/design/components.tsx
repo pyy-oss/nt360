@@ -103,7 +103,34 @@ export function Chain({ children }: { children: ReactNode[] }) {
 }
 
 // --- Table triable ---
-type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string };
+type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean };
+
+// Marque une colonne comme SECONDAIRE : elle quitte la ligne principale et s'affiche dans le détail
+// déroulant (grille clé/valeur). Sert à garder des tableaux étroits, sans scroll horizontal.
+export const det = (c: Col): Col => ({ ...c, sec: true });
+
+// Répartit les colonnes VISIBLES en principales (ligne) + détail (déroulé). Priorité au marquage
+// explicite `sec` ; sinon repli automatique de l'excédent au-delà d'un plafond (zéro scroll partout).
+const PRIMARY_CAP = 7;
+function splitCols(cols: Col[]): { primary: Col[]; detail: Col[] } {
+  if (cols.some((c) => c.sec)) return { primary: cols.filter((c) => !c.sec), detail: cols.filter((c) => c.sec) };
+  if (cols.length <= PRIMARY_CAP) return { primary: cols, detail: [] };
+  return { primary: cols.slice(0, PRIMARY_CAP), detail: cols.slice(PRIMARY_CAP) };
+}
+
+// Grille clé/valeur du détail d'une ligne (colonnes secondaires). Responsive, lisible, premium.
+function DetailGrid({ cols, row }: { cols: Col[]; row: any }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2.5">
+      {cols.map((c, i) => (
+        <div key={i} className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] uppercase tracking-wider text-faint">{c.header}</span>
+          <span className={cx("text-[13px] text-ink truncate", c.align === "right" && "tabnum")}>{c.render(row)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // --- Personnalisation des colonnes (afficher/masquer), persistée par liste dans localStorage ---
 // Identité stable d'une colonne : `key` explicite sinon l'entête (les entêtes sont uniques par liste).
@@ -174,29 +201,32 @@ function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: stri
 export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string }) {
   const { cols, hidden, toggle: toggleCol, enabled } = useColVisibility(colsKey, columns);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
+  const [open, setOpen] = useState<Set<number>>(() => new Set());
+  const { primary, detail } = splitCols(cols);
+  const hasDetail = detail.length > 0;
   const sorted = useMemo(() => {
-    if (!sort || !cols[sort.i]?.sort) return rows;
-    const key = cols[sort.i].sort!;
-    return [...rows].sort((a, b) => {
-      const va = key(a), vb = key(b);
-      if (va < vb) return -1 * sort.dir;
-      if (va > vb) return 1 * sort.dir;
-      return 0;
+    if (!sort || !primary[sort.i]?.sort) return rows.map((r, i) => ({ r, i }));
+    const key = primary[sort.i].sort!;
+    return rows.map((r, i) => ({ r, i })).sort((a, b) => {
+      const va = key(a.r), vb = key(b.r);
+      return va < vb ? -1 * sort.dir : va > vb ? 1 * sort.dir : 0;
     });
-  }, [rows, sort, cols]);
+  }, [rows, sort, primary]);
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
+  const toggleRow = (i: number) => setOpen((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-end gap-2">
-        <ExportBtn cols={cols} rows={sorted} name={colsKey} />
+        <ExportBtn cols={cols} rows={rows} name={colsKey} />
         {enabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
       </div>
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-sm rtable">
           <thead>
             <tr className="text-muted">
-              {cols.map((c, i) => (
+              {hasDetail && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
+              {primary.map((c, i) => (
                 <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                   className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
                   {c.sort ? (
@@ -209,13 +239,32 @@ export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows:
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r, ri) => (
-              <tr key={ri} className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
-                {cols.map((c, ci) => (
-                  <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
-                ))}
-              </tr>
-            ))}
+            {sorted.map(({ r, i: ri }) => {
+              const isOpen = open.has(ri);
+              return (
+                <Fragment key={ri}>
+                  <tr className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
+                    {hasDetail && (
+                      <td className="px-2 py-2 border-t border-line/60 align-middle">
+                        <button type="button" onClick={() => toggleRow(ri)} aria-expanded={isOpen}
+                          className="grid place-items-center w-6 h-6 rounded-md text-muted hover:text-ink hover:bg-panel2 transition-colors"
+                          aria-label={isOpen ? "Masquer le détail" : "Afficher le détail"}>
+                          {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </button>
+                      </td>
+                    )}
+                    {primary.map((c, ci) => (
+                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
+                    ))}
+                  </tr>
+                  {hasDetail && isOpen && (
+                    <tr className="bg-panel2/40">
+                      <td colSpan={primary.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60"><DetailGrid cols={detail} row={r} /></td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -284,6 +333,10 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const { cols, hidden, toggle: toggleCol, enabled: colsEnabled } = useColVisibility(colsKey, columns);
+  // Colonnes essentielles en ligne + secondaires dans le détail déroulant (zéro scroll horizontal).
+  // Un `expand` explicite du module reste prioritaire ; sinon on génère la grille de détail.
+  const { primary, detail: detailCols } = splitCols(cols);
+  const hasDetail = !!expand || detailCols.length > 0;
   const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
   const toggleRow = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
@@ -294,8 +347,8 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     let r = !s ? rows : rows.filter((row) => searchKeys.some((k) => String(k(row) ?? "").toLowerCase().includes(s)));
-    if (sort && cols[sort.i]?.sort) {
-      const key = cols[sort.i].sort!;
+    if (sort && primary[sort.i]?.sort) {
+      const key = primary[sort.i].sort!;
       r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
     }
     return r;
@@ -325,8 +378,8 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
           <table className="w-full text-sm rtable">
             <thead>
               <tr className="text-muted">
-                {expand && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
-                {cols.map((c, i) => (
+                {hasDetail && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
+                {primary.map((c, i) => (
                   <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                     className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
                     {c.sort ? (
@@ -341,12 +394,12 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             <tbody>
               {slice.map((r, ri) => {
                 const k = keyOf(r, ri);
-                const detail = expand ? expand(r) : null;
-                const isOpen = expand ? open.has(k) : false;
+                const detail = expand ? expand(r) : (detailCols.length ? <DetailGrid cols={detailCols} row={r} /> : null);
+                const isOpen = hasDetail ? open.has(k) : false;
                 return (
                 <Fragment key={k}>
                   <tr className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
-                    {expand && (
+                    {hasDetail && (
                       <td className="px-2 py-2 border-t border-line/60 align-middle">
                         {detail ? (
                           <button type="button" onClick={() => toggleRow(k)} aria-expanded={isOpen}
@@ -357,11 +410,11 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                         ) : null}
                       </td>
                     )}
-                    {cols.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                    {primary.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
                   </tr>
                   {isOpen && detail && (
                     <tr className="bg-panel2/40">
-                      <td colSpan={cols.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
+                      <td colSpan={primary.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
                     </tr>
                   )}
                 </Fragment>

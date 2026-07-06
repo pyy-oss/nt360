@@ -3,7 +3,7 @@ import { useState, useMemo, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { DateField } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
@@ -963,10 +963,10 @@ export const OrderList: FC<Props> = () => {
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
-          colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
-          colText("AM", (r) => r.am, (r) => r.am),
+          det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
+          det(colText("AM", (r) => r.am, (r) => r.am)),
           // Affectation à un Project Manager (PMO) — éditable en place pour le droit « import ».
-          colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || ""),
+          det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "")),
           // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans
           // ouvrir la modale : les montants saisis à la source sont parfois erronés. Les commandes de
           // source « fiche »/« opp gagnée » se corrigent à la source (fiche / opportunité).
@@ -975,32 +975,32 @@ export const OrderList: FC<Props> = () => {
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
           // Marges masquées pour les rôles sans accès « Rentabilité » (confidentialité).
           ...(canMargin ? [
-            colNum("MB", (r: Order) => money(r.mb), (r: Order) => r.mb),
-            colNum("%MB", (r: Order) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r: Order) => (r.cas ? (r.mb || 0) / r.cas : 0)),
-            colText("P&L", (r: Order) => pnlBadge(r.pnlSource), (r: Order) => r.pnlSource || ""),
+            det(colNum("MB", (r: Order) => money(r.mb), (r: Order) => r.mb)),
+            det(colNum("%MB", (r: Order) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r: Order) => (r.cas ? (r.mb || 0) / r.cas : 0))),
+            det(colText("P&L", (r: Order) => pnlBadge(r.pnlSource), (r: Order) => r.pnlSource || "")),
           ] : []),
-          colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
-          colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
-          // Synchro inverse ClickUp (statut projet + dates) — colonnes masquables via le menu Colonnes.
+          det(colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0)),
+          det(colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || "")),
+          // Synchro inverse ClickUp : statut en ligne principale, dates dans le détail.
           colText("Statut CU", (r) => (r.clickupStatus ? <Badge tone="steel">{r.clickupStatus}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupStatus || ""),
-          colText("D. commande", (r) => r.dateCommande || "—", (r) => r.dateCommande || ""),
-          colText("D. contract.", (r) => r.dateContractuelle || "—", (r) => r.dateContractuelle || ""),
-          colText("D. prév. fin", (r) => r.dateFinPrev || "—", (r) => r.dateFinPrev || ""),
-          ...(canImport ? [colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
+          det(colText("D. commande", (r) => r.dateCommande || "—", (r) => r.dateCommande || "")),
+          det(colText("D. contract.", (r) => r.dateContractuelle || "—", (r) => r.dateContractuelle || "")),
+          det(colText("D. prév. fin", (r) => r.dateFinPrev || "—", (r) => r.dateFinPrev || "")),
+          ...(canImport ? [det(colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
             ? <OrderEditor row={r} />
-            : <span className="text-[11px] text-faint">à la source</span>), () => 0)] : []),
+            : <span className="text-[11px] text-faint">à la source</span>), () => 0))] : []),
           // Assainissement : supprime la ligne P&L orders/{safeId(fp)}. Pour une commande de source
           // « fiche » (dérivée de projectSheets, sans doc orders), on renvoie vers l'écran Fiches.
-          ...(canImport ? [colText("Assainir", (r: Order) => (r.fp && r.source !== "fiche"
+          ...(canImport ? [det(colText("Assainir", (r: Order) => (r.fp && r.source !== "fiche"
             ? <DangerBtn label="Suppr." confirm={`Supprimer la commande ${r.fp} (ligne P&L) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("orders", fpDocId(r.fp!))} />
-            : <span className="text-[11px] text-faint">{r.source === "fiche" ? "fiche" : "—"}</span>), () => 0)] : []),
+            : <span className="text-[11px] text-faint">{r.source === "fiche" ? "fiche" : "—"}</span>), () => 0))] : []),
           // Annulation (statut « Annulée » persistant) : la commande quitte le carnet/CAS/backlog mais
           // reste conservée (rétablissable ci-dessus). Survit à un ré-import delta (overlay).
-          ...(canImport ? [colText("Annuler", (r: Order) => (r.fp
+          ...(canImport ? [det(colText("Annuler", (r: Order) => (r.fp
             ? <DangerBtn label="Annuler" tone="gold" okMsg="Commande annulée" errMsg="Annulation refusée"
                 confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
                 fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />
-            : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
+            : <span className="text-[11px] text-faint">—</span>), () => 0))] : []),
           ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
             <span className="inline-flex items-center gap-2">
               <ClickupBtn row={r} />
