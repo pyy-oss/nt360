@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -44,6 +44,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <FxRatesCard />}
       {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
       {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
+      {isDirection && <ClickupCard />}
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -478,6 +479,36 @@ function RefListCard({ kind, title, placeholder, tip, upper }: { kind: "projectM
         )) : <div className="text-[13px] text-muted">Aucune entrée.</div>}
       </div>
       <Tip>{tip}</Tip>
+    </Card>
+  );
+}
+
+// Intégration ClickUp : activation + liste cible. Le token vit dans Secret Manager (CLICKUP_TOKEN),
+// jamais dans l'app. Le push d'une commande se fait depuis la liste Commandes (bouton « ClickUp »).
+const CLICKUP_LISTS = [
+  { id: "901215917683", label: "Côte d'Ivoire" },
+  { id: "901215918697", label: "Burkina Faso" },
+  { id: "901215918699", label: "Guinée" },
+  { id: "901216066964", label: "Sandbox (test)" },
+];
+function ClickupCard() {
+  const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string }>("config/clickup");
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [listId, setListId] = useState<string | null>(null);
+  const on = enabled ?? (data?.enabled !== false);
+  const list = listId ?? (data?.defaultListId || "901215917683");
+  const save = async () => { await setClickupConfig({ enabled: on, defaultListId: list }); setEnabled(null); setListId(null); };
+  return (
+    <Card title="Intégration ClickUp" actions={<Busy label="Enregistrer" okMsg="Config ClickUp enregistrée" fn={save} />}>
+      <div className="flex flex-wrap items-center gap-3 text-[13px]">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={on} onChange={(e) => setEnabled(e.target.checked)} className="accent-gold" /> Intégration active
+        </label>
+        <label className="inline-flex items-center gap-2">Liste cible (Gestion de Projets)
+          <Select ariaLabel="Liste ClickUp cible" className="!py-1" value={list} onChange={setListId} options={CLICKUP_LISTS.map((l) => ({ value: l.id, label: l.label }))} />
+        </label>
+      </div>
+      <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande (résolu par nom/e-mail). Ré-appuyer met à jour la même tâche (pas de doublon).</Tip>
     </Card>
   );
 }
