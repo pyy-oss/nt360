@@ -137,6 +137,17 @@ export async function syncBcFromClickup() {
   const res = await httpsCallable(functions, "syncBcFromClickup", { timeout: 300_000 })({});
   return res.data as { ok: boolean; pulled: number; failed?: number; total: number };
 }
+/** Webhooks temps réel : enregistre (ou met à jour) le webhook ClickUp pointant vers la fonction
+ *  clickupWebhook. Le secret HMAC est stocké côté serveur. Admin. */
+export async function setupClickupWebhook(endpoint: string) {
+  const res = await httpsCallable(functions, "setupClickupWebhook", { timeout: 60_000 })({ endpoint });
+  return res.data as { ok: boolean; id: string; endpoint: string; events: string[]; hasSecret: boolean; created: boolean };
+}
+/** Supprime le webhook ClickUp temps réel (côté ClickUp + config). Admin. */
+export async function deleteClickupWebhook() {
+  const res = await httpsCallable(functions, "deleteClickupWebhook", { timeout: 60_000 })({});
+  return res.data as { ok: boolean; deleted?: string; note?: string };
+}
 
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la

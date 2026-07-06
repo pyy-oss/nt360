@@ -1,6 +1,6 @@
 // Cloud Functions 2nd gen — Node.js 20 (codebase unique). BUILD_KIT §9, §10, §11, §14.
 const { onObjectFinalized } = require("firebase-functions/v2/storage");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
@@ -1606,6 +1606,140 @@ exports.scheduledBcPull = onSchedule({ schedule: "every day 04:45", secrets: [CL
     logger.error("scheduledBcPull a échoué", { message: e && e.message, stack: e && e.stack });
     await logOps({ kind: "scheduled", action: "bcPull", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
   }
+});
+
+// ===================================================================================================
+// WEBHOOKS ClickUp TEMPS RÉEL (Lot 2). Un webhook UNIQUE au niveau workspace pousse les événements
+// (statut, mise à jour de champs, suppression, déplacement) vers la fonction HTTP `clickupWebhook`.
+// Le handler discrimine COMMANDE vs BC par index inverse du task_id (config/clickupLinks vs
+// clickupBcLinks) puis remonte immédiatement l'overlay concerné + recalcule les agrégats touchés →
+// l'app reflète ClickUp en secondes, sans attendre le tirage quotidien. Signature HMAC-SHA256 vérifiée
+// (secret ClickUp stocké côté serveur dans config/clickupWebhook, jamais exposé au client).
+// ===================================================================================================
+
+// Applique un événement à UNE tâche : relit la tâche, met à jour l'overlay (commande OU BC) et
+// recalcule le sous-ensemble d'agrégats concerné. Idempotent (rejeu de webhook sans effet de bord).
+async function applyClickupTaskEvent(token, taskId, event) {
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const bc = require("./lib/clickupBc");
+  const { reverseLinks } = require("./lib/clickupWebhook");
+  const [linksDoc, bcLinksDoc] = await Promise.all([db.doc("config/clickupLinks").get(), db.doc("config/clickupBcLinks").get()]);
+  const links = (linksDoc.data() || {}).map || {};
+  const bcLinks = (bcLinksDoc.data() || {}).map || {};
+  const cmdKey = reverseLinks(links)[String(taskId)];
+  const bcKey = reverseLinks(bcLinks)[String(taskId)];
+  const deleted = event === "taskDeleted";
+  if (cmdKey) {
+    if (deleted) {
+      await db.doc("config/clickupLinks").set({ map: { [cmdKey]: FieldValue.delete() } }, { merge: true });
+      await db.doc("config/clickupSync").set({ map: { [cmdKey]: FieldValue.delete() } }, { merge: true });
+    } else {
+      const task = await clickup.getTask(token, taskId);
+      const sync = { ...cf.readTaskSync(task), taskId };
+      await db.doc("config/clickupSync").set({ map: { [cmdKey]: sync } }, { merge: true });
+      if (sync.pm) await db.doc("config/orderPm").set({ map: { [cmdKey]: sync.pm } }, { merge: true });
+    }
+    try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes"]); }
+    catch (e) { logger.warn("webhook: recompute commandes échoué", { msg: e && e.message }); }
+    return { kind: "commande", key: cmdKey, deleted };
+  }
+  if (bcKey) {
+    if (deleted) {
+      await db.doc("config/clickupBcLinks").set({ map: { [bcKey]: FieldValue.delete() } }, { merge: true });
+      await db.doc("config/clickupBcSync").set({ map: { [bcKey]: FieldValue.delete() } }, { merge: true });
+    } else {
+      const task = await clickup.getTask(token, taskId);
+      await db.doc("config/clickupBcSync").set({ map: { [bcKey]: { ...bc.readBcSync(task), taskId } } }, { merge: true });
+    }
+    try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "qualite"]); }
+    catch (e) { logger.warn("webhook: recompute BC échoué", { msg: e && e.message }); }
+    return { kind: "bc", key: bcKey, deleted };
+  }
+  return { kind: "ignored" }; // tâche non liée (créée hors app, ou lien pas encore posé)
+}
+
+// clickupWebhook : point d'entrée HTTP des webhooks ClickUp. Vérifie la signature, applique l'événement,
+// répond 200 rapidement. Non authentifié (public) MAIS protégé par HMAC — toute requête sans signature
+// valide est rejetée (401). App Check ne s'applique pas (appel serveur-à-serveur ClickUp).
+exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
+  const { verifySignature, parseWebhook } = require("./lib/clickupWebhook");
+  const wcfg = (await db.doc("config/clickupWebhook").get()).data() || {};
+  if (!wcfg.secret) { logger.warn("webhook reçu mais aucun secret configuré"); res.status(503).send("webhook not configured"); return; }
+  const signature = req.get("X-Signature") || req.get("x-signature") || "";
+  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}), "utf8");
+  if (!verifySignature(raw, signature, wcfg.secret)) { logger.warn("webhook: signature invalide"); res.status(401).send("invalid signature"); return; }
+  const { event, taskId } = parseWebhook(req.body || {});
+  if (!taskId) { res.status(200).json({ ok: true, ignored: "no task_id" }); return; }
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) { res.status(200).json({ ok: true, ignored: "integration disabled" }); return; }
+  const token = CLICKUP_TOKEN.value();
+  if (!token) { res.status(200).json({ ok: true, ignored: "no token" }); return; }
+  try {
+    const r = await applyClickupTaskEvent(token, taskId, event);
+    res.status(200).json({ ok: true, event, ...r });
+  } catch (e) {
+    // On répond 200 même en cas d'échec applicatif : l'overlay/le recompute sont best-effort et le
+    // tirage quotidien rattrapera ; renvoyer 5xx déclencherait des rejeux ClickUp inutiles.
+    logger.error("webhook: traitement échoué", { event, taskId, msg: e && e.message });
+    res.status(200).json({ ok: false, event, error: (e && e.message) || String(e) });
+  }
+});
+
+// setupClickupWebhook : enregistre (ou met à jour) LE webhook workspace pointant vers clickupWebhook.
+// L'endpoint (URL déployée de la fonction) est fourni par l'admin. Le secret HMAC renvoyé À LA CRÉATION
+// est persisté dans config/clickupWebhook (serveur uniquement). Direction.
+exports.setupClickupWebhook = onCallG("setupClickupWebhook", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const endpoint = String(req.data?.endpoint || "").trim();
+  if (!/^https:\/\/.+/.test(endpoint)) throw new HttpsError("invalid-argument", "endpoint HTTPS de la fonction clickupWebhook requis");
+  const clickup = require("./lib/clickup");
+  const { WEBHOOK_EVENTS } = require("./lib/clickupWebhook");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  const teamId = cfg.teamId || CLICKUP_TEAM;
+  const stored = (await db.doc("config/clickupWebhook").get()).data() || {};
+  try {
+    // Un webhook déjà connu (id stocké) → mise à jour de l'endpoint/événements (le secret est conservé).
+    let existing = null;
+    try { existing = (await clickup.listWebhooks(token, teamId)).find((w) => w.id === stored.id || w.endpoint === endpoint) || null; }
+    catch (e) { logger.warn("setup webhook: liste illisible", { msg: e && e.message }); }
+    if (existing) {
+      await clickup.updateWebhook(token, existing.id, { endpoint, events: WEBHOOK_EVENTS, status: "active" });
+      const secret = stored.secret || existing.secret || null; // le secret n'est pas re-renvoyé à la maj
+      await db.doc("config/clickupWebhook").set({ id: existing.id, endpoint, events: WEBHOOK_EVENTS, secret, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await db.doc("config/clickup").set({ webhookActive: true, webhookEndpoint: endpoint }, { merge: true });
+      await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_webhook_update", module: "habilitations", entity: "config", entityId: "clickupWebhook", detail: { id: existing.id, endpoint }, ts: FieldValue.serverTimestamp() });
+      return { ok: true, id: existing.id, endpoint, events: WEBHOOK_EVENTS, hasSecret: !!secret, created: false };
+    }
+    const r = await clickup.createWebhook(token, teamId, endpoint, WEBHOOK_EVENTS);
+    const wh = r && (r.webhook || r);
+    const secret = (wh && wh.secret) || null;
+    await db.doc("config/clickupWebhook").set({ id: (wh && wh.id) || r.id, endpoint, events: WEBHOOK_EVENTS, secret, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() });
+    await db.doc("config/clickup").set({ webhookActive: true, webhookEndpoint: endpoint }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_webhook_create", module: "habilitations", entity: "config", entityId: "clickupWebhook", detail: { id: (wh && wh.id) || r.id, endpoint }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, id: (wh && wh.id) || r.id, endpoint, events: WEBHOOK_EVENTS, hasSecret: !!secret, created: true };
+  } catch (e) {
+    throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "création du webhook impossible"}`);
+  }
+});
+
+// deleteClickupWebhook : supprime le webhook enregistré (côté ClickUp + config). Direction.
+exports.deleteClickupWebhook = onCallG("deleteClickupWebhook", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const stored = (await db.doc("config/clickupWebhook").get()).data() || {};
+  if (!stored.id) return { ok: true, note: "aucun webhook enregistré" };
+  const clickup = require("./lib/clickup");
+  try { await clickup.deleteWebhook(token, stored.id); }
+  catch (e) { if (e.status !== 404) throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "suppression impossible"}`); }
+  await db.doc("config/clickupWebhook").set({ id: FieldValue.delete(), secret: FieldValue.delete(), endpoint: FieldValue.delete(), disabledBy: req.auth.uid, disabledAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.doc("config/clickup").set({ webhookActive: false }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_webhook_delete", module: "habilitations", entity: "config", entityId: "clickupWebhook", detail: { id: stored.id }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, deleted: stored.id };
 });
 
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats

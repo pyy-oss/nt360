@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -552,8 +552,11 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
   );
 }
 
+// URL par défaut de la fonction HTTP clickupWebhook (2nd gen, région us-central1). Modifiable si la
+// région/projet diffèrent — l'admin colle l'URL exacte affichée par le déploiement.
+const CLICKUP_WEBHOOK_ENDPOINT = "https://us-central1-propulse-business-87f7a.cloudfunctions.net/clickupWebhook";
 function ClickupCard() {
-  const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string }>("config/clickup");
+  const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [listId, setListId] = useState<string | null>(null);
   const [cafBusy, setCafBusy] = useState(false);
@@ -564,6 +567,8 @@ function ClickupCard() {
   const [bcRecBusy, setBcRecBusy] = useState(false);
   const [bcBulkBusy, setBcBulkBusy] = useState(false);
   const [bcPullBusy, setBcPullBusy] = useState(false);
+  const [whBusy, setWhBusy] = useState(false);
+  const [endpoint, setEndpoint] = useState<string | null>(null);
   const { data: health } = useDocData<ClickupHealthSummary>("summaries/clickupHealth");
   const { data: bcCu } = useDocData<{ totalBc?: number; linkedCount?: number; overdueCount?: number }>("summaries/clickupBc");
   const toast = useToast();
@@ -663,6 +668,30 @@ function ClickupCard() {
       toast(detail.includes("deadline") || detail.includes("timeout") ? "Push BC lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Push BC refusé — ${detail}` : "Push BC : échec"), detail.includes("deadline") ? "ok" : "err");
     } finally { setBcBulkBusy(false); }
   };
+  const ep = endpoint ?? (data?.webhookEndpoint || CLICKUP_WEBHOOK_ENDPOINT);
+  const setupWebhook = async () => {
+    if (whBusy) return;
+    setWhBusy(true);
+    try {
+      const r = await setupClickupWebhook(ep);
+      toast(`Webhook temps réel ${r.created ? "créé" : "mis à jour"}${r.hasSecret ? "" : " (secret manquant — recréez-le)"}`, r.hasSecret ? "ok" : "err");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Webhook refusé — ${detail}` : "Webhook : échec", "err");
+    } finally { setWhBusy(false); }
+  };
+  const removeWebhook = async () => {
+    if (whBusy) return;
+    if (!window.confirm("Désactiver les webhooks temps réel ? La synchro repassera au tirage quotidien.")) return;
+    setWhBusy(true);
+    try {
+      await deleteClickupWebhook();
+      toast("Webhook temps réel désactivé", "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Désactivation refusée — ${detail}` : "Désactivation : échec", "err");
+    } finally { setWhBusy(false); }
+  };
   return (
     <Card title="Intégration ClickUp" actions={<Busy label="Enregistrer" okMsg="Config ClickUp enregistrée" fn={save} />}>
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
@@ -710,6 +739,17 @@ function ClickupCard() {
           </button>
           {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-amber-400">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
         </div>
+      </div>
+      <div className="mt-4 pt-3 border-t border-white/5">
+        <div className="text-[13px] font-medium text-ink mb-2">Temps réel (webhooks) {data?.webhookActive ? <Badge tone="emerald">actif</Badge> : <Badge tone="steel">inactif</Badge>}</div>
+        <div className="flex flex-wrap items-center gap-3 text-[13px]">
+          <input className="field !py-1.5 w-[26rem] max-w-full font-mono text-[12px]" aria-label="Endpoint du webhook clickupWebhook" value={ep} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…cloudfunctions.net/clickupWebhook" />
+          <button type="button" className="btn-ghost !py-1.5" disabled={whBusy} onClick={setupWebhook} title="Enregistrer / mettre à jour le webhook ClickUp (statut, champs, suppression) pointant vers l'app">
+            {whBusy ? "…" : data?.webhookActive ? "Ré-enregistrer le webhook" : "Activer le temps réel"}
+          </button>
+          {data?.webhookActive && <button type="button" className="btn-ghost !py-1.5" disabled={whBusy} onClick={removeWebhook} title="Supprimer le webhook (retour au tirage quotidien)">Désactiver</button>}
+        </div>
+        <Tip>Le webhook remonte <b>en secondes</b> les changements ClickUp (statut, dates, champs, avancement BC) sans attendre le tirage quotidien. La signature est vérifiée par <b>HMAC</b> (secret stocké côté serveur). Après un <b>redéploiement des fonctions</b>, vérifiez que l'URL ci-dessus correspond à celle de <code>clickupWebhook</code>, puis ré-enregistrez si besoin.</Tip>
       </div>
       <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b>, les <b>dates</b> et le <b>PM assigné</b> dans les Commandes. <b>⚠️ Avant tout push en masse</b>, lancez <b>« Rattacher les tâches existantes »</b> : il relie les commandes aux tâches déjà présentes (Opp ID = N° FP) pour <b>ne pas créer de doublons</b>.</Tip>
     </Card>

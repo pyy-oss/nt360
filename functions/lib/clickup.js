@@ -114,4 +114,23 @@ async function listTasks(token, listId, opts) {
   return tasks;
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks };
+// --- Webhooks (Lot 2 : temps réel) ---
+/** Liste les webhooks du workspace (pour éviter les doublons). */
+async function listWebhooks(token, teamId) {
+  const d = await api(token, "GET", `/team/${teamId}/webhook`);
+  return (d && d.webhooks) || [];
+}
+/** Crée un webhook au niveau workspace. ClickUp renvoie { id, webhook: { id, secret, ... } }. Le
+ *  secret HMAC n'est renvoyé QU'À la création (à persister immédiatement). */
+async function createWebhook(token, teamId, endpoint, events) {
+  return api(token, "POST", `/team/${teamId}/webhook`, { endpoint, events });
+}
+/** Met à jour un webhook (endpoint / événements / statut). Le secret n'est PAS renvoyé ici. */
+async function updateWebhook(token, webhookId, payload) {
+  return api(token, "PUT", `/webhook/${webhookId}`, payload);
+}
+async function deleteWebhook(token, webhookId) {
+  return api(token, "DELETE", `/webhook/${webhookId}`);
+}
+
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks, listWebhooks, createWebhook, updateWebhook, deleteWebhook };
