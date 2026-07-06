@@ -608,8 +608,11 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
   return (
     <Card title={`Opportunités gagnées sans commande P&L · ${won.length}`}>
       <Table columns={[
-        colText("FP", (o: Opportunity) => o.fp || "—", (o: Opportunity) => o.fp || ""),
+        // FP corrigeable en place : les commerciaux saisissent parfois une mauvaise version du N° FP,
+        // ce qui empêche le rapprochement avec la commande P&L. La correction repatche l'opp (recalcul).
+        colText("FP", (o: Opportunity) => <WonOppFpFixer o={o} />, (o: Opportunity) => o.fp || ""),
         colText("Client", (o: Opportunity) => o.client || "—", (o: Opportunity) => o.client || ""),
+        colText("Désignation", (o: Opportunity) => o.designation || "—", (o: Opportunity) => o.designation || ""),
         colText("AM", (o: Opportunity) => o.am || "—", (o: Opportunity) => o.am || ""),
         colNum("Montant", (o: Opportunity) => money(o.amount || 0), (o: Opportunity) => o.amount || 0),
         colText("", (o: Opportunity) => (o.amount && o.amount > 0
@@ -623,8 +626,33 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
               fn={() => patchOpportunity({ id: o.id!, stage: 9 })} />
           : null), () => 0),
       ]} rows={won} />
-      <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. <b>« Inscrire au P&L »</b> crée la commande depuis l'opportunité (CAS = montant de l'opp). <b>« Annuler »</b> écarte l'opp (statut « Annulé ») si elle ne doit pas devenir une commande. Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
+      <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. <b>« Inscrire au P&L »</b> crée la commande depuis l'opportunité (CAS = montant de l'opp). <b>« Annuler »</b> écarte l'opp (statut « Annulé ») si elle ne doit pas devenir une commande. Le <b>N° FP est corrigeable</b> (les versions saisies par les commerciaux sont parfois erronées) : la correction peut suffire à rapprocher l'affaire d'une ligne P&L existante. Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
     </Card>
+  );
+}
+
+// Correction inline du N° FP d'une opp gagnée : les commerciaux saisissent parfois une mauvaise
+// version du FP → l'affaire ne se rapproche pas de sa ligne P&L. Repatche l'opp (recalcul derrière) ;
+// si le FP corrigé porte déjà une commande, l'affaire quitte cette liste automatiquement.
+function WonOppFpFixer({ o }: { o: Opportunity }) {
+  const [editing, setEditing] = useState(false);
+  const [fp, setFp] = useState(o.fp || "");
+  if (!o.id) return <>{o.fp || "—"}</>;
+  if (!editing) {
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span>{o.fp || "—"}</span>
+        <button type="button" onClick={() => { setFp(o.fp || ""); setEditing(true); }} className="text-gold hover:underline text-[11px]" title="Corriger le N° FP (version erronée)">corriger</button>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      <input className="field w-36 !py-1 text-xs" aria-label={`Corriger le N° FP de ${o.client || o.fp || "l'opportunité"}`} placeholder="FP/2026/…" value={fp} onChange={(e) => setFp(e.target.value)} autoFocus />
+      <Busy variant="ghost" label="OK" okMsg="N° FP corrigé (recalcul lancé)" errMsg="Correction refusée"
+        fn={async () => { const v = fp.trim(); if (!v) throw new Error("saisir un N° FP"); await patchOpportunity({ id: o.id!, fp: v }); setEditing(false); }} />
+      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler la correction">✕</button>
+    </span>
   );
 }
 
