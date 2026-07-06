@@ -12,7 +12,7 @@ import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -738,10 +738,34 @@ function CancelledOrders() {
   );
 }
 
+// Charge par Project Manager : agrégat serveur (summaries/pms) des commandes affectées — nombre,
+// CAS, RAF (backlog). Cliquer une ligne applique le filtre PM transverse (isole les listes sur ce PM).
+function PmWorkload() {
+  const { data } = useDocData<PmsSummary>("summaries/pms");
+  const { f, set } = useFilters();
+  const rows = data?.rows || [];
+  if (!rows.length) return null;
+  const pick = (pm: string) => set({ pm: f.pm === pm ? "" : pm });
+  return (
+    <Card title={`Charge par Project Manager · ${rows.length}`}>
+      <Table colsKey="pm-workload" columns={[
+        colText("PM", (r: PmRow) => (
+          <button type="button" onClick={() => pick(r.pm)} className={cx("underline decoration-dotted underline-offset-2 hover:text-gold", f.pm === r.pm ? "text-gold" : "text-ink")}
+            title={f.pm === r.pm ? "Retirer le filtre PM" : "Filtrer les listes sur ce PM"}>{r.pm}</button>
+        ), (r: PmRow) => r.pm),
+        colNum("Commandes", (r: PmRow) => r.count.toLocaleString("fr-FR"), (r: PmRow) => r.count),
+        colNum("CAS", (r: PmRow) => money(r.cas), (r: PmRow) => r.cas),
+        colNum("RAF (backlog)", (r: PmRow) => money(r.raf), (r: PmRow) => r.raf),
+      ]} rows={rows} />
+      <Tip>Affectez un PM à une commande dans la liste ci-dessous (colonne <b>PM</b>). <b>Cliquez un PM</b> ici pour filtrer toutes les listes sur son périmètre.</Tip>
+    </Card>
+  );
+}
+
 export const OrderList: FC<Props> = () => {
   const { rows: all, loading } = useCommandesRows();
   const { match } = useFilters();
-  const rows = all.filter((r) => match(r, ["bu", "am", "client"]));
+  const rows = all.filter((r) => match(r, ["bu", "am", "client", "pm"]));
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
@@ -760,9 +784,10 @@ export const OrderList: FC<Props> = () => {
   );
   return (
     <div className="flex flex-col gap-2">
-    <FilterNote dims="BU / AM / client" />
+    <FilterNote dims="BU / AM / client / PM" />
     {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
     {canImport && <CancelledOrders />}
+    <PmWorkload />
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
       {/* Suggestions d'auto-complétion partagées par les champs d'affectation PM de chaque ligne. */}

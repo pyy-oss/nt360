@@ -3,11 +3,12 @@ import { computeFilteredOverview } from "./overviewCalc";
 
 // match() identique à useFilters().match : égalité insensible à la casse sur les dims fournies.
 const up = (s?: string) => (s || "").trim().toUpperCase();
-const mkMatch = (f: { bu?: string; am?: string; client?: string }) =>
-  (row: { bu?: string; am?: string; client?: string }, dims: readonly ("bu" | "am" | "client")[] = ["bu", "am", "client"]) => {
+const mkMatch = (f: { bu?: string; am?: string; client?: string; pm?: string }) =>
+  (row: { bu?: string; am?: string; client?: string; pm?: string | null }, dims: readonly ("bu" | "am" | "client" | "pm")[] = ["bu", "am", "client", "pm"]) => {
     if (dims.includes("bu") && f.bu && up(row.bu) !== up(f.bu)) return false;
     if (dims.includes("am") && f.am && up(row.am) !== up(f.am)) return false;
     if (dims.includes("client") && f.client && up(row.client) !== up(f.client)) return false;
+    if (dims.includes("pm") && f.pm && up(row.pm || "") !== up(f.pm)) return false;
     return true;
   };
 
