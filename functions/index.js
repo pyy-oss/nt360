@@ -965,6 +965,8 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   await requireWrite(req, "bc");
   const { fpKey } = require("./lib/ids");
   const { hashId } = require("./lib/sheets");
+  const { normCur } = require("./parsers/bcPdf");
+  const { toXof } = require("./lib/fx");
   const f = req.data?.fields || {};
   const supplier = String(f.supplier || "").replace(/\s+/g, " ").trim().toUpperCase();
   const bcNumber = String(f.bcNumber || "").replace(/\s+/g, " ").trim();
@@ -974,6 +976,11 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   const description = String(f.description || "").trim();
   const status = BC_STAGES.includes(f.status) ? f.status : "a_emettre";
   const amount = Number(f.amount) || 0;
+  // Devise → XOF : contre-valeur SAISIE prioritaire, sinon conversion via taux paramétré
+  // (config/fxRates) ; sans taux, amountXof reste 0 (« à saisir ») — jamais le montant brut en devise.
+  const currency = normCur(f.currency);
+  const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
+  const conv = toXof(currency, amount, f.amountXof, rates);
   const id = "bc_" + hashId(fp, bcNumber, supplier, description);
   const doc = {
     fp, bcNumber, supplier,
@@ -981,9 +988,10 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
     country: String(f.country || "").trim(),
     expenseType: String(f.expenseType || "").trim(),
     description,
-    currency: String(f.currency || "XOF").trim() || "XOF",
+    currency,
     amount,
-    amountXof: Number(f.amountXof) || amount,
+    amountXof: conv.amountXof,
+    fxRate: conv.fxRate, fxSource: conv.fxSource,
     status, statusRaw: String(f.statusRaw || status),
     dateIn: f.dateIn || null,
     source: "bc_unitaire",
@@ -1008,6 +1016,27 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   });
   await recomputeSummaries(["suppliers", "alerts"]);
   return { ok: true, id, pdfStored: !!pdfKey };
+});
+
+// --- setFxRates : taux de change (XOF par unité de devise) pour la conversion des BC en devise
+// étrangère. Stocké dans config/fxRates { rates: { <DEVISE>: taux } }. Direction uniquement.
+// Remplace l'ensemble des taux (l'UI envoie la table complète). N'affecte que les BC créés ENSUITE
+// (la conversion est figée à l'écriture) — un BC existant se recorrige via sa contre-valeur XOF. ---
+exports.setFxRates = onCallG("setFxRates", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const raw = (req.data && req.data.rates) || {};
+  const rates = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const cur = String(k).toUpperCase().trim();
+    const r = Number(v);
+    if (cur && cur !== "XOF" && Number.isFinite(r) && r > 0) rates[cur] = r; // XOF = référence (taux 1 implicite)
+  }
+  await db.doc("config/fxRates").set({ rates, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_fx_rates", module: "habilitations", entity: "config", entityId: "fxRates",
+    detail: { devises: Object.keys(rates) }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true, rates };
 });
 
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats

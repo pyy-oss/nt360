@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -41,6 +41,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <NotificationCard />}
       {isDirection && <DedupeCard />}
       {isDirection && <ClientAliasCard />}
+      {isDirection && <FxRatesCard />}
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -412,6 +413,41 @@ function ClientAliasCard() {
         )) : <div className="text-[13px] text-muted">Aucun alias — les noms sont normalisés par règles automatiques.</div>}
       </div>
       <Tip>Les noms de clients sont d'abord normalisés par <b>règles</b> (MAJUSCULES, accents, ponctuation, formes juridiques SA/SARL…, suffixe « Côte d'Ivoire »/« CI »). Ajoutez un <b>alias</b> pour fusionner deux graphies que les règles ne rapprochent pas (ex. « SGBCI » → « Société Générale »). L'enregistrement relance un recalcul complet ; les <b>documents sources ne sont pas modifiés</b>.</Tip>
+    </Card>
+  );
+}
+
+// Taux de change (XOF par unité de devise) pour la conversion automatique des BC en devise étrangère.
+function FxRatesCard() {
+  const { data } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
+  const [draft, setDraft] = useState<{ cur: string; rate: string }[] | null>(null);
+  const list = draft ?? Object.entries(data?.rates || {}).map(([cur, rate]) => ({ cur, rate: String(rate) }));
+  const set = (i: number, k: "cur" | "rate", v: string) => setDraft(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const add = () => setDraft([...list, { cur: "", rate: "" }]);
+  const del = (i: number) => setDraft(list.filter((_, j) => j !== i));
+  const save = async () => {
+    const rates: Record<string, number> = {};
+    for (const r of list) { const c = r.cur.trim().toUpperCase(); const n = Number(r.rate); if (c && c !== "XOF" && Number.isFinite(n) && n > 0) rates[c] = n; }
+    await setFxRates(rates); setDraft(null);
+  };
+  return (
+    <Card title="Taux de change — devises (XOF par unité)" actions={
+      <div className="flex gap-2">
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Devise</button>
+        <Busy label="Enregistrer" okMsg="Taux enregistrés" fn={save} />
+      </div>}>
+      <div className="flex flex-col gap-1.5">
+        {list.length ? list.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input className="field !py-1 w-28 uppercase" placeholder="EUR" value={r.cur} onChange={(e) => set(i, "cur", e.target.value)} aria-label={`Devise ${i + 1}`} />
+            <span className="text-muted text-xs" aria-hidden="true">= 1 unité →</span>
+            <input className="field !py-1 w-36" inputMode="decimal" placeholder="655.957" value={r.rate} onChange={(e) => set(i, "rate", e.target.value)} aria-label={`Taux XOF pour ${r.cur || `devise ${i + 1}`}`} />
+            <span className="text-muted text-xs">XOF</span>
+            <button className="btn-ghost !px-2 !py-1" onClick={() => del(i)} aria-label={`Supprimer la devise ${i + 1}`}>×</button>
+          </div>
+        )) : <div className="text-[13px] text-muted">Aucun taux — les BC en devise étrangère restent « à saisir » (contre-valeur XOF manuelle).</div>}
+      </div>
+      <Tip>Un BC importé/saisi en devise étrangère est <b>converti automatiquement en XOF</b> à sa création via ces taux (le taux appliqué est figé sur la ligne pour traçabilité). Une contre-valeur XOF <b>saisie manuellement</b> reste prioritaire. Sans taux pour la devise, le BC est marqué <b>« à saisir »</b> (jamais assimilé à du XOF). Ne modifie pas les BC déjà enregistrés.</Tip>
     </Card>
   );
 }
