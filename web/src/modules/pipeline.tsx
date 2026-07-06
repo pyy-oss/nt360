@@ -186,6 +186,9 @@ export const OppList: FC<Props> = () => {
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
   const { intent } = useNav();
+  // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
+  // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
+  const { rows: cmd } = useCommandesRows();
   const [f, setF] = useState({ ...EMPTY_OPP });
   const prefill = (o: Opportunity, patch: boolean) => setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
@@ -203,8 +206,7 @@ export const OppList: FC<Props> = () => {
     .sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
   const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
   // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
-  // commandes sont chargés depuis la vue matérialisée (accès overview — sinon flag masqué, gracieux).
-  const { rows: cmd } = useCommandesRows();
+  // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
   const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
   const isBooked = (o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp))));
   const pnlFlag = (o: Opportunity): ReactNode =>
