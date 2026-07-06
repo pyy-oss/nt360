@@ -1094,9 +1094,10 @@ exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeout
 // pushOrderToClickup : crée (ou met à jour, idempotent) une tâche ClickUp pour une commande, assignée
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).
-exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "import");
   const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
@@ -1104,6 +1105,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const order = req.data?.order || {};
+  const extra = req.data?.extra || {};
   const fp = fpKey(order.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const teamId = cfg.teamId || CLICKUP_TEAM;
@@ -1112,20 +1114,34 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   let assignee = null;
   try { assignee = clickup.resolveAssignee(await clickup.listMembers(token, teamId), order.pm); }
   catch (e) { logger.warn("ClickUp: membres non résolus", { msg: e && e.message }); }
-  const payload = clickup.taskPayload({ ...order, fp }, assignee);
+
+  // Définitions des champs de la liste cible → résolution des libellés d'options en UUID (pas d'UUID
+  // codé en dur : robuste si l'admin ClickUp modifie les listes).
+  let fieldDefs = [];
+  try { fieldDefs = await clickup.listFields(token, listId); }
+  catch (e) { logger.warn("ClickUp: champs de liste illisibles", { listId, msg: e && e.message }); }
+
+  const corePayload = cf.buildCorePayload({ ...order, fp }, extra, assignee);
+  const logical = cf.buildLogical({ ...order, fp }, extra);
+  const fieldWrites = cf.buildFieldWrites(fieldDefs, logical);
 
   const id = safeId(fp);
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const existing = links[id];
   let task, created = false;
   try {
-    if (existing) { task = await clickup.updateTask(token, existing, payload); task.id = existing; }
-    else { task = await clickup.createTask(token, listId, payload); created = true; await db.doc("config/clickupLinks").set({ map: { [id]: task.id } }, { merge: true }); }
+    if (existing) { task = await clickup.updateTask(token, existing, corePayload); task.id = existing; }
+    else { task = await clickup.createTask(token, listId, corePayload); created = true; await db.doc("config/clickupLinks").set({ map: { [id]: task.id } }, { merge: true }); }
+    // Champs personnalisés posés un à un (endpoint Set-Field, fiable pour tous les types).
+    for (const w of fieldWrites) {
+      try { await clickup.setField(token, task.id, w.id, w.value); }
+      catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
+    }
   } catch (e) {
     throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation"}`);
   }
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fp, detail: { taskId: task.id, listId, assigned: !!assignee }, ts: FieldValue.serverTimestamp() });
-  return { ok: true, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, assigned: !!assignee, created };
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fp, detail: { taskId: task.id, listId, assigned: !!assignee, fields: fieldWrites.length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, assigned: !!assignee, created, fields: fieldWrites.length };
 });
 
 // listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM

@@ -623,26 +623,112 @@ function OrderCasFixer({ row }: { row: Order }) {
   );
 }
 
-// Pousse la commande vers ClickUp (crée/met à jour la tâche assignée au PM). Ouvre la tâche créée.
+// Listes ClickUp par pays (espace « Gestion de Projets ») + libellés d'options des champs
+// complémentaires (ex-formulaire). Le back résout les libellés → UUID contre la liste EN DIRECT
+// (tolérant à la casse/inclusion), donc ces libellés n'ont qu'un rôle d'IHM.
+const CLICKUP_COUNTRY_LISTS = [
+  { id: "901215917683", label: "Côte d'Ivoire", pays: "CI" },
+  { id: "901215918697", label: "Burkina Faso", pays: "BF" },
+  { id: "901215918699", label: "Guinée", pays: "GN" },
+];
+const OPT_NATURE = ["Livraison uniquement", "Service uniquement", "Livraison + Services", "Maintenance", "Infogérance", "Licence", "Hardware"];
+const OPT_DOMAINE = ["Secured IT", "Digital Workspace", "Datacenter Facilities", "Business Data Integration", "Expert & Managed Services", "Modern Network Integration", "Agile Infrastructure  & Cloud"];
+const OPT_SECTEUR = ["Autres", "Banques", "Services", "Ministères", "Telco & ISP", "Distribution", "Media et TIC", "Energie et Mines", "Transport et Logistique", "Assurance et Prévoyance", "Autres Services Financiers", "Institutions et Organismes", "Industries et agroalimentaire", "Société d'Etat et Parapublique"];
+const OPT_CIRCUIT = ["FastTrack", "Normal", "Urgent"];
+const OPT_CATREC = ["Mixte", "Licence", "Service", "Sans Objet"];
+const OPT_PRIORITE = ["Urgente", "Haute", "Normale", "Basse"];
+const isoToMs = (iso: string) => (iso ? new Date(iso).getTime() || undefined : undefined);
+
+// Pousse la commande vers ClickUp via un MODAL qui remplace l'ancien formulaire ClickUp : liste cible
+// (CI/BF/Guinée), données pré-remplies depuis la commande, + champs complémentaires. Ouvre la tâche.
 function ClickupBtn({ row }: { row: Order }) {
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const toast = useToast();
-  const onClick = async () => {
+  const [listId, setListId] = useState(CLICKUP_COUNTRY_LISTS[0].id);
+  const [nature, setNature] = useState("");
+  const [domaine, setDomaine] = useState("");
+  const [secteur, setSecteur] = useState("");
+  const [circuit, setCircuit] = useState("");
+  const [catRecurrent, setCatRecurrent] = useState("");
+  const [priority, setPriority] = useState("");
+  const [dateCommande, setDateCommande] = useState("");
+  const [dateContractuelle, setDateContractuelle] = useState("");
+  const [dateFinPrev, setDateFinPrev] = useState("");
+  const [commentaire, setCommentaire] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const pays = CLICKUP_COUNTRY_LISTS.find((l) => l.id === listId)?.pays;
+  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
+    <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
+  );
+  const Select = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: string[]; ph: string }) => (
+    <select className="field !py-1.5" value={v} onChange={(e) => set(e.target.value)}>
+      <option value="">{ph}</option>
+      {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+
+  const submit = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      const r = await pushOrderToClickup({ fp: row.fp, client: row.client, designation: row.affaire, bu: row.bu, cas: row.cas, pm: row.pm });
-      toast(`Tâche ClickUp ${r.created ? "créée" : "mise à jour"}${r.assigned ? " et assignée" : " (PM non résolu)"}`, "ok");
+      const r = await pushOrderToClickup(
+        { fp: row.fp, client: row.client, affaire: row.affaire, bu: row.bu, am: row.am, cas: row.cas, facture: row.facture, pm: row.pm },
+        { listId, extra: {
+          pays, nature: nature || undefined, domaine: domaine || undefined, secteur: secteur || undefined,
+          circuit: circuit || undefined, catRecurrent: catRecurrent || undefined, priority: priority || undefined,
+          commentaire: commentaire.trim() || undefined,
+          dateCommande: isoToMs(dateCommande), dateContractuelle: isoToMs(dateContractuelle), dateFinPrev: isoToMs(dateFinPrev),
+        } },
+      );
+      toast(`Tâche ClickUp ${r.created ? "créée" : "mise à jour"}${r.assigned ? " et assignée" : " (PM non résolu)"} — ${r.fields} champs posés`, "ok");
       if (r.url) window.open(r.url, "_blank", "noopener");
+      setOpen(false);
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       toast(detail ? `ClickUp refusé — ${detail}` : "ClickUp : échec", "err");
     } finally { setBusy(false); }
   };
+
   return (
-    <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2 !py-1 text-xs" title="Créer / mettre à jour la tâche ClickUp (assignée au PM)">
-      {busy ? "…" : row.pm ? "ClickUp ↗" : "ClickUp"}
-    </button>
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-1 text-xs" title="Créer / mettre à jour la tâche ClickUp">
+        {row.pm ? "ClickUp ↗" : "ClickUp"}
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} size="md"
+        title={<>Tâche ClickUp — <span className="text-gold">{row.fp}</span></>}
+        actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
+        <div className="text-[12px] text-muted mb-3 rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span><b className="text-ink">{row.client || "—"}</b> · {row.affaire || "sans désignation"}</span>
+            <span>BU {row.bu || "—"}</span><span>AM {row.am || "—"}</span>
+            <span>CA Signé {money(row.cas)}</span><span>CA Facturé {money(row.facture)}</span>
+            <span>PM {row.pm || <i className="text-amber-400">non affecté</i>}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <Field label="Liste (pays)">
+            <select className="field !py-1.5" value={listId} onChange={(e) => setListId(e.target.value)}>
+              {CLICKUP_COUNTRY_LISTS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature"><Select v={nature} set={setNature} opts={OPT_NATURE} ph="—" /></Field>
+          <Field label="Domaine"><Select v={domaine} set={setDomaine} opts={OPT_DOMAINE} ph="—" /></Field>
+          <Field label="Secteur"><Select v={secteur} set={setSecteur} opts={OPT_SECTEUR} ph="—" /></Field>
+          <Field label="Circuit"><Select v={circuit} set={setCircuit} opts={OPT_CIRCUIT} ph="—" /></Field>
+          <Field label="Cat. récurrent"><Select v={catRecurrent} set={setCatRecurrent} opts={OPT_CATREC} ph="—" /></Field>
+          <Field label="Priorité"><Select v={priority} set={setPriority} opts={OPT_PRIORITE} ph="—" /></Field>
+          <Field label="Date de commande"><DateField value={dateCommande} onChange={setDateCommande} ariaLabel="Date de commande" /></Field>
+          <Field label="Date contractuelle"><DateField value={dateContractuelle} onChange={setDateContractuelle} ariaLabel="Date contractuelle" /></Field>
+          <Field label="Date prév. de fin"><DateField value={dateFinPrev} onChange={setDateFinPrev} ariaLabel="Date prévisionnelle de fin" /></Field>
+        </div>
+        <Field label="Commentaire"><textarea className="field !py-1.5 mt-3" rows={2} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} placeholder="note libre (optionnel)" /></Field>
+        <div className="flex gap-2 mt-4 items-center flex-wrap">
+          <button type="button" className="btn-gold" disabled={busy} onClick={submit}>{busy ? "…" : "Créer / mettre à jour la tâche"}</button>
+          {!row.pm && <span className="text-[12px] text-amber-400">PM non affecté — la tâche ne sera pas assignée.</span>}
+        </div>
+      </Modal>
+    </>
   );
 }
 
