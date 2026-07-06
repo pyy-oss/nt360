@@ -174,7 +174,9 @@ export interface RelanceJalons { asOf?: string; count?: number; total?: number; 
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; pm?: string | null; cas?: number; raf?: number; facture?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null;
   // Synchro inverse ClickUp (overlay config/clickupSync) : statut projet + dates (ISO yyyy-mm-dd).
-  clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null };
+  clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null;
+  // Enrichissements ClickUp → app (Lot 4) : priorité, blocage, avancement checklists (%), temps passé (h).
+  clickupPriority?: string | null; clickupBlocked?: boolean; clickupProgress?: number | null; clickupTimeSpentH?: number | null };
 // Méta des commandes matérialisées. Les lignes sont désormais dans les chunks commandesRows/{i}
 // (rows conservé optionnel pour lire un ancien agrégat pré-chunking en transition).
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }

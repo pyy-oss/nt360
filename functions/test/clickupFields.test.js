@@ -101,26 +101,37 @@ describe("readTaskSync — sens inverse ClickUp → app", () => {
     status: { status: "3-en cours - deploiement" },
     start_date: "1741752000000", due_date: "1782792000000",
     assignees: [{ id: 3, username: "Serge Djedje" }],
+    priority: { priority: "urgent" },
+    tags: [{ name: "Bloqué distributeur" }],
+    time_spent: 7200000,
+    checklists: [{ resolved: 3, unresolved: 1 }, { resolved: 0, unresolved: 0 }],
     custom_fields: [{ id: "F_DELAI", name: "Délai Prévisonnel", type: "date", value: "1780200000000" }],
   };
-  it("extrait statut + 3 dates + PM assigné", () => {
+  it("extrait statut + 3 dates + PM + priorité/blocage/temps/avancement", () => {
     const s = cf.readTaskSync(task);
     expect(s.status).toBe("3-en cours - deploiement");
     expect(s.dateCommande).toBe(1741752000000);
     expect(s.dateContractuelle).toBe(1782792000000);
     expect(s.dateFinPrev).toBe(1780200000000);
     expect(s.pm).toBe("Serge Djedje");
+    expect(s.priority).toBe("urgent");
+    expect(s.blocked).toBe(true);
+    expect(s.timeSpentMs).toBe(7200000);
+    expect(s.progress).toBe(75); // 3 résolus / 4 items
   });
-  it("tolère status chaîne, dates et assigné absents → null", () => {
+  it("tolère status chaîne, dates et assigné absents → null ; pas de blocage/avancement", () => {
     const s = cf.readTaskSync({ status: "0-affecte", custom_fields: [] });
     expect(s.status).toBe("0-affecte");
     expect(s.dateCommande).toBe(null);
     expect(s.dateContractuelle).toBe(null);
     expect(s.dateFinPrev).toBe(null);
     expect(s.pm).toBe(null);
+    expect(s.priority).toBe(null);
+    expect(s.blocked).toBe(false);
+    expect(s.progress).toBe(null);
   });
-  it("tâche vide → tout null", () => {
-    expect(cf.readTaskSync({})).toEqual({ status: null, dateCommande: null, dateContractuelle: null, dateFinPrev: null, pm: null });
+  it("tâche vide → tout null/false", () => {
+    expect(cf.readTaskSync({})).toEqual({ status: null, dateCommande: null, dateContractuelle: null, dateFinPrev: null, pm: null, priority: null, blocked: false, timeSpentMs: null, progress: null });
   });
 });
 

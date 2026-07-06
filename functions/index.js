@@ -1742,6 +1742,87 @@ exports.deleteClickupWebhook = onCallG("deleteClickupWebhook", { secrets: [CLICK
   return { ok: true, deleted: stored.id };
 });
 
+// ===================================================================================================
+// ENRICHISSEMENTS app → ClickUp (Lot 3). Pose sur chaque tâche commande liée un COMMENTAIRE DE
+// SYNTHÈSE idempotent (CA/RAF, jalons de facturation, BC liés, qualité, retard) et un TAG « à risque »
+// quand la commande présente des anomalies ou un retard. La synthèse est consolidée dans UN commentaire
+// marqué (retrouvé et mis à jour à chaque passage) → jamais de doublon. Best-effort par tâche.
+// ===================================================================================================
+async function runClickupEnrich() {
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) return { disabled: true, enriched: 0, total: 0 };
+  const token = CLICKUP_TOKEN.value();
+  if (!token) return { enriched: 0, total: 0, note: "token absent" };
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const keys = Object.keys(links);
+  if (!keys.length) return { enriched: 0, total: 0 };
+  const clickup = require("./lib/clickup");
+  const enrich = require("./lib/clickupEnrich");
+  const { safeId } = require("./lib/sheets");
+  const orders = await loadCommandeRows();
+  const orderByKey = {};
+  for (const o of orders) if (o.fp) orderByKey[safeId(o.fp)] = o;
+  // BC liés par commande (N° BC agrégés) et jalons de facturation par commande.
+  const bcByFp = {};
+  for (const b of await loadBcLines()) { const k = safeId(String(b.fp || "").trim()); if (!k || !b.bcNumber) continue; (bcByFp[k] = bcByFp[k] || []).push(String(b.bcNumber).trim()); }
+  const msByFp = {};
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones)) msByFp[safeId(v.fp)] = v.milestones; });
+  // Anomalies qualité par commande (depuis summaries/dataQuality — refs = N° FP concernés).
+  const dq = (await db.doc("summaries/dataQuality").get()).data() || {};
+  const flagsByFp = {};
+  for (const iss of dq.issues || []) for (const ref of iss.refs || []) { const k = safeId(String(ref).trim()); if (!k) continue; (flagsByFp[k] = flagsByFp[k] || []).push(iss.label || iss.type); }
+  const today = new Date().toISOString().slice(0, 10);
+  let enriched = 0, failed = 0, tagged = 0;
+  for (const key of keys) {
+    const taskId = links[key];
+    const o = orderByKey[key];
+    if (!o) continue; // lien orphelin (commande disparue) → rien à synthétiser
+    const overdue = !!(o.dateContractuelle && String(o.dateContractuelle).slice(0, 10) < today && o.clickupStatus && !/clotur|termin|livr/i.test(String(o.clickupStatus)));
+    const d = {
+      fp: o.fp, cas: o.cas, facture: o.facture, raf: o.raf,
+      milestones: (msByFp[key] || []).map((m) => ({ label: m.label, amount: Number(m.amount || 0), dueDate: m.dueDate || m.date })),
+      bcRefs: [...new Set((bcByFp[key] || []).filter(Boolean))],
+      qualityFlags: [...new Set(flagsByFp[key] || [])],
+      overdue,
+    };
+    try {
+      const text = enrich.buildSyncComment(d);
+      const existing = enrich.findMarkedComment(await clickup.listComments(token, taskId), enrich.MARKER);
+      if (existing) await clickup.updateComment(token, existing.id, text); else await clickup.createComment(token, taskId, text);
+      try {
+        if (enrich.needsRiskTag(d)) { await clickup.addTag(token, taskId, enrich.RISK_TAG); tagged++; }
+        else { await clickup.removeTag(token, taskId, enrich.RISK_TAG).catch(() => {}); }
+      } catch (e) { logger.warn("enrich: tag non posé", { key, msg: e && e.message }); }
+      enriched++;
+    } catch (e) { failed++; logger.warn("enrich: échec", { key, msg: e && e.message }); }
+  }
+  return { enriched, failed, tagged, total: keys.length };
+}
+
+// enrichClickup : bouton « Enrichir les tâches ClickUp » (synthèse + tag). Direction.
+exports.enrichClickup = onCallG("enrichClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  let res;
+  try { res = await runClickupEnrich(); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${(e && e.message) || e}`); }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_enrich", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: res, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
+});
+
+// scheduledClickupEnrich : entretien QUOTIDIEN des commentaires de synthèse + tags (après le pull).
+exports.scheduledClickupEnrich = onSchedule({ schedule: "every day 05:00", secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async () => {
+  const t0 = Date.now();
+  try {
+    const res = await runClickupEnrich();
+    await logOps({ kind: "scheduled", action: "clickupEnrich", status: "ok", ms: Date.now() - t0, detail: { count: res.enriched } });
+  } catch (e) {
+    logger.error("scheduledClickupEnrich a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "scheduled", action: "clickupEnrich", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
+  }
+});
+
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---

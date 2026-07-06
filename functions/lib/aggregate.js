@@ -315,6 +315,10 @@ async function recomputeAll(db, only) {
   const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
   const cuSignals = clickupSignals(orders, clickupSyncMap, safeId, asOf);
   if (cuSignals.issues.length) dqSummary.issues = [...(dqSummary.issues || []), ...cuSignals.issues];
+  // Enrichissement inverse (Lot 4) : commandes BLOQUÉES ou en priorité URGENTE côté ClickUp → bulletin
+  // d'Actualité (projets à débloquer / à traiter en priorité). Priorité/blocage remontés par readTaskSync.
+  const urgentPrio = new Set(["urgent", "urgente"]);
+  const cuBlockedRefs = orders.filter((o) => { const cu = clickupSyncMap[safeId(o.fp)] || {}; return cu.blocked || (cu.priority && urgentPrio.has(String(cu.priority).toLowerCase())); }).map((o) => o.fp).filter(Boolean);
   // Analytique délais/échéances ClickUp (par PM, par statut, RAF échéancé) → summaries/clickupDelays.
   if (want("commandes") || want("overview") || want("dataQuality")) {
     const delays = clickupDelays(orders, clickupSyncMap, orderPmMap, safeId, asOf);
@@ -353,7 +357,7 @@ async function recomputeAll(db, only) {
       const since = new Date(Date.now() - 24 * 3600 * 1000);
       clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
     } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
-    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, fy: currentFy, asOf, thr: alertThr });
+    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, clickupBlocked: cuBlockedRefs.length, clickupBlockedRefs: cuBlockedRefs, fy: currentFy, asOf, thr: alertThr });
     w.push({ path: "summaries/news", data: { ...news, ...stamp } });
   }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
@@ -376,6 +380,11 @@ async function recomputeAll(db, only) {
         dateContractuelle: cu ? isoDay(cu.dateContractuelle) : null,
         dateFinPrev: cu ? isoDay(cu.dateFinPrev) : null,
         clickupTaskId: clickupLinksMap[safeId(o.fp)] || null,
+        // Enrichissements ClickUp → app (Lot 4) : priorité, blocage, avancement checklists, temps passé.
+        clickupPriority: cu ? (cu.priority || null) : null,
+        clickupBlocked: cu ? !!cu.blocked : false,
+        clickupProgress: cu && cu.progress != null ? cu.progress : null,
+        clickupTimeSpentH: cu && cu.timeSpentMs ? Math.round(Number(cu.timeSpentMs) / 360000) / 10 : null,
       };
     });
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));

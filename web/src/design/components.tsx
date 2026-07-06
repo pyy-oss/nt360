@@ -394,7 +394,11 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
             <tbody>
               {slice.map((r, ri) => {
                 const k = keyOf(r, ri);
-                const detail = expand ? expand(r) : (detailCols.length ? <DetailGrid cols={detailCols} row={r} /> : null);
+                // Détail = panneau custom du module (ex. actions groupées) ET/OU grille des colonnes
+                // secondaires. Les deux coexistent : un `expand` custom n'efface plus les colonnes `det`.
+                const auto = detailCols.length ? <DetailGrid cols={detailCols} row={r} /> : null;
+                const custom = expand ? expand(r) : null;
+                const detail = custom && auto ? <div className="flex flex-col gap-4">{custom}{auto}</div> : (custom || auto);
                 const isOpen = hasDetail ? open.has(k) : false;
                 return (
                 <Fragment key={k}>

@@ -178,6 +178,11 @@ function buildLogical(order, extra, only) {
  *  - dateCommande      ← start_date natif
  *  - dateContractuelle ← due_date natif
  *  - dateFinPrev       ← champ personnalisé « Délai Prévisonnel »
+ *  - pm                ← assigné ClickUp courant
+ *  - priority          ← priorité ClickUp (chaîne : urgent/high/normal/low)
+ *  - blocked           ← présence d'un tag « bloqué »/« blocked »/« blocage »
+ *  - timeSpentMs       ← temps passé cumulé (ms)
+ *  - progress          ← avancement % agrégé des checklists (résolu / total), ou null si aucune
  * Renvoie des epoch ms (ou null). Tolère task.status objet {status} ou chaîne.
  */
 function readTaskSync(task) {
@@ -187,12 +192,21 @@ function readTaskSync(task) {
   const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
   const status = t.status && typeof t.status === "object" ? (t.status.status || null) : (t.status || null);
   const a = Array.isArray(t.assignees) && t.assignees[0] ? t.assignees[0] : null;
+  const priority = t.priority && typeof t.priority === "object" ? (t.priority.priority || null) : (t.priority || null);
+  const tags = Array.isArray(t.tags) ? t.tags.map((g) => norm(g && g.name)) : [];
+  const blocked = tags.some((n) => n.includes("bloqu") || n.includes("block"));
+  let done = 0, total = 0;
+  for (const c of (t.checklists || [])) { done += Number(c.resolved || 0); total += Number(c.resolved || 0) + Number(c.unresolved || 0); }
   return {
     status: status || null,
     dateCommande: num(t.start_date),
     dateContractuelle: num(t.due_date),
     dateFinPrev: num(byName(FIELD_NAMES.delaiPrev)),
     pm: a ? (a.username || null) : null, // assigné ClickUp → PM courant de l'app
+    priority: priority || null,
+    blocked,
+    timeSpentMs: num(t.time_spent),
+    progress: total > 0 ? Math.round((done / total) * 100) : null,
   };
 }
 
