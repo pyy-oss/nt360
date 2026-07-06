@@ -939,6 +939,22 @@ export const OrderList: FC<Props> = () => {
   // Suggestions d'affectation PM (datalist) = référentiel Admin ∪ PM déjà affectés.
   const pmRef = useProjectManagers();
   const pmOptions = useMemo(() => [...new Set([...pmRef, ...(all.map((r) => r.pm).filter(Boolean) as string[])])].sort((a, b) => a.localeCompare(b)), [all, pmRef]);
+  // Panneau déplié : bloc d'ACTIONS groupées (corriger / supprimer / annuler), réservé au droit
+  // « import ». Rendu au-dessus de la grille des colonnes secondaires (BU, dates, ClickUp…).
+  const orderActions = canImport ? (r: Order) => (
+    <div className="rounded-lg bg-ink/[.03] border border-line/60 px-3 py-2.5 flex flex-col gap-2">
+      <div className="text-xs font-semibold text-muted">Mettre à jour / supprimer</div>
+      <div className="flex flex-wrap items-center gap-3">
+        {(r.source === "pnl" || r.source === "manuel") && r.fp
+          ? <OrderEditor row={r} />
+          : <span className="text-[11px] text-faint">Correction à la source (fiche / opportunité)</span>}
+        {r.fp && r.source !== "fiche" && <DangerBtn label="Supprimer la commande" confirm={`Supprimer la commande ${r.fp} (ligne P&L) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("orders", fpDocId(r.fp!))} />}
+        {r.fp && <DangerBtn label="Annuler" tone="gold" okMsg="Commande annulée" errMsg="Annulation refusée"
+          confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
+          fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />}
+      </div>
+    </div>
+  ) : undefined;
   if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return (
     <div className="flex flex-col gap-2">
@@ -961,6 +977,7 @@ export const OrderList: FC<Props> = () => {
         rows={rows}
         colsKey="commandes"
         initialSearch={intent?.search}
+        expand={orderActions}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.pm || "", (r) => r.affaire || ""]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
@@ -994,21 +1011,6 @@ export const OrderList: FC<Props> = () => {
           det(colText("Priorité CU", (r) => (r.clickupPriority ? <Badge tone={/urgent/i.test(r.clickupPriority) ? "clay" : "steel"}>{r.clickupPriority}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupPriority || "")),
           det(colText("Blocage", (r) => (r.clickupBlocked ? <Badge tone="clay">bloqué</Badge> : <span className="text-faint">—</span>), (r) => (r.clickupBlocked ? 1 : 0))),
           det(colNum("Temps CU", (r) => (r.clickupTimeSpentH != null ? `${r.clickupTimeSpentH} h` : "—"), (r) => (r.clickupTimeSpentH ?? 0))),
-          ...(canImport ? [det(colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
-            ? <OrderEditor row={r} />
-            : <span className="text-[11px] text-faint">à la source</span>), () => 0))] : []),
-          // Assainissement : supprime la ligne P&L orders/{safeId(fp)}. Pour une commande de source
-          // « fiche » (dérivée de projectSheets, sans doc orders), on renvoie vers l'écran Fiches.
-          ...(canImport ? [det(colText("Assainir", (r: Order) => (r.fp && r.source !== "fiche"
-            ? <DangerBtn label="Suppr." confirm={`Supprimer la commande ${r.fp} (ligne P&L) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("orders", fpDocId(r.fp!))} />
-            : <span className="text-[11px] text-faint">{r.source === "fiche" ? "fiche" : "—"}</span>), () => 0))] : []),
-          // Annulation (statut « Annulée » persistant) : la commande quitte le carnet/CAS/backlog mais
-          // reste conservée (rétablissable ci-dessus). Survit à un ré-import delta (overlay).
-          ...(canImport ? [det(colText("Annuler", (r: Order) => (r.fp
-            ? <DangerBtn label="Annuler" tone="gold" okMsg="Commande annulée" errMsg="Annulation refusée"
-                confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
-                fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />
-            : <span className="text-[11px] text-faint">—</span>), () => 0))] : []),
           ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
             <span className="inline-flex items-center gap-2">
               <ClickupBtn row={r} />
