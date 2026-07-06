@@ -10,7 +10,7 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc } from "../types";
 
@@ -623,6 +623,29 @@ function OrderCasFixer({ row }: { row: Order }) {
   );
 }
 
+// Affectation INLINE d'un Project Manager (PMO) à une commande. Overlay persistant (survit au
+// recompute / ré-import). Auto-complétion sur les PM déjà affectés (datalist « pm-options »).
+function OrderPmFixer({ row }: { row: Order }) {
+  const [editing, setEditing] = useState(false);
+  const [pm, setPm] = useState("");
+  if (!editing) {
+    return (
+      <span className="inline-flex items-center gap-2">
+        {row.pm ? <Badge tone="steel">{row.pm}</Badge> : <span className="text-faint">—</span>}
+        <button type="button" onClick={() => { setPm(row.pm || ""); setEditing(true); }} className="text-gold hover:underline text-[11px]" title="Affecter / changer le Project Manager">{row.pm ? "changer" : "affecter"}</button>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      <input list="pm-options" className="field w-36 !py-1 text-xs" autoFocus aria-label={`Project Manager de ${row.fp}`} placeholder="Nom du PM" value={pm} onChange={(e) => setPm(e.target.value)} />
+      <Busy variant="ghost" label="OK" okMsg={pm.trim() ? "PM affecté (recalcul lancé)" : "PM retiré (recalcul lancé)"} errMsg="Affectation refusée"
+        fn={async () => { await setOrderPm(row.fp!, pm.trim()); setEditing(false); }} />
+      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler l'affectation">✕</button>
+    </span>
+  );
+}
+
 // Réconciliation : opportunités GAGNÉES (stage 6) portant un N° FP mais SANS ligne P&L → elles ne
 // comptent pas en commande (CAS/backlog absents). « Inscrire au P&L » crée la commande depuis l'opp
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
@@ -725,6 +748,8 @@ export const OrderList: FC<Props> = () => {
   const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => r.fp).filter(Boolean) as string[]), [all]);
+  // Project Managers déjà affectés → suggestions d'auto-complétion pour l'affectation (datalist).
+  const pmOptions = useMemo(() => [...new Set(all.map((r) => r.pm).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)), [all]);
   if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return (
     <div className="flex flex-col gap-2">
@@ -740,17 +765,21 @@ export const OrderList: FC<Props> = () => {
     {canImport && <CancelledOrders />}
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
+      {/* Suggestions d'auto-complétion partagées par les champs d'affectation PM de chaque ligne. */}
+      <datalist id="pm-options">{pmOptions.map((p) => <option key={p} value={p} />)}</datalist>
       <ListView
         rows={rows}
         colsKey="commandes"
         initialSearch={intent?.search}
-        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.affaire || ""]}
+        searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.pm || "", (r) => r.affaire || ""]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
           colText("AM", (r) => r.am, (r) => r.am),
+          // Affectation à un Project Manager (PMO) — éditable en place pour le droit « import ».
+          colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || ""),
           // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans
           // ouvrir la modale : les montants saisis à la source sont parfois erronés. Les commandes de
           // source « fiche »/« opp gagnée » se corrigent à la source (fiche / opportunité).

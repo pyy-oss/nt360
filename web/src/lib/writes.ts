@@ -43,6 +43,11 @@ export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: st
   await httpsCallable(functions, "patchOrder")(data);
 }
 
+/** Affecte (ou désaffecte, pm vide) un Project Manager à une commande. Overlay persistant, recalcul. */
+export async function setOrderPm(fp: string, pm: string) {
+  await httpsCallable(functions, "setOrderPm")({ fp, pm });
+}
+
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */

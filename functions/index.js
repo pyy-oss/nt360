@@ -833,6 +833,29 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 256, timeoutSeconds: 1
   return { ok: true, fp };
 });
 
+// --- setOrderPm : affecte un Project Manager (PMO) à une commande. Stocké en OVERLAY
+// config/orderPm { map: { <safeId(fp)>: pm } }, hors du doc commande → l'affectation SURVIT au
+// recompute ET à un ré-import delta (même logique que l'annulation). `pm` vide → désaffectation.
+// Gouverné par le module « import » (comme patchOrder/createOrder) — ajustable via la matrice. ---
+exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const d = req.data || {};
+  const fp = fpKey(d.fp);
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  const pm = String(d.pm || "").trim().slice(0, 120);
+  const id = safeId(fp);
+  // Écriture ciblée dans la map : pm renseigné → pose la valeur ; vide → supprime l'entrée (merge).
+  await db.doc("config/orderPm").set({ map: { [id]: pm ? pm : FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: pm ? "assign_pm" : "unassign_pm", module: "import", entity: "order", entityId: id,
+    detail: { fp, pm: pm || null }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, fp, pm: pm || null };
+});
+
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
 // --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les

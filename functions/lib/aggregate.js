@@ -145,6 +145,9 @@ async function recomputeAll(db, only) {
   const itemsOf = (snap) => { const v = (snap.data() || {}).items; return new Set((Array.isArray(v) ? v : []).map((e) => e && e.id).filter(Boolean)); };
   const cancelledOrders = itemsOf(cxlO);
   const cancelledInvoices = itemsOf(cxlI);
+  // AFFECTATION PMO (Project Manager par commande) : overlay config/orderPm { map: { <safeId(fp)>: pm } },
+  // stocké hors des docs commandes → SURVIT au recompute et à un ré-import delta (comme l'annulation).
+  const orderPmMap = ((await db.doc("config/orderPm").get()).data() || {}).map || {};
   // Factures annulées : écartées AVANT la fusion (n'alimentent pas le facturé d'une commande).
   for (let i = invoices.length - 1; i >= 0; i--) if (cancelledInvoices.has(invoices[i].id)) invoices.splice(i, 1);
 
@@ -323,6 +326,7 @@ async function recomputeAll(db, only) {
     const base = orders.map((o) => ({
       fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
       cas: o.cas || 0, raf: o.raf || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
+      pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
     }));
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));
     const CHUNK = 800; // ~800 lignes/doc reste très en deçà de la limite 1 Mio
