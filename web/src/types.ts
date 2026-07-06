@@ -93,6 +93,8 @@ export type AmRow = {
   conv: number; targetCas: number; roCas: number | null; orderCount: number;
 };
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
+export type PmRow = { pm: string; count: number; cas: number; raf: number };
+export interface PmsSummary { count?: number; rows?: PmRow[] }
 export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; ar?: number; dso?: number; fy?: number };
 export interface TrendsSummary { points?: TrendPoint[] }
 export interface ReceivablesSummary {

@@ -13,7 +13,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
 import { callImportDelta, callReingest, type ImportDeltaResult } from "../lib/writes";
-import type { AlertsSummary, AmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
+import type { AlertsSummary, AmsSummary, PmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
 // Normalisation de périmètre pour le rapprochement objectif ↔ entité : trim + majuscules + SANS
@@ -407,8 +407,10 @@ export function FilterBar() {
   const { f, set, clear, active } = useFilters();
   const { data: ams } = useDocData<AmsSummary>("summaries/ams");
   const { data: cli } = useDocData<EntitySummary>("summaries/clients_all");
+  const { data: pms } = useDocData<PmsSummary>("summaries/pms");
   const amOpts = (ams?.rows || []).map((r) => r.am).filter(Boolean);
   const cliOpts = (cli?.rows || []).map((r) => r.key).filter(Boolean);
+  const pmOpts = (pms?.rows || []).map((r) => r.pm).filter(Boolean);
   const BU = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
   const sel = "!py-1 text-xs";
   return (
@@ -420,6 +422,9 @@ export function FilterBar() {
         options={[{ value: "", label: "AM · tous" }, ...amOpts.map((a) => ({ value: a, label: a }))]} />
       <Select className={sel} ariaLabel="Filtrer par client" value={f.client} onChange={(v) => set({ client: v })} placeholder="Client · tous"
         options={[{ value: "", label: "Client · tous" }, ...cliOpts.map((c) => ({ value: c, label: c }))]} />
+      {/* Filtre PM affiché seulement s'il existe des affectations (sinon inutile). */}
+      {pmOpts.length > 0 && <Select className={sel} ariaLabel="Filtrer par Project Manager" value={f.pm} onChange={(v) => set({ pm: v })} placeholder="PM · tous"
+        options={[{ value: "", label: "PM · tous" }, ...pmOpts.map((p) => ({ value: p, label: p }))]} />}
       {active && <button onClick={clear} className="inline-flex items-center gap-1 text-clay hover:underline" aria-label="Effacer le filtre"><X size={13} /> Effacer</button>}
     </div>
   );
@@ -429,7 +434,7 @@ export function FilterBar() {
 export function FilterNote({ dims }: { dims?: string }) {
   const { f, active } = useFilters();
   if (!active) return null;
-  const parts = [f.bu && `BU ${f.bu}`, f.am && `AM ${f.am}`, f.client && `Client ${f.client}`].filter(Boolean);
+  const parts = [f.bu && `BU ${f.bu}`, f.am && `AM ${f.am}`, f.client && `Client ${f.client}`, f.pm && `PM ${f.pm}`].filter(Boolean);
   return <div className="text-[11px] text-gold">Filtre actif : {parts.join(" · ")}{dims ? ` — ${dims}` : ""}</div>;
 }
 

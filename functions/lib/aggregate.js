@@ -337,6 +337,18 @@ async function recomputeAll(db, only) {
       w.push({ path: `commandesRows/${i}`, data: { i, rows: base.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
       w.push({ path: `commandesRowsMargin/${i}`, data: { i, rows: margin.slice(i * CHUNK, (i + 1) * CHUNK), ...stamp } });
     }
+    // CHARGE PAR PROJECT MANAGER : agrégat léger des commandes affectées (count / CAS / RAF), sans
+    // marge (grandeurs non sensibles) → alimente la vue « par PM » et les options du filtre PM.
+    const byPm = new Map();
+    for (const o of orders) {
+      const pm = orderPmMap[safeId(o.fp)];
+      if (!pm) continue;
+      const e = byPm.get(pm) || { pm, count: 0, cas: 0, raf: 0 };
+      e.count += 1; e.cas += o.cas || 0; e.raf += o.raf || 0;
+      byPm.set(pm, e);
+    }
+    const pmRows = [...byPm.values()].sort((a, b) => b.cas - a.cas);
+    w.push({ path: "summaries/pms", data: { rows: pmRows, count: pmRows.length, ...stamp } });
   }
 
   // Historisation : un INSTANTANÉ daté des grandeurs clés à chaque recompute (1 point/jour,
