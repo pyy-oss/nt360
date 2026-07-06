@@ -36,6 +36,11 @@ jobs:
       - name: Tests front (Vitest)
         run: pnpm --filter web test
 
+      # Lint ciblé : règles des hooks React (rules-of-hooks en ERREUR). Bloque les hooks
+      # conditionnels / après retour anticipé (classe du crash React #310) AVANT le build.
+      - name: Lint (règles des hooks React)
+        run: pnpm --filter web lint
+
       - name: Tests de règles Firestore (rules-unit-testing via émulateur)
         run: pnpm test:rules
 
