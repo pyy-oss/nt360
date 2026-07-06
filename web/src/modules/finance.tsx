@@ -189,6 +189,7 @@ export const InvoiceList: FC<Props> = () => {
       <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap"><Segmented value={f} onChange={setF} ariaLabel="Filtrer les factures" options={[{ value: "all", label: "Toutes" }, { value: "linked", label: "Rattachées" }, { value: "orphan", label: "Non rattachées", count: orphan.length }]} />{canImport && <ImportButton label="Importer un delta" />}</div>}>
         <ListView
           rows={filtered}
+          colsKey="factures"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
           columns={[

@@ -77,6 +77,7 @@ export const PnlProjet: FC<Props> = () => {
       <Card title={`Fiches affaire${canMargin ? " — coût / vente / marge" : ""} · ${rows.length}`}>
         <ListView
           rows={rows}
+          colsKey="pnl-projet"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
           rowKey={(r) => r.id || r.fp || ""}
@@ -146,7 +147,7 @@ export const Fournisseurs: FC<Props> = () => {
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
       <Card title="Par fournisseur">
-        <Table columns={cols} rows={data.bySupplier || []} />
+        <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" />
         <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
       </Card>
     </div>
@@ -282,6 +283,7 @@ export const BC: FC<Props> = () => {
       <Card title={`Lignes BC · ${rows.length.toLocaleString("fr-FR")}`} actions={<Segmented value={flt} onChange={setFlt} ariaLabel="Filtrer les lignes BC" options={[{ value: "all", label: "Toutes" }, { value: "open", label: "Non soldés" }, { value: "late", label: "En retard", count: lateCount }]} />}>
         <ListView
           rows={filtered}
+          colsKey="bc"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           columns={[
@@ -382,7 +384,7 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
             colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced)),
             ...(canMargin ? [colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin))] : []),
           ] : []),
-        ]} rows={rows} />
+        ]} rows={rows} colsKey={`entity-${kind}`} />
         {hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre {kind === "domaines" ? "BU" : "client"}. Les objectifs se définissent dans « Objectifs ».</Tip>}
       </Card>
     </div>

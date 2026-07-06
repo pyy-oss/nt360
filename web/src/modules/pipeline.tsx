@@ -266,6 +266,7 @@ export const OppList: FC<Props> = () => {
       <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
         <ListView
           rows={rows}
+          colsKey="opps"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
           columns={[
