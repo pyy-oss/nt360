@@ -178,6 +178,17 @@ function buildNews(x) {
     action: "Revoir les commandes anciennes : soldées ? factures manquantes ? à clôturer ?",
   });
 
+  // Retard de LIVRAISON (synchro ClickUp) : date contractuelle dépassée, projet encore actif. Distinct
+  // du retard de FACTURATION — c'est un retard d'EXÉCUTION projet.
+  const cuOverdue = num(x.clickupOverdue);
+  pushIf(B, cuOverdue > 0, {
+    id: "livraison_retard", domain: "backlog", severity: "high", module: "orderlist",
+    title: `${cuOverdue} projet(s) en retard de livraison`,
+    detail: "Des commandes ont dépassé leur date contractuelle (ClickUp) sans être livrées ni clôturées.",
+    action: "Traiter les projets en retard de livraison : re-planifier ou solder (Commandes / ClickUp).",
+    refs: (x.clickupOverdueRefs || []).slice(0, 8),
+  });
+
   // — FACTURATION / CASH —
   const realiseYtd = num(trend.realiseYtd);
   const curMonth = String(x.asOf || "").slice(0, 7);

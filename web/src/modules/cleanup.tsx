@@ -109,7 +109,7 @@ function DedupeCard() {
 const FIX = (type: string): { module: string; segment?: string } | null => {
   if (type === "factures_orphelines") return { module: "invoicelist", segment: "orphan" };
   if (type.startsWith("factures")) return { module: "invoicelist" };
-  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation") return { module: "orderlist" };
+  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation" || type.startsWith("clickup")) return { module: "orderlist" };
   if (type.startsWith("opps")) return { module: "opplist" };
   if (type.startsWith("bc_")) return { module: "bc" };
   if (type.startsWith("fiches")) return { module: "pnlprojet" };

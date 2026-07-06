@@ -290,6 +290,11 @@ async function recomputeAll(db, only) {
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
+  // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
+  // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
+  const { clickupSignals } = require("../domain/clickupSignals");
+  const cuSignals = clickupSignals(orders, clickupSyncMap, safeId, asOf);
+  if (cuSignals.issues.length) dqSummary.issues = [...(dqSummary.issues || []), ...cuSignals.issues];
   if (want("alerts") || want("dataQuality")) {
     w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
     // Snapshot QUOTIDIEN de la qualité (tendance d'assainissement) : un point par jour (clé = asOf),
@@ -323,7 +328,7 @@ async function recomputeAll(db, only) {
       const since = new Date(Date.now() - 24 * 3600 * 1000);
       clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
     } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
-    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, fy: currentFy, asOf, thr: alertThr });
+    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, fy: currentFy, asOf, thr: alertThr });
     w.push({ path: "summaries/news", data: { ...news, ...stamp } });
   }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
