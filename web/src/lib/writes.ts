@@ -191,6 +191,18 @@ export async function callRecompute() {
   return res.data;
 }
 
+export type ReingestResult = {
+  ok: boolean; objectsScanned: number; objectsIngested: number; objectsFailed: number;
+  kinds: string[]; rowsIn: number; rowsOk: number; rowsSkipped: number;
+  files?: { object: string; kinds?: string[]; rowsOk?: number; error?: string }[];
+};
+/** Re-parse les classeurs sources déjà présents dans gs://nt360 (sans re-upload) puis recompute.
+ *  Direction uniquement. `prefix` restreint éventuellement le balayage à un sous-dossier. */
+export async function callReingest(prefix?: string): Promise<ReingestResult> {
+  const res = await httpsCallable(functions, "reingest", { timeout: 540_000 })(prefix ? { prefix } : {});
+  return res.data as ReingestResult;
+}
+
 /** Encode un File en base64 (sans le préfixe `data:...;base64,`). */
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
