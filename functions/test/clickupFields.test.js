@@ -77,6 +77,31 @@ describe("buildLogical — n'inclut que les clés fournies", () => {
   });
 });
 
+describe("readTaskSync — sens inverse ClickUp → app", () => {
+  const task = {
+    status: { status: "3-en cours - deploiement" },
+    start_date: "1741752000000", due_date: "1782792000000",
+    custom_fields: [{ id: "F_DELAI", name: "Délai Prévisonnel", type: "date", value: "1780200000000" }],
+  };
+  it("extrait statut + 3 dates (start→commande, due→contractuelle, Délai Prévisonnel→prév. fin)", () => {
+    const s = cf.readTaskSync(task);
+    expect(s.status).toBe("3-en cours - deploiement");
+    expect(s.dateCommande).toBe(1741752000000);
+    expect(s.dateContractuelle).toBe(1782792000000);
+    expect(s.dateFinPrev).toBe(1780200000000);
+  });
+  it("tolère status chaîne et dates absentes → null", () => {
+    const s = cf.readTaskSync({ status: "0-affecte", custom_fields: [] });
+    expect(s.status).toBe("0-affecte");
+    expect(s.dateCommande).toBe(null);
+    expect(s.dateContractuelle).toBe(null);
+    expect(s.dateFinPrev).toBe(null);
+  });
+  it("tâche vide → tout null", () => {
+    expect(cf.readTaskSync({})).toEqual({ status: null, dateCommande: null, dateContractuelle: null, dateFinPrev: null });
+  });
+});
+
 describe("toPriority", () => {
   it("libellés FR/EN → 1..4", () => {
     expect(cf.toPriority("Urgente")).toBe(1);

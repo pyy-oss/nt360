@@ -929,6 +929,11 @@ export const OrderList: FC<Props> = () => {
           ] : []),
           colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0),
           colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || ""),
+          // Synchro inverse ClickUp (statut projet + dates) — colonnes masquables via le menu Colonnes.
+          colText("Statut CU", (r) => (r.clickupStatus ? <Badge tone="steel">{r.clickupStatus}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupStatus || ""),
+          colText("D. commande", (r) => r.dateCommande || "—", (r) => r.dateCommande || ""),
+          colText("D. contract.", (r) => r.dateContractuelle || "—", (r) => r.dateContractuelle || ""),
+          colText("D. prév. fin", (r) => r.dateFinPrev || "—", (r) => r.dateFinPrev || ""),
           ...(canImport ? [colText("Corriger", (r: Order) => ((r.source === "pnl" || r.source === "manuel") && r.fp
             ? <OrderEditor row={r} />
             : <span className="text-[11px] text-faint">à la source</span>), () => 0)] : []),

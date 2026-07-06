@@ -70,6 +70,11 @@ export async function syncClickupCaf() {
   const res = await httpsCallable(functions, "syncClickupCaf", { timeout: 300_000 })({});
   return res.data as { ok: boolean; pushed: number; skipped: number; failed?: number; total: number };
 }
+/** Sens inverse : remonte statut projet + dates des tâches ClickUp vers l'app (admin). */
+export async function syncFromClickup() {
+  const res = await httpsCallable(functions, "syncFromClickup", { timeout: 300_000 })({});
+  return res.data as { ok: boolean; pulled: number; failed?: number; total: number };
+}
 /** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
 export async function listClickupMembers() {
   const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});
