@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -509,6 +509,7 @@ function ClickupCard() {
   const [cafBusy, setCafBusy] = useState(false);
   const [pullBusy, setPullBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [recBusy, setRecBusy] = useState(false);
   const toast = useToast();
   const on = enabled ?? (data?.enabled !== false);
   const list = listId ?? (data?.defaultListId || "901215917683");
@@ -534,6 +535,17 @@ function ClickupCard() {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       toast(detail ? `Synchro refusée — ${detail}` : "Synchro : échec", "err");
     } finally { setPullBusy(false); }
+  };
+  const reconcile = async () => {
+    if (recBusy) return;
+    setRecBusy(true);
+    try {
+      const r = await reconcileClickupLinks({ listId: list });
+      toast(`Rattachement — ${r.matched} tâche(s) existante(s) reliée(s), ${r.already} déjà liée(s) / ${r.total} commande(s)`, "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Rattachement refusé — ${detail}` : "Rattachement : échec", "err");
+    } finally { setRecBusy(false); }
   };
   const bulkPush = async (force: boolean) => {
     if (bulkBusy) return;
@@ -562,14 +574,17 @@ function ClickupCard() {
         <button type="button" className="btn-ghost !py-1.5" disabled={pullBusy} onClick={pull} title="Remonter statut projet + dates depuis ClickUp">
           {pullBusy ? "Synchro…" : "Synchroniser depuis ClickUp"}
         </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(false)} title="Créer les tâches des commandes pas encore liées (liste cible ci-dessus)">
+        <button type="button" className="btn-ghost !py-1.5" disabled={recBusy} onClick={reconcile} title="Rattacher les commandes aux tâches ClickUp DÉJÀ existantes (Opp ID = FP), sans rien créer. À lancer AVANT tout push en masse.">
+          {recBusy ? "Rattachement…" : "Rattacher les tâches existantes"}
+        </button>
+        <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(false)} title="Créer les tâches des commandes pas encore liées (adopte automatiquement une tâche existante par Opp ID = FP)">
           {bulkBusy ? "Push…" : "Créer les commandes non liées"}
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
           {bulkBusy ? "Push…" : "Tout resynchroniser"}
         </button>
       </div>
-      <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b> et les <b>dates</b> (commande, contractuelle, prév. de fin) dans les Commandes.</Tip>
+      <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b>, les <b>dates</b> et le <b>PM assigné</b> dans les Commandes. <b>⚠️ Avant tout push en masse</b>, lancez <b>« Rattacher les tâches existantes »</b> : il relie les commandes aux tâches déjà présentes (Opp ID = N° FP) pour <b>ne pas créer de doublons</b>.</Tip>
     </Card>
   );
 }

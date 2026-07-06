@@ -105,6 +105,26 @@ describe("readTaskSync — sens inverse ClickUp → app", () => {
   });
 });
 
+describe("taskFp / buildTaskFpIndex — réconciliation anti-doublons", () => {
+  const tasks = [
+    { id: "t1", custom_fields: [{ name: "Opp ID", value: "FP/2024/9447" }] },
+    { id: "t2", custom_fields: [{ name: "AM", value: "x" }] },              // pas d'Opp ID → ignorée
+    { id: "t3", custom_fields: [{ name: "Opp ID", value: "  fp/2024/9447 " }] }, // doublon (1er gagne)
+    { id: "t4", custom_fields: [{ name: "Opp ID", value: "FP/2026/1" }] },
+  ];
+  it("taskFp lit le champ Opp ID", () => {
+    expect(cf.taskFp(tasks[0])).toBe("FP/2024/9447");
+    expect(cf.taskFp(tasks[1])).toBe(null);
+  });
+  it("index FP normalisé → taskId (première tâche gagne)", () => {
+    const norm = (s) => String(s || "").trim().toLowerCase();
+    const idx = cf.buildTaskFpIndex(tasks, norm);
+    expect(idx["fp/2024/9447"]).toBe("t1"); // t3 (même FP normalisé) n'écrase pas t1
+    expect(idx["fp/2026/1"]).toBe("t4");
+    expect(Object.keys(idx).length).toBe(2);
+  });
+});
+
 describe("toPriority", () => {
   it("libellés FR/EN → 1..4", () => {
     expect(cf.toPriority("Urgente")).toBe(1);

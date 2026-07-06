@@ -1118,6 +1118,16 @@ async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, member
   return { id, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, assigned: !!assignee, fields: fieldWrites.length };
 }
 
+// Index N° FP → taskId des tâches EXISTANTES d'une liste ClickUp (via le champ « Opp ID »). Sert à la
+// réconciliation anti-doublons (adopter une tâche déjà créée au lieu d'en créer une seconde).
+async function buildFpIndex(token, listId) {
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const { fpKey } = require("./lib/ids");
+  const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
+  return cf.buildTaskFpIndex(tasks, fpKey);
+}
+
 exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "import");
   const clickup = require("./lib/clickup");
@@ -1144,10 +1154,18 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   catch (e) { logger.warn("ClickUp: champs de liste illisibles", { listId, msg: e && e.message }); }
 
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const fp = fpKey(order.fp), id = safeId(fp);
+  // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
+  // formulaire), on l'ADOPTE (mise à jour) au lieu de créer un doublon.
+  if (!links[id]) {
+    try { const t = (await buildFpIndex(token, listId))[fp]; if (t) links[id] = t; }
+    catch (e) { logger.warn("ClickUp: réconciliation impossible", { msg: e && e.message }); }
+  }
   let r;
   try { r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation"}`); }
-  if (r.created) await db.doc("config/clickupLinks").set({ map: { [r.id]: r.taskId } }, { merge: true });
+  // Persiste le lien (création OU adoption d'une tâche existante) — idempotent.
+  await db.doc("config/clickupLinks").set({ map: { [r.id]: r.taskId } }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fpKey(order.fp), detail: { taskId: r.taskId, listId, assigned: r.assigned, fields: r.fields }, ts: FieldValue.serverTimestamp() });
   return { ok: true, taskId: r.taskId, url: r.url, assigned: r.assigned, created: r.created, fields: r.fields };
 });
@@ -1173,22 +1191,62 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   const pays = paysByList[listId];
   let members = []; try { members = await clickup.listMembers(token, teamId); } catch (e) { logger.warn("bulk push: membres non résolus", { msg: e && e.message }); }
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("bulk push: champs illisibles", { msg: e && e.message }); }
+  // ANTI-DOUBLON : index des tâches existantes par FP (Opp ID) → adopter au lieu de dupliquer.
+  let fpIndex = {}; try { fpIndex = await buildFpIndex(token, listId); } catch (e) { logger.warn("bulk push: réconciliation impossible", { msg: e && e.message }); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();
   const newLinks = {};
-  let created = 0, updated = 0, failed = 0, skipped = 0;
+  let created = 0, updated = 0, adopted = 0, failed = 0, skipped = 0;
   for (const o of orders) {
-    if (!fpKey(o.fp)) { skipped++; continue; }
-    const id = safeId(fpKey(o.fp));
-    if (links[id] && !force) { skipped++; continue; } // déjà liée et pas de resynchro forcée
+    const fp = fpKey(o.fp);
+    if (!fp) { skipped++; continue; }
+    const id = safeId(fp);
+    const existingTaskId = links[id] || newLinks[id] || fpIndex[fp] || null;
+    if (existingTaskId && !force) {
+      // Adoption d'une tâche existante non encore liée (écrit le lien, sans pousser de contenu).
+      if (!links[id] && !newLinks[id]) { newLinks[id] = existingTaskId; adopted++; } else skipped++;
+      continue;
+    }
     try {
-      const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks }, order: o, extra: { pays } });
-      if (r.created) { created++; newLinks[r.id] = r.taskId; } else updated++;
+      const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks, ...(existingTaskId ? { [id]: existingTaskId } : {}) }, order: o, extra: { pays } });
+      if (r.created) created++; else updated++;
+      if (!links[id]) newLinks[id] = r.taskId; // persiste création OU adoption
     } catch (e) { failed++; logger.warn("bulk push: échec", { fp: o.fp, msg: e && e.message }); }
   }
   if (Object.keys(newLinks).length) await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true });
-  const res = { created, updated, failed, skipped, total: orders.length };
+  const res = { created, updated, adopted, failed, skipped, total: orders.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bulk_push", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
+});
+
+// reconcileClickupLinks : RATTACHE les commandes aux tâches ClickUp DÉJÀ existantes (Opp ID = FP),
+// sans rien créer ni modifier dans ClickUp — à lancer AVANT tout push en masse pour éviter les
+// doublons des tâches créées via l'ancien formulaire. Direction.
+exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  let fpIndex;
+  try { fpIndex = await buildFpIndex(token, listId); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "réconciliation impossible"}`); }
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const orders = await loadCommandeRows();
+  const newLinks = {};
+  let matched = 0, already = 0;
+  for (const o of orders) {
+    const fp = fpKey(o.fp); if (!fp) continue;
+    const id = safeId(fp);
+    if (links[id]) { already++; continue; }
+    if (fpIndex[fp]) { newLinks[id] = fpIndex[fp]; matched++; }
+  }
+  if (matched) await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true });
+  const res = { matched, already, total: orders.length, tasksWithFp: Object.keys(fpIndex).length };
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_reconcile", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
 });
 
