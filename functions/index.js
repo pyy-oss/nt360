@@ -1128,6 +1128,20 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   return { ok: true, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, assigned: !!assignee, created };
 });
 
+// listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM
+// avec des noms EXACTS (évite les fautes de saisie qui casseraient l'assignation). Direction.
+exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const clickup = require("./lib/clickup");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  let members;
+  try { members = await clickup.listMembers(token, cfg.teamId || CLICKUP_TEAM); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "membres illisibles"}`); }
+  return { ok: true, members: members.map((m) => ({ name: m.username, email: m.email })).filter((m) => m.name) };
+});
+
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---
