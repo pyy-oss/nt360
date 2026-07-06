@@ -11,6 +11,17 @@ describe("news — moteur d'actualité (bulletins + recommandations)", () => {
     expect(r.recommendations).toEqual([]);
   });
 
+  it("pic d'erreurs client ≥ seuil → bulletin high ; sous le seuil → aucun", () => {
+    const spike = buildNews({ ...base, clientErrors24h: 7 });
+    const b = spike.bulletins.find((x) => x.id === "pic_erreurs_client");
+    expect(b).toBeTruthy();
+    expect(b.severity).toBe("high");
+    expect(b.module).toBe("habilitations");
+    expect(b.title).toContain("7");
+    const quiet = buildNews({ ...base, clientErrors24h: 3 });
+    expect(ids(quiet)).not.toContain("pic_erreurs_client");
+  });
+
   it("atterrissage CAS/CAF sous objectif → bulletins high + recommandations", () => {
     const r = buildNews({ ...base,
       att: { objectif: 1000, realiseCas: 400, projete: 700, ecart: -300, objectifCaf: 1000, cafProjete: 600, ecartCaf: -400 },

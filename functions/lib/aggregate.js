@@ -312,7 +312,14 @@ async function recomputeAll(db, only) {
   // + recommandations majeures, à partir des agrégats calculés. Revenu/pipeline uniquement (SANS marge)
   // → lisible au niveau « overview ». Recalculé avec les alertes.
   if (want("alerts") || want("news")) {
-    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, fy: currentFy, asOf, thr: alertThr });
+    // Pic d'erreurs applicatives sur 24 h (crash de rendu / rejets non gérés remontés par les
+    // navigateurs) → déclencheur Actualité. Count agrégé (bon marché) ; jamais bloquant pour le recompute.
+    let clientErrors24h = 0;
+    try {
+      const since = new Date(Date.now() - 24 * 3600 * 1000);
+      clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
+    } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
+    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, fy: currentFy, asOf, thr: alertThr });
     w.push({ path: "summaries/news", data: { ...news, ...stamp } });
   }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
