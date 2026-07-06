@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-const { resolveAssignee, taskPayload } = require("../lib/clickup");
+const { resolveAssignee, taskPayload, retryDelay } = require("../lib/clickup");
+
+describe("retryDelay — back-off des ré-essais", () => {
+  it("priorité à Retry-After (secondes → ms, borné 30 s)", () => {
+    expect(retryDelay(0, "2")).toBe(2000);
+    expect(retryDelay(5, "60")).toBe(30000); // borné
+  });
+  it("exponentiel 500 ms × 2^tentative, borné à 8 s, sans Retry-After", () => {
+    expect(retryDelay(0)).toBe(500);
+    expect(retryDelay(1)).toBe(1000);
+    expect(retryDelay(2)).toBe(2000);
+    expect(retryDelay(10)).toBe(8000); // borné
+  });
+  it("Retry-After non numérique → repli exponentiel", () => {
+    expect(retryDelay(1, "")).toBe(1000);
+    expect(retryDelay(1, null)).toBe(1000);
+  });
+});
 
 const members = [
   { id: 1, username: "KOUADIO KOFFI PHILIPPE LANDRY", email: "klandry@neuronestech.com" },

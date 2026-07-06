@@ -119,8 +119,11 @@ function buildCorePayload(order, extra, assigneeId) {
   const payload = {
     name: title.slice(0, 250),
     description: descLines.join("\n"),
-    status: e.status || "0-affecte",
   };
+  // Statut posé UNIQUEMENT s'il est fourni : sur une mise à jour, ne pas réinitialiser le statut réel
+  // de la tâche (que la synchro inverse relit). Le défaut « 0-affecte » est appliqué à la CRÉATION
+  // par l'appelant (pushOrderCore).
+  if (e.status) payload.status = e.status;
   if (assigneeId) payload.assignees = [assigneeId];
   const start = Number(e.dateCommande);
   if (Number.isFinite(start) && start > 0) { payload.start_date = start; payload.start_date_time = false; }

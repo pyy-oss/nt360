@@ -1096,6 +1096,28 @@ exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeout
 // pushOrderToClickup : crée (ou met à jour, idempotent) une tâche ClickUp pour une commande, assignée
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).
+// Cœur RÉUTILISABLE du push (une commande → tâche), partagé par le push unitaire et le push en masse.
+// members + fieldDefs sont résolus UNE fois par l'appelant (évite N appels /team et /field en masse).
+// L'écriture du lien config/clickupLinks est laissée à l'appelant (batch en masse). Statut initial
+// « 0-affecte » posé UNIQUEMENT à la création (jamais réinitialisé sur une tâche existante).
+async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }) {
+  const fp = fpKey(order.fp);
+  const id = safeId(fp);
+  const existing = links[id];
+  const assignee = clickup.resolveAssignee(members, order.pm);
+  const corePayload = cf.buildCorePayload({ ...order, fp }, extra || {}, assignee);
+  if (!existing && !corePayload.status) corePayload.status = "0-affecte";
+  const fieldWrites = cf.buildFieldWrites(fieldDefs, cf.buildLogical({ ...order, fp }, extra || {}));
+  let task, created = false;
+  if (existing) { task = await clickup.updateTask(token, existing, corePayload); task.id = existing; }
+  else { task = await clickup.createTask(token, listId, corePayload); created = true; }
+  for (const w of fieldWrites) {
+    try { await clickup.setField(token, task.id, w.id, w.value); }
+    catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
+  }
+  return { id, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, assigned: !!assignee, fields: fieldWrites.length };
+}
+
 exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "import");
   const clickup = require("./lib/clickup");
@@ -1108,42 +1130,66 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const order = req.data?.order || {};
   const extra = req.data?.extra || {};
-  const fp = fpKey(order.fp);
-  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  if (!fpKey(order.fp)) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const teamId = cfg.teamId || CLICKUP_TEAM;
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
 
-  let assignee = null;
-  try { assignee = clickup.resolveAssignee(await clickup.listMembers(token, teamId), order.pm); }
+  let members = [];
+  try { members = await clickup.listMembers(token, teamId); }
   catch (e) { logger.warn("ClickUp: membres non résolus", { msg: e && e.message }); }
-
   // Définitions des champs de la liste cible → résolution des libellés d'options en UUID (pas d'UUID
   // codé en dur : robuste si l'admin ClickUp modifie les listes).
   let fieldDefs = [];
   try { fieldDefs = await clickup.listFields(token, listId); }
   catch (e) { logger.warn("ClickUp: champs de liste illisibles", { listId, msg: e && e.message }); }
 
-  const corePayload = cf.buildCorePayload({ ...order, fp }, extra, assignee);
-  const logical = cf.buildLogical({ ...order, fp }, extra);
-  const fieldWrites = cf.buildFieldWrites(fieldDefs, logical);
-
-  const id = safeId(fp);
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
-  const existing = links[id];
-  let task, created = false;
-  try {
-    if (existing) { task = await clickup.updateTask(token, existing, corePayload); task.id = existing; }
-    else { task = await clickup.createTask(token, listId, corePayload); created = true; await db.doc("config/clickupLinks").set({ map: { [id]: task.id } }, { merge: true }); }
-    // Champs personnalisés posés un à un (endpoint Set-Field, fiable pour tous les types).
-    for (const w of fieldWrites) {
-      try { await clickup.setField(token, task.id, w.id, w.value); }
-      catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
-    }
-  } catch (e) {
-    throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation"}`);
+  let r;
+  try { r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation"}`); }
+  if (r.created) await db.doc("config/clickupLinks").set({ map: { [r.id]: r.taskId } }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fpKey(order.fp), detail: { taskId: r.taskId, listId, assigned: r.assigned, fields: r.fields }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, taskId: r.taskId, url: r.url, assigned: r.assigned, created: r.created, fields: r.fields };
+});
+
+// pushAllOrdersToClickup : crée/synchronise EN MASSE les tâches des commandes. Par défaut, seules les
+// commandes NON encore liées sont créées ; force=true resynchronise aussi les tâches existantes (cœur
+// + CAF). Membres/champs résolus une seule fois. Direction. Peut être long → le client peut voir un
+// timeout pendant que le traitement se poursuit côté serveur (le journal d'audit enregistre la fin).
+exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const force = req.data?.force === true;
+  const teamId = cfg.teamId || CLICKUP_TEAM;
+  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  const paysByList = { "901215917683": "CI", "901215918697": "BF", "901215918699": "GN" };
+  const pays = paysByList[listId];
+  let members = []; try { members = await clickup.listMembers(token, teamId); } catch (e) { logger.warn("bulk push: membres non résolus", { msg: e && e.message }); }
+  let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("bulk push: champs illisibles", { msg: e && e.message }); }
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const orders = await loadCommandeRows();
+  const newLinks = {};
+  let created = 0, updated = 0, failed = 0, skipped = 0;
+  for (const o of orders) {
+    if (!fpKey(o.fp)) { skipped++; continue; }
+    const id = safeId(fpKey(o.fp));
+    if (links[id] && !force) { skipped++; continue; } // déjà liée et pas de resynchro forcée
+    try {
+      const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks }, order: o, extra: { pays } });
+      if (r.created) { created++; newLinks[r.id] = r.taskId; } else updated++;
+    } catch (e) { failed++; logger.warn("bulk push: échec", { fp: o.fp, msg: e && e.message }); }
   }
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fp, detail: { taskId: task.id, listId, assigned: !!assignee, fields: fieldWrites.length }, ts: FieldValue.serverTimestamp() });
-  return { ok: true, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, assigned: !!assignee, created, fields: fieldWrites.length };
+  if (Object.keys(newLinks).length) await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true });
+  const res = { created, updated, failed, skipped, total: orders.length };
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bulk_push", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
 });
 
 // listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM
@@ -1160,15 +1206,22 @@ exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_T
   return { ok: true, members: members.map((m) => ({ name: m.username, email: m.email })).filter((m) => m.name) };
 });
 
-// CAF courant par clé safeId(fp), lu des commandes matérialisées (chunks commandesRows/{i}).
-async function loadCafByFp(safeId) {
+// Lignes de commandes matérialisées (tous les chunks commandesRows/{i}).
+async function loadCommandeRows() {
   const meta = (await db.doc("summaries/commandes").get()).data() || {};
   const chunks = Number(meta.chunks || 0);
-  const out = {};
+  const rows = [];
   for (let i = 0; i < chunks; i++) {
-    const rows = ((await db.doc(`commandesRows/${i}`).get()).data() || {}).rows || [];
-    for (const r of rows) { if (r && r.fp) out[safeId(r.fp)] = Number(r.facture || 0); }
+    const r = ((await db.doc(`commandesRows/${i}`).get()).data() || {}).rows || [];
+    rows.push(...r);
   }
+  return rows;
+}
+
+// CAF courant par clé safeId(fp), lu des commandes matérialisées.
+async function loadCafByFp(safeId) {
+  const out = {};
+  for (const r of await loadCommandeRows()) { if (r && r.fp) out[safeId(r.fp)] = Number(r.facture || 0); }
   return out;
 }
 
