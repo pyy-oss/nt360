@@ -41,4 +41,67 @@ function clickupSignals(orders, syncMap, safeId, asOf) {
   return { overdueCount: overdue.length, overdue, overdueRefs: overdue.map((x) => x.fp).slice(0, 12), issues };
 }
 
-module.exports = { clickupSignals, isActive };
+// Écart en jours entre deux dates ISO (yyyy-mm-dd) : b − a (positif si b après a).
+function daysDiff(a, b) {
+  const ta = Date.parse(a + "T00:00:00Z"), tb = Date.parse(b + "T00:00:00Z");
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
+  return Math.round((tb - ta) / 86400000);
+}
+
+/**
+ * Analytique des DÉLAIS et ÉCHÉANCES ClickUp (PUR) :
+ *  - byPm      : par Project Manager — projets actifs, en retard, retard moyen (jours).
+ *  - byStatus  : distribution des projets synchronisés par statut, dont en retard.
+ *  - rafByMonth: RAF des projets ACTIFS regroupé par mois de la date prév. de fin (Délai Prévisonnel)
+ *                → « quand le backlog devrait se facturer selon ClickUp ».
+ * @param {(fp:string)=>string} safeId  ; orderPmMap : { safeId(fp): pm }
+ */
+function clickupDelays(orders, syncMap, orderPmMap, safeId, asOf) {
+  const today = String(asOf || "").slice(0, 10);
+  const map = syncMap || {};
+  const pmMap = orderPmMap || {};
+  const byPm = new Map();
+  const byStatus = new Map();
+  const byMonth = new Map();
+  let overdueTotal = 0, sumLate = 0;
+  for (const o of orders || []) {
+    const key = safeId(o.fp);
+    const cu = map[key];
+    if (!cu) continue;
+    const status = cu.status || "—";
+    const active = isActive(status);
+    const dc = isoDay(cu.dateContractuelle);
+    const late = !!(active && dc && today && dc < today);
+    const daysLate = late ? daysDiff(dc, today) : 0;
+
+    const bs = byStatus.get(status) || { status, count: 0, overdue: 0 };
+    bs.count++; if (late) bs.overdue++;
+    byStatus.set(status, bs);
+
+    const pm = pmMap[key];
+    if (pm) {
+      const bp = byPm.get(pm) || { pm, active: 0, overdue: 0, sumLate: 0 };
+      if (active) bp.active++;
+      if (late) { bp.overdue++; bp.sumLate += daysLate; }
+      byPm.set(pm, bp);
+    }
+    if (active) {
+      const fin = isoDay(cu.dateFinPrev);
+      const m = fin ? fin.slice(0, 7) : "(sans date)";
+      const bm = byMonth.get(m) || { month: m, raf: 0, count: 0 };
+      bm.raf += Number(o.raf || 0); bm.count++;
+      byMonth.set(m, bm);
+    }
+    if (late) { overdueTotal++; sumLate += daysLate; }
+  }
+  return {
+    overdueTotal,
+    avgDaysLate: overdueTotal ? Math.round(sumLate / overdueTotal) : 0,
+    byPm: [...byPm.values()].map((b) => ({ pm: b.pm, active: b.active, overdue: b.overdue, avgDaysLate: b.overdue ? Math.round(b.sumLate / b.overdue) : 0 }))
+      .sort((a, b) => b.overdue - a.overdue || b.active - a.active),
+    byStatus: [...byStatus.values()].sort((a, b) => b.count - a.count),
+    rafByMonth: [...byMonth.values()].sort((a, b) => (a.month < b.month ? -1 : 1)),
+  };
+}
+
+module.exports = { clickupSignals, isActive, clickupDelays, daysDiff };

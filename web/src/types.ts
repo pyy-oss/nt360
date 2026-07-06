@@ -95,6 +95,12 @@ export type AmRow = {
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
 export type PmRow = { pm: string; count: number; cas: number; raf: number };
 export interface PmsSummary { count?: number; rows?: PmRow[] }
+// Analytique délais/échéances ClickUp (summaries/clickupDelays) : retard de livraison par PM/statut
+// + RAF échéancé par mois de date prév. de fin (synchro inverse ClickUp).
+export type ClickupPmDelay = { pm: string; active: number; overdue: number; avgDaysLate: number };
+export type ClickupStatusDist = { status: string; count: number; overdue: number };
+export type ClickupMonthRaf = { month: string; raf: number; count: number };
+export interface ClickupDelaysSummary { overdueTotal?: number; avgDaysLate?: number; byPm?: ClickupPmDelay[]; byStatus?: ClickupStatusDist[]; rafByMonth?: ClickupMonthRaf[] }
 export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; ar?: number; dso?: number; fy?: number };
 export interface TrendsSummary { points?: TrendPoint[] }
 export interface ReceivablesSummary {

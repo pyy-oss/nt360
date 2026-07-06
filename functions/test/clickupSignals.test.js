@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { clickupSignals, isActive } = require("../domain/clickupSignals");
+const { clickupSignals, isActive, clickupDelays, daysDiff } = require("../domain/clickupSignals");
 
 const safeId = (fp) => String(fp || "").replace(/[^a-z0-9]/gi, "_");
 const ms = (iso) => new Date(iso + "T00:00:00Z").getTime();
@@ -49,5 +49,47 @@ describe("clickupSignals — retard de livraison + incohérences", () => {
     const r = clickupSignals([{ fp: "FP/6", raf: 9 }], {}, safeId, asOf);
     expect(r.overdueCount).toBe(0);
     expect(r.issues).toEqual([]);
+  });
+});
+
+describe("daysDiff", () => {
+  it("écart en jours (b − a)", () => {
+    expect(daysDiff("2026-06-01", "2026-07-06")).toBe(35);
+    expect(daysDiff("2026-07-06", "2026-07-06")).toBe(0);
+  });
+});
+
+describe("clickupDelays — délais par PM/statut + RAF échéancé", () => {
+  const asOf = "2026-07-06";
+  const orders = [
+    { fp: "FP/1", raf: 100 }, // PM A, 3-en cours, contractuelle dépassée → retard 35 j ; fin prév. 2026-08
+    { fp: "FP/2", raf: 200 }, // PM A, 3-en cours, contractuelle future → pas de retard ; fin prév. 2026-08
+    { fp: "FP/3", raf: 50 },  // PM B, 5-facturé (non actif) → pas dans RAF échéancé
+  ];
+  const sync = {
+    [safeId("FP/1")]: { status: "3-en cours - deploiement", dateContractuelle: ms("2026-06-01"), dateFinPrev: ms("2026-08-15") },
+    [safeId("FP/2")]: { status: "3-en cours - production", dateContractuelle: ms("2026-09-01"), dateFinPrev: ms("2026-08-20") },
+    [safeId("FP/3")]: { status: "5-facturé - attente df", dateContractuelle: ms("2026-01-01"), dateFinPrev: ms("2026-02-01") },
+  };
+  const pm = { [safeId("FP/1")]: "Alice", [safeId("FP/2")]: "Alice", [safeId("FP/3")]: "Bob" };
+
+  it("par PM : actifs + en retard + retard moyen", () => {
+    const d = clickupDelays(orders, sync, pm, safeId, asOf);
+    const alice = d.byPm.find((x) => x.pm === "Alice");
+    expect(alice.active).toBe(2);
+    expect(alice.overdue).toBe(1);
+    expect(alice.avgDaysLate).toBe(35);
+    expect(d.overdueTotal).toBe(1);
+  });
+  it("RAF échéancé par mois : seuls les projets ACTIFS, groupés par date prév. fin", () => {
+    const d = clickupDelays(orders, sync, pm, safeId, asOf);
+    const aug = d.rafByMonth.find((x) => x.month === "2026-08");
+    expect(aug.raf).toBe(300); // FP/1 (100) + FP/2 (200) ; FP/3 non actif exclu
+    expect(aug.count).toBe(2);
+  });
+  it("par statut : distribution + en retard", () => {
+    const d = clickupDelays(orders, sync, pm, safeId, asOf);
+    const dep = d.byStatus.find((x) => x.status === "3-en cours - deploiement");
+    expect(dep.count).toBe(1); expect(dep.overdue).toBe(1);
   });
 });
