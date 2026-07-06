@@ -73,7 +73,7 @@ export async function syncClickupCaf() {
 /** Sens inverse : remonte statut projet + dates des tâches ClickUp vers l'app (admin). */
 export async function syncFromClickup() {
   const res = await httpsCallable(functions, "syncFromClickup", { timeout: 300_000 })({});
-  return res.data as { ok: boolean; pulled: number; failed?: number; total: number };
+  return res.data as { ok: boolean; pulled: number; failed?: number; total: number; pmUpdated?: number };
 }
 /** Push en masse : crée/synchronise les tâches ClickUp des commandes (force=true resynchronise aussi
  *  les tâches déjà liées). Admin. Peut être long (timeout client possible, traitement poursuivi). */

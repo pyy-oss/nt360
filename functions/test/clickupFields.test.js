@@ -81,24 +81,27 @@ describe("readTaskSync — sens inverse ClickUp → app", () => {
   const task = {
     status: { status: "3-en cours - deploiement" },
     start_date: "1741752000000", due_date: "1782792000000",
+    assignees: [{ id: 3, username: "Serge Djedje" }],
     custom_fields: [{ id: "F_DELAI", name: "Délai Prévisonnel", type: "date", value: "1780200000000" }],
   };
-  it("extrait statut + 3 dates (start→commande, due→contractuelle, Délai Prévisonnel→prév. fin)", () => {
+  it("extrait statut + 3 dates + PM assigné", () => {
     const s = cf.readTaskSync(task);
     expect(s.status).toBe("3-en cours - deploiement");
     expect(s.dateCommande).toBe(1741752000000);
     expect(s.dateContractuelle).toBe(1782792000000);
     expect(s.dateFinPrev).toBe(1780200000000);
+    expect(s.pm).toBe("Serge Djedje");
   });
-  it("tolère status chaîne et dates absentes → null", () => {
+  it("tolère status chaîne, dates et assigné absents → null", () => {
     const s = cf.readTaskSync({ status: "0-affecte", custom_fields: [] });
     expect(s.status).toBe("0-affecte");
     expect(s.dateCommande).toBe(null);
     expect(s.dateContractuelle).toBe(null);
     expect(s.dateFinPrev).toBe(null);
+    expect(s.pm).toBe(null);
   });
   it("tâche vide → tout null", () => {
-    expect(cf.readTaskSync({})).toEqual({ status: null, dateCommande: null, dateContractuelle: null, dateFinPrev: null });
+    expect(cf.readTaskSync({})).toEqual({ status: null, dateCommande: null, dateContractuelle: null, dateFinPrev: null, pm: null });
   });
 });
 

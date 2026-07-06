@@ -180,11 +180,13 @@ function readTaskSync(task) {
   const byName = (name) => { const f = cfs.find((c) => norm(c.name) === norm(name)); return f ? f.value : undefined; };
   const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
   const status = t.status && typeof t.status === "object" ? (t.status.status || null) : (t.status || null);
+  const a = Array.isArray(t.assignees) && t.assignees[0] ? t.assignees[0] : null;
   return {
     status: status || null,
     dateCommande: num(t.start_date),
     dateContractuelle: num(t.due_date),
     dateFinPrev: num(byName(FIELD_NAMES.delaiPrev)),
+    pm: a ? (a.username || null) : null, // assigné ClickUp → PM courant de l'app
   };
 }
 

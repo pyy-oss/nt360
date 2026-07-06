@@ -529,7 +529,7 @@ function ClickupCard() {
     setPullBusy(true);
     try {
       const r = await syncFromClickup();
-      toast(`Remonté depuis ClickUp — ${r.pulled} / ${r.total} tâche(s)${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
+      toast(`Remonté depuis ClickUp — ${r.pulled} / ${r.total} tâche(s)${r.pmUpdated ? `, ${r.pmUpdated} PM` : ""}${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       toast(detail ? `Synchro refusée — ${detail}` : "Synchro : échec", "err");
