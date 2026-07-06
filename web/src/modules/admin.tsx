@@ -639,7 +639,7 @@ function ClickupCard() {
     setEnrichBusy(true);
     try {
       const r = await enrichClickup();
-      toast(`Enrichissement — ${r.enriched} tâche(s) synthétisée(s), ${r.tagged} taguée(s) « à risque »${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
+      toast(`Enrichissement — ${r.enriched} synthèse(s), ${r.subtasked} jalons→sous-tâches, ${r.checklisted} checklist(s) BC, ${r.tagged} tag(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       toast(detail ? `Enrichissement refusé — ${detail}` : "Enrichissement : échec", "err");
@@ -731,7 +731,7 @@ function ClickupCard() {
         <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
           {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
         </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={enrichBusy} onClick={enrich} title="Poser un commentaire de synthèse (CA/RAF, jalons, BC liés, qualité) + un tag « à risque » sur chaque tâche commande liée">
+        <button type="button" className="btn-ghost !py-1.5" disabled={enrichBusy} onClick={enrich} title="Sur chaque tâche commande liée : commentaire de synthèse (CA/RAF, qualité) + jalons de facturation en sous-tâches + BC liés en checklist + tag « à risque »">
           {enrichBusy ? "Enrichissement…" : "Enrichir les tâches"}
         </button>
       </div>

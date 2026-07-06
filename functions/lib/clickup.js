@@ -114,6 +114,27 @@ async function listTasks(token, listId, opts) {
   return tasks;
 }
 
+/** Récupère une tâche AVEC ses sous-tâches (et checklists) — pour la réconciliation des jalons/BC. */
+async function getTaskDetail(token, taskId) {
+  return api(token, "GET", `/task/${taskId}?include_subtasks=true`);
+}
+
+// --- Sous-tâches (jalons de facturation) & checklists (BC liés) : Lot 3+ ---
+/** Crée une sous-tâche sous `parentId` dans la liste `listId`. */
+async function createSubtask(token, listId, parentId, payload) {
+  return api(token, "POST", `/list/${listId}/task`, { ...payload, parent: parentId });
+}
+/** Crée une checklist nommée sur une tâche → { checklist: { id, ... } }. */
+async function createChecklist(token, taskId, name) {
+  return api(token, "POST", `/task/${taskId}/checklist`, { name });
+}
+async function deleteChecklist(token, checklistId) {
+  return api(token, "DELETE", `/checklist/${checklistId}`);
+}
+async function createChecklistItem(token, checklistId, name) {
+  return api(token, "POST", `/checklist/${checklistId}/checklist_item`, { name });
+}
+
 // --- Commentaires & tags (Lot 3 : enrichissements app → ClickUp) ---
 /** Commentaires d'une tâche → [{id, comment_text, ...}]. Sert à retrouver notre commentaire marqué. */
 async function listComments(token, taskId) {
@@ -153,4 +174,4 @@ async function deleteWebhook(token, webhookId) {
   return api(token, "DELETE", `/webhook/${webhookId}`);
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, getTaskDetail, listTasks, createSubtask, createChecklist, deleteChecklist, createChecklistItem, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };

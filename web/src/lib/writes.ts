@@ -91,7 +91,7 @@ export async function reconcileClickupLinks(opts?: { listId?: string }) {
  *  + tag « à risque ». Admin. Peut être long. */
 export async function enrichClickup() {
   const res = await httpsCallable(functions, "enrichClickup", { timeout: 540_000 })({});
-  return res.data as { ok: boolean; enriched: number; failed?: number; tagged: number; total: number };
+  return res.data as { ok: boolean; enriched: number; failed?: number; tagged: number; subtasked: number; checklisted: number; total: number };
 }
 /** Diagnostic qualité de l'intégration ClickUp (couverture, orphelines, écarts CAF…). Admin. */
 export async function clickupHealth(opts?: { listId?: string }) {

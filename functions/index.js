@@ -1772,7 +1772,7 @@ async function runClickupEnrich() {
   const flagsByFp = {};
   for (const iss of dq.issues || []) for (const ref of iss.refs || []) { const k = safeId(String(ref).trim()); if (!k) continue; (flagsByFp[k] = flagsByFp[k] || []).push(iss.label || iss.type); }
   const today = new Date().toISOString().slice(0, 10);
-  let enriched = 0, failed = 0, tagged = 0;
+  let enriched = 0, failed = 0, tagged = 0, subtasked = 0, checklisted = 0;
   for (const key of keys) {
     const taskId = links[key];
     const o = orderByKey[key];
@@ -1786,17 +1786,43 @@ async function runClickupEnrich() {
       overdue,
     };
     try {
+      // Une seule lecture détaillée (sous-tâches + checklists + liste parente) réutilisée pour tout.
+      const detail = await clickup.getTaskDetail(token, taskId);
+      const listId = detail && detail.list && detail.list.id;
+      // 1) Commentaire de synthèse (upsert idempotent).
       const text = enrich.buildSyncComment(d);
       const existing = enrich.findMarkedComment(await clickup.listComments(token, taskId), enrich.MARKER);
       if (existing) await clickup.updateComment(token, existing.id, text); else await clickup.createComment(token, taskId, text);
+      // 2) Tag « à risque » (posé/retiré).
       try {
         if (enrich.needsRiskTag(d)) { await clickup.addTag(token, taskId, enrich.RISK_TAG); tagged++; }
         else { await clickup.removeTag(token, taskId, enrich.RISK_TAG).catch(() => {}); }
       } catch (e) { logger.warn("enrich: tag non posé", { key, msg: e && e.message }); }
+      // 3) Jalons de facturation → vraies SOUS-TÂCHES (réconciliées par clé `Jalon i`, jamais supprimées).
+      if (listId) {
+        try {
+          const plan = enrich.planMilestoneSubtasks(detail.subtasks, enrich.buildMilestoneSubtasks(d.milestones));
+          for (const e of plan.toCreate) { const p = { name: e.name }; if (e.dueMs) { p.due_date = e.dueMs; p.due_date_time = false; } await clickup.createSubtask(token, listId, taskId, p); }
+          for (const u of plan.toUpdate) { const p = { name: u.expected.name }; if (u.expected.dueMs) { p.due_date = u.expected.dueMs; p.due_date_time = false; } await clickup.updateTask(token, u.id, p); }
+          if (plan.toCreate.length || plan.toUpdate.length) subtasked++;
+        } catch (e) { logger.warn("enrich: sous-tâches jalons échouées", { key, msg: e && e.message }); }
+      }
+      // 4) BC liés → CHECKLIST (recréée à l'identique = idempotente : supprime la nôtre puis re-crée).
+      try {
+        const items = enrich.buildBcChecklistItems(d.bcRefs);
+        const existingCl = enrich.findBcChecklist(detail.checklists, enrich.BC_CHECKLIST);
+        if (items.length) {
+          if (existingCl) await clickup.deleteChecklist(token, existingCl.id).catch(() => {});
+          const cl = await clickup.createChecklist(token, taskId, enrich.BC_CHECKLIST);
+          const clId = cl && (cl.checklist ? cl.checklist.id : cl.id);
+          if (clId) for (const it of items) await clickup.createChecklistItem(token, clId, it);
+          checklisted++;
+        } else if (existingCl) { await clickup.deleteChecklist(token, existingCl.id).catch(() => {}); }
+      } catch (e) { logger.warn("enrich: checklist BC échouée", { key, msg: e && e.message }); }
       enriched++;
     } catch (e) { failed++; logger.warn("enrich: échec", { key, msg: e && e.message }); }
   }
-  return { enriched, failed, tagged, total: keys.length };
+  return { enriched, failed, tagged, subtasked, checklisted, total: keys.length };
 }
 
 // enrichClickup : bouton « Enrichir les tâches ClickUp » (synthèse + tag). Direction.
