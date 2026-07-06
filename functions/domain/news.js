@@ -27,6 +27,7 @@ const DEFAULT_THR = {
   qualiteMin: 0.85,            // score qualité de données plancher
   concentrationClient: 0.4,    // un client > 40 % du backlog = concentration
   dormantBacklogPct: 0.15,     // > 15 % du backlog sur des millésimes anciens = dormant
+  clientErrors24h: 5,          // ≥ N erreurs JS clientes sur 24 h = régression à investiguer
 };
 
 function pushIf(list, cond, b) { if (cond) list.push(b); }
@@ -241,6 +242,17 @@ function buildNews(x) {
     title: "Qualité des données dégradée",
     detail: `Score de complétude ${pctTxt(dq.score)} — sous le plancher (${pctTxt(thr.qualiteMin)}). Fiabilise les imports.`,
     action: "Corriger les anomalies du cockpit Qualité des données puis ré-importer.",
+  });
+
+  // — TECHNIQUE : pic d'erreurs client (crash de rendu / rejets non gérés) sur 24 h. Un pic signale
+  // une régression front à investiguer (le journal détaillé est en Habilitations). Sans ce déclencheur,
+  // un crash n'était visible que par hasard.
+  const errs24h = num(x.clientErrors24h);
+  pushIf(B, errs24h >= thr.clientErrors24h, {
+    id: "pic_erreurs_client", domain: "qualite", severity: "high", module: "habilitations",
+    title: `${errs24h} erreur(s) applicative(s) sur 24 h`,
+    detail: `Des erreurs JavaScript non gérées / crashs de rendu ont été remontés par les navigateurs sur les dernières 24 h (seuil ${thr.clientErrors24h}). Signale une régression à investiguer.`,
+    action: "Ouvrir « Erreurs client récentes » (Habilitations) pour identifier le message et le module en cause.",
   });
 
   // Tri : sévérité (high > medium > info) puis ordre d'insertion.
