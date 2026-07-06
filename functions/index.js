@@ -20,6 +20,9 @@ const CLICKUP_TOKEN = defineSecret("CLICKUP_TOKEN");
 // Défauts d'intégration ClickUp (surchargés par config/clickup) : workspace + liste « Côte d'Ivoire ».
 const CLICKUP_TEAM = "90121503678";
 const CLICKUP_LIST_CI = "901215917683";
+// Listes pays de l'espace « Gestion de Projets » — scannées ENSEMBLE pour l'anti-doublon (une tâche
+// BF/GN ne doit pas être dupliquée dans CI). CI / Burkina Faso / Guinée.
+const CLICKUP_LISTS_ALL = ["901215917683", "901215918697", "901215918699"];
 
 initializeApp();
 // Base Firestore nommée nt360 (projet partagé) — isole données et règles.
@@ -638,7 +641,7 @@ exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSe
   }
   await ref.set({ items: list.slice(0, 5000), updatedAt: FieldValue.serverTimestamp() }, { merge: false });
   await db.collection("auditLog").add({
-    uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module,
+    uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module: spec.module,
     entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
@@ -1109,8 +1112,15 @@ async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, member
   if (!existing && !corePayload.status) corePayload.status = "0-affecte";
   const fieldWrites = cf.buildFieldWrites(fieldDefs, cf.buildLogical({ ...order, fp }, extra || {}));
   let task, created = false;
-  if (existing) { task = await clickup.updateTask(token, existing, corePayload); task.id = existing; }
-  else { task = await clickup.createTask(token, listId, corePayload); created = true; }
+  if (existing) {
+    // Réaffectation propre : retire les anciens assignés (≠ nouveau) sinon ils s'accumuleraient.
+    let remove = [];
+    if (assignee) {
+      try { const cur = await clickup.getTask(token, existing); remove = (cur.assignees || []).map((a) => a.id).filter((idA) => idA && idA !== assignee); }
+      catch (e) { logger.warn("ClickUp: assignés courants illisibles", { msg: e && e.message }); }
+    }
+    task = await clickup.updateTask(token, existing, corePayload, remove); task.id = existing;
+  } else { task = await clickup.createTask(token, listId, corePayload); created = true; }
   for (const w of fieldWrites) {
     try { await clickup.setField(token, task.id, w.id, w.value); }
     catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
@@ -1118,15 +1128,24 @@ async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, member
   return { id, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, assigned: !!assignee, fields: fieldWrites.length };
 }
 
-// Index N° FP → taskId des tâches EXISTANTES d'une liste ClickUp (via le champ « Opp ID »). Sert à la
-// réconciliation anti-doublons (adopter une tâche déjà créée au lieu d'en créer une seconde).
-async function buildFpIndex(token, listId) {
+// Index N° FP → taskId des tâches EXISTANTES (via le champ « Opp ID »). Scanne TOUTES les listes pays
+// par défaut (anti-doublon multi-pays : une tâche BF/GN ne doit pas être re-créée dans CI). Sert à la
+// réconciliation / adoption. `listIds` : liste(s) à scanner (défaut = les 3 pays + la liste cible).
+async function buildFpIndex(token, listIds) {
   const clickup = require("./lib/clickup");
   const cf = require("./lib/clickupFields");
   const { fpKey } = require("./lib/ids");
-  const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
-  return cf.buildTaskFpIndex(tasks, fpKey);
+  const lists = Array.isArray(listIds) ? listIds : [listIds];
+  const uniq = [...new Set(lists.filter(Boolean))];
+  const all = [];
+  for (const lid of uniq) {
+    try { all.push(...(await clickup.listTasks(token, lid, { includeClosed: true }))); }
+    catch (e) { logger.warn("ClickUp: liste non scannée", { list: lid, msg: e && e.message }); }
+  }
+  return cf.buildTaskFpIndex(all, fpKey);
 }
+// Toutes les listes pays + la liste cible → union pour l'anti-doublon.
+function allScanLists(listId) { return [...new Set([...CLICKUP_LISTS_ALL, String(listId)])]; }
 
 exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "import");
@@ -1158,7 +1177,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
   // formulaire), on l'ADOPTE (mise à jour) au lieu de créer un doublon.
   if (!links[id]) {
-    try { const t = (await buildFpIndex(token, listId))[fp]; if (t) links[id] = t; }
+    try { const t = (await buildFpIndex(token, allScanLists(listId)))[fp]; if (t) links[id] = t; }
     catch (e) { logger.warn("ClickUp: réconciliation impossible", { msg: e && e.message }); }
   }
   let r;
@@ -1192,10 +1211,12 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   let members = []; try { members = await clickup.listMembers(token, teamId); } catch (e) { logger.warn("bulk push: membres non résolus", { msg: e && e.message }); }
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("bulk push: champs illisibles", { msg: e && e.message }); }
   // ANTI-DOUBLON : index des tâches existantes par FP (Opp ID) → adopter au lieu de dupliquer.
-  let fpIndex = {}; try { fpIndex = await buildFpIndex(token, listId); } catch (e) { logger.warn("bulk push: réconciliation impossible", { msg: e && e.message }); }
+  let fpIndex = {}; try { fpIndex = await buildFpIndex(token, allScanLists(listId)); } catch (e) { logger.warn("bulk push: réconciliation impossible", { msg: e && e.message }); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();
   const newLinks = {};
+  let pending = 0; // liens non encore flushés (résilience : on persiste régulièrement, pas qu'à la fin)
+  const flush = async () => { if (pending) { await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true }); pending = 0; } };
   let created = 0, updated = 0, adopted = 0, failed = 0, skipped = 0;
   for (const o of orders) {
     const fp = fpKey(o.fp);
@@ -1204,16 +1225,18 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
     const existingTaskId = links[id] || newLinks[id] || fpIndex[fp] || null;
     if (existingTaskId && !force) {
       // Adoption d'une tâche existante non encore liée (écrit le lien, sans pousser de contenu).
-      if (!links[id] && !newLinks[id]) { newLinks[id] = existingTaskId; adopted++; } else skipped++;
-      continue;
+      if (!links[id] && !newLinks[id]) { newLinks[id] = existingTaskId; adopted++; pending++; } else skipped++;
+    } else {
+      try {
+        const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks, ...(existingTaskId ? { [id]: existingTaskId } : {}) }, order: o, extra: { pays } });
+        if (r.created) created++; else updated++;
+        if (!links[id]) { newLinks[id] = r.taskId; pending++; } // persiste création OU adoption
+      } catch (e) { failed++; logger.warn("bulk push: échec", { fp: o.fp, msg: e && e.message }); }
     }
-    try {
-      const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks, ...(existingTaskId ? { [id]: existingTaskId } : {}) }, order: o, extra: { pays } });
-      if (r.created) created++; else updated++;
-      if (!links[id]) newLinks[id] = r.taskId; // persiste création OU adoption
-    } catch (e) { failed++; logger.warn("bulk push: échec", { fp: o.fp, msg: e && e.message }); }
+    // Flush incrémental : un timeout (540 s) avant la fin ne fait plus perdre les liens déjà créés.
+    if (pending >= 25) await flush();
   }
-  if (Object.keys(newLinks).length) await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true });
+  await flush();
   const res = { created, updated, adopted, failed, skipped, total: orders.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bulk_push", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
@@ -1232,7 +1255,7 @@ exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLI
   const { safeId } = require("./lib/sheets");
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
   let fpIndex;
-  try { fpIndex = await buildFpIndex(token, listId); }
+  try { fpIndex = await buildFpIndex(token, allScanLists(listId)); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "réconciliation impossible"}`); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();

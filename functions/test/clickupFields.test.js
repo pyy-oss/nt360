@@ -31,6 +31,15 @@ describe("buildFieldWrites — valeurs logiques → écritures ClickUp", () => {
     const w = cf.buildFieldWrites(fieldDefs, { nature: "Maintenance" });
     expect(w).toContainEqual({ id: "F_NATURE", value: "n_maint" });
   });
+  it("normalisation robuste : double espace et accents résolvent quand même l'option", () => {
+    const defs = [
+      { id: "F_DOM", name: "Domaine", type: "drop_down", type_config: { options: [{ id: "d_agile", name: "Agile Infrastructure & Cloud" }] } },
+      { id: "F_SEC", name: "Secteur", type: "drop_down", type_config: { options: [{ id: "s_min", name: "Ministères" }] } },
+    ];
+    const w = cf.buildFieldWrites(defs, { domaine: "Agile Infrastructure  & Cloud", secteur: "ministeres" });
+    expect(w).toContainEqual({ id: "F_DOM", value: "d_agile" });
+    expect(w).toContainEqual({ id: "F_SEC", value: "s_min" });
+  });
   it("option introuvable → champ ignoré (pas d'échec global)", () => {
     const w = cf.buildFieldWrites(fieldDefs, { bu: "INEXISTANT", caSigne: 5 });
     expect(w.find((x) => x.id === "F_BU")).toBeUndefined();

@@ -20,13 +20,16 @@ const FIELD_NAMES = {
   catRecurrent: "Cat Recurrent",
   delaiPrev: "Délai Prévisonnel",
   commentaire: "Commentaire",
+  commentaires: "Commentaires", // champ texte riche (parité formulaire) — reçoit aussi la note
 };
 
 // Types de champ que l'on sait POSER (les autres — formule Backlog, baselines — sont ignorés).
 const DROPDOWN = "drop_down";
 const CURRENCY = "currency";
 const DATE = "date";
-const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
+// Normalisation robuste : dépouille les diacritiques (é/ô…), réduit les espaces internes, trim, casse.
+// Sans ça, « Agile Infrastructure  & Cloud » (double espace) ou « 9-Clôturé » ne se résolvaient jamais.
+const norm = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 
 /** Trouve la définition d'un champ par nom (insensible casse/espaces) dans la liste des champs. */
 function findField(fieldDefs, name) {
@@ -113,6 +116,7 @@ function buildCorePayload(order, extra, assigneeId) {
     order.bu ? `**BU :** ${order.bu}` : "",
     order.cas != null && order.cas !== "" ? `**CA Signé :** ${Number(order.cas).toLocaleString("fr-FR")} XOF` : "",
     order.pm ? `**PM :** ${order.pm}` : "",
+    e.lieu ? `**Lieu :** ${e.lieu}` : "",
     e.commentaire ? `\n${e.commentaire}` : "",
     `\n_Synchronisé depuis Neurone360 — clé ${fp}_`,
   ].filter(Boolean);
@@ -156,6 +160,7 @@ function buildLogical(order, extra, only) {
     catRecurrent: e.catRecurrent,
     delaiPrev: e.dateFinPrev,
     commentaire: e.commentaire,
+    commentaires: e.commentaire, // même note routée vers le champ texte riche « Commentaires » (parité)
   };
   // On ne conserve que les clés effectivement fournies (non undefined) pour ne pas écraser à vide.
   const logical = {};

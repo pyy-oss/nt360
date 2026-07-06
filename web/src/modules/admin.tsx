@@ -615,7 +615,7 @@ function ClickupCard() {
     setBulkBusy(true);
     try {
       const r = await pushAllOrdersToClickup({ force, listId: list });
-      toast(`Push en masse — ${r.created} créée(s), ${r.updated} maj, ${r.skipped} ignorée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
+      toast(`Push en masse — ${r.created} créée(s), ${r.adopted || 0} rattachée(s), ${r.updated} maj, ${r.skipped} ignorée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       // Un timeout client est possible sur un gros volume : le traitement se poursuit côté serveur.

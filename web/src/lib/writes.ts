@@ -100,7 +100,7 @@ export async function listClickupMembers() {
 /** Champs complémentaires du modal ClickUp (ceux que la commande ne fournit pas — ex-formulaire). */
 export type ClickupExtra = {
   pays?: string; nature?: string; domaine?: string; secteur?: string; circuit?: string; catRecurrent?: string;
-  priority?: string; commentaire?: string;
+  priority?: string; commentaire?: string; lieu?: string;
   dateCommande?: number; dateContractuelle?: number; dateFinPrev?: number; // epoch ms
 };
 /** Pousse une commande vers ClickUp (crée/màj une tâche assignée au PM, avec champs complémentaires

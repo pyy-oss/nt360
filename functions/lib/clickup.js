@@ -12,21 +12,32 @@ function retryDelay(attempt, retryAfterSec) {
   return Math.min(500 * Math.pow(2, attempt), 8000);
 }
 
-// Ré-essaie sur 429 (throttling) et 5xx transitoires ; les erreurs 4xx (hors 429) échouent tout de suite.
+// Ré-essaie sur 429 (throttling), 5xx transitoires ET erreurs de TRANSPORT (ECONNRESET/ETIMEDOUT/DNS
+// — fréquentes en push massif) ; les erreurs 4xx (hors 429) échouent tout de suite.
 async function api(token, method, path, body, opts) {
   const maxRetries = opts && Number.isFinite(opts.retries) ? opts.retries : 3;
   let attempt = 0;
   for (;;) {
-    const res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) {
+      // Coupure réseau : re-tenter avec back-off, sinon propager.
+      if (attempt < maxRetries) { await sleep(retryDelay(attempt)); attempt++; continue; }
+      const err = new Error(`ClickUp réseau: ${(e && e.message) || e}`);
+      err.status = 0;
+      throw err;
+    }
     if (res.ok) {
       const text = await res.text();
       try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
     }
     if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+      await res.text().catch(() => {}); // draine le corps (évite une fuite de socket undici) avant retry
       await sleep(retryDelay(attempt, res.headers && res.headers.get("retry-after")));
       attempt++;
       continue;
@@ -63,29 +74,14 @@ function resolveAssignee(members, pm) {
   return byIncl ? byIncl.id : null;
 }
 
-/** Payload PUR d'une tâche à partir d'une commande (fp/client/désignation/bu/cas/pm). */
-function taskPayload(order, assigneeId) {
-  const fp = String(order.fp || "").trim();
-  const lines = [
-    order.designation ? `**Désignation :** ${order.designation}` : "",
-    order.client ? `**Client :** ${order.client}` : "",
-    order.bu ? `**BU :** ${order.bu}` : "",
-    order.cas != null && order.cas !== "" ? `**CAS :** ${Number(order.cas).toLocaleString("fr-FR")} XOF` : "",
-    order.pm ? `**PM :** ${order.pm}` : "",
-    `\n_Synchronisé depuis Neurone360 — clé ${fp}_`,
-  ].filter(Boolean);
-  return {
-    name: `${fp}${order.client ? ` — ${order.client}` : ""}`.slice(0, 250),
-    description: lines.join("\n"),
-    ...(assigneeId ? { assignees: [assigneeId] } : {}),
-  };
-}
-
 async function createTask(token, listId, payload) { return api(token, "POST", `/list/${listId}/task`, payload); }
-// PUT /task attend les assignés au format { add: [...] } (et non un simple tableau).
-async function updateTask(token, taskId, payload) {
+// PUT /task attend les assignés au format { add:[...], rem:[...] } (et non un simple tableau). `remove`
+// permet de RETIRER les anciens assignés (sinon l'assigné s'accumulerait à chaque changement de PM).
+async function updateTask(token, taskId, payload, remove) {
   const { assignees, ...rest } = payload;
-  return api(token, "PUT", `/task/${taskId}`, { ...rest, ...(assignees ? { assignees: { add: assignees } } : {}) });
+  const rem = Array.isArray(remove) ? remove.filter((id) => !(assignees || []).includes(id)) : [];
+  const assignPatch = assignees || rem.length ? { assignees: { ...(assignees ? { add: assignees } : {}), ...(rem.length ? { rem } : {}) } } : {};
+  return api(token, "PUT", `/task/${taskId}`, { ...rest, ...assignPatch });
 }
 
 /** Définitions des champs personnalisés d'une liste (id, name, type, options). */
@@ -118,4 +114,4 @@ async function listTasks(token, listId, opts) {
   return tasks;
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask, listTasks };
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, listTasks };

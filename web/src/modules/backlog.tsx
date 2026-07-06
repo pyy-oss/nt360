@@ -14,6 +14,18 @@ import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, s
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
+// Champs de formulaire HISSÉS au scope module : définis dans le corps d'un composant, ils étaient
+// recréés à chaque render → React démontait/remontait le sous-arbre → PERTE DE FOCUS à chaque frappe.
+const Fld = ({ label, children }: { label: string; children: ReactNode }) => (
+  <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
+);
+const Sel = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: string[]; ph: string }) => (
+  <select className="field !py-1.5" value={v} onChange={(e) => set(e.target.value)}>
+    <option value="">{ph}</option>
+    {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+  </select>
+);
+
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
   const { data, loading, error } = useDocData<BacklogSummary>("summaries/backlog_fy");
@@ -623,9 +635,6 @@ function OrderEditor({ row }: { row: Order }) {
   const [nf, setNf] = useState("");
   const yearMissing = !(row.yearPo && row.yearPo > 0);
   const anyField = cas !== "" || raf !== "" || client.trim() !== "" || am.trim() !== "";
-  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
-    <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
-  );
   return (
     <>
       <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setOpen(true)}>Corriger</button>
@@ -633,12 +642,12 @@ function OrderEditor({ row }: { row: Order }) {
         title={<>Corriger la commande <span className="text-gold">{fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
         <div className="grid grid-cols-2 gap-3 mt-1">
-          <Field label="CAS"><input className="field !py-1.5" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="montant" value={cas} onChange={(e) => setCas(e.target.value)} /></Field>
-          <Field label="RAF"><input className="field !py-1.5" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="reste à facturer" value={raf} onChange={(e) => setRaf(e.target.value)} /></Field>
-          <Field label="Client"><input className="field !py-1.5" aria-label={`Client ${fp}`} placeholder="nom du client" value={client} onChange={(e) => setClient(e.target.value)} /></Field>
-          <Field label="AM"><input className="field !py-1.5" aria-label={`AM ${fp}`} placeholder="commercial" value={am} onChange={(e) => setAm(e.target.value)} /></Field>
-          {yearMissing && <Field label="Année de PO"><input className="field !py-1.5" aria-label={`Année de PO ${fp}`} placeholder="ex. 2026" value={y} onChange={(e) => setY(e.target.value)} /></Field>}
-          <Field label="Corriger le N° FP"><input className="field !py-1.5" aria-label={`Corriger le N° FP ${fp}`} placeholder="nouveau N° FP" value={nf} onChange={(e) => setNf(e.target.value)} /></Field>
+          <Fld label="CAS"><input className="field !py-1.5" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="montant" value={cas} onChange={(e) => setCas(e.target.value)} /></Fld>
+          <Fld label="RAF"><input className="field !py-1.5" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="reste à facturer" value={raf} onChange={(e) => setRaf(e.target.value)} /></Fld>
+          <Fld label="Client"><input className="field !py-1.5" aria-label={`Client ${fp}`} placeholder="nom du client" value={client} onChange={(e) => setClient(e.target.value)} /></Fld>
+          <Fld label="AM"><input className="field !py-1.5" aria-label={`AM ${fp}`} placeholder="commercial" value={am} onChange={(e) => setAm(e.target.value)} /></Fld>
+          {yearMissing && <Fld label="Année de PO"><input className="field !py-1.5" aria-label={`Année de PO ${fp}`} placeholder="ex. 2026" value={y} onChange={(e) => setY(e.target.value)} /></Fld>}
+          <Fld label="Corriger le N° FP"><input className="field !py-1.5" aria-label={`Corriger le N° FP ${fp}`} placeholder="nouveau N° FP" value={nf} onChange={(e) => setNf(e.target.value)} /></Fld>
         </div>
         <div className="flex gap-2 mt-4 flex-wrap">
           {anyField && <Busy label="Enregistrer" okMsg="Commande mise à jour" fn={() => patchOrder({ fp, cas: cas !== "" ? parseNum(cas) : undefined, raf: raf !== "" ? parseNum(raf) : undefined, client: client.trim() || undefined, am: am.trim() || undefined }).then(() => setOpen(false))} />}
@@ -703,22 +712,15 @@ function ClickupBtn({ row }: { row: Order }) {
   const [circuit, setCircuit] = useState("");
   const [catRecurrent, setCatRecurrent] = useState("");
   const [priority, setPriority] = useState("");
-  const [dateCommande, setDateCommande] = useState("");
-  const [dateContractuelle, setDateContractuelle] = useState("");
-  const [dateFinPrev, setDateFinPrev] = useState("");
+  // Dates pré-remplies depuis la commande (déjà remontées de ClickUp le cas échéant).
+  const [dateCommande, setDateCommande] = useState(row.dateCommande || "");
+  const [dateContractuelle, setDateContractuelle] = useState(row.dateContractuelle || "");
+  const [dateFinPrev, setDateFinPrev] = useState(row.dateFinPrev || "");
+  const [lieu, setLieu] = useState("");
   const [commentaire, setCommentaire] = useState("");
   const [busy, setBusy] = useState(false);
 
   const pays = CLICKUP_COUNTRY_LISTS.find((l) => l.id === listId)?.pays;
-  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
-    <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
-  );
-  const Select = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: string[]; ph: string }) => (
-    <select className="field !py-1.5" value={v} onChange={(e) => set(e.target.value)}>
-      <option value="">{ph}</option>
-      {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-    </select>
-  );
 
   const submit = async () => {
     if (busy) return;
@@ -729,7 +731,7 @@ function ClickupBtn({ row }: { row: Order }) {
         { listId, extra: {
           pays, nature: nature || undefined, domaine: domaine || undefined, secteur: secteur || undefined,
           circuit: circuit || undefined, catRecurrent: catRecurrent || undefined, priority: priority || undefined,
-          commentaire: commentaire.trim() || undefined,
+          commentaire: commentaire.trim() || undefined, lieu: lieu.trim() || undefined,
           dateCommande: isoToMs(dateCommande), dateContractuelle: isoToMs(dateContractuelle), dateFinPrev: isoToMs(dateFinPrev),
         } },
       );
@@ -759,22 +761,23 @@ function ClickupBtn({ row }: { row: Order }) {
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <Field label="Liste (pays)">
+          <Fld label="Liste (pays)">
             <select className="field !py-1.5" value={listId} onChange={(e) => setListId(e.target.value)}>
               {CLICKUP_COUNTRY_LISTS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
             </select>
-          </Field>
-          <Field label="Nature"><Select v={nature} set={setNature} opts={OPT_NATURE} ph="—" /></Field>
-          <Field label="Domaine"><Select v={domaine} set={setDomaine} opts={OPT_DOMAINE} ph="—" /></Field>
-          <Field label="Secteur"><Select v={secteur} set={setSecteur} opts={OPT_SECTEUR} ph="—" /></Field>
-          <Field label="Circuit"><Select v={circuit} set={setCircuit} opts={OPT_CIRCUIT} ph="—" /></Field>
-          <Field label="Cat. récurrent"><Select v={catRecurrent} set={setCatRecurrent} opts={OPT_CATREC} ph="—" /></Field>
-          <Field label="Priorité"><Select v={priority} set={setPriority} opts={OPT_PRIORITE} ph="—" /></Field>
-          <Field label="Date de commande"><DateField value={dateCommande} onChange={setDateCommande} ariaLabel="Date de commande" /></Field>
-          <Field label="Date contractuelle"><DateField value={dateContractuelle} onChange={setDateContractuelle} ariaLabel="Date contractuelle" /></Field>
-          <Field label="Date prév. de fin"><DateField value={dateFinPrev} onChange={setDateFinPrev} ariaLabel="Date prévisionnelle de fin" /></Field>
+          </Fld>
+          <Fld label="Nature"><Sel v={nature} set={setNature} opts={OPT_NATURE} ph="—" /></Fld>
+          <Fld label="Domaine"><Sel v={domaine} set={setDomaine} opts={OPT_DOMAINE} ph="—" /></Fld>
+          <Fld label="Secteur"><Sel v={secteur} set={setSecteur} opts={OPT_SECTEUR} ph="—" /></Fld>
+          <Fld label="Circuit"><Sel v={circuit} set={setCircuit} opts={OPT_CIRCUIT} ph="—" /></Fld>
+          <Fld label="Cat. récurrent"><Sel v={catRecurrent} set={setCatRecurrent} opts={OPT_CATREC} ph="—" /></Fld>
+          <Fld label="Priorité"><Sel v={priority} set={setPriority} opts={OPT_PRIORITE} ph="—" /></Fld>
+          <Fld label="Date de commande"><DateField value={dateCommande} onChange={setDateCommande} ariaLabel="Date de commande" /></Fld>
+          <Fld label="Date contractuelle"><DateField value={dateContractuelle} onChange={setDateContractuelle} ariaLabel="Date contractuelle" /></Fld>
+          <Fld label="Date prév. de fin"><DateField value={dateFinPrev} onChange={setDateFinPrev} ariaLabel="Date prévisionnelle de fin" /></Fld>
+          <Fld label="Lieu"><input className="field !py-1.5" value={lieu} onChange={(e) => setLieu(e.target.value)} placeholder="site / ville (optionnel)" /></Fld>
         </div>
-        <Field label="Commentaire"><textarea className="field !py-1.5 mt-3" rows={2} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} placeholder="note libre (optionnel)" /></Field>
+        <Fld label="Commentaire"><textarea className="field !py-1.5 mt-3" rows={2} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} placeholder="note libre (optionnel)" /></Fld>
         <div className="flex gap-2 mt-4 items-center flex-wrap">
           <button type="button" className="btn-gold" disabled={busy} onClick={submit}>{busy ? "…" : "Créer / mettre à jour la tâche"}</button>
           {!row.pm && <span className="text-[12px] text-amber-400">PM non affecté — la tâche ne sera pas assignée.</span>}
