@@ -599,6 +599,30 @@ function OrderEditor({ row }: { row: Order }) {
   );
 }
 
+// Correction INLINE du montant (CAS) d'une commande P&L/manuelle, sans ouvrir la modale « Corriger ».
+// Même repli tolérant que le parseur (« 5 000 000 » → 5000000) ; refuse un montant ≤ 0 plutôt que
+// d'écrire un CAS nul en silence. Repatche la commande (patchOrder) → recalcul des agrégats derrière.
+function OrderCasFixer({ row }: { row: Order }) {
+  const [editing, setEditing] = useState(false);
+  const [cas, setCas] = useState("");
+  if (!editing) {
+    return (
+      <span className="inline-flex items-center gap-2 justify-end">
+        {money(row.cas)}
+        <button type="button" onClick={() => { setCas(String(row.cas ?? "")); setEditing(true); }} className="text-gold hover:underline text-[11px]" title="Corriger le montant (CAS)">corriger</button>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 justify-end flex-wrap">
+      <input className="field w-28 !py-1 text-xs text-right" inputMode="decimal" autoFocus aria-label={`Corriger le CAS de ${row.fp}`} placeholder="montant" value={cas} onChange={(e) => setCas(e.target.value)} />
+      <Busy variant="ghost" label="OK" okMsg="Montant corrigé (recalcul lancé)" errMsg="Correction refusée"
+        fn={async () => { const v = parseNum(cas); if (!(v > 0)) throw new Error("saisir un montant > 0"); await patchOrder({ fp: row.fp!, cas: v }); setEditing(false); }} />
+      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler la correction">✕</button>
+    </span>
+  );
+}
+
 // Réconciliation : opportunités GAGNÉES (stage 6) portant un N° FP mais SANS ligne P&L → elles ne
 // comptent pas en commande (CAS/backlog absents). « Inscrire au P&L » crée la commande depuis l'opp
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
@@ -727,7 +751,11 @@ export const OrderList: FC<Props> = () => {
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
           colText("AM", (r) => r.am, (r) => r.am),
-          colNum("CAS", (r) => money(r.cas), (r) => r.cas),
+          // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans
+          // ouvrir la modale : les montants saisis à la source sont parfois erronés. Les commandes de
+          // source « fiche »/« opp gagnée » se corrigent à la source (fiche / opportunité).
+          colNum("CAS", (r) => (canImport && (r.source === "pnl" || r.source === "manuel") && r.fp
+            ? <OrderCasFixer row={r} /> : money(r.cas)), (r) => r.cas),
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
           // Marges masquées pour les rôles sans accès « Rentabilité » (confidentialité).
           ...(canMargin ? [
