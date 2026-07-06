@@ -44,6 +44,10 @@ jobs:
       - name: Build web
         if: steps.guard.outputs.ok == 'true'
         run: pnpm --filter web build
+        env:
+          # Le canal de preview appelle les MÊMES Cloud Functions que la prod : une fois l'enforcement
+          # App Check actif, la preview a aussi besoin de la clé reCAPTCHA pour émettre un jeton valide.
+          VITE_APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY }}
 
       # Firebase Hosting plafonne le nombre de canaux de preview par site. Chaque PR en crée un
       # (rétention plusieurs jours) ; sans purge on finit par saturer le quota (429 RESOURCE_EXHAUSTED)

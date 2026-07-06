@@ -22,8 +22,20 @@ jobs:
       - name: Install (workspace)
         run: pnpm install --frozen-lockfile
 
+      # App Check : la clé reCAPTCHA v3 (secret APPCHECK_SITE_KEY) est injectée au build ; si le secret
+      # est absent, l'app démarre sans App Check (non bloquant). Voir docs/app-check.md.
       - name: Build web
         run: pnpm --filter web build
+        env:
+          VITE_APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY }}
+
+      # Env runtime des Cloud Functions : l'enforcement App Check est piloté par la VARIABLE de dépôt
+      # APPCHECK_ENFORCE (Settings → Variables). Ne PAS mettre à true tant que la clé reCAPTCHA n'est
+      # pas déployée au client, sinon TOUS les callables seraient rejetés. IMPORTS_BUCKET rappelé ici
+      # (défaut « nt360 » aussi codé en dur).
+      - name: Configurer l'env des functions
+        run: |
+          printf 'IMPORTS_BUCKET=nt360\nAPPCHECK_ENFORCE=%s\n' "${{ vars.APPCHECK_ENFORCE }}" > functions/.env
 
       - name: Write service account
         run: |
