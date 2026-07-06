@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -42,6 +42,8 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <DedupeCard />}
       {isDirection && <ClientAliasCard />}
       {isDirection && <FxRatesCard />}
+      {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
+      {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -448,6 +450,34 @@ function FxRatesCard() {
         )) : <div className="text-[13px] text-muted">Aucun taux — les BC en devise étrangère restent « à saisir » (contre-valeur XOF manuelle).</div>}
       </div>
       <Tip>Un BC importé/saisi en devise étrangère est <b>converti automatiquement en XOF</b> à sa création via ces taux (le taux appliqué est figé sur la ligne pour traçabilité). Une contre-valeur XOF <b>saisie manuellement</b> reste prioritaire. Sans taux pour la devise, le BC est marqué <b>« à saisir »</b> (jamais assimilé à du XOF). Ne modifie pas les BC déjà enregistrés.</Tip>
+    </Card>
+  );
+}
+
+// Référentiel éditable (liste simple) — Project Managers / Business Units. Remplace la liste en base.
+function RefListCard({ kind, title, placeholder, tip, upper }: { kind: "projectManagers" | "businessUnits"; title: string; placeholder: string; tip: string; upper?: boolean }) {
+  const { data } = useDocData<{ list?: string[] }>(`config/${kind}`);
+  const [draft, setDraft] = useState<string[] | null>(null);
+  const list = draft ?? (data?.list || []);
+  const set = (i: number, v: string) => setDraft(list.map((r, j) => (j === i ? v : r)));
+  const add = () => setDraft([...list, ""]);
+  const del = (i: number) => setDraft(list.filter((_, j) => j !== i));
+  const save = async () => { await setRefList(kind, list.map((s) => (upper ? s.trim().toUpperCase() : s.trim())).filter(Boolean)); setDraft(null); };
+  return (
+    <Card title={title} actions={
+      <div className="flex gap-2">
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Ajouter</button>
+        <Busy label="Enregistrer" okMsg="Référentiel enregistré" fn={save} />
+      </div>}>
+      <div className="flex flex-wrap gap-1.5">
+        {list.length ? list.map((r, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <input className={cx("field !py-1 w-44", upper && "uppercase")} placeholder={placeholder} value={r} onChange={(e) => set(i, e.target.value)} aria-label={`${title} — entrée ${i + 1}`} />
+            <button className="btn-ghost !px-2 !py-1" onClick={() => del(i)} aria-label={`Supprimer l'entrée ${i + 1}`}>×</button>
+          </div>
+        )) : <div className="text-[13px] text-muted">Aucune entrée.</div>}
+      </div>
+      <Tip>{tip}</Tip>
     </Card>
   );
 }

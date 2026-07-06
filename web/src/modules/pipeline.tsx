@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
@@ -193,6 +193,7 @@ export const OppList: FC<Props> = () => {
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
+  const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
   const prefill = (o: Opportunity, patch: boolean) => setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "", patch,
@@ -230,7 +231,7 @@ export const OppList: FC<Props> = () => {
             <input className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} />
             <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
             <input className="field w-36" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
-            <Select ariaLabel="Business Unit" className="w-36" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => ({ value: b, label: b }))} />
+            <Select ariaLabel="Business Unit" className="w-36" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} />
             <input className="field w-28" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
             <Select ariaLabel="Étape du pipeline" className="w-44" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} />
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
