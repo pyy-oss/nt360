@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -561,7 +561,11 @@ function ClickupCard() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [bcRecBusy, setBcRecBusy] = useState(false);
+  const [bcBulkBusy, setBcBulkBusy] = useState(false);
+  const [bcPullBusy, setBcPullBusy] = useState(false);
   const { data: health } = useDocData<ClickupHealthSummary>("summaries/clickupHealth");
+  const { data: bcCu } = useDocData<{ totalBc?: number; linkedCount?: number; overdueCount?: number }>("summaries/clickupBc");
   const toast = useToast();
   const on = enabled ?? (data?.enabled !== false);
   const list = listId ?? (data?.defaultListId || "901215917683");
@@ -624,6 +628,41 @@ function ClickupCard() {
       toast(detail.includes("deadline") || detail.includes("timeout") ? "Push lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Push refusé — ${detail}` : "Push : échec"), detail.includes("deadline") ? "ok" : "err");
     } finally { setBulkBusy(false); }
   };
+  const bcReconcile = async () => {
+    if (bcRecBusy) return;
+    setBcRecBusy(true);
+    try {
+      const r = await reconcileBcLinks();
+      toast(`BC rattachés — ${r.matched} tâche(s) reliée(s), ${r.already} déjà liée(s) / ${r.total} BC`, "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Rattachement BC refusé — ${detail}` : "Rattachement BC : échec", "err");
+    } finally { setBcRecBusy(false); }
+  };
+  const bcPull = async () => {
+    if (bcPullBusy) return;
+    setBcPullBusy(true);
+    try {
+      const r = await syncBcFromClickup();
+      toast(`Avancement BC remonté — ${r.pulled} / ${r.total} tâche(s)${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Synchro BC refusée — ${detail}` : "Synchro BC : échec", "err");
+    } finally { setBcPullBusy(false); }
+  };
+  const bcBulkPush = async (force: boolean) => {
+    if (bcBulkBusy) return;
+    const label = force ? "Resynchroniser TOUTES les tâches BC liées ?" : "Créer les tâches ClickUp de tous les BC non liés ? (les tâches existantes sont adoptées par N° de Commande, pas dupliquées)";
+    if (!window.confirm(label + "\n\nAstuce : lancez d'abord « Rattacher les BC existants ».")) return;
+    setBcBulkBusy(true);
+    try {
+      const r = await pushAllBcToClickup({ force });
+      toast(`Push BC — ${r.created} créé(s), ${r.adopted || 0} rattaché(s), ${r.updated} maj, ${r.skipped} ignoré(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail.includes("deadline") || detail.includes("timeout") ? "Push BC lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Push BC refusé — ${detail}` : "Push BC : échec"), detail.includes("deadline") ? "ok" : "err");
+    } finally { setBcBulkBusy(false); }
+  };
   return (
     <Card title="Intégration ClickUp" actions={<Busy label="Enregistrer" okMsg="Config ClickUp enregistrée" fn={save} />}>
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
@@ -654,6 +693,24 @@ function ClickupCard() {
       </div>
       <ClickupHealthPanel health={health} />
       {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-amber-400 mt-1">⚠️ {health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
+      <div className="mt-4 pt-3 border-t border-white/5">
+        <div className="text-[13px] font-medium text-ink mb-2">Bons de commande fournisseurs (liste « Commandes Fournisseurs »)</div>
+        <div className="flex flex-wrap items-center gap-3 text-[13px]">
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcRecBusy} onClick={bcReconcile} title="Rattacher les BC aux tâches ClickUp DÉJÀ existantes (par N° de Commande), sans rien créer. À lancer AVANT tout push en masse.">
+            {bcRecBusy ? "Rattachement…" : "Rattacher les BC existants"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcBulkBusy} onClick={() => bcBulkPush(false)} title="Créer les tâches des BC pas encore liés (adopte automatiquement une tâche existante par N° de Commande)">
+            {bcBulkBusy ? "Push…" : "Créer les BC non liés"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcBulkBusy} onClick={() => bcBulkPush(true)} title="Resynchroniser TOUTES les tâches BC liées">
+            {bcBulkBusy ? "Push…" : "Tout resynchroniser (BC)"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcPullBusy} onClick={bcPull} title="Remonter l'avancement achat (statut) + l'ETA des tâches BC depuis ClickUp">
+            {bcPullBusy ? "Synchro…" : "Synchroniser les BC depuis ClickUp"}
+          </button>
+          {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-amber-400">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
+        </div>
+      </div>
       <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b>, les <b>dates</b> et le <b>PM assigné</b> dans les Commandes. <b>⚠️ Avant tout push en masse</b>, lancez <b>« Rattacher les tâches existantes »</b> : il relie les commandes aux tâches déjà présentes (Opp ID = N° FP) pour <b>ne pas créer de doublons</b>.</Tip>
     </Card>
   );

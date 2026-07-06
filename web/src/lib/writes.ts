@@ -113,6 +113,31 @@ export async function pushOrderToClickup(
   return res.data as { ok: boolean; taskId: string; url: string; assigned: boolean; created: boolean; fields: number };
 }
 
+/** BC ⇄ ClickUp — pousse UN bon de commande (agrégé par N° BC) vers la liste « Commandes
+ *  Fournisseurs » (crée/màj une tâche : fournisseur, montant, ETA, pays, client, Opp ID). Droit « bc ». */
+export async function pushBcToClickup(bcNumber: string, opts?: { listId?: string; extra?: { status?: string } }) {
+  const res = await httpsCallable(functions, "pushBcToClickup", { timeout: 120_000 })({ bcNumber, listId: opts?.listId, extra: opts?.extra });
+  return res.data as { ok: boolean; taskId: string; url: string; created: boolean; fields: number };
+}
+/** Push BC en masse : crée/synchronise les tâches ClickUp de tous les BC (force=true resynchronise
+ *  aussi les tâches déjà liées). Admin. Peut être long. */
+export async function pushAllBcToClickup(opts?: { force?: boolean; listId?: string }) {
+  const res = await httpsCallable(functions, "pushAllBcToClickup", { timeout: 540_000 })({ force: opts?.force, listId: opts?.listId });
+  return res.data as { ok: boolean; created: number; updated: number; adopted: number; failed: number; skipped: number; total: number };
+}
+/** Réconciliation BC anti-doublons : rattache les BC aux tâches ClickUp DÉJÀ existantes (par N° de
+ *  Commande), sans rien créer. À lancer AVANT tout push en masse. Admin. */
+export async function reconcileBcLinks(opts?: { listId?: string }) {
+  const res = await httpsCallable(functions, "reconcileBcLinks", { timeout: 300_000 })({ listId: opts?.listId });
+  return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithNumber: number };
+}
+/** Sens inverse BC : remonte l'avancement achat (statut) + l'ETA des tâches ClickUp liées vers l'app
+ *  (overlay additif). Admin. */
+export async function syncBcFromClickup() {
+  const res = await httpsCallable(functions, "syncBcFromClickup", { timeout: 300_000 })({});
+  return res.data as { ok: boolean; pulled: number; failed?: number; total: number };
+}
+
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */

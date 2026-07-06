@@ -154,6 +154,19 @@ async function recomputeAll(db, only) {
   const clickupSyncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   // Lien FP↔tâche ClickUp (config/clickupLinks) → expose clickupTaskId sur les rows pour le badge « lié ↗ ».
   const clickupLinksMap = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  // SYNCHRO INVERSE BC ClickUp : overlay config/clickupBcSync { map: { <safeId(N°BC)>: { status,
+  // statusRaw, eta, taskId } } } — avancement achat + ETA remontés de la liste « Commandes
+  // Fournisseurs ». ADDITIF : n'écrase JAMAIS le statut financier SOA des lignes BC (a_emettre… solde),
+  // seulement des champs clickupBc* parallèles. Fusionné sur les lignes bcLines ci-dessous.
+  const clickupBcSyncMap = ((await db.doc("config/clickupBcSync").get()).data() || {}).map || {};
+  const clickupBcLinksMap = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
+  for (const b of bcLines) {
+    const k = safeId(String(b.bcNumber || "").trim());
+    if (!k) continue;
+    const cu = clickupBcSyncMap[k];
+    if (cu) { b.clickupBcStatus = cu.status || null; b.clickupBcStatusRaw = cu.statusRaw || null; b.clickupBcEta = cu.eta || null; }
+    if (clickupBcLinksMap[k]) b.clickupBcTaskId = clickupBcLinksMap[k];
+  }
   // Factures annulées : écartées AVANT la fusion (n'alimentent pas le facturé d'une commande).
   for (let i = invoices.length - 1; i >= 0; i--) if (cancelledInvoices.has(invoices[i].id)) invoices.splice(i, 1);
 
@@ -215,6 +228,11 @@ async function recomputeAll(db, only) {
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, ...stamp } }); // global (rétro-compat)
   let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
+  // Suivi BC ⇄ ClickUp : avancement achat + retards remontés de la liste « Commandes Fournisseurs »
+  // (overlay clickupBcSync fusionné sur bcLines plus haut). Alimente la carte de suivi + l'Actualité.
+  const { clickupBcSignals } = require("../domain/clickupBc");
+  const bcCu = clickupBcSignals(bcLines, Date.parse(asOf + "T00:00:00Z"));
+  if (want("suppliers")) w.push({ path: "summaries/clickupBc", data: { ...bcCu, ...stamp } });
   // Créances clients (Cash / DSO) : instantané global (l'AR est un état à date, non périodé).
   const rec = receivables(invoices, asOf);
   if (want("facturation") || want("receivables")) w.push({ path: "summaries/receivables", data: { ...rec, ...stamp } });
@@ -335,7 +353,7 @@ async function recomputeAll(db, only) {
       const since = new Date(Date.now() - 24 * 3600 * 1000);
       clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
     } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
-    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, fy: currentFy, asOf, thr: alertThr });
+    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, fy: currentFy, asOf, thr: alertThr });
     w.push({ path: "summaries/news", data: { ...news, ...stamp } });
   }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).

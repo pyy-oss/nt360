@@ -9,7 +9,7 @@ import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Gauge } from "../design/charts";
-import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord } from "../lib/writes";
+import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
@@ -273,6 +273,11 @@ export const BC: FC<Props> = () => {
   const rows = allRows.filter((r) => r.source !== "fiche");
   const planned = allRows.length - rows.length; // = lignes de fiche affaire (achats planifiés)
   const canWrite = useCan("bc") === "write";
+  // Intégration ClickUp BC : bouton par ligne (push/synchro du bon de commande) si l'intégration est
+  // active. Le lien N°BC↔tâche (config/clickupBcLinks) révèle les BC déjà rattachés (glyphe ↗).
+  const { data: cuCfg } = useDocData<{ enabled?: boolean }>("config/clickup");
+  const { data: bcLinks } = useDocData<{ map?: Record<string, string> }>(canWrite ? "config/clickupBcLinks" : null);
+  const cuOn = canWrite && cuCfg?.enabled !== false;
   const { intent } = useNav();
   const [flt, setFlt] = useState<"all" | "open" | "late">(intent?.segment === "late" ? "late" : intent?.segment === "open" ? "open" : "all");
   // Drill-through depuis le Centre d'alertes (« BC en retard / en attente ») → segment pré-sélectionné.
@@ -315,6 +320,7 @@ export const BC: FC<Props> = () => {
             colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
             colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
+            ...(cuOn ? [colText("ClickUp", (r: BcLine) => <BcClickupBtn bcNumber={r.bcNumber} linked={!!(r.bcNumber && bcLinks?.map?.[fpDocId(r.bcNumber)])} />, () => 0)] : []),
             ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} />, () => 0)] : []),
             ...(canWrite ? [colText("Assainir", (r: BcLine) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la ligne BC ${r.bcNumber || r.supplier || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("bcLines", r.id!)} /> : null), () => 0)] : []),
           ]}
@@ -324,6 +330,17 @@ export const BC: FC<Props> = () => {
     </div>
   );
 };
+
+// Push / synchro d'un bon de commande (agrégé par N° BC) vers ClickUp. Toutes les lignes de même N°
+// BC forment UNE tâche côté serveur ; un ré-appui met à jour la tâche existante (idempotent).
+function BcClickupBtn({ bcNumber, linked }: { bcNumber?: string; linked: boolean }) {
+  const num = (bcNumber || "").trim();
+  if (!num) return <span className="text-faint text-[11px]" title="N° BC requis pour synchroniser">—</span>;
+  return (
+    <Busy variant="ghost" label={linked ? "ClickUp ↗" : "ClickUp"} okMsg="BC synchronisé avec ClickUp" errMsg="ClickUp : échec"
+      fn={async () => { const r = await pushBcToClickup(num); if (r.url) window.open(r.url, "_blank", "noopener"); }} />
+  );
+}
 
 // Fiabilisation inline d'une ligne BC : rattacher un N° FP et/ou saisir la contre-valeur XOF
 // (ex. BC en devise étrangère → montant XOF nul). Pré-remplit les champs à corriger.
