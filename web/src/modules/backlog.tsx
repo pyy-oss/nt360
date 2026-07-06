@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { DateField } from "../design/inputs";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, FpLink } from "./_shared";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
@@ -772,8 +772,9 @@ export const OrderList: FC<Props> = () => {
   const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => r.fp).filter(Boolean) as string[]), [all]);
-  // Project Managers déjà affectés → suggestions d'auto-complétion pour l'affectation (datalist).
-  const pmOptions = useMemo(() => [...new Set(all.map((r) => r.pm).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)), [all]);
+  // Suggestions d'affectation PM (datalist) = référentiel Admin ∪ PM déjà affectés.
+  const pmRef = useProjectManagers();
+  const pmOptions = useMemo(() => [...new Set([...pmRef, ...(all.map((r) => r.pm).filter(Boolean) as string[])])].sort((a, b) => a.localeCompare(b)), [all, pmRef]);
   if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return (
     <div className="flex flex-col gap-2">

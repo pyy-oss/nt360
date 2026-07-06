@@ -8,7 +8,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
-import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink } from "./_shared";
+import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN } from "../lib/thresholds";
 import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
@@ -28,6 +28,7 @@ export const Objectifs: FC<Props> = () => {
   const toast = useToast();
   const [f, setF] = useState({ ...EMPTY_OBJ });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de périmètre d'objectif
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
   const reset = () => { setF({ ...EMPTY_OBJ }); setEditingId(null); };
 
@@ -91,7 +92,7 @@ export const Objectifs: FC<Props> = () => {
               <Select value={f.scope} onChange={(v) => set("scope", v)} ariaLabel="Périmètre" options={SCOPES.map((s) => ({ value: s.v, label: s.label }))} /></label>
             <label className="flex flex-col gap-1 text-xs text-muted">{f.scope === "global" ? "Valeur (— global)" : f.scope === "bu" ? "BU" : f.scope === "commercial" ? "Commercial (AM)" : "Client"}
               {f.scope === "bu"
-                ? <Select value={f.scopeValue} onChange={(v) => set("scopeValue", v)} ariaLabel="BU" options={["ICT", "CLOUD", "FORMATION", "AUTRE"].map((b) => ({ value: b, label: b }))} />
+                ? <Select value={f.scopeValue} onChange={(v) => set("scopeValue", v)} ariaLabel="BU" options={bus.map((b) => ({ value: b, label: b }))} />
                 : <input className="field" disabled={f.scope === "global"} placeholder={f.scope === "global" ? "all" : "nom / identifiant"} value={f.scope === "global" ? "all" : f.scopeValue} onChange={(e) => set("scopeValue", e.target.value)} />}</label>
             <label className="flex flex-col gap-1 text-xs text-muted">Libellé (optionnel)
               <input className="field" placeholder="ex. Objectif CODIR 2026" value={f.label} onChange={(e) => set("label", e.target.value)} /></label>

@@ -42,6 +42,17 @@ export function useObjectives(fy: number | string | undefined) {
 // Lignes de commandes matérialisées, LUES DEPUIS LES CHUNKS (commandesRows/{i}) pour s'affranchir
 // de la limite Firestore ~1 Mio/doc. Fusionne les chunks (ordre stable), avec repli sur les lignes
 // inline d'un ancien agrégat (transition avant le premier recompute chunké). count depuis la méta.
+// Référentiels éditables (Admin) : liste des BU / des Project Managers, avec repli sur des valeurs
+// par défaut si le référentiel n'est pas encore renseigné. Alimente filtres et sélecteurs.
+export const DEFAULT_BU = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+export function useRefList(kind: "businessUnits" | "projectManagers", fallback: string[] = []) {
+  const { data } = useDocData<{ list?: string[] }>(`config/${kind}`);
+  const list = (data?.list || []).filter(Boolean);
+  return list.length ? list : fallback;
+}
+export const useBusinessUnits = () => useRefList("businessUnits", DEFAULT_BU);
+export const useProjectManagers = () => useRefList("projectManagers", []);
+
 export function useCommandesRows(enabled = true) {
   const canMargin = useCanSeeMargin();
   // enabled=false → aucun abonnement (name null) : la Vue d'ensemble / FP 360° ne chargent la liste
@@ -424,7 +435,7 @@ export function FilterBar() {
   const amOpts = (ams?.rows || []).map((r) => r.am).filter(Boolean);
   const cliOpts = (cli?.rows || []).map((r) => r.key).filter(Boolean);
   const pmOpts = (pms?.rows || []).map((r) => r.pm).filter(Boolean);
-  const BU = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+  const BU = useBusinessUnits();
   const sel = "!py-1 text-xs";
   return (
     <div className="flex items-center gap-2 flex-wrap text-xs">

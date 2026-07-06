@@ -1039,6 +1039,35 @@ exports.setFxRates = onCallG("setFxRates", { memoryMiB: 256, timeoutSeconds: 60 
   return { ok: true, rates };
 });
 
+// --- setRefList : référentiels ÉDITABLES (Project Managers, Business Units) alimentant les
+// sélecteurs et filtres de l'app. config/<kind> { list: [...] }. Direction. Remplace la liste
+// (nettoyage : trim, dédup insensible à la casse, MAJUSCULES pour les BU, plafonds). ---
+const REF_LISTS = { projectManagers: { doc: "config/projectManagers", upper: false }, businessUnits: { doc: "config/businessUnits", upper: true } };
+exports.setRefList = onCallG("setRefList", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const kind = String(req.data?.kind || "");
+  const spec = REF_LISTS[kind];
+  if (!spec) throw new HttpsError("invalid-argument", "référentiel inconnu");
+  const raw = Array.isArray(req.data?.list) ? req.data.list : [];
+  const seen = new Set(); const list = [];
+  for (const v of raw) {
+    let s = String(v || "").replace(/\s+/g, " ").trim();
+    if (spec.upper) s = s.toUpperCase();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); list.push(s.slice(0, 60));
+    if (list.length >= 300) break;
+  }
+  list.sort((a, b) => a.localeCompare(b));
+  await db.doc(spec.doc).set({ list, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_ref_list", module: "habilitations", entity: "config", entityId: kind,
+    detail: { count: list.length }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true, kind, list };
+});
+
 // --- Écritures BC / crédit fournisseur en onCall : elles RECALCULENT ensuite les agrégats
 // (suppliers + alerts), sinon l'exposition et les alertes restaient périmées jusqu'au
 // « Recalculer » manuel. Le rôle est revérifié côté serveur. ---

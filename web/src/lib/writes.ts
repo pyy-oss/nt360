@@ -54,6 +54,12 @@ export async function setFxRates(rates: Record<string, number>) {
   return res.data as { ok: boolean; rates: Record<string, number> };
 }
 
+/** Enregistre un référentiel éditable (liste des Project Managers / des BU) — admin. Remplace la liste. */
+export async function setRefList(kind: "projectManagers" | "businessUnits", list: string[]) {
+  const res = await httpsCallable(functions, "setRefList")({ kind, list });
+  return res.data as { ok: boolean; kind: string; list: string[] };
+}
+
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */
