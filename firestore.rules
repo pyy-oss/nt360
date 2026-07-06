@@ -111,8 +111,10 @@ service cloud.firestore {
     match /config/cancelOrders   { allow read: if canRead('overview');    allow write: if false; }
     match /config/cancelInvoices { allow read: if canRead('facturation'); allow write: if false; }
     // Repli config/* : ALLOWLIST fail-closed (les docs sensibles ont leur propre règle ci-dessus ;
-    // un futur doc config/* non listé n'est PAS lisible par défaut).
-    match /config/{id}        { allow read: if signedIn() && id in ['alerts', 'projection', 'periods', 'fiscal']; allow write: if false; }
+    // un futur doc config/* non listé n'est PAS lisible par défaut). Inclut les référentiels éditables
+    // (projectManagers, businessUnits), les taux de change (fxRates) et la config ClickUp NON sensible
+    // (enabled/teamId/listId ; le token vit dans Secret Manager, jamais ici) — tous lus par le front.
+    match /config/{id}        { allow read: if signedIn() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }

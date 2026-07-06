@@ -1293,18 +1293,23 @@ async function runClickupPull() {
   const prev = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   const map = {};
   for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
+  const pmUpdates = {}; // assigné ClickUp → PM app (overlay config/orderPm), quand un assigné existe
   let pulled = 0, failed = 0;
   for (const key of keys) {
     try {
       const task = await clickup.getTask(token, links[key]);
-      map[key] = { ...cf.readTaskSync(task), taskId: links[key] };
+      const sync = { ...cf.readTaskSync(task), taskId: links[key] };
+      map[key] = sync;
+      if (sync.pm) pmUpdates[key] = sync.pm; // récupère le PM courant (assigné) de la tâche
       pulled++;
     } catch (e) { logger.warn("ClickUp pull: échec", { key, msg: e && e.message }); failed++; }
   }
   await db.doc("config/clickupSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
+  // Le PM de l'app reflète l'assigné ClickUp (merge : ne touche pas les commandes sans assigné).
+  if (Object.keys(pmUpdates).length) await db.doc("config/orderPm").set({ map: pmUpdates }, { merge: true });
   try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes"]); }
   catch (e) { logger.warn("ClickUp pull: recompute partiel échoué", { msg: e && e.message }); }
-  return { pulled, failed, total: keys.length };
+  return { pulled, failed, total: keys.length, pmUpdated: Object.keys(pmUpdates).length };
 }
 
 // syncFromClickup : bouton « Synchroniser depuis ClickUp » (statut projet + dates). Direction.
