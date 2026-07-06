@@ -12,6 +12,8 @@ const XLSX = require("xlsx");
 const { getApp } = require("firebase-admin/app");
 const { IMPORTS_BUCKET, FIRESTORE_DB } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
+const { applyWrites } = require("./lib/apply");
+const { parseBuffer, reingestBucket } = require("./lib/reingest");
 
 initializeApp();
 // Base Firestore nommée nt360 (projet partagé) — isole données et règles.
@@ -28,40 +30,8 @@ db.settings({ ignoreUndefinedProperties: true });
 // dual-region eur4 (non déployable comme région de fonction). Le trigger n'est donc exporté
 // que si INGEST_REGION est défini (région alignée sur le bucket) ; sinon l'ingestion passe
 // par seed/loadData.js (Admin SDK, sans contrainte de région).
-// Applique un lot d'écritures {path,data} : déduplication par chemin (fusion des champs, dernier
-// gagne — utile en import ZIP multi-classeurs), upsert par batch, puis NETTOYAGE des lignes BC de
-// fiche devenues orphelines (une fiche régénère toutes ses lignes ; si le ré-import en compte moins,
-// les anciennes lignes de fin resteraient et gonfleraient l'exposition). Fail-safe : si une fiche
-// ne produit AUCUNE ligne, son FP n'est pas dans keepByFp → aucune suppression. Filtre par `fp`
-// seul (pas d'index composite) + garde `source === "fiche"` en mémoire → ne touche jamais les
-// lignes logistics/unitaires/manuelles. Partagé par importDelta ET le trigger Storage.
-async function applyWrites(writes) {
-  const byPath = new Map();
-  for (const w of writes) byPath.set(w.path, { ...(byPath.get(w.path) || {}), ...w.data });
-  if (byPath.size) {
-    let batch = db.batch(), n = 0;
-    for (const [path, data] of byPath) {
-      batch.set(db.doc(path), data, { merge: true }); // IDs déterministes ⇒ upsert
-      if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-    }
-    await batch.commit();
-  }
-  const keepByFp = new Map();
-  for (const [path, data] of byPath) {
-    if (path.startsWith("bcLines/") && data.source === "fiche" && data.fp) {
-      (keepByFp.get(data.fp) || keepByFp.set(data.fp, new Set()).get(data.fp)).add(path.slice("bcLines/".length));
-    }
-  }
-  for (const [fp, keep] of keepByFp) {
-    const snap = await db.collection("bcLines").where("fp", "==", fp).get();
-    const stale = snap.docs.filter((d) => d.get("source") === "fiche" && !keep.has(d.id));
-    for (let i = 0; i < stale.length; i += 400) {
-      const batch = db.batch();
-      stale.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-  }
-}
+// `applyWrites(db, writes)` (upsert idempotent + nettoyage des lignes BC de fiche orphelines) est
+// extrait dans ./lib/apply — partagé par le trigger Storage, importDelta et reingest.
 
 async function ingestHandler(event) {
   const { bucket, name } = event.data;
@@ -72,7 +42,7 @@ async function ingestHandler(event) {
   const { kinds, writes, report } = buildWrites(wb);
   logger.info("ingest", { name, kinds, ...report });
 
-  await applyWrites(writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
+  await applyWrites(db, writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
   await db.collection("imports").add({
     uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
@@ -526,12 +496,6 @@ exports.syncSalesData = onSchedule("every day 06:00", async () => {
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
 // Capacité d'IMPORT / fiabilisation (importDelta, setInvoiceFp, patchOrder) gouvernée par le module
 // « import » de la matrice opposable (requireWrite) — plus de liste de rôles figée.
-// Bornes de robustesse à l'import (anti-OOM / anti-bombe de décompression / anti-timeout).
-const MAX_SHEETS = 60;                        // onglets par classeur
-const MAX_ZIP_ENTRIES = 100;                  // classeurs par ZIP
-const MAX_ENTRY_BYTES = 50 * 1024 * 1024;     // décompressé par classeur
-const MAX_TOTAL_BYTES = 200 * 1024 * 1024;    // décompressé cumulé sur le ZIP
-
 exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const b64 = req.data?.fileB64;
@@ -542,64 +506,15 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo) — divise l'import (ex. ZIP par lots).");
   const buf = Buffer.from(b64, "base64");
 
-  // Un import peut être : un XLSX (éventuellement multi-onglets), OU un ZIP de plusieurs
-  // classeurs (import groupé de fiches affaire). On agrège écritures et rapports par fichier.
-  const kindsSet = new Set();
-  const writes = [];
-  const files = [];
-  let rowsIn = 0, rowsOk = 0, rowsSkipped = 0;
-  const processWb = (wb, name) => {
-    // Garde-fou : un classeur à des milliers d'onglets ferait autant de parses → timeout/OOM.
-    if ((wb.SheetNames && wb.SheetNames.length || 0) > MAX_SHEETS) { files.push({ file: name, error: `trop d'onglets (> ${MAX_SHEETS})` }); return; }
-    const r = buildWrites(wb);
-    if (!r.kinds.length) { files.push({ file: name, error: "aucune source reconnue" }); return; }
-    r.kinds.forEach((k) => kindsSet.add(k));
-    writes.push(...r.writes);
-    rowsIn += r.report.rowsIn || 0; rowsOk += r.report.rowsOk || 0; rowsSkipped += r.report.rowsSkipped || 0;
-    files.push({ file: name, kinds: r.kinds, rowsOk: r.report.rowsOk || 0, byKind: r.report.byKind });
-  };
-
-  if (/\.zip$/i.test(filename)) {
-    const { unzipSync } = require("fflate");
-    // Anti-BOMBE DE DÉCOMPRESSION : le plafond ~22 Mo ne borne QUE l'entrée compressée ; un ZIP peut
-    // se décompresser en plusieurs Go. Le `filter` de fflate décide AVANT décompression (via la taille
-    // déclarée `originalSize` du répertoire central) : on n'ouvre que les .xlsx, on plafonne la taille
-    // décompressée PAR classeur, le CUMUL et le NOMBRE de classeurs — les entrées au-delà ne sont pas
-    // décompressées (mémoire bornée) et l'import est refusé avec un message clair.
-    let total = 0, count = 0, truncated = false;
-    let entries;
-    try {
-      entries = unzipSync(new Uint8Array(buf), { filter: (f) => {
-        const base = (f.name.split("/").pop() || f.name);
-        if (!/\.xlsx?$/i.test(base) || f.name.startsWith("__MACOSX/") || base.startsWith("~$")) return false;
-        const sz = f.originalSize || 0;
-        if (sz > MAX_ENTRY_BYTES || count + 1 > MAX_ZIP_ENTRIES || total + sz > MAX_TOTAL_BYTES) { truncated = true; return false; }
-        count += 1; total += sz; return true;
-      } });
-    } catch (e) { throw new HttpsError("invalid-argument", "ZIP illisible"); }
-    if (truncated) throw new HttpsError("failed-precondition", `ZIP trop volumineux (bombe de décompression ?) : max ${MAX_ZIP_ENTRIES} classeurs, ${MAX_ENTRY_BYTES / 1048576} Mo/classeur, ${MAX_TOTAL_BYTES / 1048576} Mo cumulés — divise l'import.`);
-    const names = Object.keys(entries);
-    if (!names.length) throw new HttpsError("failed-precondition", "aucun classeur XLSX dans le ZIP");
-    for (const n of names) {
-      let wb;
-      try { wb = XLSX.read(Buffer.from(entries[n]), { cellDates: true }); }
-      catch (e) { files.push({ file: n, error: "classeur illisible" }); continue; }
-      // Isolation PAR FICHIER du parsing : un classeur au format inattendu qui ferait échouer un
-      // parseur ne casse plus l'import entier (les classeurs valides sont conservés).
-      try { processWb(wb, n); }
-      catch (e) { files.push({ file: n, error: "parsing impossible" }); }
-    }
-  } else {
-    let wb;
-    try { wb = XLSX.read(buf, { cellDates: true }); }
-    catch (e) { throw new HttpsError("invalid-argument", "fichier illisible (XLSX ou ZIP attendu)"); }
-    processWb(wb, filename);
-  }
-
-  const kinds = [...kindsSet];
+  // Parsing partagé (XLSX ou ZIP de classeurs, gardes anti-OOM/anti-bombe) — cf. ./lib/reingest.
+  // Une IngestError (entrée fatale) est remontée en HttpsError avec son code d'origine.
+  let parsed;
+  try { parsed = parseBuffer(buf, filename); }
+  catch (e) { throw new HttpsError(e.code || "invalid-argument", e.message || "fichier illisible"); }
+  const { kinds, writes, files, rowsIn, rowsOk, rowsSkipped } = parsed;
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
 
-  await applyWrites(writes); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
+  await applyWrites(db, writes); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
   const report = { kinds, files, rowsIn, rowsOk, rowsSkipped };
   await db.collection("imports").add({
@@ -616,6 +531,27 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   // `files` = détail PAR fichier (kinds reconnus, lignes OK, erreur éventuelle, byKind) — permet à
   // l'UI d'afficher précisément ce qui a été reconnu et la cause d'un éventuel échec par classeur.
   return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, fileCount: files.length, files };
+});
+
+// --- reingest : re-parse en masse les classeurs SOURCES déjà présents dans gs://nt360, SANS
+// re-upload. Utile après une évolution de parseur (ex. nouvel en-tête « Description du Projet »
+// reconnu) : l'upsert `merge:true` ÉCRASE les champs recalculés (désignation…) sur l'existant.
+// Direction uniquement (opération lourde : lit tout le bucket + recompute complet). Le SA runtime
+// des functions a déjà accès au bucket (indépendant du 403 constaté au DÉPLOIEMENT des Storage
+// rules). `prefix` optionnel restreint le balayage à un sous-dossier. ---
+exports.reingest = onCallG("reingest", { memoryMiB: 1024, timeoutSeconds: 540 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const prefix = req.data?.prefix ? String(req.data.prefix) : undefined;
+  const r = await reingestBucket({ db, storage: getStorage(), bucketName: IMPORTS_BUCKET, prefix });
+  await db.collection("imports").add({
+    uid: req.auth.uid, kinds: r.kinds, filename: `reingest:${prefix || "*"}`, objectKey: `${IMPORTS_BUCKET}/${prefix || ""}`,
+    mode: "reingest", rowsIn: r.rowsIn, rowsOk: r.rowsOk, rowsSkipped: r.rowsSkipped, report: r, ts: FieldValue.serverTimestamp(),
+  });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "reingest", module: "facturation", entity: "storage", entityId: prefix || "*",
+    detail: { objectsScanned: r.objectsScanned, objectsIngested: r.objectsIngested, objectsFailed: r.objectsFailed, kinds: r.kinds }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true, ...r };
 });
 
 // --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.

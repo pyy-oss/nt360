@@ -1,0 +1,47 @@
+name: Reingest storage (manual)
+
+# Ré-ingestion MANUELLE des classeurs sources déjà présents dans gs://nt360, sans re-upload.
+# À lancer après une évolution de parseur (nouvel en-tête reconnu, etc.) pour re-calculer les
+# champs dérivés (ex. désignation) sur les enregistrements existants — l'upsert `merge:true`
+# écrase les champs recalculés. Réutilise le même service account que le déploiement.
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: "Préfixe de sous-dossier à re-parser (vide = tout le bucket)"
+        required: false
+        default: ""
+
+# Un seul job de ré-ingestion à la fois (évite deux recompute concurrents).
+concurrency:
+  group: reingest
+  cancel-in-progress: false
+
+jobs:
+  reingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Write service account
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Reingest
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          node functions/scripts/reingest.js
+        env:
+          GCLOUD_PROJECT: propulse-business-87f7a
+          REINGEST_PREFIX: ${{ github.event.inputs.prefix }}

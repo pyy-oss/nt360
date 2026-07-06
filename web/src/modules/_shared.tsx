@@ -5,14 +5,14 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
-import { useCanSeeMargin } from "../lib/rbac";
+import { useCanSeeMargin, useClaims } from "../lib/rbac";
 import { relTime, ageDays } from "../lib/format";
 import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { callImportDelta, type ImportDeltaResult } from "../lib/writes";
+import { callImportDelta, callReingest, type ImportDeltaResult } from "../lib/writes";
 import type { AlertsSummary, AmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
@@ -295,6 +295,7 @@ export function ImportButton({ label = "Importer un fichier" }: { label?: string
 export function DataImportCard() {
   const { run, phase, busy, outcome } = useImport();
   const [drag, setDrag] = useState(false);
+  const isDirection = useClaims().role === "direction";
   const { rows: recent } = useCollectionData<ImportLog>("imports", [orderBy("ts", "desc"), limit(5)], "recent5");
   const last = recent[0];
 
@@ -323,6 +324,15 @@ export function DataImportCard() {
 
       {busy && phase && <ImportProgress phase={phase} />}
       {!busy && outcome && <ImportResult outcome={outcome} />}
+
+      {/* Ré-ingestion des classeurs DÉJÀ dans gs://nt360 (sans re-upload). Utile après une évolution
+          de parseur : re-calcule les champs dérivés (ex. désignation) sur l'existant. Direction. */}
+      {isDirection && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel2/40 px-3 py-2">
+          <span className="text-[12px] text-muted">Re-parser les fichiers déjà présents dans le stockage (sans re-uploader) — recalcule les champs dérivés après une évolution de format.</span>
+          <ReingestButton />
+        </div>
+      )}
 
       {/* ÉTAT durable : dernier import (journal serveur), avec l'historique récent repliable. */}
       {last && (
@@ -359,6 +369,35 @@ export function DataImportCard() {
         <p className="mt-1 text-faint">Fiches affaire en lot : plusieurs onglets d'un classeur, ou plusieurs classeurs dans un ZIP.</p>
       </details>
     </Card>
+  );
+}
+
+// Bouton de ré-ingestion (Direction) : confirme, appelle `reingest`, puis toast détaillé issu du
+// rapport serveur (objets ingérés, lignes, échecs). Ré-ingérer n'est pas destructif (upsert
+// merge), mais lance un recompute complet — d'où la confirmation et l'état occupé dédié.
+function ReingestButton() {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const onClick = async () => {
+    if (busy) return;
+    if (!window.confirm("Re-parser tous les classeurs sources de gs://nt360 ?\nÉcrase les champs recalculés (ex. désignation) sur l'existant, puis relance un recalcul complet. Aucune donnée n'est supprimée.")) return;
+    setBusy(true);
+    try {
+      const r = await callReingest();
+      const failPart = r.objectsFailed ? ` · ${r.objectsFailed} ignoré(s)` : "";
+      const kindsPart = r.kinds?.length ? ` · ${r.kinds.join(", ")}` : "";
+      toast(`Ré-ingestion : ${r.objectsIngested}/${r.objectsScanned} fichier(s) · ${r.rowsOk.toLocaleString("fr-FR")} ligne(s)${failPart}${kindsPart}`, r.objectsFailed && !r.objectsIngested ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Ré-ingestion refusée — ${detail}` : "Ré-ingestion refusée", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2.5 !py-1 text-xs font-semibold shrink-0">
+      {busy ? "Ré-ingestion…" : "Ré-ingérer depuis le stockage"}
+    </button>
   );
 }
 
