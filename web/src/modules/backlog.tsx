@@ -3,14 +3,14 @@ import { useState, useMemo, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, money, cx, useToast } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { DateField } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow } from "../types";
 
@@ -623,6 +623,29 @@ function OrderCasFixer({ row }: { row: Order }) {
   );
 }
 
+// Pousse la commande vers ClickUp (crée/met à jour la tâche assignée au PM). Ouvre la tâche créée.
+function ClickupBtn({ row }: { row: Order }) {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const onClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await pushOrderToClickup({ fp: row.fp, client: row.client, designation: row.affaire, bu: row.bu, cas: row.cas, pm: row.pm });
+      toast(`Tâche ClickUp ${r.created ? "créée" : "mise à jour"}${r.assigned ? " et assignée" : " (PM non résolu)"}`, "ok");
+      if (r.url) window.open(r.url, "_blank", "noopener");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `ClickUp refusé — ${detail}` : "ClickUp : échec", "err");
+    } finally { setBusy(false); }
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2 !py-1 text-xs" title="Créer / mettre à jour la tâche ClickUp (assignée au PM)">
+      {busy ? "…" : row.pm ? "ClickUp ↗" : "ClickUp"}
+    </button>
+  );
+}
+
 // Affectation INLINE d'un Project Manager (PMO) à une commande. Overlay persistant (survit au
 // recompute / ré-import). Auto-complétion sur les PM déjà affectés (datalist « pm-options »).
 function OrderPmFixer({ row }: { row: Order }) {
@@ -835,6 +858,7 @@ export const OrderList: FC<Props> = () => {
                 confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
                 fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />
             : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
+          ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? <ClickupBtn row={r} /> : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
         ]}
       />
     </Card>

@@ -60,6 +60,17 @@ export async function setRefList(kind: "projectManagers" | "businessUnits", list
   return res.data as { ok: boolean; kind: string; list: string[] };
 }
 
+/** Config intégration ClickUp (activation + liste cible) — admin. */
+export async function setClickupConfig(cfg: { enabled?: boolean; teamId?: string; defaultListId?: string }) {
+  const res = await httpsCallable(functions, "setClickupConfig")(cfg);
+  return res.data as { ok: boolean; config: any };
+}
+/** Pousse une commande vers ClickUp (crée/màj une tâche assignée au PM). Renvoie l'URL de la tâche. */
+export async function pushOrderToClickup(order: { fp?: string; client?: string; designation?: string | null; bu?: string; cas?: number; pm?: string | null }) {
+  const res = await httpsCallable(functions, "pushOrderToClickup", { timeout: 60_000 })({ order });
+  return res.data as { ok: boolean; taskId: string; url: string; assigned: boolean; created: boolean };
+}
+
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */
