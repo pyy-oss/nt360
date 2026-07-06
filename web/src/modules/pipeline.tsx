@@ -3,7 +3,7 @@ import { useState, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId } from "../lib/writes";
@@ -190,6 +190,9 @@ export const OppList: FC<Props> = () => {
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
   const [f, setF] = useState({ ...EMPTY_OPP });
+  // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
+  // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
+  const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
   const prefill = (o: Opportunity, patch: boolean) => setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "", patch,
@@ -213,6 +216,10 @@ export const OppList: FC<Props> = () => {
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
       : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
         : <span className="text-faint">—</span>;
+  // Buckets de statut par étape (1..5 actives, 6 gagnée, 7 perdue, 8 suspendue, 9 annulée).
+  const segOf = (s: number) => (s >= 1 && s <= 5 ? "active" : s === 6 ? "won" : s === 7 ? "lost" : s === 8 ? "susp" : s === 9 ? "cxl" : "active");
+  const segCount = (k: string) => rows.filter((o) => segOf(o.stage || 0) === k).length;
+  const shownOpps = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
   return (
     <div className="flex flex-col gap-4">
       <FilterNote dims="BU / AM / client" />
@@ -263,9 +270,20 @@ export const OppList: FC<Props> = () => {
           colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
-      <Card title={`Toutes les opportunités · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <ImportButton label="Importer (LIVE / Sales)" /> : undefined}>
+      <Card title={`Toutes les opportunités · ${shownOpps.length.toLocaleString("fr-FR")}`} actions={
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <Segmented value={seg} onChange={setSeg} ariaLabel="Filtrer par statut d'opportunité" options={[
+            { value: "all", label: "Toutes", count: rows.length },
+            { value: "active", label: "Actives", count: segCount("active") },
+            { value: "won", label: "Gagnées", count: segCount("won") },
+            { value: "lost", label: "Perdues", count: segCount("lost") },
+            { value: "susp", label: "Suspendues", count: segCount("susp") },
+            { value: "cxl", label: "Annulées", count: segCount("cxl") },
+          ]} />
+          {canImport && <ImportButton label="Importer (LIVE / Sales)" />}
+        </div>}>
         <ListView
-          rows={rows}
+          rows={shownOpps}
           colsKey="opps"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
