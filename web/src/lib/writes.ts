@@ -48,6 +48,12 @@ export async function setOrderPm(fp: string, pm: string) {
   await httpsCallable(functions, "setOrderPm")({ fp, pm });
 }
 
+/** Enregistre la table des taux de change (XOF par unité de devise) — admin. Remplace l'ensemble. */
+export async function setFxRates(rates: Record<string, number>) {
+  const res = await httpsCallable(functions, "setFxRates")({ rates });
+  return res.data as { ok: boolean; rates: Record<string, number> };
+}
+
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */

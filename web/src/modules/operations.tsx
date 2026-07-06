@@ -168,13 +168,20 @@ function CreditEditor({ name, authorized, opening, openingDate }: { name: string
 }
 
 // Import BC fournisseurs — 2 modes : Batch (Excel « Logistics / PO List ») ou Unitaire (PDF).
-const EMPTY_BC = { bcNumber: "", supplier: "", fp: "", expenseType: "Hardware", amountXof: "", status: "a_emettre", description: "", dateIn: "" };
+const EMPTY_BC = { bcNumber: "", supplier: "", fp: "", expenseType: "Hardware", currency: "XOF", amount: "", amountXof: "", status: "a_emettre", description: "", dateIn: "" };
 function BcImport() {
   const [mode, setMode] = useState<"batch" | "unitaire">("batch");
   const [f, setF] = useState(EMPTY_BC);
   const [pdf, setPdf] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const { data: fx } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
   const toast = useToast();
+  // Aperçu de conversion : devise étrangère × taux paramétré → XOF (une contre-valeur saisie prime).
+  const cur = (f.currency || "XOF").toUpperCase();
+  const rate = cur !== "XOF" ? Number((fx?.rates || {})[cur]) : 0;
+  const previewXof = f.amountXof.trim() !== "" ? Number(f.amountXof) || 0
+    : cur === "XOF" ? Number(f.amount) || 0
+    : rate > 0 ? Math.round((Number(f.amount) || 0) * rate) : 0;
   // À la sélection du PDF : extraction serveur (pdfjs) + pré-remplissage best-effort du formulaire.
   const onPdf = async (file: File | null) => {
     setPdf(file);
@@ -188,7 +195,8 @@ function BcImport() {
         supplier: x.supplier || prev.supplier,
         fp: x.fp || prev.fp,
         expenseType: x.expenseType || prev.expenseType,
-        amountXof: x.amountXof ? String(x.amountXof) : prev.amountXof,
+        currency: x.currency || prev.currency,
+        amount: x.amount ? String(x.amount) : prev.amount,
         description: x.description || prev.description,
         dateIn: x.dateIn || prev.dateIn,
       }));
@@ -217,7 +225,9 @@ function BcImport() {
             <input className="field" placeholder="Fournisseur" aria-label="Fournisseur" value={f.supplier} onChange={(e) => setF({ ...f, supplier: e.target.value })} />
             <input className="field w-40" placeholder="N° FP (optionnel)" aria-label="Numéro FP" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
             <Select className="w-40" ariaLabel="Type de dépense" value={f.expenseType} onChange={(v) => setF({ ...f, expenseType: v })} options={["Hardware", "Licence", "Software", "Support", "Service Pro", "Mixte"].map((t) => ({ value: t, label: t }))} />
-            <input className="field w-32" placeholder="Montant XOF" aria-label="Montant XOF" value={f.amountXof} onChange={(e) => setF({ ...f, amountXof: e.target.value })} />
+            <input className="field w-20 uppercase" placeholder="Devise" aria-label="Devise" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} />
+            <input className="field w-32" placeholder={cur === "XOF" ? "Montant XOF" : `Montant ${cur}`} aria-label="Montant (devise)" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+            {cur !== "XOF" && <input className="field w-32" placeholder="XOF (option)" aria-label="Contre-valeur XOF (option)" value={f.amountXof} onChange={(e) => setF({ ...f, amountXof: e.target.value })} />}
             <Select className="w-40" ariaLabel="Statut du BC" value={f.status} onChange={(v) => setF({ ...f, status: v })} options={BC_STAGES.map((s) => ({ value: s, label: bcLabel(s) }))} />
             <DateField className="w-40" ariaLabel="Date du BC" value={f.dateIn} onChange={(v) => setF({ ...f, dateIn: v })} placeholder="date BC" />
             <input className="field" placeholder="Description" aria-label="Description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
@@ -228,12 +238,19 @@ function BcImport() {
             <Busy label="Enregistrer le BC" okMsg="BC enregistré" errMsg="Enregistrement refusé" fn={async () => {
               await callAddBcLine({
                 bcNumber: f.bcNumber, supplier: f.supplier, fp: f.fp || undefined, expenseType: f.expenseType,
-                amountXof: Number(f.amountXof) || 0, amount: Number(f.amountXof) || 0, status: f.status,
-                description: f.description, dateIn: f.dateIn || undefined,
+                currency: cur, amount: Number(f.amount) || 0,
+                // Contre-valeur XOF laissée au serveur (conversion via taux) sauf override saisi.
+                amountXof: f.amountXof.trim() !== "" ? (Number(f.amountXof) || 0) : undefined,
+                status: f.status, description: f.description, dateIn: f.dateIn || undefined,
               }, pdf);
               setF(EMPTY_BC); setPdf(null);
             }} />
           </div>
+          {cur !== "XOF" && (Number(f.amount) || 0) > 0 && (
+            <div className="text-[11px]">{previewXof > 0
+              ? <span className="text-muted">Contre-valeur : <b className="text-ink">{previewXof.toLocaleString("fr-FR")} XOF</b>{f.amountXof.trim() === "" && rate > 0 ? ` (taux ${rate})` : f.amountXof.trim() !== "" ? " (saisie)" : ""}</span>
+              : <span className="text-clay">Aucun taux {cur} paramétré — saisissez la contre-valeur XOF, ou définissez le taux (Habilitations).</span>}</div>
+          )}
         </div>
       )}
     </Card>
@@ -291,7 +308,7 @@ export const BC: FC<Props> = () => {
             colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
             colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
             colText("Type", (r) => r.expenseType, (r) => r.expenseType),
-            colNum("XOF", (r) => money(r.amountXof), (r) => r.amountXof || 0),
+            colNum("XOF", (r) => <BcAmount row={r} />, (r) => r.amountXof || 0),
             colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || ""),
             colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
@@ -334,6 +351,20 @@ function BcFixer({ id, fp, amountXof, supplier }: { id: string; fp?: string; amo
         <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" errMsg="Montant invalide"
           fn={() => { const v = Number(String(amt).replace(/[^\d]/g, "")); if (!(v > 0)) throw new Error("saisir un montant XOF > 0"); return patchBcLine({ id, amountXof: v }); }} />
       </>}
+    </span>
+  );
+}
+// Montant d'une ligne BC : contre-valeur XOF, avec le montant d'ORIGINE en devise (et le taux figé)
+// pour les BC en devise étrangère. « à saisir » si devise sans conversion (jamais assimilé à du XOF).
+function BcAmount({ row }: { row: BcLine }) {
+  const foreign = !!row.currency && row.currency !== "XOF";
+  const toConvert = foreign && !((row.amountXof || 0) > 0);
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      {toConvert ? <span className="text-clay text-[12px]">à saisir</span> : money(row.amountXof)}
+      {foreign && (row.amount || 0) > 0 && (
+        <span className="text-[10.5px] text-faint">{(row.amount || 0).toLocaleString("fr-FR")} {row.currency}{row.fxRate ? ` @ ${row.fxRate}` : ""}</span>
+      )}
     </span>
   );
 }
