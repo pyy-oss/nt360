@@ -1250,6 +1250,31 @@ exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLI
   return { ok: true, ...res };
 });
 
+// clickupHealth : diagnostic de QUALITÉ de l'intégration (couverture, tâches orphelines, écarts CAF,
+// synchro). Scanne la liste une fois, croise avec les commandes + overlays, écrit summaries/clickupHealth
+// (lu par la carte de monitoring). Direction.
+exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const clickup = require("./lib/clickup");
+  const { clickupHealth } = require("./domain/clickupHealth");
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  let tasks;
+  try { tasks = await clickup.listTasks(token, listId, { includeClosed: true }); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "liste illisible"}`); }
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+  const orders = await loadCommandeRows();
+  const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
+  await db.doc("summaries/clickupHealth").set({ ...health, listId, at: FieldValue.serverTimestamp() });
+  return { ok: true, ...health };
+});
+
 // listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM
 // avec des noms EXACTS (évite les fautes de saisie qui casseraient l'assignation). Direction.
 exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {

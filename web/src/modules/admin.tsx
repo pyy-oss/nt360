@@ -5,9 +5,9 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
-import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
+import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
 const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
@@ -502,6 +502,56 @@ const CLICKUP_LISTS = [
   { id: "901215918699", label: "Guinée" },
   { id: "901216066964", label: "Sandbox (test)" },
 ];
+// Cockpit de QUALITÉ de l'intégration ClickUp : couverture, tâches orphelines, écarts CAF, synchro.
+function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }) {
+  if (!health || health.commandesTotal == null) return null;
+  const money = (n?: number) => (n ? (n / 1e6).toFixed(1) + " M" : "0");
+  const Metric = ({ label, value, tone, sub }: { label: string; value: string | number; tone?: string; sub?: string }) => (
+    <div className="rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className={cx("font-display tabnum text-lg leading-tight", tone)}>{value}</div>
+      {sub && <div className="text-[11px] text-faint">{sub}</div>}
+    </div>
+  );
+  const cov = health.coverage || 0;
+  return (
+    <div className="mt-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <Metric label="Couverture" value={`${cov}%`} tone={cov >= 90 ? "text-emerald" : cov >= 50 ? "text-gold" : "text-clay"} sub={`${health.linked}/${health.commandesTotal} liées`} />
+        <Metric label="Commandes non liées" value={health.unlinked || 0} tone={(health.unlinked || 0) > 0 ? "text-gold" : "text-emerald"} sub={`dont ${health.unlinkedMatchable || 0} rattachables`} />
+        <Metric label="Synchronisées (statut/dates)" value={health.synced || 0} sub={`sur ${health.linked} liées`} />
+        <Metric label="Tâches ClickUp" value={health.tasksTotal || 0} sub={`${health.tasksWithFp || 0} avec N° FP`} />
+        <Metric label="Tâches orphelines" value={health.orphanTasks || 0} tone={(health.orphanTasks || 0) > 0 ? "text-gold" : "text-emerald"} sub="sans commande app" />
+        <Metric label="Écarts CAF" value={health.cafGapCount || 0} tone={(health.cafGapCount || 0) > 0 ? "text-clay" : "text-emerald"} sub={`${money(health.cafGapTotal)} d'écart`} />
+      </div>
+      {(health.unlinkedSample?.length || health.orphanSample?.length) ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
+          {!!health.unlinkedSample?.length && (
+            <div>
+              <div className="text-[11px] text-muted mb-1">Commandes non liées (échantillon)</div>
+              <Table colsKey="clickup-unlinked" columns={[
+                colText("FP", (r: { fp?: string }) => r.fp || "—"),
+                colText("Client", (r: { client?: string }) => r.client || "—"),
+                colText("Tâche existante", (r: { matchable?: boolean }) => (r.matchable ? <Badge tone="gold">à rattacher</Badge> : <span className="text-faint">non</span>)),
+              ]} rows={health.unlinkedSample} />
+            </div>
+          )}
+          {!!health.orphanSample?.length && (
+            <div>
+              <div className="text-[11px] text-muted mb-1">Tâches ClickUp orphelines (échantillon)</div>
+              <Table colsKey="clickup-orphans" columns={[
+                colText("Tâche", (r: { name?: string; id?: string }) => <a href={`https://app.clickup.com/t/${r.id}`} target="_blank" rel="noopener" className="text-emerald hover:underline">{r.name || r.id}</a>),
+                colText("N° FP", (r: { fp?: string | null }) => r.fp || <span className="text-faint">aucun</span>),
+              ]} rows={health.orphanSample} />
+            </div>
+          )}
+        </div>
+      ) : null}
+      {health.at && <div className="text-[11px] text-faint mt-1">Dernier diagnostic : {new Date((health.at.seconds || 0) * 1000).toLocaleString("fr-FR")}</div>}
+    </div>
+  );
+}
+
 function ClickupCard() {
   const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -510,6 +560,8 @@ function ClickupCard() {
   const [pullBusy, setPullBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const { data: health } = useDocData<ClickupHealthSummary>("summaries/clickupHealth");
   const toast = useToast();
   const on = enabled ?? (data?.enabled !== false);
   const list = listId ?? (data?.defaultListId || "901215917683");
@@ -547,6 +599,17 @@ function ClickupCard() {
       toast(detail ? `Rattachement refusé — ${detail}` : "Rattachement : échec", "err");
     } finally { setRecBusy(false); }
   };
+  const refreshHealth = async () => {
+    if (healthBusy) return;
+    setHealthBusy(true);
+    try {
+      const r = await clickupHealth({ listId: list });
+      toast(`Diagnostic — ${r.linked}/${r.commandesTotal} liées (${r.coverage}%), ${r.orphanTasks} tâche(s) orpheline(s)`, "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Diagnostic refusé — ${detail}` : "Diagnostic : échec", "err");
+    } finally { setHealthBusy(false); }
+  };
   const bulkPush = async (force: boolean) => {
     if (bulkBusy) return;
     setBulkBusy(true);
@@ -583,7 +646,12 @@ function ClickupCard() {
         <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
           {bulkBusy ? "Push…" : "Tout resynchroniser"}
         </button>
+        <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
+          {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
+        </button>
       </div>
+      <ClickupHealthPanel health={health} />
+      {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-amber-400 mt-1">⚠️ {health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
       <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b>, les <b>dates</b> et le <b>PM assigné</b> dans les Commandes. <b>⚠️ Avant tout push en masse</b>, lancez <b>« Rattacher les tâches existantes »</b> : il relie les commandes aux tâches déjà présentes (Opp ID = N° FP) pour <b>ne pas créer de doublons</b>.</Tip>
     </Card>
   );

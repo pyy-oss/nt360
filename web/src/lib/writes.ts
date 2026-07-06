@@ -87,6 +87,11 @@ export async function reconcileClickupLinks(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "reconcileClickupLinks", { timeout: 300_000 })({ listId: opts?.listId });
   return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithFp: number };
 }
+/** Diagnostic qualité de l'intégration ClickUp (couverture, orphelines, écarts CAF…). Admin. */
+export async function clickupHealth(opts?: { listId?: string }) {
+  const res = await httpsCallable(functions, "clickupHealth", { timeout: 300_000 })({ listId: opts?.listId });
+  return res.data as { ok: boolean } & Record<string, any>;
+}
 /** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
 export async function listClickupMembers() {
   const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});

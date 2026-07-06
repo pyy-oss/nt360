@@ -50,6 +50,8 @@ service cloud.firestore {
         : id.matches('relancesCreances.*') ? 'facturation'
         : id.matches('relancesBc.*') ? 'fournisseurs'
         : id.matches('relancesJalons.*') ? 'backlog'
+        // Diagnostic qualité de l'intégration ClickUp → réservé aux habilitations (carte direction).
+        : id.matches('clickupHealth.*') ? 'habilitations'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';
