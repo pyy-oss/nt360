@@ -68,4 +68,20 @@ async function updateTask(token, taskId, payload) {
   return api(token, "PUT", `/task/${taskId}`, { ...rest, ...(assignees ? { assignees: { add: assignees } } : {}) });
 }
 
-module.exports = { api, listMembers, resolveAssignee, taskPayload, createTask, updateTask };
+/** Définitions des champs personnalisés d'une liste (id, name, type, options). */
+async function listFields(token, listId) {
+  const d = await api(token, "GET", `/list/${listId}/field`);
+  return d.fields || [];
+}
+
+/** Pose une valeur de champ personnalisé (uniforme pour tous les types). value déjà normalisée. */
+async function setField(token, taskId, fieldId, value) {
+  return api(token, "POST", `/task/${taskId}/field/${fieldId}`, { value });
+}
+
+/** Récupère une tâche (champs personnalisés inclus) — pour la synchro inverse (Lot C). */
+async function getTask(token, taskId) {
+  return api(token, "GET", `/task/${taskId}?include_subtasks=false`);
+}
+
+module.exports = { api, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask };

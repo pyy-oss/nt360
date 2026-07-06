@@ -70,10 +70,20 @@ export async function listClickupMembers() {
   const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});
   return res.data as { ok: boolean; members: { name: string; email: string }[] };
 }
-/** Pousse une commande vers ClickUp (crée/màj une tâche assignée au PM). Renvoie l'URL de la tâche. */
-export async function pushOrderToClickup(order: { fp?: string; client?: string; designation?: string | null; bu?: string; cas?: number; pm?: string | null }) {
-  const res = await httpsCallable(functions, "pushOrderToClickup", { timeout: 60_000 })({ order });
-  return res.data as { ok: boolean; taskId: string; url: string; assigned: boolean; created: boolean };
+/** Champs complémentaires du modal ClickUp (ceux que la commande ne fournit pas — ex-formulaire). */
+export type ClickupExtra = {
+  pays?: string; nature?: string; domaine?: string; secteur?: string; circuit?: string; catRecurrent?: string;
+  priority?: string; commentaire?: string;
+  dateCommande?: number; dateContractuelle?: number; dateFinPrev?: number; // epoch ms
+};
+/** Pousse une commande vers ClickUp (crée/màj une tâche assignée au PM, avec champs complémentaires
+ *  et liste cible CI/BF/GN). Renvoie l'URL de la tâche. */
+export async function pushOrderToClickup(
+  order: { fp?: string; client?: string; affaire?: string | null; designation?: string | null; bu?: string; am?: string; cas?: number; facture?: number; pm?: string | null },
+  opts?: { listId?: string; extra?: ClickupExtra },
+) {
+  const res = await httpsCallable(functions, "pushOrderToClickup", { timeout: 120_000 })({ order, listId: opts?.listId, extra: opts?.extra });
+  return res.data as { ok: boolean; taskId: string; url: string; assigned: boolean; created: boolean; fields: number };
 }
 
 /** Crée une commande (ligne P&L) DIRECTEMENT dans l'app. N° FP + CAS (> 0) requis. Refuse un FP
