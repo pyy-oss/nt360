@@ -12,7 +12,7 @@ import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
-import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow } from "../types";
+import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
@@ -69,11 +69,63 @@ export const Backlog: FC<Props> = () => {
       <Card title="Top commandes ouvertes">
         <Table columns={[colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
       </Card>
+      <ClickupDelaysCard />
       <CarryoverCard />
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
     </div>
   );
 };
+
+// Analytique délais & échéances ClickUp (summaries/clickupDelays) : retard de livraison par PM /
+// par statut + RAF échéancé par mois de date prév. de fin. N'apparaît qu'une fois la synchro inverse
+// ClickUp peuplée (bouton « Synchroniser depuis ClickUp » ou tirage quotidien).
+function ClickupDelaysCard() {
+  const { data } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
+  const byPm = data?.byPm || [], byStatus = data?.byStatus || [], rafByMonth = data?.rafByMonth || [];
+  if (!data || (!byPm.length && !byStatus.length && !rafByMonth.length)) return null;
+  return (
+    <Card title="Délais & échéances ClickUp">
+      <div className={grid4}>
+        <Kpi label="Projets en retard de livraison" value={String(data.overdueTotal || 0)} tone={(data.overdueTotal || 0) > 0 ? "clay" : "emerald"} sub="date contractuelle dépassée, non livrés" />
+        <Kpi label="Retard moyen" value={`${data.avgDaysLate || 0} j`} tone="steel" sub="sur les projets en retard" />
+      </div>
+      <div className={cols2}>
+        {byPm.length > 0 && (
+          <div>
+            <Eyebrow>Par Project Manager</Eyebrow>
+            <Table columns={[
+              colText("PM", (r: ClickupPmDelay) => r.pm),
+              colNum("Actifs", (r: ClickupPmDelay) => r.active),
+              colNum("En retard", (r: ClickupPmDelay) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
+              colNum("Retard moy.", (r: ClickupPmDelay) => (r.overdue ? `${r.avgDaysLate} j` : "—")),
+            ]} rows={byPm} />
+          </div>
+        )}
+        {rafByMonth.length > 0 && (
+          <div>
+            <Eyebrow>RAF à facturer par mois (prév. ClickUp)</Eyebrow>
+            <Table columns={[
+              colText("Mois", (r: ClickupMonthRaf) => r.month),
+              colNum("Projets", (r: ClickupMonthRaf) => r.count),
+              colNum("RAF", (r: ClickupMonthRaf) => money(r.raf)),
+            ]} rows={rafByMonth} />
+          </div>
+        )}
+      </div>
+      {byStatus.length > 0 && (
+        <div className="mt-3">
+          <Eyebrow>Par statut projet</Eyebrow>
+          <Table columns={[
+            colText("Statut", (r: ClickupStatusDist) => r.status),
+            colNum("Projets", (r: ClickupStatusDist) => r.count),
+            colNum("En retard", (r: ClickupStatusDist) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
+          ]} rows={byStatus} />
+        </div>
+      )}
+      <Tip>Alimenté par la synchro inverse ClickUp (statut + dates). Le <b>RAF échéancé</b> indique quand le backlog des projets actifs devrait se facturer, selon la <b>date prév. de fin</b> ClickUp.</Tip>
+    </Card>
+  );
+}
 
 type OpenOrder = Order & { projetable: number };
 

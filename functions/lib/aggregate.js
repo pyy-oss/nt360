@@ -294,9 +294,14 @@ async function recomputeAll(db, only) {
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
   // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
   // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
-  const { clickupSignals } = require("../domain/clickupSignals");
+  const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
   const cuSignals = clickupSignals(orders, clickupSyncMap, safeId, asOf);
   if (cuSignals.issues.length) dqSummary.issues = [...(dqSummary.issues || []), ...cuSignals.issues];
+  // Analytique délais/échéances ClickUp (par PM, par statut, RAF échéancé) → summaries/clickupDelays.
+  if (want("commandes") || want("overview") || want("dataQuality")) {
+    const delays = clickupDelays(orders, clickupSyncMap, orderPmMap, safeId, asOf);
+    w.push({ path: "summaries/clickupDelays", data: { ...delays, ...stamp } });
+  }
   if (want("alerts") || want("dataQuality")) {
     w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
     // Snapshot QUOTIDIEN de la qualité (tendance d'assainissement) : un point par jour (clé = asOf),
