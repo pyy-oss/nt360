@@ -44,9 +44,10 @@ function resolveOptionId(fieldDef, label) {
   const opts = fieldDef.type_config.options || [];
   const exact = opts.find((o) => norm(o.name) === q);
   if (exact) return exact.id;
-  // Tolérance : inclusion (ex. « Maintenance » vs « Maintenance  » ou variantes).
-  const incl = opts.find((o) => norm(o.name) && (norm(o.name).includes(q) || q.includes(norm(o.name))));
-  return incl ? incl.id : null;
+  // Tolérance d'inclusion, mais UNIQUEMENT si un seul candidat (sinon « Autres » matcherait « Autres
+  // Services Financiers » selon l'ordre → faux positif). Ambigu → on n'écrit rien.
+  const cands = opts.filter((o) => { const n = norm(o.name); return n && (n.includes(q) || q.includes(n)); });
+  return cands.length === 1 ? cands[0].id : null;
 }
 
 // Convertit une valeur logique en valeur ClickUp selon le type du champ.

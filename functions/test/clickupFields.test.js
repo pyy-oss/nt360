@@ -40,6 +40,16 @@ describe("buildFieldWrites — valeurs logiques → écritures ClickUp", () => {
     expect(w).toContainEqual({ id: "F_DOM", value: "d_agile" });
     expect(w).toContainEqual({ id: "F_SEC", value: "s_min" });
   });
+  it("inclusion AMBIGUË → aucune option écrite (pas de faux positif)", () => {
+    const def = { name: "Secteur", type: "drop_down", type_config: { options: [{ id: "s_a", name: "Autres" }, { id: "s_asf", name: "Autres Services Financiers" }] } };
+    // « Autres » est inclus dans « Autres Services Financiers » → 2 candidats par inclusion, mais match
+    // EXACT sur « Autres » doit primer et rester déterministe.
+    expect(cf.resolveOptionId(def, "Autres")).toBe("s_a"); // match EXACT prime
+    // Saisie ambiguë par inclusion (2 candidats) → null (pas de faux positif).
+    expect(cf.resolveOptionId(def, "Autres Serv")).toBe(null);
+    // Un seul candidat inclusif → résolu.
+    expect(cf.resolveOptionId({ name: "X", type: "drop_down", type_config: { options: [{ id: "a", name: "Ministères" }, { id: "b", name: "Banques" }] } }, "ministere")).toBe("a");
+  });
   it("option introuvable → champ ignoré (pas d'échec global)", () => {
     const w = cf.buildFieldWrites(fieldDefs, { bu: "INEXISTANT", caSigne: 5 });
     expect(w.find((x) => x.id === "F_BU")).toBeUndefined();

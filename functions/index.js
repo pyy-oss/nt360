@@ -1099,34 +1099,8 @@ exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeout
 // pushOrderToClickup : crée (ou met à jour, idempotent) une tâche ClickUp pour une commande, assignée
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).
-// Cœur RÉUTILISABLE du push (une commande → tâche), partagé par le push unitaire et le push en masse.
-// members + fieldDefs sont résolus UNE fois par l'appelant (évite N appels /team et /field en masse).
-// L'écriture du lien config/clickupLinks est laissée à l'appelant (batch en masse). Statut initial
-// « 0-affecte » posé UNIQUEMENT à la création (jamais réinitialisé sur une tâche existante).
-async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }) {
-  const fp = fpKey(order.fp);
-  const id = safeId(fp);
-  const existing = links[id];
-  const assignee = clickup.resolveAssignee(members, order.pm);
-  const corePayload = cf.buildCorePayload({ ...order, fp }, extra || {}, assignee);
-  if (!existing && !corePayload.status) corePayload.status = "0-affecte";
-  const fieldWrites = cf.buildFieldWrites(fieldDefs, cf.buildLogical({ ...order, fp }, extra || {}));
-  let task, created = false;
-  if (existing) {
-    // Réaffectation propre : retire les anciens assignés (≠ nouveau) sinon ils s'accumuleraient.
-    let remove = [];
-    if (assignee) {
-      try { const cur = await clickup.getTask(token, existing); remove = (cur.assignees || []).map((a) => a.id).filter((idA) => idA && idA !== assignee); }
-      catch (e) { logger.warn("ClickUp: assignés courants illisibles", { msg: e && e.message }); }
-    }
-    task = await clickup.updateTask(token, existing, corePayload, remove); task.id = existing;
-  } else { task = await clickup.createTask(token, listId, corePayload); created = true; }
-  for (const w of fieldWrites) {
-    try { await clickup.setField(token, task.id, w.id, w.value); }
-    catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
-  }
-  return { id, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, assigned: !!assignee, fields: fieldWrites.length };
-}
+// Cœur du push commande → tâche, extrait (lib/clickupPush) pour être testable.
+const { pushOrderCore } = require("./lib/clickupPush");
 
 // Index N° FP → taskId des tâches EXISTANTES (via le champ « Opp ID »). Scanne TOUTES les listes pays
 // par défaut (anti-doublon multi-pays : une tâche BF/GN ne doit pas être re-créée dans CI). Sert à la
@@ -1378,7 +1352,7 @@ exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], m
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
   try { res = await runCafSync({ force: true }); }
-  catch (e) { throw new HttpsError("internal", `CAF : ${(e && e.message) || e}`); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `CAF : ${(e && e.message) || e}`); }
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_caf_sync", module: "habilitations", entity: "config", entityId: "clickupCaf", detail: res, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
 });
@@ -1425,7 +1399,7 @@ exports.syncFromClickup = onCallG("syncFromClickup", { secrets: [CLICKUP_TOKEN],
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
   try { res = await runClickupPull(); }
-  catch (e) { throw new HttpsError("internal", `ClickUp : ${(e && e.message) || e}`); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${(e && e.message) || e}`); }
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_pull", module: "habilitations", entity: "config", entityId: "clickupSync", detail: res, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
 });
