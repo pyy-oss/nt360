@@ -189,6 +189,17 @@ function buildNews(x) {
     refs: (x.clickupOverdueRefs || []).slice(0, 8),
   });
 
+  // Retard d'ACHAT fournisseur (synchro ClickUp BC) : ETA de livraison dépassée, BC non livré ni annulé.
+  // Distinct du retard projet ci-dessus — c'est un retard côté APPROVISIONNEMENT (bon de commande).
+  const bcOverdue = num(x.bcClickupOverdue);
+  pushIf(B, bcOverdue > 0, {
+    id: "bc_achat_retard", domain: "suppliers", severity: "high", module: "operations",
+    title: `${bcOverdue} bon(s) de commande en retard de livraison`,
+    detail: "Des BC ont dépassé leur ETA (ClickUp) sans être livrés ni annulés — risque sur les délais projet.",
+    action: "Relancer les fournisseurs / distributeurs concernés (Exécution BC / ClickUp).",
+    refs: (x.bcClickupOverdueRefs || []).slice(0, 8),
+  });
+
   // — FACTURATION / CASH —
   const realiseYtd = num(trend.realiseYtd);
   const curMonth = String(x.asOf || "").slice(0, 7);
