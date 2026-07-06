@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { resolveAssignee, taskPayload, retryDelay } = require("../lib/clickup");
+const { resolveAssignee, retryDelay, updateTask } = require("../lib/clickup");
 
 describe("retryDelay — back-off des ré-essais", () => {
   it("priorité à Retry-After (secondes → ms, borné 30 s)", () => {
@@ -32,17 +32,18 @@ describe("resolveAssignee — PM (chaîne libre) → membre ClickUp", () => {
   it("vide → null", () => expect(resolveAssignee(members, "")).toBe(null));
 });
 
-describe("taskPayload — commande → tâche", () => {
-  it("nom = FP — client ; assigné inclus si résolu", () => {
-    const p = taskPayload({ fp: "FP/2026/1", client: "MTN CI", designation: "Refonte", bu: "ICT", cas: 1000000, pm: "Serge" }, 3);
-    expect(p.name).toBe("FP/2026/1 — MTN CI");
-    expect(p.assignees).toEqual([3]);
-    expect(p.description).toContain("Refonte");
-    expect(p.description).toContain("XOF");
-    expect(p.description.replace(/\s/g, "")).toContain("1000000XOF");
-  });
-  it("sans assigné → pas de champ assignees", () => {
-    const p = taskPayload({ fp: "FP/2026/2", client: "X" }, null);
-    expect(p.assignees).toBeUndefined();
+describe("updateTask — assignés au format {add, rem}", () => {
+  it("transforme assignees[] en {add} et retire les anciens (rem)", async () => {
+    const bodies = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (_url, opts) => { bodies.push(JSON.parse(opts.body)); return { ok: true, text: async () => "{}" }; };
+    try {
+      await updateTask("tok", "task1", { name: "X", assignees: [7] }, [3, 7, 9]); // 7 = nouveau (exclu de rem)
+      expect(bodies[0].assignees).toEqual({ add: [7], rem: [3, 9] });
+      expect(bodies[0].name).toBe("X");
+      bodies.length = 0;
+      await updateTask("tok", "task1", { name: "Y" }); // pas d'assigné → pas de patch assignees
+      expect(bodies[0].assignees).toBeUndefined();
+    } finally { globalThis.fetch = orig; }
   });
 });

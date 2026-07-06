@@ -4,7 +4,8 @@
 //  2) INCOHÉRENCES statut ClickUp ↔ données app : « facturé » sans CAF rattaché ; « clôturé » avec
 //     RAF non nul. Alimentent le cockpit Qualité.
 const isoDay = (ms) => (Number.isFinite(Number(ms)) && Number(ms) > 0 ? new Date(Number(ms)).toISOString().slice(0, 10) : null);
-const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
+// Insensible aux diacritiques : « 9-Clôturé » doit matcher le préfixe « 9-clotur ».
+const norm = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 
 // Statuts « actifs » (projet PAS encore livré) : préfixes 0-affecté / 1-prise en charge / 3-en cours.
 // Les autres (4-terminé, 5-facturé, 6-, 8-suivi, 9-, termine) = livré / clôturé / en suivi → pas en retard.
