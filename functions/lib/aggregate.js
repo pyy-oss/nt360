@@ -332,7 +332,7 @@ async function recomputeAll(db, only) {
     // sensibles → confidentialité opposable côté serveur (pas seulement masquage UI).
     const base = orders.map((o) => ({
       fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
-      cas: o.cas || 0, raf: o.raf || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
+      cas: o.cas || 0, raf: o.raf || 0, facture: o.facture || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
       pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
     }));
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));

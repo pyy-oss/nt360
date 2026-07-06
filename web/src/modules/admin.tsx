@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -506,9 +506,22 @@ function ClickupCard() {
   const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [listId, setListId] = useState<string | null>(null);
+  const [cafBusy, setCafBusy] = useState(false);
+  const toast = useToast();
   const on = enabled ?? (data?.enabled !== false);
   const list = listId ?? (data?.defaultListId || "901215917683");
   const save = async () => { await setClickupConfig({ enabled: on, defaultListId: list }); setEnabled(null); setListId(null); };
+  const forceCaf = async () => {
+    if (cafBusy) return;
+    setCafBusy(true);
+    try {
+      const r = await syncClickupCaf();
+      toast(`CAF synchronisé — ${r.pushed} poussé(s) / ${r.total} tâche(s)${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `CAF refusé — ${detail}` : "CAF : échec", "err");
+    } finally { setCafBusy(false); }
+  };
   return (
     <Card title="Intégration ClickUp" actions={<Busy label="Enregistrer" okMsg="Config ClickUp enregistrée" fn={save} />}>
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
@@ -518,8 +531,11 @@ function ClickupCard() {
         <label className="inline-flex items-center gap-2">Liste cible (Gestion de Projets)
           <Select ariaLabel="Liste ClickUp cible" className="!py-1" value={list} onChange={setListId} options={CLICKUP_LISTS.map((l) => ({ value: l.id, label: l.label }))} />
         </label>
+        <button type="button" className="btn-ghost !py-1.5" disabled={cafBusy} onClick={forceCaf} title="Repousser le CA Facturé de toutes les tâches liées">
+          {cafBusy ? "Synchro CAF…" : "Forcer la synchro CAF"}
+        </button>
       </div>
-      <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande (résolu par nom/e-mail). Ré-appuyer met à jour la même tâche (pas de doublon).</Tip>
+      <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (seuls les CAF modifiés sont repoussés) ; le bouton <b>« Forcer la synchro CAF »</b> repousse tout. Le <b>Backlog</b> (RAF) est une formule ClickUp (CA Signé − CA Facturé), rien à pousser.</Tip>
     </Card>
   );
 }
