@@ -3,9 +3,9 @@ import { useState, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
-import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx } from "../design/components";
+import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig } from "../types";
 
@@ -42,7 +42,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <DedupeCard />}
       {isDirection && <ClientAliasCard />}
       {isDirection && <FxRatesCard />}
-      {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
+      {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" clickupImport tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). Pour une assignation ClickUp fiable, utilisez « Importer depuis ClickUp » (noms exacts) puis retirez les non-PM. L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
       {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
       {isDirection && <ClickupCard />}
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
@@ -456,17 +456,28 @@ function FxRatesCard() {
 }
 
 // Référentiel éditable (liste simple) — Project Managers / Business Units. Remplace la liste en base.
-function RefListCard({ kind, title, placeholder, tip, upper }: { kind: "projectManagers" | "businessUnits"; title: string; placeholder: string; tip: string; upper?: boolean }) {
+function RefListCard({ kind, title, placeholder, tip, upper, clickupImport }: { kind: "projectManagers" | "businessUnits"; title: string; placeholder: string; tip: string; upper?: boolean; clickupImport?: boolean }) {
   const { data } = useDocData<{ list?: string[] }>(`config/${kind}`);
   const [draft, setDraft] = useState<string[] | null>(null);
+  const toast = useToast();
   const list = draft ?? (data?.list || []);
   const set = (i: number, v: string) => setDraft(list.map((r, j) => (j === i ? v : r)));
   const add = () => setDraft([...list, ""]);
   const del = (i: number) => setDraft(list.filter((_, j) => j !== i));
   const save = async () => { await setRefList(kind, list.map((s) => (upper ? s.trim().toUpperCase() : s.trim())).filter(Boolean)); setDraft(null); };
+  // Import ClickUp : fusionne les noms des membres ClickUp dans le brouillon (noms EXACTS → assignation
+  // fiable). L'utilisateur retire les non-PM puis Enregistre. Ne remplace rien tant qu'on n'a pas cliqué Enregistrer.
+  const importClickup = async () => {
+    const r = await listClickupMembers();
+    const names = (r.members || []).map((m) => m.name).filter(Boolean);
+    const merged = [...new Set([...list, ...names])].sort((a, b) => a.localeCompare(b));
+    setDraft(merged);
+    toast(`${names.length} membre(s) ClickUp importé(s) — retirez les non-PM puis « Enregistrer ».`, "ok");
+  };
   return (
     <Card title={title} actions={
       <div className="flex gap-2">
+        {clickupImport && <Busy variant="ghost" label="Importer depuis ClickUp" errMsg="Import ClickUp refusé" fn={importClickup} />}
         <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Ajouter</button>
         <Busy label="Enregistrer" okMsg="Référentiel enregistré" fn={save} />
       </div>}>

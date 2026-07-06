@@ -65,6 +65,11 @@ export async function setClickupConfig(cfg: { enabled?: boolean; teamId?: string
   const res = await httpsCallable(functions, "setClickupConfig")(cfg);
   return res.data as { ok: boolean; config: any };
 }
+/** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
+export async function listClickupMembers() {
+  const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});
+  return res.data as { ok: boolean; members: { name: string; email: string }[] };
+}
 /** Pousse une commande vers ClickUp (crée/màj une tâche assignée au PM). Renvoie l'URL de la tâche. */
 export async function pushOrderToClickup(order: { fp?: string; client?: string; designation?: string | null; bu?: string; cas?: number; pm?: string | null }) {
   const res = await httpsCallable(functions, "pushOrderToClickup", { timeout: 60_000 })({ order });
