@@ -152,6 +152,8 @@ async function recomputeAll(db, only) {
   // dateContractuelle, dateFinPrev } } } — statut projet + dates remontés de ClickUp, hors docs commandes
   // → SURVIT au recompute (comme l'affectation PMO). Fusionné dans les rows commandes ci-dessous.
   const clickupSyncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+  // Lien FP↔tâche ClickUp (config/clickupLinks) → expose clickupTaskId sur les rows pour le badge « lié ↗ ».
+  const clickupLinksMap = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   // Factures annulées : écartées AVANT la fusion (n'alimentent pas le facturé d'une commande).
   for (let i = invoices.length - 1; i >= 0; i--) if (cancelledInvoices.has(invoices[i].id)) invoices.splice(i, 1);
 
@@ -350,6 +352,7 @@ async function recomputeAll(db, only) {
         dateCommande: cu ? isoDay(cu.dateCommande) : null,
         dateContractuelle: cu ? isoDay(cu.dateContractuelle) : null,
         dateFinPrev: cu ? isoDay(cu.dateFinPrev) : null,
+        clickupTaskId: clickupLinksMap[safeId(o.fp)] || null,
       };
     });
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));

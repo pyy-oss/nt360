@@ -75,6 +75,12 @@ export async function syncFromClickup() {
   const res = await httpsCallable(functions, "syncFromClickup", { timeout: 300_000 })({});
   return res.data as { ok: boolean; pulled: number; failed?: number; total: number };
 }
+/** Push en masse : crée/synchronise les tâches ClickUp des commandes (force=true resynchronise aussi
+ *  les tâches déjà liées). Admin. Peut être long (timeout client possible, traitement poursuivi). */
+export async function pushAllOrdersToClickup(opts?: { force?: boolean; listId?: string }) {
+  const res = await httpsCallable(functions, "pushAllOrdersToClickup", { timeout: 540_000 })({ force: opts?.force, listId: opts?.listId });
+  return res.data as { ok: boolean; created: number; updated: number; failed: number; skipped: number; total: number };
+}
 /** Liste les membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM (admin). */
 export async function listClickupMembers() {
   const res = await httpsCallable(functions, "listClickupMembers", { timeout: 60_000 })({});

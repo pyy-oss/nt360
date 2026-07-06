@@ -949,7 +949,12 @@ export const OrderList: FC<Props> = () => {
                 confirm={`Annuler la commande ${r.fp} ? Elle sort du carnet, du CAS et du backlog (conservée pour l'historique, rétablissable). L'annulation survit à un ré-import.`}
                 fn={() => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client })} />
             : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
-          ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? <ClickupBtn row={r} /> : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
+          ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
+            <span className="inline-flex items-center gap-2">
+              <ClickupBtn row={r} />
+              {r.clickupTaskId && <a href={`https://app.clickup.com/t/${r.clickupTaskId}`} target="_blank" rel="noopener" className="text-[11px] text-emerald hover:underline" title="Ouvrir la tâche ClickUp liée">lié ↗</a>}
+            </span>
+          ) : <span className="text-[11px] text-faint">—</span>), () => 0)] : []),
         ]}
       />
     </Card>

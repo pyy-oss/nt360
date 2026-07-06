@@ -2,21 +2,41 @@
 // Manager). Les helpers PURS (résolution d'assigné, construction du payload) sont testables sans
 // réseau ; les appels HTTP sont fins et remontent une erreur claire sur statut non 2xx.
 const BASE = "https://api.clickup.com/api/v2";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function api(token, method, path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: { Authorization: token, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) {
+// Délai de back-off PUR (ms) avant un ré-essai. Priorité à l'en-tête Retry-After (secondes) renvoyé
+// par ClickUp sur un 429 ; sinon exponentiel (500 ms × 2^tentative) borné à 8 s.
+function retryDelay(attempt, retryAfterSec) {
+  const ra = Number(retryAfterSec);
+  if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 30000);
+  return Math.min(500 * Math.pow(2, attempt), 8000);
+}
+
+// Ré-essaie sur 429 (throttling) et 5xx transitoires ; les erreurs 4xx (hors 429) échouent tout de suite.
+async function api(token, method, path, body, opts) {
+  const maxRetries = opts && Number.isFinite(opts.retries) ? opts.retries : 3;
+  let attempt = 0;
+  for (;;) {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.ok) {
+      const text = await res.text();
+      try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+      await sleep(retryDelay(attempt, res.headers && res.headers.get("retry-after")));
+      attempt++;
+      continue;
+    }
+    const text = await res.text();
+    let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     const err = new Error(`ClickUp ${res.status}: ${(data && (data.err || data.error)) || text || res.statusText}`);
     err.status = res.status;
     throw err;
   }
-  return data;
 }
 
 /** Membres du workspace (team) → [{id, username, email}] (aplati depuis /team). */
@@ -84,4 +104,4 @@ async function getTask(token, taskId) {
   return api(token, "GET", `/task/${taskId}?include_subtasks=false`);
 }
 
-module.exports = { api, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask };
+module.exports = { api, retryDelay, listMembers, resolveAssignee, taskPayload, createTask, updateTask, listFields, setField, getTask };
