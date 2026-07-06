@@ -1,8 +1,9 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3 } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download } from "lucide-react";
 import { fmt, pct } from "./tokens";
+import { buildCsv, downloadCsv } from "../lib/exportCsv";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -154,6 +155,22 @@ function ColumnsMenu({ columns, hidden, onToggle }: { columns: Col[]; hidden: Se
   );
 }
 
+// Export CSV des colonnes VISIBLES + lignes courantes (après filtre/tri). Exporte « ce qu'on voit ».
+function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: string }) {
+  if (!rows.length) return null;
+  const onClick = () => {
+    const visible = cols.filter((c) => (c.header || "").trim() !== "");
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    downloadCsv(`nt360-${name || "export"}-${stamp}.csv`, buildCsv(visible, rows));
+  };
+  return (
+    <button type="button" onClick={onClick} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5" title="Exporter les lignes affichées en CSV (Excel)">
+      <Download size={14} aria-hidden="true" />CSV
+    </button>
+  );
+}
+
 export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string }) {
   const { cols, hidden, toggle: toggleCol, enabled } = useColVisibility(colsKey, columns);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
@@ -171,7 +188,10 @@ export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows:
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   return (
     <div className="flex flex-col gap-2">
-      {enabled && <div className="flex justify-end"><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></div>}
+      <div className="flex justify-end gap-2">
+        <ExportBtn cols={cols} rows={sorted} name={colsKey} />
+        {enabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
+      </div>
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-sm rtable">
           <thead>
@@ -296,6 +316,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
+          <ExportBtn cols={cols} rows={filtered} name={colsKey} />
           {colsEnabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
         </div>
       </div>
