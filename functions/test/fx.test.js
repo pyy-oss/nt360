@@ -22,6 +22,12 @@ describe("toXof — conversion devise → XOF (BC)", () => {
     expect(r.amountXof).toBe(0);
     expect(r.fxSource).toBe("a_saisir");
   });
+  it("EUR sans taux paramétré → repli sur la parité fixe légale (655,957)", () => {
+    const r = toXof("EUR", 100, "", {}); // aucun taux configuré
+    expect(r.amountXof).toBe(65596);
+    expect(r.fxRate).toBe(655.957);
+    expect(r.fxSource).toBe("peg");
+  });
   it("normalisation de la casse de la devise", () => {
     expect(toXof("eur", 10, "", rates).amountXof).toBe(6560); // 10 × 655.957 = 6559.57 → 6560
   });

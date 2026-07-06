@@ -176,9 +176,11 @@ function BcImport() {
   const [analyzing, setAnalyzing] = useState(false);
   const { data: fx } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
   const toast = useToast();
-  // Aperçu de conversion : devise étrangère × taux paramétré → XOF (une contre-valeur saisie prime).
+  // Aperçu de conversion : devise étrangère × taux (paramétré, sinon parité fixe légale) → XOF ;
+  // une contre-valeur saisie prime. FIXED_PEG doit rester aligné sur functions/lib/fx.js.
+  const FIXED_PEG: Record<string, number> = { EUR: 655.957, XAF: 1 };
   const cur = (f.currency || "XOF").toUpperCase();
-  const rate = cur !== "XOF" ? Number((fx?.rates || {})[cur]) : 0;
+  const rate = cur !== "XOF" ? (Number((fx?.rates || {})[cur]) || FIXED_PEG[cur] || 0) : 0;
   const previewXof = f.amountXof.trim() !== "" ? Number(f.amountXof) || 0
     : cur === "XOF" ? Number(f.amount) || 0
     : rate > 0 ? Math.round((Number(f.amount) || 0) * rate) : 0;
