@@ -42,24 +42,37 @@ export const PnlProjet: FC<Props> = () => {
   // Lignes BC indexées par N° FP → détail des coûts (type / fournisseur) masquable sous chaque affaire.
   const bcByFp = new Map<string, BcLine[]>();
   for (const b of bc) { const k = b.fp || ""; if (!k) continue; (bcByFp.get(k) || bcByFp.set(k, []).get(k)!).push(b); }
-  // Panneau déplié : ventilation des coûts de l'affaire par type de dépense et par fournisseur.
+  // Panneau déplié : actions (mise à jour / suppression, si droit) puis ventilation des coûts de
+  // l'affaire par type de dépense et par fournisseur (lignes BC de même N° FP).
   const affaireDetail = (r: ProjectSheet) => {
     const lines = (r.fp && bcByFp.get(r.fp)) || [];
-    if (!lines.length) return <div className="text-xs text-muted py-1">Aucune ligne BC rattachée à cette affaire.</div>;
     const total = lines.reduce((s, b) => s + (b.amountXof || 0), 0);
     return (
-      <div className="flex flex-col gap-3">
-        <div className="text-[11px] text-faint">{lines.length} ligne{lines.length > 1 ? "s" : ""} BC · coût total {money(total)}</div>
-        <div className={cols2}>
-          <div>
-            <div className="text-xs font-semibold text-muted mb-1.5">Coût par type</div>
-            <HBars rows={sumBy(lines, (b) => b.expenseType, (b) => b.amountXof || 0)} colorFn={() => T.steel} />
+      <div className="flex flex-col gap-4">
+        {canEditFiche && (
+          <div className="rounded-lg bg-ink/[.03] border border-line/60 px-3 py-2.5 flex flex-col gap-2">
+            <div className="text-xs font-semibold text-muted">Mettre à jour / supprimer</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <FicheFixer row={r} />
+              {r.id && <DangerBtn label="Supprimer la fiche" confirm={`Supprimer la fiche affaire ${r.fp || r.id} (et sa marge) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("projectSheets", r.id!)} />}
+            </div>
           </div>
-          <div>
-            <div className="text-xs font-semibold text-muted mb-1.5">Coût par fournisseur (top 10)</div>
-            <HBars rows={sumBy(lines, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} />
+        )}
+        {lines.length ? (
+          <div className="flex flex-col gap-3">
+            <div className="text-[11px] text-faint">{lines.length} ligne{lines.length > 1 ? "s" : ""} BC · coût total {money(total)}</div>
+            <div className={cols2}>
+              <div>
+                <div className="text-xs font-semibold text-muted mb-1.5">Coût par type</div>
+                <HBars rows={sumBy(lines, (b) => b.expenseType, (b) => b.amountXof || 0)} colorFn={() => T.steel} />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-muted mb-1.5">Coût par fournisseur (top 10)</div>
+                <HBars rows={sumBy(lines, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} />
+              </div>
+            </div>
           </div>
-        </div>
+        ) : <div className="text-xs text-muted">Aucune ligne BC rattachée à cette affaire.</div>}
       </div>
     );
   };
@@ -93,12 +106,10 @@ export const PnlProjet: FC<Props> = () => {
               colNum("Marge", (r: ProjectSheet) => money(r.margin), (r: ProjectSheet) => r.margin || 0),
               colNum("%MB", (r: ProjectSheet) => <Badge tone={((r.marginPct || 0) < MARGIN.LOW ? "clay" : (r.marginPct || 0) < MARGIN.OK ? "gold" : "emerald") as any}>{pct(r.marginPct)}</Badge>, (r: ProjectSheet) => r.marginPct || 0),
             ] : []),
-            ...(canEditFiche ? [colText("Corriger", (r: ProjectSheet) => <FicheFixer row={r} />, () => 0)] : []),
-            ...(canEditFiche ? [colText("Assainir", (r: ProjectSheet) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la fiche affaire ${r.fp || r.id} (et sa marge) ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("projectSheets", r.id!)} /> : null), () => 0)] : []),
           ]}
         />
       </Card>
-      <Tip>Marge issue des fiches affaire. <b>Déplie une affaire</b> (chevron) pour voir la ventilation de ses coûts par type de dépense et par fournisseur, à partir des lignes BC portant le même N° FP.</Tip>
+      <Tip>Marge issue des fiches affaire. <b>Déplie une affaire</b> (chevron) pour {canEditFiche ? <><b>mettre à jour</b> (prix de vente / revient) ou <b>supprimer</b> la fiche, et </> : ""}voir la ventilation de ses coûts par type de dépense et par fournisseur (lignes BC de même N° FP).</Tip>
     </div>
   );
 };
@@ -106,15 +117,24 @@ export const PnlProjet: FC<Props> = () => {
 // Correction inline d'une fiche affaire : prix de vente et/ou de revient (marge recalculée
 // côté serveur). Comble « fiche sans prix de vente ». Donnée de marge → droit « rentabilité ».
 function FicheFixer({ row }: { row: ProjectSheet }) {
-  const [sale, setSale] = useState("");
-  const [cost, setCost] = useState("");
-  const changed = sale.trim() !== "" || cost.trim() !== "";
+  // Pré-rempli avec les valeurs courantes : l'utilisateur édite à partir du réel. On ne pousse que les
+  // champs RÉELLEMENT modifiés (la marge est recalculée côté serveur).
+  const asStr = (v?: number | null) => (v == null ? "" : String(Math.round(v)));
+  const [sale, setSale] = useState(asStr(row.saleTotal));
+  const [cost, setCost] = useState(asStr(row.costTotal));
   const num = (s: string) => Number(String(s).replace(/[^\d.-]/g, ""));
+  const saleChanged = sale.trim() !== "" && num(sale) !== Math.round(row.saleTotal || 0);
+  const costChanged = cost.trim() !== "" && num(cost) !== Math.round(row.costTotal || 0);
+  const changed = saleChanged || costChanged;
   return (
-    <span className="inline-flex gap-1 items-center flex-wrap">
-      <input className="field w-24 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de vente ${row.fp}`} placeholder="Vente" value={sale} onChange={(e) => setSale(e.target.value)} />
-      <input className="field w-24 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de revient ${row.fp}`} placeholder="Revient" value={cost} onChange={(e) => setCost(e.target.value)} />
-      {changed && row.fp && <Busy variant="ghost" label="MàJ" okMsg="Fiche mise à jour" fn={() => patchProjectSheet({ fp: row.fp!, saleTotal: sale.trim() !== "" ? num(sale) : undefined, costTotal: cost.trim() !== "" ? num(cost) : undefined })} />}
+    <span className="inline-flex gap-2 items-center flex-wrap">
+      <label className="inline-flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-faint">Vente
+        <input className="field w-28 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de vente ${row.fp}`} placeholder="Vente" value={sale} onChange={(e) => setSale(e.target.value)} />
+      </label>
+      <label className="inline-flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-faint">Revient
+        <input className="field w-28 !py-1 text-xs" inputMode="decimal" aria-label={`Prix de revient ${row.fp}`} placeholder="Revient" value={cost} onChange={(e) => setCost(e.target.value)} />
+      </label>
+      {changed && row.fp && <Busy variant="ghost" label="Mettre à jour" okMsg="Fiche mise à jour" fn={() => patchProjectSheet({ fp: row.fp!, saleTotal: saleChanged ? num(sale) : undefined, costTotal: costChanged ? num(cost) : undefined })} />}
     </span>
   );
 }
