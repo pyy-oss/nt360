@@ -8,4 +8,10 @@ const IMPORTS_BUCKET = process.env.IMPORTS_BUCKET || "nt360";
 // distincte de "(default)" pour isoler données ET règles). Override émulateur possible.
 const FIRESTORE_DB = process.env.FIRESTORE_DATABASE || "nt360";
 
-module.exports = { IMPORTS_BUCKET, FIRESTORE_DB };
+// Bucket des SAUVEGARDES Firestore planifiées (F8). Idéalement un bucket DÉDIÉ (rétention/lifecycle
+// propres, isolé du bucket d'imports scanné/ré-ingéré → pas de blast-radius partagé). Par défaut = bucket
+// d'imports (comportement historique, non bloquant) ; ops pointe BACKUP_BUCKET vers p.ex. « nt360-backups »
+// UNE FOIS ce bucket + sa règle de rétention provisionnés (sinon l'export échoue sur un bucket inexistant).
+const BACKUP_BUCKET = process.env.BACKUP_BUCKET || IMPORTS_BUCKET;
+
+module.exports = { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET };

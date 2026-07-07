@@ -32,10 +32,11 @@ jobs:
       # Env runtime des Cloud Functions : l'enforcement App Check est piloté par la VARIABLE de dépôt
       # APPCHECK_ENFORCE (Settings → Variables). Ne PAS mettre à true tant que la clé reCAPTCHA n'est
       # pas déployée au client, sinon TOUS les callables seraient rejetés. IMPORTS_BUCKET rappelé ici
-      # (défaut « nt360 » aussi codé en dur).
+      # (défaut « nt360 » aussi codé en dur). BACKUP_BUCKET (variable de dépôt, optionnelle) isole les
+      # sauvegardes Firestore ; vide = même bucket que les imports (repli du code sur IMPORTS_BUCKET).
       - name: Configurer l'env des functions
         run: |
-          printf 'IMPORTS_BUCKET=nt360\nAPPCHECK_ENFORCE=%s\n' "${{ vars.APPCHECK_ENFORCE }}" > functions/.env
+          printf 'IMPORTS_BUCKET=nt360\nAPPCHECK_ENFORCE=%s\nBACKUP_BUCKET=%s\n' "${{ vars.APPCHECK_ENFORCE }}" "${{ vars.BACKUP_BUCKET }}" > functions/.env
 
       - name: Write service account
         run: |

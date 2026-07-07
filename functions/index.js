@@ -10,7 +10,7 @@ const { getAuth } = require("firebase-admin/auth");
 const XLSX = require("xlsx");
 
 const { getApp } = require("firebase-admin/app");
-const { IMPORTS_BUCKET, FIRESTORE_DB } = require("./lib/config");
+const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
 const { applyWrites } = require("./lib/apply");
 const { parseBuffer, reingestBucket } = require("./lib/reingest");
@@ -2221,31 +2221,38 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   return { ok: true, written: writes.length };
 });
 
-// --- F8 : export Firestore managé planifié → gs://nt360/backups/ (sauvegarde) ---
-exports.scheduledFirestoreExport = onSchedule("every sunday 03:00", async () => {
+// --- F8 : export Firestore managé planifié → bucket de sauvegarde DÉDIÉ (BACKUP_BUCKET) ---
+// On ATTEND la complétion de l'opération longue (LRO) et on ne trace « ok » qu'à la RÉUSSITE réelle :
+// avant, seul le LANCEMENT était journalisé → un export qui démarrait puis échouait en aval passait pour
+// réussi. timeoutSeconds élevé pour laisser la LRO se terminer ; si l'export dépasse ce délai, la fonction
+// est tuée AVANT le log « ok » → l'absence de trace récente est précisément le signal recherché.
+exports.scheduledFirestoreExport = onSchedule({ schedule: "every sunday 03:00", timeoutSeconds: 540, memoryMiB: 256 }, async () => {
+  const startedAtMs = Date.now();
+  const ts = new Date().toISOString().slice(0, 10);
+  const uri = `gs://${BACKUP_BUCKET}/backups/${ts}`;
+  const dedicated = BACKUP_BUCKET !== IMPORTS_BUCKET; // vrai une fois le bucket de sauvegarde dédié configuré
   try {
     const firestore = require("@google-cloud/firestore");
     const client = new firestore.v1.FirestoreAdminClient();
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";
-    const ts = new Date().toISOString().slice(0, 10);
     const name = client.databasePath(projectId, FIRESTORE_DB);
     const [op] = await client.exportDocuments({
       name,
-      outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,
+      outputUriPrefix: uri,
       collectionIds: [], // toutes les collections
     });
-    const uri = `gs://${IMPORTS_BUCKET}/backups/${ts}`;
-    logger.info("scheduledFirestoreExport lancé", { op: op.name, uri });
-    // Trace de SUCCÈS queryable (comme le chemin d'erreur) : sans elle, seul l'échec laissait une
-    // trace → une sauvegarde qui ne tourne plus était indétectable. Un dernier opsLog
-    // 'scheduledFirestoreExport' ok manquant ou périmé (> 8 j) est désormais un signal exploitable.
-    // NB : on trace le LANCEMENT de l'opération longue (op.name) ; le suivi de complétion de la LRO
-    // et l'isolation dans un bucket de sauvegarde dédié restent des évolutions ops distinctes.
-    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "ok", op: op.name, detail: { uri } });
-    return { ok: true, op: op.name };
+    logger.info("scheduledFirestoreExport lancé", { op: op.name, uri, dedicated });
+    // Suivi de COMPLÉTION : op.promise() résout à la fin réelle de l'export (ou rejette en cas d'échec aval).
+    const [response] = await op.promise();
+    logger.info("scheduledFirestoreExport terminé", { op: op.name, outputUriPrefix: response?.outputUriPrefix || uri });
+    // Trace de SUCCÈS queryable APRÈS complétion. Un dernier opsLog 'scheduledFirestoreExport' ok manquant
+    // ou périmé (> 8 j) reste un signal exploitable ; `dedicated:false` signale que le bucket dédié n'est
+    // pas encore branché (ops : créer nt360-backups + rétention, puis pointer BACKUP_BUCKET dessus).
+    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "ok", op: op.name, ms: Date.now() - startedAtMs, detail: { uri: response?.outputUriPrefix || uri, dedicated } });
+    return { ok: true, op: op.name, uri: response?.outputUriPrefix || uri };
   } catch (e) {
-    logger.error("scheduledFirestoreExport a échoué", { message: e && e.message, stack: e && e.stack });
-    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "error", error: (e && e.message) || String(e) });
+    logger.error("scheduledFirestoreExport a échoué", { message: e && e.message, stack: e && e.stack, uri });
+    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "error", ms: Date.now() - startedAtMs, detail: { uri, dedicated }, error: (e && e.message) || String(e) });
     throw e;
   }
 });
