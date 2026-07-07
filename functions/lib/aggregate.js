@@ -19,6 +19,7 @@ const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
 const { oppFunnel } = require("../domain/oppFunnel");
 const { dataQuality } = require("../domain/dataQuality");
+const { isAgedLost } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
@@ -129,7 +130,7 @@ async function recomputeCore(db, only) {
   coerceNums(pnlOrders, ["cas", "raf", "mb", "facture", "costTotal", "marginPct", "yearPo"]);
   for (const o of pnlOrders) if (Array.isArray(o.suppliers)) for (const s of o.suppliers) { if (s && s.amount != null && (typeof s.amount !== "number" || !Number.isFinite(s.amount))) s.amount = num(s.amount); }
   coerceNums(invoices, ["amountHt"]);
-  coerceNums(oppsRaw, ["amount", "probability", "weighted", "stage"]);
+  coerceNums(oppsRaw, ["amount", "probability", "weighted", "stage", "ageDays"]);
   coerceNums(bcLines, ["amountXof", "amount"]);
   coerceNums(sheetsBase, ["cas", "raf", "costTotal", "saleTotal", "margin", "marginPct"]);
   coerceNums(sheetsMargin, ["costTotal", "saleTotal", "margin", "marginPct"]);
@@ -215,8 +216,12 @@ async function recomputeCore(db, only) {
   // (sans clôture 7/9) est marquée `stale:true` NON-DESTRUCTIVEMENT à l'import (lib/apply.js). On
   // l'EXCLUT ici des agrégats pipeline actifs (pondéré, funnel, conversion, commandes) — elle reste en
   // base, ré-activable par un import ultérieur. Réversible : aucune donnée supprimée.
-  const oppsActive = oppsDedup.filter((o) => o.stale !== true);
+  // Auto-perte par ÂGE (règle source LIVE : Âge ≥ 366 j ET IdC ≤ 90 % ⇒ perdue) : une opp ACTIVE mais
+  // périmée est exclue du pipeline actif (comme la source) — calcul pur, non écrit (le ré-import corrige
+  // à la source si l'âge/IdC évoluent). Signalée en Qualité (opps_agees).
+  const oppsActive = oppsDedup.filter((o) => o.stale !== true && !isAgedLost(o));
   const staleOpps = oppsDedup.filter((o) => o.stale === true); // fantômes (I2) : signalés en Qualité, hors agrégats
+  const agedOpps = oppsDedup.filter((o) => o.stale !== true && isAgedLost(o)); // périmées par âge (règle source)
   // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
   // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
   // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
@@ -381,7 +386,7 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/alertsPipeline", data: { items: bucket.pipeline, ...meta } });
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps);
+  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps, agedOpps);
   // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
   // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
   const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
