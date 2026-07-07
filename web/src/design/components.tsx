@@ -198,10 +198,11 @@ function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: stri
   );
 }
 
-export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string }) {
+export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string; pageSize?: number }) {
   const { cols, hidden, toggle: toggleCol, enabled } = useColVisibility(colsKey, columns);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const [open, setOpen] = useState<Set<number>>(() => new Set());
+  const [page, setPage] = useState(0);
   const { primary, detail } = splitCols(cols);
   const hasDetail = detail.length > 0;
   const sorted = useMemo(() => {
@@ -212,6 +213,15 @@ export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows:
       return va < vb ? -1 * sort.dir : va > vb ? 1 * sort.dir : 0;
     });
   }, [rows, sort, primary]);
+  // Pagination des longues listes : au-delà de `pageSize` lignes on ne rend qu'une fenêtre + un pager.
+  // Les listes courtes (< pageSize) restent inchangées (aucun pager). `pageSize={0}` désactive.
+  const total = sorted.length;
+  const paged = pageSize > 0 && total > pageSize;
+  const pageCount = paged ? Math.ceil(total / pageSize) : 1;
+  const safePage = Math.min(page, pageCount - 1);
+  // Le tri ou un changement du nombre de lignes (filtre) ramène à la première page.
+  useEffect(() => { setPage(0); }, [sort, total, pageSize]);
+  const pageRows = paged ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted;
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   const toggleRow = (i: number) => setOpen((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
@@ -239,7 +249,7 @@ export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows:
             </tr>
           </thead>
           <tbody>
-            {sorted.map(({ r, i: ri }) => {
+            {pageRows.map(({ r, i: ri }) => {
               const isOpen = open.has(ri);
               return (
                 <Fragment key={ri}>
@@ -268,6 +278,22 @@ export function Table({ columns, rows, empty, colsKey }: { columns: Col[]; rows:
           </tbody>
         </table>
       </div>
+      {paged && (
+        <div className="flex items-center justify-between gap-2 text-xs text-muted">
+          <span className="tabnum">{safePage * pageSize + 1}–{Math.min(safePage * pageSize + pageSize, total)} sur {total}</span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={safePage <= 0}
+              className="btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none" aria-label="Page précédente">
+              <ChevronLeft size={14} aria-hidden="true" />Préc.
+            </button>
+            <span className="tabnum px-1" aria-live="polite">{safePage + 1} / {pageCount}</span>
+            <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1}
+              className="btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none" aria-label="Page suivante">
+              Suiv.<ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
