@@ -12,10 +12,13 @@ export function nodeToText(node: any): string {
   return "";
 }
 
-// Échappe une cellule CSV (RFC 4180, séparateur « ; ») : double les guillemets et entoure la valeur
-// si elle contient un séparateur, un guillemet ou un saut de ligne.
+// Échappe une cellule CSV (RFC 4180, séparateur « ; ») : double les guillemets et entoure la valeur si
+// elle contient un séparateur, un guillemet ou un saut de ligne. NEUTRALISE aussi l'injection de FORMULE
+// (Excel/Sheets) : une chaîne commençant par = + - @ ou une tabulation/retour chariot est préfixée d'une
+// apostrophe — sinon un libellé importé/ClickUp du type =HYPERLINK(...) s'exécuterait à l'ouverture. Cf. audit.
 export function csvCell(v: string | number | null | undefined): string {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s; // désamorce la formule
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

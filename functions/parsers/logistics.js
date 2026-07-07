@@ -4,6 +4,7 @@
 const XLSX = require("xlsx");
 const { fpKey, num, cleanName, noAcc } = require("../lib/ids");
 const { headerKeys, val, toISO, hashId } = require("../lib/sheets");
+const { toXof } = require("../lib/fx");
 
 // Choisit la feuille de suivi des PO (sinon la 1re).
 function pickSheet(wb) {
@@ -45,6 +46,11 @@ function parseLogistics(wb) {
     // Ligne exploitable : au moins un n° de BC OU un fournisseur OU un montant.
     if (!poNumber && !supplier && !amountXof && !amount) continue;
 
+    // Devise (alias « currency »/« devise ») + contre-valeur XOF robuste (toXof) : le montant XOF saisi
+    // prime, sinon conversion via taux (peg EUR en repli), sinon 0 marqué « à saisir » (jamais silencieux).
+    const currency = String(val(r, keys, "currency", "devise") || "").trim() || "XOF";
+    const conv = toXof(currency, amount, amountXof, undefined);
+
     const fp = fpKey(val(r, keys, "opp id", "n° fp", "n fp", "fp"));
     const statusRaw = String(val(r, keys, "statut", "status") || "").trim();
     const description = String(val(r, keys, "description") || "").trim();
@@ -64,9 +70,15 @@ function parseLogistics(wb) {
       country: String(val(r, keys, "pays") || "").trim(),
       expenseType: String(val(r, keys, "nature", "type") || "").trim(),
       description,
-      currency: String(val(r, keys, "currency", "devise") || "").trim() || "XOF",
+      currency,
       amount,
-      amountXof: amountXof || (String(val(r, keys, "currency") || "").toUpperCase().includes("XOF") ? amount : 0),
+      // Contre-valeur XOF : montant XOF saisi prioritaire, sinon conversion via taux (parité EUR fixe en
+      // repli), sinon 0 EXPLICITEMENT marqué « à saisir » (fxSource) → visible en qualité de données. Cf.
+      // audit P0-B : ne JAMAIS laisser un BC en devise étrangère silencieusement à 0 (dette/décaissement
+      // effacés). L'alias « devise » est désormais respecté (variable `currency` calculée ci-dessus).
+      amountXof: conv.amountXof,
+      fxRate: conv.fxRate,
+      fxSource: conv.fxSource,
       statusRaw,
       status: mapBcStatus(statusRaw),
       dateIn: toISO(val(r, keys, "date in")),

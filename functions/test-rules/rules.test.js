@@ -119,11 +119,14 @@ describe("Lignes BC : seul le statut est modifiable", () => {
 });
 
 describe("Lignes de crédit fournisseurs", () => {
-  it("achats écrit une ligne de crédit", async () => {
-    await assertSucceeds(setDoc(doc(as("achats"), "creditLines/S2"), { authorized: 500, outstanding: 0 }));
+  it("écriture SDK DIRECTE interdite (même pour achats) → passe par le callable upsertCreditLine audité", async () => {
+    await assertFails(setDoc(doc(as("achats"), "creditLines/S2"), { authorized: 500, outstanding: 0 }));
   });
   it("commercial (fournisseurs=none) ne peut PAS écrire", async () => {
     await assertFails(setDoc(doc(as("commercial"), "creditLines/S3"), { authorized: 1 }));
+  });
+  it("achats LIT toujours les lignes de crédit", async () => {
+    await assertSucceeds(getDoc(doc(as("achats"), "creditLines/S1")));
   });
 });
 

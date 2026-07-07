@@ -637,12 +637,17 @@ exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSe
   if (!id) throw new HttpsError("invalid-argument", "identifiant requis");
   const cancelled = d.cancelled !== false; // défaut = annuler
   const ref = db.doc(spec.doc);
-  const cur = (await ref.get()).data() || {};
-  const list = (Array.isArray(cur.items) ? cur.items : []).filter((e) => e && e.id !== id);
-  if (cancelled) {
-    list.push({ id, label: String(d.label || "").slice(0, 120), client: String(d.client || "").slice(0, 120), uid: req.auth.uid, ts: Date.now() });
-  }
-  await ref.set({ items: list.slice(0, 5000), updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  // ATOMIQUE (runTransaction) : le read-modify-write de la liste d'annulations doit être sérialisé —
+  // deux annulations concurrentes en lecture-puis-écriture non transactionnelle en perdraient une (la
+  // 2e écriture écrase la 1re), réinjectant une commande annulée dans TOUS les agrégats. Cf. audit P0-A.
+  await db.runTransaction(async (tx) => {
+    const cur = (await tx.get(ref)).data() || {};
+    const list = (Array.isArray(cur.items) ? cur.items : []).filter((e) => e && e.id !== id);
+    if (cancelled) {
+      list.push({ id, label: String(d.label || "").slice(0, 120), client: String(d.client || "").slice(0, 120), uid: req.auth.uid, ts: Date.now() });
+    }
+    tx.set(ref, { items: list.slice(0, 5000), updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module: spec.module,
     entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),

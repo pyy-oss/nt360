@@ -10,7 +10,9 @@ const SEV_RANK = { high: 0, medium: 1, low: 2 };
 function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
   bcLines = bcLines || []; sheets = sheets || [];
-  const surfacPct = (thr && thr.surfacturationPct) || ALERT_DEFAULTS.surfacturationPct; // seuil de surfacturation (même défaut que les alertes)
+  // Number.isFinite → un seuil configuré à 0 (valide) n'est PAS écrasé par le défaut (le `||` le ferait,
+  // en contradiction avec alerts.js). Cf. audit P2.
+  const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
 
   const billed = {};
   for (const i of invoices) if (i.fp) billed[i.fp] = (billed[i.fp] || 0) + (i.amountHt || 0);
