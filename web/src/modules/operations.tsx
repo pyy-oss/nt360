@@ -453,7 +453,8 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
       </Card>
       <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
         <Table columns={[
-          colText(kind === "clients" ? "Client" : "BU", (r) => <EntityLink kind={kind} value={r.key} />, (r) => r.key),
+          // « Autres (N) » (longue traîne agrégée, cf. audit intégral A2) : non cliquable (pas une entité réelle).
+          colText(kind === "clients" ? "Client" : "BU", (r) => (r.isOther ? <span className="text-faint italic">{r.key}</span> : <EntityLink kind={kind} value={r.key} />), (r) => r.key),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
           colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
           // Marges masquées pour les rôles sans accès « Rentabilité ».

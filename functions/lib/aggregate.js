@@ -345,11 +345,15 @@ async function recomputeCore(db, only) {
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory), construit
   // à partir de MAINTENANT (la source n'a pas d'historique). Lu uniquement sur want("pipeline").
-  // Lecture BORNÉE de oppHistory (append-only, non purgé) : on ne relit que les 5000 transitions les plus
-  // récentes → coût de recompute borné dans le temps (cf. audit). Suffit largement au funnel courant.
+  // Lecture BORNÉE de oppHistory (append-only, non purgé) : on ne relit que les N transitions les plus
+  // récentes → coût de recompute borné dans le temps. Au-delà de N, le funnel devient une FENÊTRE
+  // GLISSANTE (les plus anciennes sortent) — on l'expose HONNÊTEMENT via `truncated`/`windowSize` pour
+  // que l'UI ne le présente plus comme « cumulatif » quand la borne est atteinte (cf. audit intégral A1).
   if (want("pipeline")) {
-    const histSnap = await db.collection("oppHistory").orderBy("at", "desc").limit(5000).get();
-    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(histSnap.docs.map((d) => d.data())), ...stamp } });
+    const OPP_HISTORY_WINDOW = 5000;
+    const histSnap = await db.collection("oppHistory").orderBy("at", "desc").limit(OPP_HISTORY_WINDOW).get();
+    const truncated = histSnap.size >= OPP_HISTORY_WINDOW; // borne atteinte → funnel = fenêtre glissante
+    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(histSnap.docs.map((d) => d.data())), truncated, windowSize: histSnap.size, ...stamp } });
   }
   if (want("alerts")) {
     // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte

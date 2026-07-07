@@ -115,10 +115,19 @@ function byEntity(orders, invoices, keyFn) {
     const a = get(keyFn(i) || "AUTRE");
     a.facture += i.amountHt || 0;
   }
-  return Object.values(m)
+  const all = Object.values(m)
     .map((a) => ({ ...a, pmb: a.cas > 0 ? a.mb / a.cas : 0 }))
-    .sort((x, y) => y.cas - x.cas)
-    .slice(0, 100);
+    .sort((x, y) => y.cas - x.cas);
+  const CAP = 100;
+  if (all.length <= CAP) return all;
+  // Au-delà du plafond d'affichage : la longue traîne est AGRÉGÉE dans une ligne « Autres (N) » plutôt
+  // que abandonnée silencieusement (cf. audit intégral A2 : sinon sommes front sous-évaluées + entités
+  // disparues sans trace). `isOther` → le front la rend non cliquable (ce n'est pas une entité réelle).
+  const rest = all.slice(CAP);
+  const other = rest.reduce((s, a) => { s.cas += a.cas; s.facture += a.facture; s.backlog += a.backlog; s.mb += a.mb; return s; },
+    { key: `Autres (${rest.length})`, cas: 0, facture: 0, backlog: 0, mb: 0, isOther: true });
+  other.pmb = other.cas > 0 ? other.mb / other.cas : 0;
+  return [...all.slice(0, CAP), other];
 }
 
 module.exports = { facturation, rentabilite, byEntity, topN };

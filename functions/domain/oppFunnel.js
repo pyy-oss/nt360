@@ -1,8 +1,10 @@
 // Funnel de conversion commercial à partir de l'HISTORIQUE des transitions d'étape (oppHistory).
 // La source Sales_DATA n'a ni date de création ni historique → un vrai taux de conversion étape→étape
 // n'est PAS dérivable rétroactivement. On journalise donc chaque changement d'étape (patch/board) dans
-// oppHistory et on en dérive ici, à partir de MAINTENANT, un funnel réel (cumulatif dans le temps).
-// Fonction PURE (testable).
+// oppHistory et on en dérive ici, à partir de MAINTENANT, un funnel réel. Il est cumulatif TANT QUE
+// l'historique tient dans la fenêtre de lecture bornée de l'agrégat ; au-delà, c'est une fenêtre
+// glissante sur les transitions les plus récentes — l'agrégat le signale via `truncated` (cf. audit
+// intégral A1), à charge de l'UI de le présenter honnêtement. Fonction PURE (testable).
 //
 // @param {Array<{from?:number,to?:number,amount?:number,at?:any}>} history
 // @returns {{transitions:{from:number,to:number,count:number,amount:number}[], won:number, lost:number,

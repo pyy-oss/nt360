@@ -97,6 +97,7 @@ export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
 export interface OppFunnelSummary {
   transitions?: { from: number; to: number; count: number; amount: number }[];
   won?: number; lost?: number; advanced?: number; regressed?: number; winRate?: number; total?: number;
+  truncated?: boolean; windowSize?: number; // fenêtre glissante si la borne de lecture est atteinte (A1)
 }
 export type PmRow = { pm: string; count: number; cas: number; raf: number };
 export interface PmsSummary { count?: number; rows?: PmRow[] }
@@ -145,7 +146,7 @@ export interface CashflowSummary {
   // Engagement (BC non facturés) : sortie potentielle, hors position nette de base (règle SOA).
   decaissementEngaged?: number; decaissementEngagedCount?: number; decaissementEngagedBeyond?: number;
 }
-export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number };
+export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number; isOther?: boolean };
 
 export interface SuppliersSummary {
   totalExpo?: number; openTotal?: number; encoursTotal?: number; engagementTotal?: number; soldeTotal?: number;
