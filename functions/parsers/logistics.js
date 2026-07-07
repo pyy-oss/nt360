@@ -54,15 +54,23 @@ function parseLogistics(wb) {
     const fp = fpKey(val(r, keys, "opp id", "n° fp", "n fp", "fp"));
     const statusRaw = String(val(r, keys, "statut", "status") || "").trim();
     const description = String(val(r, keys, "description") || "").trim();
-    // ID = clé métier + INDEX D'OCCURRENCE parmi les lignes identiques (comme salesData). Deux lignes
-    // distinctes d'un même BC (même fournisseur/description) restent séparées (seq 0,1…), tandis
-    // qu'un RÉ-IMPORT (même corrigé sur le montant) réattribue le même seq → même ID → idempotent
-    // (pas d'orphelin qui gonflerait l'exposition). Le montant N'ENTRE PAS dans l'ID.
-    const mkey = [fp, poNumber, supplier, description].join("|");
+    // ID = clé métier PHYSIQUE + INDEX D'OCCURRENCE parmi les lignes identiques (comme salesData).
+    // Deux lignes distinctes d'un même BC (même fournisseur/description) restent séparées (seq 0,1…),
+    // et un RÉ-IMPORT réattribue le même seq → même ID → idempotent (pas d'orphelin qui gonflerait
+    // l'exposition). Le montant N'ENTRE PAS dans l'ID (une correction de montant reste idempotente).
+    //
+    // Le N° FP (opp id) est un ATTRIBUT MUTABLE (corrigeable) : dès qu'on a un n° de PO — identité
+    // forte, un PO fournisseur appartient à UNE seule affaire — le FP N'ENTRE PAS dans l'id. Ainsi une
+    // CORRECTION du FP réattribue le MÊME id → la ligne est mise à jour EN PLACE (le champ `fp` change),
+    // au lieu de créer un orphelin sous l'ancien FP que le sweep (indexé par fp, cf. lib/apply.js) ne
+    // balaierait jamais → double-compte permanent de l'exposition fournisseur (cf. audit intégral I1).
+    // Sans n° de PO (identité faible), on conserve le FP dans l'id pour discriminer les lignes.
+    const idParts = poNumber ? [poNumber, supplier, description] : [fp, poNumber, supplier, description];
+    const mkey = idParts.join("|");
     const seq = dupSeq.get(mkey) || 0;
     dupSeq.set(mkey, seq + 1);
     const doc = {
-      _id: "bc_" + hashId(fp, poNumber, supplier, description, seq),
+      _id: "bc_" + hashId(...idParts, seq),
       fp,
       bcNumber: poNumber,
       supplier,

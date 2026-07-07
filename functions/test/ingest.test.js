@@ -67,7 +67,9 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
     ];
     const { kinds, writes } = buildWrites(wbAoa("Fiche", aoa));
     expect(kinds).toEqual(["fiche"]);
-    expect(writes.map((w) => w.path)).toEqual(["projectSheets/FP_2026_9", "projectSheetsMargin/FP_2026_9", "bcLines/FP_2026_9_0"]);
+    // id de ligne BC = clé métier hachée (plus positionnel `_0`) — cf. audit intégral I3.
+    expect(writes.map((w) => w.path.replace(/_h[a-z0-9]+$/, "_h#"))).toEqual(
+      ["projectSheets/FP_2026_9", "projectSheetsMargin/FP_2026_9", "bcLines/FP_2026_9_h#"]);
     // marge isolée dans projectSheetsMargin ; le doc de base ne porte plus coût/vente/marge
     const base = writes.find((w) => w.path === "projectSheets/FP_2026_9").data;
     expect(base.saleTotal).toBeUndefined();
@@ -86,9 +88,9 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
     const { kinds, writes, report } = buildWrites(b);
     expect(kinds).toEqual(["fiche"]);
     expect(report.byKind.fiche.fiches).toBe(2);
-    expect(writes.map((w) => w.path)).toEqual([
-      "projectSheets/FP_2026_9", "projectSheetsMargin/FP_2026_9", "bcLines/FP_2026_9_0",
-      "projectSheets/FP_2026_10", "projectSheetsMargin/FP_2026_10", "bcLines/FP_2026_10_0",
+    expect(writes.map((w) => w.path.replace(/_h[a-z0-9]+$/, "_h#"))).toEqual([
+      "projectSheets/FP_2026_9", "projectSheetsMargin/FP_2026_9", "bcLines/FP_2026_9_h#",
+      "projectSheets/FP_2026_10", "projectSheetsMargin/FP_2026_10", "bcLines/FP_2026_10_h#",
     ]);
   });
   it("classeur multi-feuilles (P&L + LIVE + Facturation DF) → toutes les sources", () => {

@@ -3,7 +3,7 @@
 // (SheetJS tolère les `sqref` mal formés, contrairement à openpyxl). §18.4.
 const XLSX = require("xlsx");
 const { fpKey, num, noAcc } = require("../lib/ids");
-const { safeId } = require("../lib/sheets");
+const { safeId, hashId } = require("../lib/sheets");
 
 // Une feuille est une fiche affaire si elle porte le marqueur CELLULAIRE distinctif « N° DE FP »
 // (≠ colonne « N° FP » d'un P&L/DF), OU le couple « prix de revient » + « prix de vente » propre
@@ -78,6 +78,7 @@ function parseFicheSheet(ws) {
 
   // Table BC : en-tête = ligne contenant "fournisseur" ; données jusqu'à "TOTAL" (colonne B). §18.4
   const bc = [];
+  const dupSeq = new Map(); // clé métier de ligne → occurrences (préserve les lignes identiques distinctes)
   let hr = -1;
   const col = {};
   aoa.forEach((row, ri) => {
@@ -106,20 +107,33 @@ function parseFicheSheet(ws) {
       if (typeof b === "string" && noAcc(b).includes("total")) break;
       const frn = cF >= 0 ? String(row[cF] || "").trim() : "";
       const xof = cX >= 0 ? num(row[cX]) : 0;
-      if ((frn && frn !== "0") || xof > 0)
+      if ((frn && frn !== "0") || xof > 0) {
+        const supplier = frn.toUpperCase();
+        const bcNumber = cB >= 0 ? String(row[cB] || "").trim() : "";
+        const description = cD >= 0 ? String(row[cD] || "").trim() : "";
+        // ID par CLÉ MÉTIER (fournisseur/n° BC/description) + occurrence, PAS par position de ligne :
+        // deux onglets partageant le MÊME FP produisaient sinon des ids positionnels IDENTIQUES
+        // (`sid_0, sid_1…`) qui s'écrasaient en aval (applyWrites fusionne par chemin) → perte
+        // silencieuse des lignes du 1er onglet (cf. audit intégral I3). Désormais : lignes identiques
+        // en double → même id → fusionnées (pas de double-compte) ; lignes distinctes → ids distincts
+        // → toutes conservées. Le seq d'occurrence sépare deux lignes réellement identiques du même FP.
+        const mkey = [supplier, bcNumber, description].join("|");
+        const seq = dupSeq.get(mkey) || 0;
+        dupSeq.set(mkey, seq + 1);
         bc.push({
-          _id: `${sid}_${bc.length}`,
+          _id: `${sid}_${hashId(supplier, bcNumber, description, seq)}`,
           fp,
           lineIndex: bc.length,
-          bcNumber: cB >= 0 ? String(row[cB] || "").trim() : "",
-          description: cD >= 0 ? String(row[cD] || "").trim() : "",
-          supplier: frn.toUpperCase(),
+          bcNumber,
+          description,
+          supplier,
           expenseType: cT >= 0 ? String(row[cT] || "").trim() : "",
           currency: "XOF",
           amountXof: xof,
           status: "a_emettre",
           source: "fiche", // permet le nettoyage des lignes orphelines au ré-import
         });
+      }
     }
 
   return { sheet, bcLines: bc };
