@@ -48,6 +48,15 @@ function findMarkedComment(comments, marker) {
   return (comments || []).find((c) => String((c && c.comment_text) || "").startsWith(m)) || null;
 }
 
+/** Dernier commentaire HUMAIN (≠ notre synthèse marquée) d'une tâche → { by, text, at } pour remonter la
+ *  note ops dans l'app (bidirectionnel fin). `comments` du plus récent au plus ancien. PUR. */
+function latestHumanComment(comments, marker) {
+  const m = marker || MARKER;
+  const c = (comments || []).find((x) => { const t = String((x && x.comment_text) || ""); return t.trim() && !t.startsWith(m); });
+  if (!c) return null;
+  return { by: (c.user && (c.user.username || c.user.email)) || null, text: String(c.comment_text || "").trim().slice(0, 280), at: c.date != null ? String(c.date) : null };
+}
+
 // --- Jalons → sous-tâches (clé stable = index `Jalon i`) ---
 /** Sous-tâches attendues à partir des jalons. Nom déterministe `Jalon i · <label> · <date> — <montant> XOF`.
  *  Chaque entrée porte sa clé (`Jalon i`), son échéance (ms) et son montant. PUR. */
@@ -115,7 +124,7 @@ function findBcChecklist(checklists, name) {
 
 module.exports = {
   MARKER, RISK_TAG, MS_PREFIX, BC_CHECKLIST,
-  buildSyncComment, needsRiskTag, findMarkedComment,
+  buildSyncComment, needsRiskTag, findMarkedComment, latestHumanComment,
   buildMilestoneSubtasks, subtaskKey, planMilestoneSubtasks,
   buildBcChecklistItems, findBcChecklist,
 };

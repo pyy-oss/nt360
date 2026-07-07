@@ -1,8 +1,28 @@
 import { describe, it, expect } from "vitest";
 const {
-  MARKER, RISK_TAG, BC_CHECKLIST, buildSyncComment, needsRiskTag, findMarkedComment,
+  MARKER, RISK_TAG, BC_CHECKLIST, buildSyncComment, needsRiskTag, findMarkedComment, latestHumanComment,
   buildMilestoneSubtasks, subtaskKey, planMilestoneSubtasks, buildBcChecklistItems, findBcChecklist,
 } = require("../lib/clickupEnrich");
+
+describe("latestHumanComment — note ops (≠ synthèse) remontée à l'app", () => {
+  it("prend le commentaire HUMAIN le plus récent, ignore notre synthèse marquée", () => {
+    const comments = [
+      { comment_text: MARKER + " (synthèse)", user: { username: "bot" }, date: "300" },
+      { comment_text: "Colis bloqué en douane", user: { username: "Awa" }, date: "250" },
+      { comment_text: "ancienne note", user: { username: "Koffi" }, date: "100" },
+    ];
+    const r = latestHumanComment(comments, MARKER);
+    expect(r.by).toBe("Awa");
+    expect(r.text).toBe("Colis bloqué en douane");
+    expect(r.at).toBe("250");
+  });
+  it("aucun commentaire humain → null ; tronque à 280 caractères", () => {
+    expect(latestHumanComment([{ comment_text: MARKER + " x" }], MARKER)).toBe(null);
+    const long = latestHumanComment([{ comment_text: "a".repeat(400), user: {}, date: "1" }], MARKER);
+    expect(long.text.length).toBe(280);
+    expect(long.by).toBe(null);
+  });
+});
 
 describe("buildSyncComment — synthèse marquée idempotente (jalons/BC en pointeurs)", () => {
   it("commence par le marqueur et résume CA/RAF + %", () => {

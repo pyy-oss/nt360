@@ -41,7 +41,19 @@ des bons de commande) vers Neurone360, sans attendre le tirage quotidien (`sched
 ## Événements souscrits
 
 `taskStatusUpdated`, `taskUpdated` (inclut les champs personnalisés), `taskDeleted`, `taskMoved`,
-`taskCreated`. Une suppression de tâche liée retire le lien et l'overlay correspondants.
+`taskCreated`, `taskCommentPosted`. Une suppression de tâche liée retire le lien et l'overlay
+correspondants.
+
+Sur **`taskCommentPosted`**, la **dernière note humaine** (≠ notre commentaire de synthèse) est remontée
+en overlay (`lastComment { by, text, at }`) et affichée sur la ligne Commande (détail « Note ClickUp ») —
+communication ops → finance en temps réel. *(Après l'ajout d'un événement, ré-enregistrer le webhook.)*
+
+## Cockpit ClickUp
+
+Onglet **Cockpit ClickUp** (groupe *Cockpit*) : vue de pilotage **lecture seule** consolidant couverture
+des commandes, tâches orphelines, écart CAF, BC liés/en retard, retards de livraison par PM et par statut,
+échéancier RAF, et l'état de l'intégration (active / temps réel). Chaque carte n'apparaît que si le rôle a
+le droit de lire le summary correspondant (mêmes modules que les règles Firestore).
 
 ---
 

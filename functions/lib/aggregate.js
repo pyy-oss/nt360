@@ -396,6 +396,7 @@ async function recomputeAll(db, only) {
         clickupBlocked: cu ? !!cu.blocked : false,
         clickupProgress: cu && cu.progress != null ? cu.progress : null,
         clickupTimeSpentH: cu && cu.timeSpentMs ? Math.round(Number(cu.timeSpentMs) / 360000) / 10 : null,
+        clickupLastComment: cu && cu.lastComment ? cu.lastComment : null, // dernière note ops ClickUp (webhook)
       };
     });
     const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));

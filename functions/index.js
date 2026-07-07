@@ -1689,6 +1689,7 @@ async function applyClickupTaskEvent(token, taskId, event) {
   const clickup = require("./lib/clickup");
   const cf = require("./lib/clickupFields");
   const bc = require("./lib/clickupBc");
+  const enrich = require("./lib/clickupEnrich");
   const { planTaskEvent } = require("./lib/clickupWebhook");
   const [linksDoc, bcLinksDoc] = await Promise.all([db.doc("config/clickupLinks").get(), db.doc("config/clickupBcLinks").get()]);
   const links = (linksDoc.data() || {}).map || {};
@@ -1696,10 +1697,16 @@ async function applyClickupTaskEvent(token, taskId, event) {
   // Routage PUR (testé) : commande / BC / ignoré + suppression. Le wrapper applique ensuite les I/O.
   const plan = planTaskEvent(links, bcLinks, taskId, event);
   const { recomputeAll } = require("./lib/aggregate");
+  const isComment = event === "taskCommentPosted";
+  // Note ops ClickUp → app (bidirectionnel fin) : sur un commentaire, on remonte le dernier commentaire
+  // HUMAIN (≠ notre synthèse) en overlay { lastComment: {by,text,at} }. Deep-merge → préserve statut/dates.
+  const lastComment = async () => { try { return enrich.latestHumanComment(await clickup.listComments(token, taskId), enrich.MARKER); } catch (e) { logger.warn("webhook: commentaires illisibles", { msg: e && e.message }); return null; } };
   if (plan.kind === "commande") {
     if (plan.deleted) {
       await db.doc("config/clickupLinks").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
       await db.doc("config/clickupSync").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
+    } else if (isComment) {
+      await db.doc("config/clickupSync").set({ map: { [plan.key]: { lastComment: await lastComment() } } }, { merge: true });
     } else {
       const task = await clickup.getTask(token, taskId);
       const sync = { ...cf.readTaskSync(task), taskId };
@@ -1715,6 +1722,8 @@ async function applyClickupTaskEvent(token, taskId, event) {
     if (plan.deleted) {
       await db.doc("config/clickupBcLinks").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
       await db.doc("config/clickupBcSync").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
+    } else if (isComment) {
+      await db.doc("config/clickupBcSync").set({ map: { [plan.key]: { lastComment: await lastComment() } } }, { merge: true });
     } else {
       const task = await clickup.getTask(token, taskId);
       await db.doc("config/clickupBcSync").set({ map: { [plan.key]: { ...bc.readBcSync(task), taskId } } }, { merge: true });

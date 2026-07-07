@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -41,6 +41,7 @@ const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
 const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
+const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -70,6 +71,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "cleanup", key: "import", label: "Assainissement", icon: Eraser, Component: Cleanup },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
   { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
+  { id: "clickupcockpit", key: "overview", label: "Cockpit ClickUp", icon: Radar, Component: ClickupCockpit },
 ];
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.

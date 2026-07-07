@@ -101,6 +101,19 @@ const PARCOURS: Parcours[] = [
       { text: <>Ajuster la <b>matrice de droits</b> (opposable, appliquée côté serveur).</>, go: "habilitations" },
     ],
   },
+  {
+    title: "Synchroniser avec ClickUp (projets & achats)",
+    who: "Direction",
+    need: (c) => canWrite(c, "habilitations"),
+    steps: [
+      { text: <>Dans <b>Habilitations → Intégration ClickUp</b> : garder l'intégration <b>active</b> et choisir la liste cible.</>, go: "habilitations" },
+      { text: <><b>Rattacher les tâches existantes</b> (Opp ID = N° FP) AVANT tout push en masse, pour éviter les doublons.</>, go: "habilitations" },
+      { text: <>Depuis <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée/met à jour une tâche assignée au PM ; le CA facturé est entretenu automatiquement.</>, go: "orderlist" },
+      { text: <>Côté BC : <b>Rattacher</b> → <b>Créer les BC non liés</b> → au besoin <b>Importer les BC saisis dans ClickUp</b> (statut « émis », sans impact solde).</>, go: "habilitations" },
+      { text: <>Activer le <b>temps réel</b> (webhooks) pour refléter ClickUp en secondes, puis <b>« Enrichir les tâches »</b> (synthèse + jalons en sous-tâches + BC en checklist).</>, go: "habilitations" },
+      { text: <>Suivre l'ensemble (couverture, retards, échéancier) dans le <b>Cockpit ClickUp</b>.</>, go: "clickupcockpit" },
+    ],
+  },
 ];
 
 const GLOSSARY: { term: string; def: string }[] = [
