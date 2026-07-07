@@ -5,7 +5,7 @@ const crypto = require("crypto");
 
 // Événements souscrits : statut, mise à jour (inclut les champs personnalisés), suppression, déplacement.
 // Un seul webhook workspace suffit — le handler discrimine commande vs BC par index inverse du task_id.
-const WEBHOOK_EVENTS = ["taskStatusUpdated", "taskUpdated", "taskDeleted", "taskMoved", "taskCreated"];
+const WEBHOOK_EVENTS = ["taskStatusUpdated", "taskUpdated", "taskDeleted", "taskMoved", "taskCreated", "taskCommentPosted"];
 
 /** Vérifie la signature HMAC-SHA256 (hex) du corps BRUT avec le secret du webhook. Comparaison à temps
  *  constant. rawBody : Buffer|string reçu tel quel (NON reparsé). Renvoie false si secret/signature absents. */

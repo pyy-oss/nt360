@@ -1011,6 +1011,9 @@ export const OrderList: FC<Props> = () => {
           det(colText("Priorité CU", (r) => (r.clickupPriority ? <Badge tone={/urgent/i.test(r.clickupPriority) ? "clay" : "steel"}>{r.clickupPriority}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupPriority || "")),
           det(colText("Blocage", (r) => (r.clickupBlocked ? <Badge tone="clay">bloqué</Badge> : <span className="text-faint">—</span>), (r) => (r.clickupBlocked ? 1 : 0))),
           det(colNum("Temps CU", (r) => (r.clickupTimeSpentH != null ? `${r.clickupTimeSpentH} h` : "—"), (r) => (r.clickupTimeSpentH ?? 0))),
+          det(colText("Note ClickUp", (r) => (r.clickupLastComment?.text
+            ? <span className="text-[12px]" title={r.clickupLastComment.text}>💬 {r.clickupLastComment.by ? <b>{r.clickupLastComment.by} : </b> : null}{r.clickupLastComment.text.slice(0, 80)}{r.clickupLastComment.text.length > 80 ? "…" : ""}</span>
+            : <span className="text-faint">—</span>), (r) => (r.clickupLastComment?.text ? 1 : 0))),
           ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
             <span className="inline-flex items-center gap-2">
               <ClickupBtn row={r} />

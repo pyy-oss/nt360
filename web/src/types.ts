@@ -101,6 +101,13 @@ export type ClickupPmDelay = { pm: string; active: number; overdue: number; avgD
 export type ClickupStatusDist = { status: string; count: number; overdue: number };
 export type ClickupMonthRaf = { month: string; raf: number; count: number };
 export interface ClickupDelaysSummary { overdueTotal?: number; avgDaysLate?: number; byPm?: ClickupPmDelay[]; byStatus?: ClickupStatusDist[]; rafByMonth?: ClickupMonthRaf[] }
+// Suivi BC ⇄ ClickUp (summaries/clickupBc) : couverture + retards d'avancement achat.
+export interface ClickupBcSummary {
+  totalBc?: number; linkedCount?: number; overdueCount?: number;
+  byStatus?: Record<string, number>;
+  overdue?: { bcNumber: string; supplier: string; status: string | null; eta: string | null }[];
+  overdueRefs?: string[]; at?: any;
+}
 // Diagnostic qualité de l'intégration ClickUp (summaries/clickupHealth).
 export interface ClickupHealthSummary {
   commandesTotal?: number; linked?: number; unlinked?: number; unlinkedMatchable?: number; synced?: number;
@@ -176,7 +183,9 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
   // Synchro inverse ClickUp (overlay config/clickupSync) : statut projet + dates (ISO yyyy-mm-dd).
   clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null;
   // Enrichissements ClickUp → app (Lot 4) : priorité, blocage, avancement checklists (%), temps passé (h).
-  clickupPriority?: string | null; clickupBlocked?: boolean; clickupProgress?: number | null; clickupTimeSpentH?: number | null };
+  clickupPriority?: string | null; clickupBlocked?: boolean; clickupProgress?: number | null; clickupTimeSpentH?: number | null;
+  // Dernière note ops remontée de ClickUp (webhook taskCommentPosted).
+  clickupLastComment?: { by?: string | null; text?: string; at?: string | null } | null };
 // Méta des commandes matérialisées. Les lignes sont désormais dans les chunks commandesRows/{i}
 // (rows conservé optionnel pour lire un ancien agrégat pré-chunking en transition).
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }
