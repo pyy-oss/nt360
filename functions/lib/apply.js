@@ -46,31 +46,10 @@ async function applyWrites(db, writes) {
       await batch.commit();
     }
   }
-  await markStaleOpportunities(db, byPath);
-}
-
-// I2 (audit intégral) — marquage NON-DESTRUCTIF des opportunités fantômes. Un import 'salesData' est un
-// SNAPSHOT complet du pipeline LIVE : une opp source=='salesData' ABSENTE de l'import a été retirée de
-// LIVE sans clôture (étape 7/9) → sinon elle reste indéfiniment au pipeline pondéré/funnel (dérive).
-// On la marque `stale:true` (JAMAIS supprimée : réversible — un import ultérieur qui la ré-inclut la
-// ré-active via `stale:false`), et l'agrégat l'exclut des vues actives (cf. lib/aggregate.js). Les opps
-// SAISIES manuellement (source 'saisie') ne sont JAMAIS touchées. Gardé sur la présence d'AU MOINS une
-// opp 'salesData' dans le lot (preuve qu'une feuille LIVE — snapshot complet — était présente).
-async function markStaleOpportunities(db, byPath) {
-  const importedSalesIds = new Set();
-  for (const [path, data] of byPath) {
-    if (path.startsWith("opportunities/") && data.source === "salesData") importedSalesIds.add(path.slice("opportunities/".length));
-  }
-  if (!importedSalesIds.size) return; // pas de snapshot LIVE dans ce lot → on ne touche à rien (fail-safe)
-  const snap = await db.collection("opportunities").where("source", "==", "salesData").get();
-  let batch = db.batch(), n = 0;
-  for (const d of snap.docs) {
-    const shouldStale = !importedSalesIds.has(d.id);
-    if ((d.get("stale") === true) === shouldStale) continue; // déjà dans le bon état
-    batch.set(d.ref, { stale: shouldStale }, { merge: true });
-    if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
-  }
-  if (n % 400 !== 0) await batch.commit();
+  // NB : le marquage des opportunités FANTÔMES (I2) N'est PAS fait ici. `applyWrites` sert le chemin
+  // DELTA/partiel (importDelta, ré-ingestion) qui ne connaît PAS l'ensemble complet du pipeline — y
+  // balayer les absents mass-staliserait le pipeline sur un simple fichier de correction (cf.
+  // vérification). Le marquage vit dans lib/sync.js (applySalesSync), seul chemin snapshot LIVE complet.
 }
 
 module.exports = { applyWrites };

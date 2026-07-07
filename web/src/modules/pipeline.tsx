@@ -222,6 +222,7 @@ const amMatch = (a: string, b: string) => {
 // ⇒ perdue). Utilisé pour exclure les opps périmées des vues pipeline, en cohérence avec les agrégats
 // (qui les excluent aussi). Âge inconnu → jamais exclue. Garder les deux implémentations synchronisées.
 const isAgedLost = (o: Opportunity): boolean => {
+  if ((o.source || "") !== "salesData") return false; // MIROIR EXACT du back : ne vise QUE la source LIVE
   const stage = Number(o.stage) || 0;
   if (stage < 1 || stage > 5) return false;
   const age = Number(o.ageDays);

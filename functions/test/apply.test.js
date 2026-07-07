@@ -90,34 +90,18 @@ describe("applyWrites — balayage anti-orphelins par (source, fp)", () => {
   });
 });
 
-describe("applyWrites — marquage NON-DESTRUCTIF des opportunités fantômes (audit intégral I2)", () => {
+describe("applyWrites — chemin DELTA/partiel : ne mass-stalise JAMAIS les opportunités (cf. vérification)", () => {
   const opp = (id, data) => ({ path: `opportunities/${id}`, data });
-  it("opp salesData ABSENTE d'un import LIVE → marquée stale (JAMAIS supprimée)", async () => {
+  it("un import DELTA d'1 opp salesData ne touche PAS les autres opps en base (pas de snapshot)", async () => {
+    // Régression : un fichier de CORRECTION partiel via importDelta → applyWrites ne doit rien staliser.
     const db = fakeDb({
       "opportunities/o1": { source: "salesData", fp: "FP/1", stage: 3 },
-      "opportunities/o2": { source: "salesData", fp: "FP/2", stage: 4 }, // retirée de LIVE
+      "opportunities/o2": { source: "salesData", fp: "FP/2", stage: 4 }, // absente du delta — NON marquée
+      "opportunities/o3": { source: "salesData", fp: "FP/3", stage: 5 }, // absente du delta — NON marquée
     });
-    await applyWrites(db, [opp("o1", { source: "salesData", fp: "FP/1", stage: 3 })]);
-    expect(db.store.has("opportunities/o2")).toBe(true);        // jamais supprimée
-    expect(db.store.get("opportunities/o2").stale).toBe(true);  // fantôme marqué
-    expect(db.store.get("opportunities/o1").stale).toBeFalsy(); // présente → active
-  });
-  it("opp fantôme qui RÉAPPARAÎT dans un import → ré-activée (stale:false) — réversible", async () => {
-    const db = fakeDb({ "opportunities/o2": { source: "salesData", fp: "FP/2", stage: 4, stale: true } });
-    await applyWrites(db, [opp("o2", { source: "salesData", fp: "FP/2", stage: 4 })]);
-    expect(db.store.get("opportunities/o2").stale).toBe(false);
-  });
-  it("les opps SAISIES (source 'saisie') ne sont JAMAIS marquées", async () => {
-    const db = fakeDb({
-      "opportunities/m1": { source: "saisie", fp: "FP/9", stage: 2 },
-      "opportunities/o1": { source: "salesData", fp: "FP/1", stage: 3 },
-    });
-    await applyWrites(db, [opp("o1", { source: "salesData", fp: "FP/1", stage: 3 })]);
-    expect(db.store.get("opportunities/m1").stale).toBeUndefined();
-  });
-  it("fail-safe : un import SANS opp salesData ne marque RIEN (pas de snapshot LIVE)", async () => {
-    const db = fakeDb({ "opportunities/o1": { source: "salesData", fp: "FP/1", stage: 3 } });
-    await applyWrites(db, [w("x", { fp: "FP/1", source: "fiche" })]);
-    expect(db.store.get("opportunities/o1").stale).toBeUndefined();
+    await applyWrites(db, [opp("o1", { source: "salesData", fp: "FP/1", stage: 3, amount: 999 })]);
+    expect(db.store.get("opportunities/o2").stale).toBeUndefined(); // intacte
+    expect(db.store.get("opportunities/o3").stale).toBeUndefined(); // intacte
+    expect(db.store.get("opportunities/o1").amount).toBe(999);      // upsert appliqué
   });
 });

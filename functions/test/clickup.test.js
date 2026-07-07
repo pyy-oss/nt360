@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 const { resolveAssignee, retryDelay, updateTask } = require("../lib/clickup");
 
 describe("retryDelay — back-off des ré-essais", () => {
-  it("priorité à Retry-After (secondes → ms, borné 120 s — cf. audit intégral C2)", () => {
+  it("priorité à Retry-After (secondes → ms, borné 60 s — cf. vérification C2)", () => {
     expect(retryDelay(0, "2")).toBe(2000);
-    expect(retryDelay(5, "60")).toBe(60000);   // honoré tel quel (< cap)
-    expect(retryDelay(5, "300")).toBe(120000); // borné à 120 s
+    expect(retryDelay(0, "60")).toBe(60000);   // honoré tel quel (= cap)
+    expect(retryDelay(0, "300")).toBe(60000);  // borné à 60 s (une fenêtre de throttle)
   });
   it("exponentiel 500 ms × 2^tentative, borné à 8 s, sans Retry-After", () => {
     expect(retryDelay(0)).toBe(500);
