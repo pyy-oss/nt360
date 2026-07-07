@@ -58,6 +58,10 @@ function parseSalesData(wb) {
       idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
     const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
+    // « Âge Auto » (jours depuis la création/dernière activité) : sert à la règle d'auto-perte par âge
+    // (cf. formule source LIVE : Âge ≥ 366 j ET IdC ≤ 90 % ⇒ affaire considérée PERDUE). Absent → null.
+    const ageRaw = val(r, keys, "age auto", "âge auto");
+    const ageDays = ageRaw == null || ageRaw === "" ? null : num(ageRaw);
     // Date brute (pour la clé d'ID, STABLE dans le temps) vs date STOCKÉE (fenêtre glissante).
     const rawClosing = toISO(val(r, keys, "d prev", "closing", "date prev", "cloture")) || "";
     const closingDate = rawClosing && plausibleYear(rawClosing.slice(0, 4)) ? rawClosing : null; // rejet sentinelles 1899
@@ -106,6 +110,8 @@ function parseSalesData(wb) {
       probability,
       weighted: amount * probability,
       closingDate,
+      ageDays, // Âge Auto (jours) — règle d'auto-perte par âge (aggregate)
+
       // Pas de marge sur l'opportunité : `opportunities` est lisible au niveau « pipeline » (pas
       // « rentabilite ») → y stocker un %MB fuiterait la marge hors du cloisonnement. La marge des
       // affaires vit dans les fiches/commandes (projectSheetsMargin, orders), gatées « rentabilite ».

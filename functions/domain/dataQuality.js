@@ -7,9 +7,9 @@ const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
-function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps) {
+function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
-  bcLines = bcLines || []; sheets = sheets || []; staleOpps = staleOpps || [];
+  bcLines = bcLines || []; sheets = sheets || []; staleOpps = staleOpps || []; agedOpps = agedOpps || [];
   // Number.isFinite → un seuil configuré à 0 (valide) n'est PAS écrasé par le défaut (le `||` le ferait,
   // en contradiction avec alerts.js). Cf. audit P2.
   const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
@@ -50,6 +50,9 @@ function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps) {
   // marquées `stale` et EXCLUES du pipeline actif. Signalées ici (non-destructif) → à clôturer
   // proprement (étape 7 Perdu / 9 Annulé) ou ré-importer si le retrait était accidentel.
   add("opps_fantomes", "low", staleOpps, "Opportunités retirées de LIVE sans clôture (exclues du pipeline — à clôturer 7/9 ou ré-importer)", (o) => o.fp || o.client);
+  // Auto-perte par âge (règle source LIVE : > 1 an ET IdC ≤ 90 %) : exclues du pipeline pondéré comme
+  // la source les considère perdues → à clôturer (7/9) ou rafraîchir (IdC / relance) si encore vivantes.
+  add("opps_agees", "medium", agedOpps, "Opportunités périmées (> 1 an, confiance ≤ 90 %) — considérées PERDUES par la règle source, exclues du pipeline", (o) => o.fp || o.client);
 
   // Lignes BC
   add("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier);

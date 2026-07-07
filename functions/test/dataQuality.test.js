@@ -117,6 +117,14 @@ describe("dataQuality — hygiène d'ingestion", () => {
     const t = Object.fromEntries(q.issues.map((i) => [i.type, i]));
     expect(t.opps_fantomes).toBeUndefined();
   });
+  it("opportunités PÉRIMÉES par âge signalées en Qualité (medium) — règle source (Lot 7)", () => {
+    const aged = [{ fp: "FP/2026/50", client: "ZED", stage: 3 }];
+    const q7 = dataQuality([], [], [], [], [], undefined, [], aged);
+    const t = Object.fromEntries(q7.issues.map((i) => [i.type, i]));
+    expect(t.opps_agees.count).toBe(1);
+    expect(t.opps_agees.severity).toBe("medium");
+    expect(t.opps_agees.refs).toContain("FP/2026/50");
+  });
   it("issues triées par sévérité (high avant medium avant low)", () => {
     const ranks = q.issues.map((i) => ({ high: 0, medium: 1, low: 2 }[i.severity]));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));

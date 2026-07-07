@@ -218,6 +218,17 @@ const amMatch = (a: string, b: string) => {
   return nb.split(/\s+/).some((t) => t.length >= 3 && ta.has(t));
 };
 
+// Auto-perte par âge — MIROIR de domain/oppLifecycle.js (règle source LIVE : Âge ≥ 366 j ET IdC ≤ 90 %
+// ⇒ perdue). Utilisé pour exclure les opps périmées des vues pipeline, en cohérence avec les agrégats
+// (qui les excluent aussi). Âge inconnu → jamais exclue. Garder les deux implémentations synchronisées.
+const isAgedLost = (o: Opportunity): boolean => {
+  const stage = Number(o.stage) || 0;
+  if (stage < 1 || stage > 5) return false;
+  const age = Number(o.ageDays);
+  if (!Number.isFinite(age) || age < 366) return false;
+  return Number(o.probability) <= 0.9;
+};
+
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
@@ -230,7 +241,7 @@ export const OppList: FC<Props> = () => {
   // « Mon pipeline » : match souple sur l'AM (insensible à la casse/espaces). Filtre transverse appliqué ensuite.
   // Les opps FANTÔMES (stale : retirées de LIVE, cf. audit intégral I2) sont exclues de la vue pipeline
   // pour rester cohérent avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
-  const rows = allRows.filter((r) => !r.stale && match(r, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
+  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match(r, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
@@ -551,7 +562,7 @@ export const PipelineBoard: FC<Props> = () => {
   if (loading && !allRows.length) return <CardSkeleton />;
   // Exclut les opps FANTÔMES (stale : retirées de LIVE, cf. audit intégral I2) → le board reste cohérent
   // avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
-  const rows = allRows.filter((r) => !r.stale && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5);
+  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5);
   const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
   return (
     <div className="flex flex-col gap-3">
