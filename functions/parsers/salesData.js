@@ -74,10 +74,14 @@ function parseSalesData(wb) {
     if (extId) {
       oppId = safeId(extId);
     } else {
-      const mkey = [client, amount, stage, am, fp || "", rawClosing].join("|");
+      // IDENTITÉ STABLE (cf. audit P0-E) : la clé N'INCLUT PAS montant/étape — ce sont des attributs
+      // MUTABLES d'un même deal. Les y mettre créait un nouvel oppId à chaque changement de montant ou de
+      // stade → l'ancien doc devenait orphelin et DOUBLE-COMPTAIT le pipeline pondéré. La clé métier stable
+      // = client + AM + FP + échéance brute (+ index d'occurrence parmi lignes strictement identiques).
+      const mkey = [client, am, fp || "", rawClosing].join("|");
       const seq = dupSeq.get(mkey) || 0;
       dupSeq.set(mkey, seq + 1);
-      oppId = hashId(client, amount, stage, am, fp || "", rawClosing, seq);
+      oppId = hashId(client, am, fp || "", rawClosing, seq);
     }
 
     out.push({
