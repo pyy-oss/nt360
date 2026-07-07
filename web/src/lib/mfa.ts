@@ -16,7 +16,7 @@ export async function startTotpEnrollment(): Promise<{ secret: TotpSecret; uri: 
   const mfa = multiFactor(user);
   const session = await mfa.getSession();
   const secret = await TotpMultiFactorGenerator.generateSecret(session);
-  const uri = secret.generateQrCodeUrl(user.email || "user", "Neurone360 NT CI");
+  const uri = secret.generateQrCodeUrl(user.email || "user", "Neurones 360 NT CI");
   return { secret, uri, mfa };
 }
 
