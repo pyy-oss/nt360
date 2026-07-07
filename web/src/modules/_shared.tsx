@@ -5,7 +5,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { useFilters } from "../lib/filters";
-import { useCanSeeMargin, useClaims } from "../lib/rbac";
+import { useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { relTime, ageDays } from "../lib/format";
 import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
@@ -467,12 +467,20 @@ export function FilterNote({ dims }: { dims?: string }) {
 export function AlertsBanner() {
   const canMargin = useCanSeeMargin();
   const { data } = useDocData<AlertsSummary>("summaries/alerts");
-  // Alertes dérivées de la marge : lues SÉPARÉMENT et seulement si le rôle a l'accès « rentabilité »
-  // (summaries/alertsMargin est gaté serveur) → recomposées dans le même bandeau.
+  // Alertes CLOISONNÉES par module (serveur) : chaque summary n'est lu que si le rôle a le droit du
+  // module correspondant → un rôle « overview » seul ne voit plus les données fournisseurs/facturation/
+  // backlog/BC/pipeline. Recomposées dans le même bandeau. Cf. audit P0-C.
   const { data: dataMargin } = useDocData<AlertsSummary>(canMargin ? "summaries/alertsMargin" : null);
+  const { data: dFac } = useDocData<AlertsSummary>(useCan("facturation") !== "none" ? "summaries/alertsFacturation" : null);
+  const { data: dFrn } = useDocData<AlertsSummary>(useCan("fournisseurs") !== "none" ? "summaries/alertsFournisseurs" : null);
+  const { data: dBl } = useDocData<AlertsSummary>(useCan("backlog") !== "none" ? "summaries/alertsBacklog" : null);
+  const { data: dBc } = useDocData<AlertsSummary>(useCan("bc") !== "none" ? "summaries/alertsBc" : null);
+  const { data: dPl } = useDocData<AlertsSummary>(useCan("pipeline") !== "none" ? "summaries/alertsPipeline" : null);
   const { go, canGo } = useNav();
   const rank: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  const items = [...(data?.items || []), ...(dataMargin?.items || [])].sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));
+  const items = [data, dataMargin, dFac, dFrn, dBl, dBc, dPl]
+    .flatMap((d) => d?.items || [])
+    .sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));
   if (!items.length) return null;
   const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   return (
