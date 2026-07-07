@@ -664,9 +664,14 @@ exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSecond
   await requireWrite(req, module);
   const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter(Boolean).slice(0, 1000);
   if (!ids.length) throw new HttpsError("invalid-argument", "aucun identifiant fourni");
-  for (let i = 0; i < ids.length; i += 400) {
+  // Taille de fenêtre en fonction du NOMBRE D'OPÉRATIONS par id, pas du nombre d'ids : projectSheets
+  // enfile 2 suppressions par id (fiche + doc marge isolé projectSheetsMargin) → 200×2 = 400 ≤ 500
+  // (limite dure Firestore d'écritures par commit). Sinon 400 ids × 2 = 800 → INVALID_ARGUMENT, tout
+  // le lot échoue (rien supprimé). Cf. audit chemins non testés.
+  const step = collection === "projectSheets" ? 200 : 400;
+  for (let i = 0; i < ids.length; i += step) {
     const batch = db.batch();
-    for (const id of ids.slice(i, i + 400)) {
+    for (const id of ids.slice(i, i + step)) {
       batch.delete(db.doc(`${collection}/${id}`));
       if (collection === "projectSheets") batch.delete(db.doc(`projectSheetsMargin/${id}`)); // marge isolée liée
     }
