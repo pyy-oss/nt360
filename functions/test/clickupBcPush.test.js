@@ -24,16 +24,18 @@ function fakeClient(over = {}) {
 const group = (over = {}) => bc.groupBcByNumber([{ id: "a", bcNumber: "BC-1", supplier: "CISCO", fp: "FP/2026/1", amount: 100, ...over }], safeId)[0];
 
 describe("pushBcCore — orchestration create/update BC", () => {
-  it("CRÉATION : statut placee distributeur, champs posés, created=true", async () => {
+  it("CRÉATION : statut placee distributeur, champs DANS le payload de création, created=true (C3)", async () => {
     const { clickup, calls } = fakeClient();
     const r = await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, links: {}, group: group(), extra: {} });
     expect(r.created).toBe(true);
     expect(calls.create[0].payload.status).toBe("placee distributeur");
-    expect(calls.setField.map((s) => s.fieldId).sort()).toEqual(["F_FRN", "F_MNT", "F_NUM", "F_OPP"]);
+    // C3 : champs posés atomiquement à la création (pas via setField) → tâche née identifiable.
+    expect((calls.create[0].payload.custom_fields || []).map((c) => c.id).sort()).toEqual(["F_FRN", "F_MNT", "F_NUM", "F_OPP"]);
+    expect(calls.setField.length).toBe(0);
     expect(r.taskId).toBe("newbc");
   });
 
-  it("MISE À JOUR : ne pose pas de statut initial ; met à jour la tâche liée", async () => {
+  it("MISE À JOUR : ne pose pas de statut initial ; champs via setField sur la tâche liée", async () => {
     const { clickup, calls } = fakeClient();
     const g = group();
     const r = await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, links: { [g.key]: "task9" }, group: g, extra: {} });
@@ -41,13 +43,15 @@ describe("pushBcCore — orchestration create/update BC", () => {
     expect(calls.create.length).toBe(0);
     expect(calls.update[0].taskId).toBe("task9");
     expect(calls.update[0].payload.status).toBeUndefined(); // avancement achat piloté dans ClickUp
+    expect(calls.setField.map((s) => s.fieldId).sort()).toEqual(["F_FRN", "F_MNT", "F_NUM", "F_OPP"]);
   });
 
-  it("setField best-effort : un champ en échec ne casse pas le push", async () => {
+  it("MISE À JOUR — setField best-effort : un champ en échec ne casse pas le push (lien déjà présent)", async () => {
     const { clickup } = fakeClient({ setField: async () => { throw new Error("boom"); } });
-    const r = await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, links: {}, group: group(), extra: {} });
-    expect(r.created).toBe(true);
-    expect(r.taskId).toBe("newbc");
+    const g = group();
+    const r = await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, links: { [g.key]: "task2" }, group: g, extra: {} });
+    expect(r.created).toBe(false);
+    expect(r.taskId).toBe("task2");
   });
 
   it("statut initial validé : absent de la liste → omis, création quand même", async () => {

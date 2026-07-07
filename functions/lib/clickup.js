@@ -5,10 +5,12 @@ const BASE = "https://api.clickup.com/api/v2";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Délai de back-off PUR (ms) avant un ré-essai. Priorité à l'en-tête Retry-After (secondes) renvoyé
-// par ClickUp sur un 429 ; sinon exponentiel (500 ms × 2^tentative) borné à 8 s.
+// par ClickUp sur un 429 ; sinon exponentiel (500 ms × 2^tentative) borné à 8 s. Le Retry-After
+// serveur est honoré jusqu'à 120 s (la fenêtre de throttle ClickUp, par minute, peut atteindre ~60 s ;
+// un cap 30 s expirait le budget de retries DANS la même fenêtre → 429 en cascade, cf. audit intégral C2).
 function retryDelay(attempt, retryAfterSec) {
   const ra = Number(retryAfterSec);
-  if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 30000);
+  if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 120000);
   return Math.min(500 * Math.pow(2, attempt), 8000);
 }
 
@@ -16,7 +18,8 @@ function retryDelay(attempt, retryAfterSec) {
 // — fréquentes en push massif) ; les erreurs 4xx (hors 429) échouent tout de suite.
 async function api(token, method, path, body, opts) {
   const maxRetries = opts && Number.isFinite(opts.retries) ? opts.retries : 3;
-  let attempt = 0;
+  const maxThrottleWaits = opts && Number.isFinite(opts.throttleWaits) ? opts.throttleWaits : 6;
+  let attempt = 0, throttleWaits = 0;
   for (;;) {
     let res;
     try {
@@ -35,6 +38,16 @@ async function api(token, method, path, body, opts) {
     if (res.ok) {
       const text = await res.text();
       try { return text ? JSON.parse(text) : {}; } catch { return { raw: text }; }
+    }
+    // 429 AVEC Retry-After serveur : on OBÉIT au délai indiqué sans consommer le budget de retries
+    // (sinon les 3 essais s'épuisent dans la même fenêtre de throttle) ; borné par `maxThrottleWaits`
+    // pour éviter une boucle si le serveur reste saturé (cf. audit intégral C2).
+    const ra = res.status === 429 && res.headers ? Number(res.headers.get("retry-after")) : NaN;
+    if (Number.isFinite(ra) && ra > 0 && throttleWaits < maxThrottleWaits) {
+      await res.text().catch(() => {});
+      await sleep(retryDelay(attempt, ra));
+      throttleWaits++;
+      continue;
     }
     if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
       await res.text().catch(() => {}); // draine le corps (évite une fuite de socket undici) avant retry

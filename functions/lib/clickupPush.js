@@ -27,10 +27,19 @@ async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, member
       catch (e) { logger.warn("ClickUp: assignés courants illisibles", { msg: e && e.message }); }
     }
     task = await clickup.updateTask(token, existing, corePayload, remove); task.id = existing;
-  } else { task = await clickup.createTask(token, listId, corePayload); created = true; }
-  for (const w of fieldWrites) {
-    try { await clickup.setField(token, task.id, w.id, w.value); }
-    catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
+    // Champs personnalisés d'une tâche EXISTANTE : posés via Set-Field (best-effort ; le lien existe déjà,
+    // la clé Opp ID est donc déjà présente sur la tâche → un échec ponctuel ne crée pas de doublon).
+    for (const w of fieldWrites) {
+      try { await clickup.setField(token, task.id, w.id, w.value); }
+      catch (e) { logger.warn("ClickUp: champ non posé", { field: w.id, msg: e && e.message }); }
+    }
+  } else {
+    // C3 (audit intégral) : les champs personnalisés — dont « Opp ID », clé de dédoublonnage par FP —
+    // sont posés DANS le payload de CRÉATION (custom_fields), pour que la tâche NAISSE avec son Opp ID.
+    // Un Set-Field ultérieur en échec (429…) laissait sinon une tâche SANS clé → doublon au passage
+    // suivant (la réconciliation par FP ne la retrouvait pas). Atomique : pas de fenêtre d'orphelin.
+    if (fieldWrites.length) corePayload.custom_fields = fieldWrites.map((w) => ({ id: w.id, value: w.value }));
+    task = await clickup.createTask(token, listId, corePayload); created = true;
   }
   return { id, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, assigned: !!assignee, fields: fieldWrites.length };
 }
