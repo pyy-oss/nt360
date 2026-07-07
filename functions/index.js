@@ -666,9 +666,13 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds:
   const ref = db.doc(`invoices/${id}`);
   if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
   const d = req.data || {};
+  const { toISO } = require("./lib/sheets");
+  // NORMALISER en ISO complet (YYYY-MM-DD) comme à l'ingestion : cashflow (échéance en fin de mois si
+  // "YYYY-MM") et receivables (Date.parse → 1er du mois) interprètent différemment une date partielle,
+  // ce qui désalignait le bucket mensuel d'une facture éditée à la main. toISO garantit une date pleine.
   const patch = { updatedAt: FieldValue.serverTimestamp() };
-  if (d.date !== undefined) patch.date = d.date || null;
-  if (d.dueDate !== undefined) patch.dueDate = d.dueDate || null;
+  if (d.date !== undefined) patch.date = d.date ? (toISO(d.date) || null) : null;
+  if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? (toISO(d.dueDate) || null) : null;
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date ou échéance requise)");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({
