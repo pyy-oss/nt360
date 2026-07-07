@@ -980,6 +980,11 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   // Édition : id fourni préfixé « saisie_ » ; sinon nouvelle saisie. On ne touche QUE les saisies.
   const id = (typeof d.id === "string" && d.id.startsWith("saisie_")) ? d.id
     : ("saisie_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  // MB prévisionnel : % de marge brute PRÉVISIONNELLE saisie (prévision commerciale, NON confidentielle
+  // — distincte de la marge P&L réelle qui, elle, reste isolée dans projectSheetsMargin/rentabilité).
+  // Clamp [0,100] ; vide/absent → null. Porté par l'opportunité (lisible au niveau pipeline, par choix).
+  const mbRaw = d.mbPrev;
+  const mbPrev = (mbRaw === undefined || mbRaw === null || mbRaw === "") ? null : Math.min(100, Math.max(0, Number(mbRaw) || 0));
   const doc = {
     oppId: id, source: "saisie",
     client, am: String(d.am || "").trim(), bu: String(d.bu || "AUTRE").trim().toUpperCase(),
@@ -987,6 +992,8 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
     probability, weighted: oppWeighted(amount, probability),
     closingDate: d.closingDate || null,
+    mbPrev,          // % marge brute prévisionnelle (prévision, non confidentiel)
+    dr: d.dr === true, // DR (Deal Registration / demande de remise) — booléen Oui/Non
     updatedAt: FieldValue.serverTimestamp(),
   };
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
