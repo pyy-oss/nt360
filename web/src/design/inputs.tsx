@@ -2,7 +2,7 @@
 // 100 % maison, sans dépendance : cohérents avec le design system (tokens, thème clair/sombre),
 // accessibles (clavier + ARIA) et positionnés par PORTAIL en position fixe → fonctionnent même dans
 // une cellule de tableau à débordement (overflow) sans être tronqués.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, Check, Calendar, X } from "lucide-react";
 import { cx } from "./components";
@@ -65,6 +65,8 @@ export function Select({ value, onChange, options, ariaLabel, placeholder = "Sé
   const btn = useRef<HTMLButtonElement>(null);
   const sel = options.find((o) => o.value === value);
   const typeBuf = useRef({ s: "", t: 0 });
+  const lid = useId(); // base d'id stable pour lier bouton ↔ liste ↔ option surlignée (a11y listbox)
+  const optId = (i: number) => `${lid}-opt-${i}`;
 
   useEffect(() => { if (open) setHi(options.findIndex((o) => o.value === value)); }, [open]); // eslint-disable-line
 
@@ -98,6 +100,7 @@ export function Select({ value, onChange, options, ariaLabel, placeholder = "Sé
     <>
       <button
         ref={btn} type="button" disabled={disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
+        aria-controls={open ? lid : undefined} aria-activedescendant={open && hi >= 0 ? optId(hi) : undefined}
         onClick={() => !disabled && setOpen((v) => !v)} onKeyDown={onKey}
         className={cx("field inline-flex items-center justify-between gap-2 text-left", disabled && "opacity-50 cursor-not-allowed", !sel && "text-muted", className)}
       >
@@ -106,11 +109,11 @@ export function Select({ value, onChange, options, ariaLabel, placeholder = "Sé
       </button>
       {open && (
         <Panel anchor={btn.current} onClose={() => setOpen(false)} minWidth={180}>
-          <ul role="listbox" aria-label={ariaLabel} className="max-h-[280px] overflow-auto">
+          <ul id={lid} role="listbox" aria-label={ariaLabel} className="max-h-[280px] overflow-auto">
             {options.map((o, i) => {
               const on = o.value === value;
               return (
-                <li key={o.value} role="option" aria-selected={on} aria-disabled={o.disabled}
+                <li key={o.value} id={optId(i)} role="option" aria-selected={on} aria-disabled={o.disabled}
                   onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(o); }}
                   className={cx("flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] cursor-pointer select-none",
                     o.disabled ? "text-faint opacity-50 cursor-not-allowed" : i === hi ? "bg-gold/15 text-ink" : "text-ink hover:bg-ink/[.05]")}>
@@ -173,7 +176,7 @@ export function DateField({ value, onChange, ariaLabel, placeholder = "jj/mm/aaa
       </button>
       {open && (
         <Panel anchor={btn.current} onClose={() => setOpen(false)} minWidth={272}>
-          <div className="p-1.5 w-[264px]">
+          <div className="p-1.5 w-[264px]" role="dialog" aria-modal="false" aria-label={`${ariaLabel || "Date"} — ${MO[m]} ${y}`}>
             <div className="flex items-center justify-between mb-2">
               <button type="button" className="btn-ghost !p-1.5" aria-label="Mois précédent" onClick={() => setView(new Date(y, m - 1, 1))}><ChevronLeft size={16} /></button>
               <div className="text-[13px] font-semibold text-ink">{MO[m]} {y}</div>
@@ -190,6 +193,7 @@ export function DateField({ value, onChange, ariaLabel, placeholder = "jj/mm/aaa
                 const isToday = di === today;
                 return (
                   <button key={i} type="button" onClick={() => pick(d)}
+                    aria-label={`${d.getDate()} ${MO[m]} ${y}`} aria-pressed={!!on} aria-current={isToday ? "date" : undefined}
                     className={cx("h-8 rounded-lg text-[12px] tabnum transition-colors",
                       on ? "bg-gold text-bg font-semibold" : isToday ? "text-gold font-semibold hover:bg-ink/[.06]" : "text-ink hover:bg-ink/[.06]")}>
                     {d.getDate()}

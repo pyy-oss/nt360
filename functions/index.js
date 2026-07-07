@@ -2206,8 +2206,15 @@ exports.scheduledFirestoreExport = onSchedule("every sunday 03:00", async () => 
       outputUriPrefix: `gs://${IMPORTS_BUCKET}/backups/${ts}`,
       collectionIds: [], // toutes les collections
     });
-    logger.info("scheduledFirestoreExport lancé", { op: op.name });
-    return { ok: true };
+    const uri = `gs://${IMPORTS_BUCKET}/backups/${ts}`;
+    logger.info("scheduledFirestoreExport lancé", { op: op.name, uri });
+    // Trace de SUCCÈS queryable (comme le chemin d'erreur) : sans elle, seul l'échec laissait une
+    // trace → une sauvegarde qui ne tourne plus était indétectable. Un dernier opsLog
+    // 'scheduledFirestoreExport' ok manquant ou périmé (> 8 j) est désormais un signal exploitable.
+    // NB : on trace le LANCEMENT de l'opération longue (op.name) ; le suivi de complétion de la LRO
+    // et l'isolation dans un bucket de sauvegarde dédié restent des évolutions ops distinctes.
+    await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "ok", op: op.name, detail: { uri } });
+    return { ok: true, op: op.name };
   } catch (e) {
     logger.error("scheduledFirestoreExport a échoué", { message: e && e.message, stack: e && e.stack });
     await logOps({ kind: "scheduled", action: "scheduledFirestoreExport", status: "error", error: (e && e.message) || String(e) });

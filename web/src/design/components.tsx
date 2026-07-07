@@ -1,5 +1,5 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
-import { Component, createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, Fragment, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download } from "lucide-react";
 import { fmt, pct } from "./tokens";
@@ -493,26 +493,53 @@ export function Toggle({ checked, onChange, ariaLabel, disabled }: { checked: bo
   );
 }
 
-// --- Modal (portail + overlay flou, Échap / clic-fond pour fermer, focus initial) ---
+// --- Modal (portail + overlay flou, Échap / clic-fond pour fermer, PIÈGE À FOCUS) ---
+// Boîte de dialogue accessible : role="dialog" + aria-modal sur la CARTE (la frontière du dialogue,
+// pas l'overlay), aria-labelledby vers le titre. Le focus est PIÉGÉ dans la carte (Tab/Maj+Tab bouclent
+// entre le premier et le dernier élément focusable) — aria-modal seul ne piège pas dans un dialogue
+// fait main. Focus initial : [data-autofocus] sinon la carte elle-même (tabIndex -1). À la fermeture,
+// le focus est RESTITUÉ à l'élément déclencheur (sinon il retombait sur <body>, perdu pour le clavier).
 export function Modal({ open, onClose, title, children, actions, size = "sm" }:
   { open: boolean; onClose: () => void; title?: ReactNode; children?: ReactNode; actions?: ReactNode; size?: "sm" | "md" }) {
   const ref = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const card = ref.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null; // pour restitution à la fermeture
+    const focusables = () => Array.from(
+      card?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])') || [],
+    ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab") return;
+      const els = focusables();
+      if (!els.length) { e.preventDefault(); card?.focus(); return; }
+      const first = els[0], last = els[els.length - 1], act = document.activeElement;
+      // Boucle : Maj+Tab depuis le premier → dernier ; Tab depuis le dernier → premier. Si le focus a
+      // fui hors de la carte, on le ramène au bord approprié.
+      if (e.shiftKey && (act === first || !card?.contains(act))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (act === last || !card?.contains(act))) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden"; // fige le scroll d'arrière-plan
-    ref.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+    const auto = card?.querySelector<HTMLElement>("[data-autofocus]");
+    (auto || card)?.focus(); // focus initial : cible marquée, sinon la carte (tabIndex -1)
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+      previouslyFocused?.focus?.(); // restitution du focus au déclencheur
+    };
   }, [open, onClose]);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[100] grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
-      <div ref={ref} className={cx("relative card p-4 sm:p-5 w-full animate-scale-in", size === "md" ? "max-w-lg" : "max-w-sm")}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}
+        className={cx("relative card p-4 sm:p-5 w-full animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
         <div className="flex items-start justify-between gap-3 mb-2">
-          {title ? <h2 className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
+          {title ? <h2 id={titleId} className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
           <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>
         </div>
         {children && <div className="text-[13px] text-muted leading-relaxed">{children}</div>}
