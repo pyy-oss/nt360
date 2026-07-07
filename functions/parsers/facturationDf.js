@@ -34,10 +34,14 @@ function parseFacturationDf(wb) {
     const dueDate = toISO(val(r, keys, "date d'échéance", "date d echeance", "echeance", "due date"));
     const paymentStatus = String(val(r, keys, "statut en cours de paiement", "statut de paiement", "statut", "payment") || "").trim();
     const paid = /pay[ée]|régl|encaiss|sold/i.test(paymentStatus); // encaissée ?
-    // Signature = LIGNE COMPLÈTE (toutes les colonnes). On ne fusionne QUE les doublons d'export
-    // strictement identiques ; deux lignes distinctes de même montant/date (ex. 2 licences au
-    // même prix) restent SOMMÉES → CAF = Σ factures non sous-évalué. (§18.3)
-    const sig = JSON.stringify(Object.values(r));
+    // Signature de LIGNE. Si un identifiant de LIGNE stable est présent (id Odoo de la ligne de
+    // facture), il fait autorité : deux lignes réellement distinctes de MÊME montant (ex. 2 licences
+    // au même prix, byte-identiques par ailleurs) portent des id de ligne différents → SOMMÉES, donc
+    // CAF = Σ factures non sous-évalué (cf. audit intégral I4 : sans cet id, deux lignes strictement
+    // identiques étaient prises pour un artefact d'export et la 2e SILENCIEUSEMENT abandonnée). Sans
+    // id de ligne, on retombe sur la signature « ligne complète » (comportement historique §18.3).
+    const lineId = String(val(r, keys, "id ligne", "ligne id", "line id", "n° ligne", "numero de ligne") || "").trim();
+    const sig = lineId ? "L#" + lineId : JSON.stringify(Object.values(r));
     const prev = byNumero.get(id);
     if (prev) {
       // Même Numéro : facture MULTI-LIGNES (export Odoo : 1 ligne par ligne) ⇒ on SOMME les

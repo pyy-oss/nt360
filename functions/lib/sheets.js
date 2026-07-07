@@ -66,9 +66,20 @@ function toISO(v) {
   }
   const s = String(v).trim();
   const m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  if (m) {
+    const mo = +m[2], da = +m[3];
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) return null; // ISO malformé → rejet
+    return `${m[1]}-${String(mo).padStart(2, "0")}-${String(da).padStart(2, "0")}`;
+  }
   const m2 = s.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-  if (m2) return `${m2[3]}-${m2[2].padStart(2, "0")}-${m2[1].padStart(2, "0")}`;
+  if (m2) {
+    let da = +m2[1], mo = +m2[2]; // par défaut JOUR d'abord (D/M/Y), format usuel ici
+    // Si le « mois » dépasse 12 alors que le « jour » est un mois valide, la source est en MOIS
+    // d'abord (US M/D/Y) → on permute pour ne jamais émettre un mois 13 (cf. audit intégral I6).
+    if (mo > 12 && da <= 12) { const t = da; da = mo; mo = t; }
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) return null; // date invalide → rejet plutôt qu'ISO malformé
+    return `${m2[3]}-${String(mo).padStart(2, "0")}-${String(da).padStart(2, "0")}`;
+  }
   return null;
 }
 

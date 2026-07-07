@@ -3,7 +3,7 @@ const XLSX = require("xlsx");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
 const { parseSalesData, normalizeStage } = require("../parsers/salesData");
-const { parseFiche } = require("../parsers/ficheAffaire");
+const { parseFiche, parseFicheAll } = require("../parsers/ficheAffaire");
 
 // Construit un classeur à partir d'une feuille nommée + lignes d'objets.
 function wbFromRows(sheetName, rows) {
@@ -191,7 +191,40 @@ describe("parseFiche → projectSheets + bcLines (§18.4, contrôle PAM-BF)", ()
     expect(bcLines[0].supplier).toBe("AITEK");
     expect(bcLines[0].amountXof).toBe(1007500);
     expect(bcLines[0].status).toBe("a_emettre");
-    expect(bcLines[0]._id).toBe("FP_2026_13542_0"); // FP sanitisé (pas de '/' dans l'ID)
+    expect(bcLines[0]._id).toMatch(/^FP_2026_13542_h[a-z0-9]+$/); // FP sanitisé + clé métier hachée (plus positionnel)
+  });
+  it("id de ligne DÉTERMINISTE (ré-import → même id, idempotent)", () => {
+    const again = parseFiche(wbFromAoa("Fiche", aoa)).bcLines[0]._id;
+    expect(again).toBe(bcLines[0]._id);
+  });
+});
+
+describe("parseFicheAll — deux onglets de MÊME FP ne perdent plus de lignes (cf. audit intégral I3)", () => {
+  // Fabrique une fiche cellulaire à une ligne BC (fournisseur/description/montant paramétrables).
+  const fiche = (frn, desc, xof) => [
+    [null, null, null, null, null, "N° DE FP :", "FP/2026/700"],
+    [null, null, null, null, null, "CLIENT :", "ACME"],
+    [], [],
+    [null, null, "N°BC FRNS", "DESCRIPTION", "FOURNISSEUR", "TYPE", "DEVISE", "CHARGES EN DEVISE", "CHARGES EN XOF"],
+    [null, "Cmd", "", desc, frn, "Matériel", "XOF", xof, xof],
+    [null, "TOTAL Commandes Frns", null, null, null, null, null, null, xof],
+  ];
+  const twoSheets = (a, b) => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), "Fiche A");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(b), "Fiche B");
+    return wb;
+  };
+
+  it("lignes DISTINCTES (fournisseurs différents) → ids distincts, aucune perte", () => {
+    const fiches = parseFicheAll(twoSheets(fiche("AITEK", "Serveur", 100), fiche("KUKUZA", "Routeur", 200)));
+    const ids = fiches.flatMap((f) => f.bcLines.map((b) => b._id));
+    expect(new Set(ids).size).toBe(2); // pas de collision `sid_0` → `sid_0`
+  });
+  it("lignes IDENTIQUES en double (onglet dupliqué) → même id → fusion (pas de double-compte)", () => {
+    const fiches = parseFicheAll(twoSheets(fiche("AITEK", "Serveur", 100), fiche("AITEK", "Serveur", 100)));
+    const ids = fiches.flatMap((f) => f.bcLines.map((b) => b._id));
+    expect(new Set(ids).size).toBe(1); // même clé métier → même id → applyWrites fusionne
   });
 });
 
@@ -219,6 +252,16 @@ describe("parseFacturationDf : factures multi-lignes sommées", () => {
     const inv1 = rows.find((r) => r.numero === "JVEXO/2026/0001");
     expect(inv1.amountHt).toBe(350); // 100 + 250
     expect(inv1.lines).toBe(2);
+  });
+  it("2 lignes byte-identiques MAIS d'id de ligne distincts → SOMMÉES (plus de sous-compte CAF, I4)", () => {
+    const wb = wbFromRows("Facturation DF", [
+      { "Numéro": "JV/2026/9", "Montant HT": 500, "ID ligne": "L1" },
+      { "Numéro": "JV/2026/9", "Montant HT": 500, "ID ligne": "L2" }, // même montant, autre ligne
+      { "Numéro": "JV/2026/9", "Montant HT": 500, "ID ligne": "L2" }, // vrai artefact d'export (même id) → ignoré
+    ]);
+    const inv = parseFacturationDf(wb).rows.find((r) => r.numero === "JV/2026/9");
+    expect(inv.amountHt).toBe(1000); // L1 + L2 (l'artefact L2 dupliqué n'est pas recompté)
+    expect(inv.lines).toBe(2);
   });
 });
 

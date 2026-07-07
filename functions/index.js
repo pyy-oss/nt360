@@ -813,7 +813,7 @@ async function migrateFpSatellites(oldFp, newFp) {
   // suivre la ré-clé, sinon ils pointent vers un FP disparu → annulation / affectation PMO / lien ClickUp
   // PERDUS. Cas le plus grave : une commande ANNULÉE ré-clée « ressusciterait » dans CAS/backlog/rentabilité
   // (le flag d'annulation vit dans config/cancelOrders, pas dans le doc commande). Cf. audit cycle de vie.
-  for (const path of ["config/orderPm", "config/clickupLinks", "config/clickupSync"]) {
+  for (const path of ["config/orderPm", "config/clickupLinks", "config/clickupSync", "config/clickupCaf"]) {
     const map = ((await db.doc(path).get()).data() || {}).map || {};
     if (Object.prototype.hasOwnProperty.call(map, oldI)) {
       await db.doc(path).set({ map: { [newI]: map[oldI], [oldI]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });

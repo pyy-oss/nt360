@@ -41,3 +41,24 @@ describe("parseLogistics — contre-valeur XOF robuste (cf. audit P0-B)", () => 
     expect(b.fxSource).toBe("manuel");
   });
 });
+
+describe("parseLogistics — identité BC STABLE sur correction du FP (cf. audit intégral I1)", () => {
+  const line = (over) => ({ "PO N°": "BC N° 06457", Fournisseur: "KUKUZA", Description: "Routeur", Montant: 500000, Devise: "XOF", "Opp ID": "FP/2024/13", ...over });
+  const idOf = (over) => parseLogistics(wbFrom([
+    ["PO N°", "Fournisseur", "Description", "Montant", "Devise", "Opp ID"],
+    Object.values(line(over)),
+  ])).rows[0]._id;
+
+  it("même PO, FP CORRIGÉ (13→14) → même id (mise à jour en place, plus d'orphelin double-compté)", () => {
+    expect(idOf({ "Opp ID": "FP/2024/13" })).toBe(idOf({ "Opp ID": "FP/2024/14" }));
+  });
+  it("même PO, MONTANT corrigé → même id (idempotent)", () => {
+    expect(idOf({ Montant: 500000 })).toBe(idOf({ Montant: 750000 }));
+  });
+  it("n° de PO DIFFÉRENT → id différent (deux BC distincts)", () => {
+    expect(idOf({ "PO N°": "BC N° 06457" })).not.toBe(idOf({ "PO N°": "BC N° 06999" }));
+  });
+  it("sans n° de PO (identité faible) → le FP discrimine encore", () => {
+    expect(idOf({ "PO N°": "", "Opp ID": "FP/2024/13" })).not.toBe(idOf({ "PO N°": "", "Opp ID": "FP/2024/14" }));
+  });
+});
