@@ -210,6 +210,9 @@ export type UserRow = { id?: string; email?: string; name?: string; active?: boo
 export type NewsBulletin = { id: string; domain: string; severity: "high" | "medium" | "info"; title: string; detail?: string; refs?: string[]; module?: string; segment?: string; action?: string };
 export type NewsRecommendation = { priority: number; text: string; domain?: string; module?: string; severity?: string };
 export interface NewsSummary { generatedFor?: number; bulletins?: NewsBulletin[]; recommendations?: NewsRecommendation[]; counts?: { high?: number; medium?: number; info?: number } }
+// Curation LLM de la veille : score de pertinence par TYPE de bulletin (clé = id du bulletin).
+export type NewsCurationScore = { relevance: number; keep: boolean; note?: string };
+export interface NewsCuration { scoredAt?: any; model?: string; threshold?: number; signalCount?: number; activeIds?: string[]; scores?: Record<string, NewsCurationScore> }
 
 export type PeriodsConfig = { available?: string[]; currentFy?: number; lastRecomputeAt?: any };
 export interface ClientAliasConfig { pairs?: { from: string; to: string }[]; updatedAt?: any }

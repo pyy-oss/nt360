@@ -60,6 +60,9 @@ service cloud.firestore {
         : id.matches('newsBacklog.*') ? 'backlog'
         : id.matches('newsBc.*') ? 'bc'
         : id.matches('newsPipeline.*') ? 'pipeline'
+        // Curation LLM de la veille (scores de pertinence par TYPE, aucune donnée sensible) → overview.
+        // Explicite (bien que news.* le couvrirait) pour lever toute ambiguïté.
+        : id.matches('newsCuration.*') ? 'overview'
         : id.matches('news.*') ? 'overview'
         // Plan de relance : CLOISONNÉ par module (le montant d'une créance ne fuite pas hors facturation).
         : id.matches('relancesCreances.*') ? 'facturation'

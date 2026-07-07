@@ -1,13 +1,14 @@
 // Vue ACTUALITÉ : fil de bulletins d'événements clés (opportunités / commandes / facturation /
 // backlog / fournisseurs / BC / qualité) + recommandations majeures. Alimentée par summaries/news
 // (moteur functions/domain/news, sans marge). Chaque bulletin renvoie vers le module concerné.
-import { type FC } from "react";
+import { useState, type FC } from "react";
 import { useDocData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useClaims } from "../lib/rbac";
 import { useNav } from "../lib/nav";
-import { Card, Badge, Tip, EmptyState, CardSkeleton, cx } from "../design/components";
+import { Card, Badge, Tip, EmptyState, CardSkeleton, Busy, cx } from "../design/components";
+import { curateNewsNow } from "../lib/writes";
 import type { Props } from "./_shared";
-import type { NewsSummary, NewsBulletin } from "../types";
+import type { NewsSummary, NewsBulletin, NewsCuration } from "../types";
 
 const SEV_TONE = { high: "clay", medium: "gold", info: "steel" } as const;
 const SEV_LABEL = { high: "Urgent", medium: "À surveiller", info: "Info" } as const;
@@ -27,9 +28,20 @@ export const Actualite: FC<Props> = () => {
   const { data: dBc } = useDocData<NewsSummary>(useCan("bc") !== "none" ? "summaries/newsBc" : null);
   const { data: dPl } = useDocData<NewsSummary>(useCan("pipeline") !== "none" ? "summaries/newsPipeline" : null);
   const { go, canGo } = useNav();
+  // Curation LLM (scores de pertinence par TYPE de bulletin) — lue toujours (module overview) ; absente
+  // (secret non configuré / jamais exécutée) → tout est affiché tel quel (dégradation gracieuse).
+  const { data: cur } = useDocData<NewsCuration>("summaries/newsCuration");
+  const isDirection = useClaims().role === "direction";
+  const [showAll, setShowAll] = useState(false);
   const parts = [data, dFac, dFrn, dBl, dBc, dPl];
   const rankS: Record<string, number> = { high: 0, medium: 1, info: 2 };
-  const bulletins = parts.flatMap((p) => p?.bulletins || []).sort((a, b) => (rankS[a.severity] ?? 3) - (rankS[b.severity] ?? 3));
+  const relOf = (b: NewsBulletin) => cur?.scores?.[b.id]?.relevance ?? 50; // non curé → neutre (affiché)
+  // Type jugé peu pertinent par la curation → DÉMOTÉ (masqué derrière « voir tout »), SAUF sévérité
+  // « high » qui n'est JAMAIS masquée (un signal urgent prime sur le score de pertinence du type).
+  const isMuted = (b: NewsBulletin) => { const s = cur?.scores?.[b.id]; return !!s && s.keep === false && b.severity !== "high"; };
+  const bulletins = parts.flatMap((p) => p?.bulletins || []).sort((a, b) => (rankS[a.severity] ?? 3) - (rankS[b.severity] ?? 3) || relOf(b) - relOf(a));
+  const mutedCount = bulletins.filter(isMuted).length;
+  const shown = showAll ? bulletins : bulletins.filter((b) => !isMuted(b));
   const recos = parts.flatMap((p) => p?.recommendations || []).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
   const counts = parts.reduce((acc, p) => ({ high: acc.high + (p?.counts?.high || 0), medium: acc.medium + (p?.counts?.medium || 0), info: acc.info + (p?.counts?.info || 0) }), { high: 0, medium: 0, info: 0 });
   // Chargement : squelette tant que le 1er snapshot n'est pas arrivé — sinon flash d'« aucun événement »
@@ -58,16 +70,18 @@ export const Actualite: FC<Props> = () => {
         </Card>
       )}
       <Card
-        title={`Fil d'actualité · ${bulletins.length}`}
-        actions={counts && (
-          <div className="flex gap-1.5 flex-wrap">
+        title={`Fil d'actualité · ${shown.length}`}
+        actions={
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
             {(["high", "medium", "info"] as const).map((s) => (counts[s] || 0) > 0
               ? <Badge key={s} tone={SEV_TONE[s]}>{counts[s]} {SEV_LABEL[s]}</Badge> : null)}
+            {/* Rafraîchir la curation LLM (Direction) — score la pertinence des types de bulletins. */}
+            {isDirection && <Busy label="Curer" variant="ghost" okMsg="Curation relancée" errMsg="Curation indisponible" fn={curateNewsNow} />}
           </div>
-        )}
+        }
       >
         <div className="flex flex-col gap-2">
-          {bulletins.map((b, i) => {
+          {shown.map((b, i) => {
             const clickable = !!b.module && canGo(b.module);
             return (
               <div key={i} className={cx("rounded-lg border p-3",
@@ -89,7 +103,12 @@ export const Actualite: FC<Props> = () => {
             );
           })}
         </div>
-        <Tip>Événements détectés automatiquement à partir des agrégats (état courant, sans donnée marge), priorisés par sévérité. Le fil se rafraîchit à chaque recalcul (05:00 ou « Recalculer »).</Tip>
+        {mutedCount > 0 && (
+          <button onClick={() => setShowAll((v) => !v)} className="mt-1 text-[12px] text-faint hover:text-ink underline underline-offset-2 self-start">
+            {showAll ? "Masquer les signaux moins pertinents" : `Afficher ${mutedCount} signal${mutedCount > 1 ? "aux" : ""} moins pertinent${mutedCount > 1 ? "s" : ""}`}
+          </button>
+        )}
+        <Tip>Événements détectés automatiquement à partir des agrégats (état courant, sans donnée marge), priorisés par sévérité{cur?.scores ? " puis par pertinence (curation IA)" : ""}. Le fil se rafraîchit à chaque recalcul (05:00 ou « Recalculer »){cur?.scores ? " ; la curation IA (05:30) score la pertinence des types de signaux pour reléguer le bruit — les signaux urgents ne sont jamais masqués" : ""}.</Tip>
       </Card>
     </div>
   );

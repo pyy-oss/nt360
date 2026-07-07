@@ -1,6 +1,8 @@
 {
   "name": "functions",
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -10,19 +12,20 @@
     "test:rules": "vitest run --config vitest.rules.config.js"
   },
   "dependencies": {
-    "firebase-admin": "^12",
-    "firebase-functions": "^5",
+    "@anthropic-ai/sdk": "^0.110.0",
     "@google-cloud/firestore": "^7",
-    "xlsx": "^0.18",
     "exceljs": "^4",
     "fflate": "^0.8",
+    "firebase-admin": "^12",
+    "firebase-functions": "^5",
+    "pdfjs-dist": "3.11.174",
     "pdfkit": "^0.15",
-    "pdfjs-dist": "3.11.174"
+    "xlsx": "^0.18"
   },
   "devDependencies": {
-    "vitest": "^2",
-    "@vitest/coverage-v8": "^2",
     "@firebase/rules-unit-testing": "^3",
-    "firebase": "^10"
+    "@vitest/coverage-v8": "^2",
+    "firebase": "^10",
+    "vitest": "^2"
   }
 }

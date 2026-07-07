@@ -17,6 +17,9 @@ const { parseBuffer, reingestBucket } = require("./lib/reingest");
 const { defineSecret } = require("firebase-functions/params");
 // Token API ClickUp (Secret Manager) — utilisé seulement par les fonctions d'intégration ClickUp.
 const CLICKUP_TOKEN = defineSecret("CLICKUP_TOKEN");
+// Clé API Anthropic (Secret Manager) — utilisée seulement par la CURATION de la veille (curateNews).
+// Absente → la curation no-op proprement (pas d'échec du scheduler). À provisionner avant activation.
+const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 // Défauts d'intégration ClickUp (surchargés par config/clickup) : workspace + liste « Côte d'Ivoire ».
 const CLICKUP_TEAM = "90121503678";
 const CLICKUP_LIST_CI = "901215917683";
@@ -469,6 +472,55 @@ exports.alertDigest = onSchedule({ schedule: "every day 07:00", timeoutSeconds: 
     logger.error("alertDigest a échoué", { message: e && e.message });
     await logOps({ kind: "notification", trigger: "planifié", status: "error", error: (e && e.message) || String(e) });
   }
+});
+
+// --- CURATION DE LA VEILLE (agent LLM) — score la PERTINENCE de chaque TYPE de bulletin d'actualité
+// pour filtrer le bruit « avant publication ». Confidentialité par CONSTRUCTION : on n'envoie à l'API
+// QUE des signaux dé-identifiés (clé + libellé générique du catalogue + domaine + sévérité), jamais le
+// texte réel (noms clients/AM/fournisseurs, N° FP/BC/facture, montants). Écrit un doc de SCORES par
+// type (summaries/newsCuration, module overview) que le front joint au fil pour trier/masquer. ---
+async function runNewsCuration(uid) {
+  const apiKey = ANTHROPIC_API_KEY.value();
+  if (!apiKey) {
+    await logOps({ kind: "scheduled", action: "curateNews", status: "skipped", uid: uid || null, detail: { reason: "ANTHROPIC_API_KEY non configuré" } });
+    return { ok: false, skipped: true };
+  }
+  const { buildSignals, CURATION_THRESHOLD } = require("./domain/newsCuration");
+  const { scoreSignals } = require("./lib/anthropic");
+  // Bulletins ACTIFS = union des 6 docs news* (cloisonnés). Sert à connaître les types en vigueur ;
+  // buildSignals part du catalogue complet et enrichit avec ces bulletins (domaine/sévérité réels).
+  const NEWS_DOCS = ["news", "newsFacturation", "newsFournisseurs", "newsBacklog", "newsBc", "newsPipeline"];
+  const snaps = await Promise.all(NEWS_DOCS.map((d) => db.doc(`summaries/${d}`).get()));
+  const bulletins = [];
+  for (const s of snaps) { for (const b of ((s.data() || {}).bulletins || [])) bulletins.push(b); }
+  const signals = buildSignals(bulletins);
+  const activeIds = [...new Set(bulletins.map((b) => b && b.id).filter(Boolean))];
+  const { scores, model, usage } = await scoreSignals(apiKey, signals, { threshold: CURATION_THRESHOLD });
+  await db.doc("summaries/newsCuration").set({
+    scoredAt: FieldValue.serverTimestamp(), model, threshold: CURATION_THRESHOLD,
+    signalCount: signals.length, activeIds, scores,
+  });
+  await logOps({ kind: "scheduled", action: "curateNews", status: "ok", uid: uid || null, detail: { scored: Object.keys(scores).length, active: activeIds.length, model, usage } });
+  return { ok: true, scored: Object.keys(scores).length, active: activeIds.length, model };
+}
+
+// Planifiée : quotidienne à 05:30 (après le recompute de 05:00 qui régénère les bulletins). Best-effort :
+// n'échoue PAS le scheduler si l'API est indisponible (la curation est un raffinement, pas un bloquant).
+exports.curateNews = onSchedule({ schedule: "every day 05:30", secrets: [ANTHROPIC_API_KEY], memoryMiB: 256, timeoutSeconds: 120 }, async () => {
+  try { await runNewsCuration(); }
+  catch (e) {
+    logger.error("curateNews a échoué", { message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "scheduled", action: "curateNews", status: "error", error: (e && e.message) || String(e) });
+  }
+});
+
+// À la demande (Direction) : recalcule la curation immédiatement (test / rafraîchissement). Remonte
+// une erreur explicite si le secret n'est pas configuré, pour guider le provisionnement.
+exports.curateNewsNow = onCallG("curateNewsNow", { secrets: [ANTHROPIC_API_KEY], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const r = await runNewsCuration(req.auth.uid);
+  if (r.skipped) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — curation indisponible.");
+  return r;
 });
 
 // --- logLogin : audit de connexion (critère F1) ---
