@@ -131,11 +131,17 @@ describe("Lignes de crédit fournisseurs", () => {
 });
 
 describe("Objectifs", () => {
-  it("direction écrit un objectif", async () => {
-    await assertSucceeds(setDoc(doc(as("direction"), "objectives/2026_bu_ICT"), { fiscalYear: 2026 }));
+  // objectives n'est plus éditable EN DIRECT (write:false) : l'édition passe par les callables
+  // upsertObjective/deleteObjective (cibles validées + auditLog). Même direction ne peut pas écrire
+  // le doc directement — cohérent avec creditLines / billingMilestones / config/permissions.
+  it("objectives n'est PAS éditable en direct — même par direction (callable-only)", async () => {
+    await assertFails(setDoc(doc(as("direction"), "objectives/2026_bu_ICT"), { fiscalYear: 2026 }));
   });
   it("commercial (objectifs=none) ne peut PAS écrire", async () => {
     await assertFails(setDoc(doc(as("commercial"), "objectives/2026_bu_X"), { fiscalYear: 2026 }));
+  });
+  it("direction LIT les objectifs", async () => {
+    await assertSucceeds(getDoc(doc(as("direction"), "objectives/2026_bu_ICT")));
   });
 });
 

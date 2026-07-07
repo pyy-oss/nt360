@@ -2,7 +2,7 @@
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
 import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCanExport, useCanSeeMargin, useClaims } from "../lib/rbac";
+import { useCanExport, useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
@@ -67,8 +67,13 @@ export const Overview: FC<Props> = ({ period }) => {
   // Les collections brutes ne sont abonnées QUE si un filtre est actif (le recalcul par périmètre en
   // a besoin) — sinon la Vue d'ensemble (page la plus vue) n'ouvre aucun listener plein-collection.
   const { rows: cmdRows } = useCommandesRows(active);
-  const { rows: allOpps } = useCollectionData<Opportunity>(active ? "opportunities" : null);
-  const { rows: allInvoices } = useCollectionData<Invoice>(active ? "invoices" : null);
+  // Cloisonnement : n'ouvrir les collections brutes que si le rôle a le droit du module concerné
+  // (pipeline pour les opportunités, facturation pour les factures) — sinon un rôle sans ce droit
+  // déclenchait une lecture permission-denied et fuitait hors de son périmètre. Cf. audit P0-C.
+  const canPipe = useCan("pipeline") !== "none";
+  const canFac = useCan("facturation") !== "none";
+  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe ? "opportunities" : null);
+  const { rows: allInvoices } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
   // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
   const canMargin = useCanSeeMargin();
