@@ -105,7 +105,11 @@ async function recomputeAll(db, only) {
   // reconstruirait l'Actualité avec bcLines/creditLines VIDES et effacerait ces bulletins.
   const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news"]);
   const needCredit = need(["suppliers", "alerts", "news"]);
-  const needObj = need(["atterrissage", "ams", "pipeline"]);
+  // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
+  // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces
+  // agrégats avec objectives=[] → alertes d'écart réelles effacées + faux « objectif absent ». Même
+  // classe de piège que needBc/needCredit. Cf. audit P0-D.
+  const needObj = need(["atterrissage", "ams", "pipeline", "news", "alerts"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices", true), // id nécessaire pour l'exclusion des factures annulées (overlay)

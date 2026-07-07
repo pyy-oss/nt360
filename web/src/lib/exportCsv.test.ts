@@ -22,6 +22,19 @@ describe("csvCell — échappement (séparateur ;)", () => {
     expect(csvCell("ligne1\nligne2")).toBe('"ligne1\nligne2"');
     expect(csvCell(null)).toBe("");
   });
+  it("désamorce l'injection de formule (= + - @ TAB) par un préfixe apostrophe", () => {
+    expect(csvCell("=1+1")).toBe("'=1+1");
+    expect(csvCell("+33600")).toBe("'+33600");
+    expect(csvCell("-cmd")).toBe("'-cmd");
+    expect(csvCell("@SUM(A1)")).toBe("'@SUM(A1)");
+    expect(csvCell("\tTAB")).toBe("'\tTAB");
+    // formule contenant un guillemet → préfixe apostrophe PUIS échappement RFC 4180
+    expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
+  });
+  it("ne préfixe PAS un nombre négatif légitime (valeur numérique)", () => {
+    expect(csvCell(-1500)).toBe("-1500");
+    expect(csvCell(42)).toBe("42");
+  });
 });
 
 describe("cellValue — priorité à la valeur de tri brute", () => {

@@ -31,6 +31,7 @@ function suppliers(orders, bcLines, creditLines) {
   // BC : ventile facturé (→ solde) vs engagé (→ engagement) ; les soldés (payés) sont exclus.
   // bcByKey (FP|fournisseur) = Σ BC NON soldés → sert à NETTER l'achat des commandes déjà bon-de-commandé.
   const bcByKey = {};
+  const bcNoFpBySup = {}; // Σ BC NON soldés SANS N° FP renseigné, par fournisseur → repli de netting.
   for (const b of bcLines) {
     if (b.status === PAID) continue; // payé → hors compte et hors engagement
     const sup = String(b.supplier || "").toUpperCase();
@@ -38,8 +39,9 @@ function suppliers(orders, bcLines, creditLines) {
     const amt = b.amountXof || 0;
     if (b.status === INVOICED) a.facture += amt;       // facturé non payé → SOLDE
     else if (COMMITTED.has(b.status)) a.engagementBc += amt; // commandé non facturé → ENGAGEMENT
-    const k = (fpKey(b.fp) || "") + "|" + sup;
-    bcByKey[k] = (bcByKey[k] || 0) + amt;
+    const fpk = fpKey(b.fp) || "";
+    bcByKey[fpk + "|" + sup] = (bcByKey[fpk + "|" + sup] || 0) + amt;
+    if (!fpk) bcNoFpBySup[sup] = (bcNoFpBySup[sup] || 0) + amt; // BC sans FP → pool fournisseur
   }
 
   for (const o of orders) {
@@ -50,12 +52,18 @@ function suppliers(orders, bcLines, creditLines) {
       const a = get(sup);
       a.expo += s.amount || 0;
       if (openOrder) {
-        // Part de l'achat DÉJÀ couverte par un BC (tout statut non soldé) du même FP/fournisseur →
-        // retirée du prévisionnel (pas de double compte avec l'engagement BC). Le reste = « open ».
+        // Part de l'achat DÉJÀ couverte par un BC (tout statut non soldé) → retirée du prévisionnel
+        // (pas de double compte avec l'engagement BC). Priorité au BC du MÊME FP+fournisseur ; le reliquat
+        // est netté contre les BC du MÊME fournisseur SANS FP renseigné (repli — cf. audit P0-B : sinon
+        // un BC sans FP compte en engagement ET l'achat de la commande compte en open = double compte).
         const k = fp + "|" + sup;
         const covered = Math.min(s.amount || 0, bcByKey[k] || 0);
         bcByKey[k] = (bcByKey[k] || 0) - covered;
-        a.open += (s.amount || 0) - covered;
+        let remaining = (s.amount || 0) - covered;
+        const fromNoFp = Math.min(remaining, bcNoFpBySup[sup] || 0);
+        bcNoFpBySup[sup] = (bcNoFpBySup[sup] || 0) - fromNoFp;
+        remaining -= fromNoFp;
+        a.open += remaining;
       }
     }
   }

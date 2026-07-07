@@ -92,7 +92,9 @@ service cloud.firestore {
         && request.resource.data.status in ['a_emettre', 'emis', 'livre', 'facture', 'solde'];
     }
 
-    match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if canWrite('fournisseurs'); }
+    // Écriture INTERDITE au client : toute mutation passe par le callable upsertCreditLine (valide +
+    // journalise auditLog). Une écriture SDK directe contournerait la traçabilité opposable. Cf. audit.
+    match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if false; }
     // Jalons de facturation (échéancier prévisionnel par projet) : lisibles par qui voit le backlog ;
     // écrits uniquement par la Cloud Function setBillingMilestones (direction/PMO).
     match /billingMilestones/{id} { allow read: if canRead('backlog');  allow write: if false; }
