@@ -1,5 +1,5 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
-import { useState, type FC, type ReactNode, type ChangeEvent } from "react";
+import { useState, useEffect, type FC, type ReactNode, type ChangeEvent } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
@@ -675,6 +675,56 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
 // ── BOARD KANBAN : colonnes par étape (1→5 actives), changement d'étape RAPIDE (patchOpportunity),
 // cartes en retard (D Prev dépassée) flaggées. Lit la collection opportunities en direct. Filtrable.
 const BOARD_STAGES = [1, 2, 3, 4, 5];
+const BOARD_PAGE = 30; // cartes affichées par colonne avant « Voir plus » (une colonne peut porter des centaines d'opps)
+
+// Colonne du board : PAGINÉE par révélation incrémentale (« Voir plus ») — sans quoi une étape à
+// plusieurs centaines d'opps (ex. Qualification) rendait autant de cartes d'un coup (coût + illisibilité).
+// L'en-tête garde le compte RÉEL (total colonne) ; le pas revient à BOARD_PAGE quand le filtre change.
+function BoardColumn({ stage, col, canWrite, movingId, move, today }: {
+  stage: number; col: Opportunity[]; canWrite: boolean; movingId: string | null;
+  move: (o: Opportunity, v: string) => void; today: string;
+}) {
+  const [shown, setShown] = useState(BOARD_PAGE);
+  useEffect(() => { setShown(BOARD_PAGE); }, [col.length]); // filtre appliqué (taille de colonne change) → repart au 1er lot
+  const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
+  const rest = col.length - shown;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-panel2/40 p-2 min-h-[120px]">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[12px] font-semibold text-ink">{stage} · {STAGE_SHORT[stage]}</span>
+        <span className="text-[11px] text-faint tabnum">{col.length} · {fmt(tot)}</span>
+      </div>
+      {col.slice(0, shown).map((o) => {
+        const overdue = !!(o.closingDate && o.closingDate.slice(0, 10) < today);
+        return (
+          <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel", overdue ? "border-clay/40" : "border-line")}>
+            <div className="text-[12px] font-semibold text-ink truncate" title={o.client || ""}>{o.client || "—"}</div>
+            {o.designation && <div className="text-[11px] text-muted truncate" title={o.designation}>{o.designation}</div>}
+            <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
+              <span className="font-display tabnum text-ink">{fmt(o.amount)}</span>
+              <span className="text-faint">· pond. {fmt(o.weighted)}</span>
+              {o.am && <span className="text-faint truncate max-w-[90px]">· {o.am}</span>}
+            </div>
+            <div className="flex items-center justify-between gap-1.5 mt-1.5">
+              <span className={cx("text-[10px]", overdue ? "text-clay" : "text-faint")}>{o.closingDate ? (overdue ? `retard · ${o.closingDate.slice(0, 10)}` : o.closingDate.slice(0, 10)) : "sans date"}</span>
+              {canWrite && (
+                <Select ariaLabel={`Changer l'étape de ${o.client || "l'opportunité"}`} className="!py-0.5 !px-1.5 text-[11px] w-[92px]" value={String(o.stage)} disabled={movingId === (o.oppId || o.id)}
+                  onChange={(v) => move(o, v)} options={[1, 2, 3, 4, 5, 6, 7, 9].map((st) => ({ value: String(st), label: `${st}·${STAGE_SHORT[st]}` }))} />
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {!col.length && <div className="text-[11px] text-faint px-1 py-3 text-center">—</div>}
+      {rest > 0 && (
+        <button onClick={() => setShown((n) => n + BOARD_PAGE)} className="mt-0.5 rounded-lg border border-line hover:border-gold/50 hover:bg-panel2 text-[11px] text-gold px-1 py-1.5 text-center transition-colors">
+          Voir {Math.min(BOARD_PAGE, rest)} de plus <span className="text-faint">· {rest} restante{rest > 1 ? "s" : ""}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export const PipelineBoard: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
@@ -704,42 +754,11 @@ export const PipelineBoard: FC<Props> = () => {
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / AM / client" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-        {BOARD_STAGES.map((s) => {
-          const col = byStage(s);
-          const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
-          return (
-            <div key={s} className="flex flex-col gap-2 rounded-xl border border-line bg-panel2/40 p-2 min-h-[120px]">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[12px] font-semibold text-ink">{s} · {STAGE_SHORT[s]}</span>
-                <span className="text-[11px] text-faint tabnum">{col.length} · {fmt(tot)}</span>
-              </div>
-              {col.map((o) => {
-                const overdue = !!(o.closingDate && o.closingDate.slice(0, 10) < today);
-                return (
-                  <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel", overdue ? "border-clay/40" : "border-line")}>
-                    <div className="text-[12px] font-semibold text-ink truncate" title={o.client || ""}>{o.client || "—"}</div>
-                    {o.designation && <div className="text-[11px] text-muted truncate" title={o.designation}>{o.designation}</div>}
-                    <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
-                      <span className="font-display tabnum text-ink">{fmt(o.amount)}</span>
-                      <span className="text-faint">· pond. {fmt(o.weighted)}</span>
-                      {o.am && <span className="text-faint truncate max-w-[90px]">· {o.am}</span>}
-                    </div>
-                    <div className="flex items-center justify-between gap-1.5 mt-1.5">
-                      <span className={cx("text-[10px]", overdue ? "text-clay" : "text-faint")}>{o.closingDate ? (overdue ? `retard · ${o.closingDate.slice(0, 10)}` : o.closingDate.slice(0, 10)) : "sans date"}</span>
-                      {canWrite && (
-                        <Select ariaLabel={`Changer l'étape de ${o.client || "l'opportunité"}`} className="!py-0.5 !px-1.5 text-[11px] w-[92px]" value={String(o.stage)} disabled={movingId === (o.oppId || o.id)}
-                          onChange={(v) => move(o, v)} options={[1, 2, 3, 4, 5, 6, 7, 9].map((st) => ({ value: String(st), label: `${st}·${STAGE_SHORT[st]}` }))} />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {!col.length && <div className="text-[11px] text-faint px-1 py-3 text-center">—</div>}
-            </div>
-          );
-        })}
+        {BOARD_STAGES.map((s) => (
+          <BoardColumn key={s} stage={s} col={byStage(s)} canWrite={canWrite} movingId={movingId} move={move} today={today} />
+        ))}
       </div>
-      <Tip>Pilotage visuel des deals actifs (étapes 1→5). Changer l'étape d'une carte met à jour l'opportunité et relance le recalcul. Cartes en <b className="text-clay">retard</b> = D Prev dépassée (à requalifier). Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
+      <Tip>Pilotage visuel des deals actifs (étapes 1→5). Chaque colonne affiche les opportunités <b>les plus pondérées d'abord</b> ; « <b>Voir plus</b> » révèle la suite (le compte total reste affiché en tête). Changer l'étape d'une carte met à jour l'opportunité et relance le recalcul. Cartes en <b className="text-clay">retard</b> = D Prev dépassée (à requalifier). Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
     </div>
   );
 };
