@@ -181,22 +181,24 @@ export const Am360: FC<Props> = () => {
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", patch: false };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", patch: false };
 
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
-  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]));
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
   const { intent } = useNav();
+  const { user } = useClaims(); // identité de l'utilisateur connecté → pré-remplit l'AM d'une nouvelle opp + « Mon pipeline »
+  const meAm = (user?.displayName || user?.email || "").trim();
+  const [mine, setMine] = useState(false); // « Mes opportunités » : filtre owner = utilisateur connecté (client-side)
+  // « Mon pipeline » : match souple sur l'AM (insensible à la casse/espaces). Filtre transverse appliqué ensuite.
+  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]) && (!mine || (r.am || "").trim().toLowerCase() === meAm.toLowerCase()));
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
   const [f, setF] = useState({ ...EMPTY_OPP });
   const [open, setOpen] = useState(false); // saisie/édition d'opportunité en MODALE
-  const { user } = useClaims(); // identité de l'utilisateur connecté → pré-remplit l'AM d'une nouvelle opp
-  const meAm = (user?.displayName || user?.email || "").trim();
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
@@ -204,7 +206,8 @@ export const OppList: FC<Props> = () => {
   const prefill = (o: Opportunity, patch: boolean) => { setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
-    mbPrev: o.mbPrev != null ? String(o.mbPrev) : "", dr: o.dr ? "oui" : "non", patch,
+    mbPrev: o.mbPrev != null ? String(o.mbPrev) : "", dr: o.dr ? "oui" : "non",
+    nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", patch,
   }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
   const fixOpp = (o: Opportunity) => prefill(o, true);   // opp IMPORTÉE → correction (patch, source conservée)
@@ -219,6 +222,20 @@ export const OppList: FC<Props> = () => {
     .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9)
     .sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
   const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
+  const today = new Date().toISOString().slice(0, 10);
+  // Prochaines actions commerciales échéancées (opps ACTIVES avec date d'action), triées par échéance.
+  const actions = rows.filter((o) => o.nextStepDate && (o.stage || 0) >= 1 && (o.stage || 0) <= 5)
+    .sort((a, b) => (a.nextStepDate || "").localeCompare(b.nextStepDate || ""));
+  // Motifs de perte (opps PERDUES, étape 7) regroupés — analytique win/loss.
+  const lostByReason = (() => {
+    const m = new Map<string, { count: number; amount: number }>();
+    rows.filter((o) => o.stage === 7).forEach((o) => {
+      const k = (o.lostReason || "").trim() || "(non renseigné)";
+      const e = m.get(k) || { count: 0, amount: 0 };
+      e.count++; e.amount += (o.amount || 0); m.set(k, e);
+    });
+    return [...m.entries()].map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
+  })();
   // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
   // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
   const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
@@ -235,7 +252,10 @@ export const OppList: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <FilterNote dims="BU / AM / client" />
-        {canWrite && <button onClick={openNew} className="btn-gold !px-3 !py-1.5 text-sm shrink-0">+ Ajouter une opportunité</button>}
+        <div className="flex items-center gap-2 shrink-0">
+          {meAm && <button onClick={() => setMine((m) => !m)} className={cx("btn-ghost !px-3 !py-1.5 text-sm", mine && "!text-gold !border-gold/50")} title="Filtrer sur mes opportunités (AM = moi)">{mine ? "Mon pipeline ✓" : "Mon pipeline"}</button>}
+          {canWrite && <button onClick={openNew} className="btn-gold !px-3 !py-1.5 text-sm">+ Ajouter une opportunité</button>}
+        </div>
       </div>
       {canWrite && (
         <Modal open={open} onClose={() => setOpen(false)} size="md"
@@ -246,9 +266,9 @@ export const OppList: FC<Props> = () => {
               <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
                 fn={async () => {
                   if (f.patch) {
-                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined });
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason });
                   } else {
-                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui" });
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason });
                   }
                   setOpen(false); setF({ ...EMPTY_OPP });
                 }} />
@@ -279,9 +299,42 @@ export const OppList: FC<Props> = () => {
               <Select ariaLabel="DR (Oui / Non)" value={f.dr} onChange={(v) => setF({ ...f, dr: v })} options={[{ value: "non", label: "Non" }, { value: "oui", label: "Oui" }]} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">D Prev
               <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></label>
+            {/* Suivi commercial (Lot B) : prochaine action + échéance (date maîtrisée → relances honnêtes). */}
+            <label className="flex flex-col gap-1 text-[11px] text-muted sm:col-span-2">Prochaine action
+              <input className="field" aria-label="Prochaine action commerciale" placeholder="Ex. relancer DAF, envoyer proposition…" value={f.nextStep} onChange={(e) => setF({ ...f, nextStep: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Échéance action
+              <DateField ariaLabel="Échéance de la prochaine action" value={f.nextStepDate} onChange={(v) => setF({ ...f, nextStepDate: v })} placeholder="jj/mm/aaaa" /></label>
+            {/* Motif de perte : pertinent uniquement pour une opp Perdue (étape 7) → analytique win/loss. */}
+            {Number(f.stage) === 7 && (
+              <label className="flex flex-col gap-1 text-[11px] text-muted">Motif de perte
+                <input className="field" aria-label="Motif de perte" placeholder="Ex. prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></label>
+            )}
           </div>
           {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
         </Modal>
+      )}
+      {actions.length > 0 && (
+        <Card title={`Prochaines actions commerciales · ${actions.length}`}>
+          <Table columns={[
+            colText("Échéance", (o) => { const late = (o.nextStepDate || "") < today; return <span className={late ? "text-clay" : "text-ink"}>{o.nextStepDate}{late ? " · retard" : ""}</span>; }, (o) => o.nextStepDate || ""),
+            colText("Client", (o) => o.client, (o) => o.client),
+            colText("Action", (o) => o.nextStep || "—"),
+            colText("Étape", (o) => o.stageLabel || o.stage, (o) => o.stage),
+            colText("AM", (o) => o.am, (o) => o.am),
+            ...(canWrite ? [colText("", (o: Opportunity) => <button onClick={() => (o.source === "saisie" ? editOpp(o) : fixOpp(o))} className="text-gold hover:underline text-xs">Éditer</button>)] : []),
+          ]} rows={actions.slice(0, 25)} />
+          <Tip>Actions commerciales datées à mener sur les opportunités actives. Les <b className="text-clay">en retard</b> (échéance dépassée) sont prioritaires. Renseignées via la fiche opportunité (« Prochaine action » + échéance).</Tip>
+        </Card>
+      )}
+      {lostByReason.length > 0 && (
+        <Card title={`Motifs de perte · ${lostByReason.reduce((s, r) => s + r.count, 0)} opp. perdue(s)`}>
+          <Table columns={[
+            colText("Motif", (r) => r.reason, (r) => r.reason),
+            colNum("Opp.", (r) => r.count, (r) => r.count),
+            colNum("Montant perdu", (r) => money(r.amount), (r) => r.amount),
+          ]} rows={lostByReason} />
+          <Tip>Analyse win/loss : volumes et montants perdus par motif (saisi au passage en « Perdu »). Éclaire les corrections de prix / délai / positionnement concurrentiel.</Tip>
+        </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
         {certitudes.length ? (

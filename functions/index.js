@@ -985,6 +985,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   // Clamp [0,100] ; vide/absent → null. Porté par l'opportunité (lisible au niveau pipeline, par choix).
   const mbRaw = d.mbPrev;
   const mbPrev = (mbRaw === undefined || mbRaw === null || mbRaw === "") ? null : Math.min(100, Math.max(0, Number(mbRaw) || 0));
+  const { toISO } = require("./lib/sheets");
   const doc = {
     oppId: id, source: "saisie",
     client, am: String(d.am || "").trim(), bu: String(d.bu || "AUTRE").trim().toUpperCase(),
@@ -994,6 +995,11 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     closingDate: d.closingDate || null,
     mbPrev,          // % marge brute prévisionnelle (prévision, non confidentiel)
     dr: d.dr === true, // DR (Deal Registration / demande de remise) — booléen Oui/Non
+    // Suivi commercial (Lot B) : prochaine action + son échéance (date QU'ON MAÎTRISE → aging honnête
+    // du suivi, distinct de la D Prev) ; motif de perte (analytique win/loss sur les opps stage 7).
+    nextStep: String(d.nextStep || "").trim().slice(0, 500) || null,
+    nextStepDate: d.nextStepDate ? (toISO(d.nextStepDate) || null) : null,
+    lostReason: String(d.lostReason || "").trim().slice(0, 200) || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
@@ -1037,6 +1043,10 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   if (d.closingDate !== undefined) patch.closingDate = d.closingDate || null;
   if (d.am !== undefined) patch.am = String(d.am || "").trim();
   if (d.bu !== undefined) patch.bu = String(d.bu || "").trim().toUpperCase();
+  // Suivi commercial (Lot B) : prochaine action + échéance + motif de perte — éditables sur toute opp.
+  if (d.nextStep !== undefined) patch.nextStep = String(d.nextStep || "").trim().slice(0, 500) || null;
+  if (d.nextStepDate !== undefined) { const { toISO } = require("./lib/sheets"); patch.nextStepDate = d.nextStepDate ? (toISO(d.nextStepDate) || null) : null; }
+  if (d.lostReason !== undefined) patch.lostReason = String(d.lostReason || "").trim().slice(0, 200) || null;
   if (d.stage !== undefined) {
     const stage = clampStage(d.stage);
     patch.stage = stage;
