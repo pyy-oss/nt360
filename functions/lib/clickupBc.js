@@ -121,6 +121,41 @@ function readBcSync(task) {
   };
 }
 
+// Reconstruit une ligne BC LOGIQUE à partir d'une tâche ClickUp (import inverse : les BC saisis
+// directement dans ClickUp deviennent des bcLines). Résout les listes déroulantes (Currency, Pays) via
+// les options portées par le champ lui-même. Renvoie null sans N° de Commande (clé indispensable). PUR.
+function readBcFromTask(task) {
+  const t = task || {};
+  const cfs = t.custom_fields || [];
+  const byName = (name) => cfs.find((c) => norm(c.name) === norm(name));
+  const txt = (name) => { const f = byName(name); return f && f.value != null ? String(f.value).trim() : ""; };
+  const numF = (name) => { const f = byName(name); const n = f ? Number(f.value) : NaN; return Number.isFinite(n) ? n : 0; };
+  const opt = (name) => {
+    const f = byName(name); if (!f || f.value == null) return "";
+    const os = (f.type_config && f.type_config.options) || [];
+    const o = os.find((x) => String(x.id) === String(f.value) || String(x.orderindex) === String(f.value));
+    return o ? o.name : "";
+  };
+  const bcNumber = txt(BC_FIELD.numero);
+  if (!bcNumber) return null;
+  const rawCur = opt(BC_FIELD.currency);
+  const etaF = byName(BC_FIELD.eta);
+  const etaMs = etaF && etaF.value != null ? Number(etaF.value) : NaN;
+  const status = t.status && typeof t.status === "object" ? (t.status.status || null) : (t.status || null);
+  return {
+    bcNumber,
+    supplier: txt(BC_FIELD.fournisseur),
+    customer: txt(BC_FIELD.client),
+    fp: txt(BC_FIELD.oppId),
+    country: opt(BC_FIELD.pays),
+    currency: rawCur ? (norm(rawCur) === "fcfa" ? "XOF" : rawCur.toUpperCase()) : "",
+    amount: numF(BC_FIELD.montant),
+    etaReel: Number.isFinite(etaMs) && etaMs > 0 ? new Date(etaMs).toISOString().slice(0, 10) : null,
+    statusRaw: status,
+    taskId: t.id || null,
+  };
+}
+
 // N° BC porté par une tâche (champ « Numéro de Commande ») → réconciliation anti-doublon. PUR.
 function taskBcNumber(task) {
   const cfs = (task && task.custom_fields) || [];
@@ -134,4 +169,4 @@ function buildBcIndex(tasks, safeId) {
   return idx;
 }
 
-module.exports = { BC_FIELD, bcKey, groupBcByNumber, bcLogical, buildBcFieldWrites, bcCorePayload, mapBcStatus, readBcSync, taskBcNumber, buildBcIndex };
+module.exports = { BC_FIELD, bcKey, groupBcByNumber, bcLogical, buildBcFieldWrites, bcCorePayload, mapBcStatus, readBcSync, readBcFromTask, taskBcNumber, buildBcIndex };

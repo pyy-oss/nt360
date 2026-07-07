@@ -1560,6 +1560,64 @@ exports.reconcileBcLinks = onCallG("reconcileBcLinks", { secrets: [CLICKUP_TOKEN
   return { ok: true, ...res };
 });
 
+// importBcFromClickup : IMPORTE dans l'app les BC saisis DIRECTEMENT dans ClickUp (tâches de la liste
+// « Commandes Fournisseurs » sans ligne bcLines correspondante). Crée une bcLine par tâche avec un N° de
+// Commande + un Montant. GARDE-FOUS : (1) l'import Logistics/PDF/fiche PRIME — un N° BC déjà connu par
+// une autre source est ignoré (jamais de doublon comptable) ; (2) statut « émis » = ENGAGÉ non facturé →
+// alimente l'engagement fournisseur, JAMAIS le solde SOA (seule une facture bouge le solde) ; (3) montant
+// converti en XOF via config/fxRates ; (4) id stable → ré-import idempotent. Direction.
+exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const clickup = require("./lib/clickup");
+  const bc = require("./lib/clickupBc");
+  const { toXof } = require("./lib/fx");
+  const { safeId } = require("./lib/sheets");
+  const { fpKey } = require("./lib/ids");
+  const listId = bcListIdOf(cfg, req.data?.listId);
+  const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
+  // BC déjà connus par une source COMPTABLE (≠ clickup) → prioritaires, on ne les réimporte pas.
+  const known = new Set();
+  (await db.collection("bcLines").get()).forEach((doc) => { const v = doc.data() || {}; if (v.bcNumber && v.source !== "clickup") known.add(bc.bcKey(v.bcNumber, safeId)); });
+  let tasks;
+  try { tasks = await clickup.listTasks(token, listId, { includeClosed: true }); }
+  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "liste illisible"}`); }
+  const writes = [];
+  const newLinks = {};
+  let created = 0, skippedKnown = 0, skippedIncomplete = 0;
+  for (const t of tasks) {
+    const r = bc.readBcFromTask(t);
+    if (!r || !r.bcNumber || !(r.amount > 0)) { skippedIncomplete++; continue; }
+    const key = bc.bcKey(r.bcNumber, safeId);
+    if (known.has(key)) { skippedKnown++; continue; } // import comptable prime
+    const conv = toXof(r.currency || "XOF", r.amount, null, rates);
+    const id = "bc_cu_" + key; // id stable → ré-import = même doc (idempotent)
+    writes.push({ path: `bcLines/${id}`, data: {
+      _id: id, fp: fpKey(r.fp) || "", bcNumber: r.bcNumber, supplier: r.supplier || "", customer: r.customer || "",
+      country: r.country || "", currency: r.currency || "XOF", amount: r.amount || 0,
+      amountXof: conv.amountXof, fxRate: conv.fxRate, fxSource: conv.fxSource,
+      status: "emis", // ENGAGÉ non facturé → engagement fournisseur, JAMAIS le solde SOA
+      etaReel: r.etaReel || null, clickupBcStatusRaw: r.statusRaw || null,
+      source: "clickup", clickupTaskId: r.taskId || null, importedAt: FieldValue.serverTimestamp(),
+    } });
+    if (r.taskId) newLinks[key] = r.taskId;
+    created++;
+  }
+  // Écriture par batch (merge → idempotent), puis liens + recompute des agrégats fournisseurs.
+  let batch = db.batch(), n = 0;
+  for (const w of writes) { batch.set(db.doc(w.path), w.data, { merge: true }); if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); } }
+  if (n % 400 !== 0 || n === 0) await batch.commit();
+  if (Object.keys(newLinks).length) await db.doc("config/clickupBcLinks").set({ map: newLinks }, { merge: true });
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+  catch (e) { logger.warn("import BC: recompute partiel échoué", { msg: e && e.message }); }
+  const res = { created, skippedKnown, skippedIncomplete, scanned: tasks.length };
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_import", module: "bc", entity: "bcLines", entityId: "import", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...res };
+});
+
 // SENS INVERSE BC ClickUp → app : lit le statut d'avancement achat + l'ETA des tâches BC liées et les
 // stocke en overlay config/clickupBcSync (survit au recompute). Recalcule ensuite les agrégats
 // fournisseurs (exposition, retards, décaissements) pour fusionner immédiatement ces champs. Préserve

@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -568,6 +568,7 @@ function ClickupCard() {
   const [bcRecBusy, setBcRecBusy] = useState(false);
   const [bcBulkBusy, setBcBulkBusy] = useState(false);
   const [bcPullBusy, setBcPullBusy] = useState(false);
+  const [bcImportBusy, setBcImportBusy] = useState(false);
   const [whBusy, setWhBusy] = useState(false);
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const { data: health } = useDocData<ClickupHealthSummary>("summaries/clickupHealth");
@@ -655,6 +656,18 @@ function ClickupCard() {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
       toast(detail ? `Rattachement BC refusé — ${detail}` : "Rattachement BC : échec", "err");
     } finally { setBcRecBusy(false); }
+  };
+  const bcImport = async () => {
+    if (bcImportBusy) return;
+    if (!window.confirm("Importer dans l'app les BC saisis directement dans ClickUp (non encore présents) ?\n\nLes BC déjà connus par un import (Logistics/PDF) sont ignorés. Les BC importés sont créés au statut « émis » (engagement, sans impact sur le solde du compte).")) return;
+    setBcImportBusy(true);
+    try {
+      const r = await importBcFromClickup();
+      toast(`Import BC — ${r.created} créé(s), ${r.skippedKnown} déjà connu(s), ${r.skippedIncomplete} incomplet(s) / ${r.scanned} tâche(s)`, "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Import BC refusé — ${detail}` : "Import BC : échec", "err");
+    } finally { setBcImportBusy(false); }
   };
   const bcPull = async () => {
     if (bcPullBusy) return;
@@ -751,6 +764,9 @@ function ClickupCard() {
           </button>
           <button type="button" className="btn-ghost !py-1.5" disabled={bcPullBusy} onClick={bcPull} title="Remonter l'avancement achat (statut) + l'ETA des tâches BC depuis ClickUp">
             {bcPullBusy ? "Synchro…" : "Synchroniser les BC depuis ClickUp"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcImportBusy} onClick={bcImport} title="Créer dans l'app les BC saisis directement dans ClickUp (dédup par N° BC, statut « émis », conversion XOF). L'import Logistics/PDF reste prioritaire.">
+            {bcImportBusy ? "Import…" : "Importer les BC depuis ClickUp"}
           </button>
           {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-amber-400">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
         </div>

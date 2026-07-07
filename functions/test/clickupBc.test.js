@@ -133,6 +133,43 @@ describe("mapBcStatus / readBcSync — sens inverse ClickUp → app", () => {
   });
 });
 
+describe("readBcFromTask — import inverse (tâche ClickUp → ligne BC)", () => {
+  const task = {
+    id: "t1",
+    status: { status: "placee distributeur" },
+    custom_fields: [
+      { name: "Numéro de Commande", type: "short_text", value: "BC/2026/9" },
+      { name: "Fournisseur", type: "short_text", value: "CISCO" },
+      { name: "Client", type: "short_text", value: "MTN" },
+      { name: "Opp ID", type: "short_text", value: "FP/2026/1" },
+      { name: "Montant Total de la Commande", type: "currency", value: "1200" },
+      { name: "Currency", type: "drop_down", value: "u_usd", type_config: { options: [{ id: "u_eur", name: "EUR", orderindex: 0 }, { id: "u_usd", name: "USD", orderindex: 1 }, { id: "u_fcfa", name: "FCFA", orderindex: 2 }] } },
+      { name: "Pays", type: "drop_down", value: 1, type_config: { options: [{ id: "p_bf", name: "BF", orderindex: 0 }, { id: "p_ci", name: "CI", orderindex: 1 }] } },
+      { name: "Livraison Estimée (ETA)", type: "date", value: "1780200000000" },
+    ],
+  };
+  it("extrait N°/fournisseur/client/FP/montant + résout devise & pays (par id ET orderindex)", () => {
+    const r = bc.readBcFromTask(task);
+    expect(r.bcNumber).toBe("BC/2026/9");
+    expect(r.supplier).toBe("CISCO");
+    expect(r.customer).toBe("MTN");
+    expect(r.fp).toBe("FP/2026/1");
+    expect(r.amount).toBe(1200);
+    expect(r.currency).toBe("USD");   // drop_down résolu par option.id
+    expect(r.country).toBe("CI");     // drop_down résolu par orderindex
+    expect(r.etaReel).toBe("2026-05-31");
+    expect(r.statusRaw).toBe("placee distributeur");
+    expect(r.taskId).toBe("t1");
+  });
+  it("FCFA → currency XOF", () => {
+    const t2 = { id: "t2", custom_fields: [{ name: "Numéro de Commande", value: "BC-2" }, { name: "Currency", type: "drop_down", value: "u_fcfa", type_config: { options: [{ id: "u_fcfa", name: "FCFA" }] } }] };
+    expect(bc.readBcFromTask(t2).currency).toBe("XOF");
+  });
+  it("sans N° de Commande → null (clé indispensable)", () => {
+    expect(bc.readBcFromTask({ id: "t3", custom_fields: [{ name: "Fournisseur", value: "X" }] })).toBe(null);
+  });
+});
+
 describe("taskBcNumber / buildBcIndex — réconciliation anti-doublons", () => {
   const tasks = [
     { id: "t1", custom_fields: [{ name: "Numéro de Commande", value: "BC-1" }] },
