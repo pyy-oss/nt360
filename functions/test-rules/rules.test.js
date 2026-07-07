@@ -145,6 +145,20 @@ describe("Objectifs", () => {
   });
 });
 
+describe("Historique des transitions d'étape (oppHistory · funnel)", () => {
+  // oppHistory est écrit uniquement par les Cloud Functions (recordOppTransition, Admin SDK) : lisible
+  // par qui voit le pipeline, jamais éditable côté client (funnel non falsifiable).
+  it("commercial (pipeline:write) LIT oppHistory", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "oppHistory/h1")));
+  });
+  it("oppHistory n'est PAS éditable en direct — même par direction (callable-only)", async () => {
+    await assertFails(setDoc(doc(as("direction"), "oppHistory/h1"), { from: 1, to: 2 }));
+  });
+  it("summaries/oppFunnel lisible au niveau pipeline (commercial OK)", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/oppFunnel")));
+  });
+});
+
 describe("Matrice de droits (habilitations)", () => {
   // config/permissions n'est plus éditable EN DIRECT (write:false) : l'édition passe par le callable
   // setPermissions (schéma validé + audité). Même direction ne peut pas écrire le doc directement.

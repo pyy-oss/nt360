@@ -10,7 +10,10 @@ import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, f
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
-import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary } from "../types";
+import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
+
+// Libellés courts d'étape pour le funnel de transitions (from→to).
+const stageArrow = (from: number, to: number) => `${from || "•"} → ${to}`;
 
 // Module PIPELINE : synthèse analytique seulement (la saisie et le détail sont dans « Opportunités »).
 export const Pipeline: FC<Props> = ({ period }) => {
@@ -24,6 +27,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // Pipeline de l'EXERCICE (indépendant du sélecteur de période) pour une couverture cohérente
   // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
+  const { data: funnelC } = useDocData<OppFunnelSummary>("summaries/oppFunnel"); // funnel de conversion réel (Lot C)
   if (!data) return <EmptyState />;
   const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
   // Couverture du reste-à-faire : combien de fois le pipeline pondéré (exercice) couvre l'écart à
@@ -130,6 +134,24 @@ export const Pipeline: FC<Props> = ({ period }) => {
           <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. L'<b>ancienneté du retard</b> priorise les affaires les plus enlisées (les <b>&gt; 90 j</b> sont les plus à risque, souvent à passer en perdu). Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
         </>
       )}
+      <Card title="Funnel de conversion — transitions d'étape (réel)">
+        {(funnelC?.total ?? 0) > 0 ? (
+          <>
+            <div className={grid4}>
+              <Kpi label="Taux de gain" value={pct(funnelC?.winRate)} tone={(funnelC?.winRate ?? 0) >= 0.5 ? "emerald" : "gold"} sub={`gagné ${funnelC?.won ?? 0} / perdu ${funnelC?.lost ?? 0}`} />
+              <Kpi label="Progressions" value={String(funnelC?.advanced ?? 0)} tone="emerald" sub="avancées d'étape" />
+              <Kpi label="Reculs" value={String(funnelC?.regressed ?? 0)} tone="clay" sub="retours en arrière" />
+              <Kpi label="Transitions" value={String(funnelC?.total ?? 0)} sub="mouvements journalisés" />
+            </div>
+            <Table columns={[
+              colText("Transition", (t) => stageArrow(t.from, t.to), (t) => t.from * 100 + t.to),
+              colNum("Occurrences", (t) => t.count, (t) => t.count),
+              colNum("Montant", (t) => money(t.amount), (t) => t.amount),
+            ]} rows={funnelC?.transitions || []} />
+          </>
+        ) : <EmptyState label="Le funnel de conversion se construit à partir des changements d'étape (board / édition d'opportunité)." />}
+        <Tip>Funnel <b>réel</b> mesuré sur les transitions d'étape journalisées (board Kanban / édition) — la source Excel n'ayant ni date de création ni historique, il se construit <b>à partir de maintenant</b> et gagne en fiabilité avec le temps. <b>Taux de gain</b> = passages en Gagné / (Gagné + Perdu).</Tip>
+      </Card>
     </div>
   );
 };

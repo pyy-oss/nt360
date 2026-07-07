@@ -93,6 +93,11 @@ export type AmRow = {
   conv: number; targetCas: number; roCas: number | null; orderCount: number;
 };
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
+// Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory).
+export interface OppFunnelSummary {
+  transitions?: { from: number; to: number; count: number; amount: number }[];
+  won?: number; lost?: number; advanced?: number; regressed?: number; winRate?: number; total?: number;
+}
 export type PmRow = { pm: string; count: number; cas: number; raf: number };
 export interface PmsSummary { count?: number; rows?: PmRow[] }
 // Analytique délais/échéances ClickUp (summaries/clickupDelays) : retard de livraison par PM/statut

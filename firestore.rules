@@ -32,6 +32,7 @@ service cloud.firestore {
         : id.matches('domainesMargin.*') ? 'rentabilite'
         : id.matches('pipeline.*') ? 'pipeline'
         : id.matches('ams.*') ? 'pipeline'
+        : id.matches('oppFunnel.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'
         : id.matches('atterrissage.*') ? 'overview'
         : id.matches('backlog.*') ? 'backlog'
@@ -96,6 +97,9 @@ service cloud.firestore {
       allow update: if canWrite('pipeline') && resource.data.source == 'saisie' && request.resource.data.source == 'saisie';
       allow delete: if canWrite('pipeline') && resource.data.source == 'saisie';
     }
+    // Historique des transitions d'étape (Lot C) : lisible par qui voit le pipeline ; écrit UNIQUEMENT
+    // par les Cloud Functions (recordOppTransition, Admin SDK) → le funnel n'est pas falsifiable côté client.
+    match /oppHistory/{id} { allow read: if canRead('pipeline'); allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
