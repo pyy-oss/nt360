@@ -53,8 +53,12 @@ jobs:
       # Smoke E2E de PR : joue le rendu de l'écran de connexion contre l'app BUILDÉE (vite preview,
       # servie localement par Playwright). Sans secret — les tests de marge se skippent. Attrape les
       # régressions runtime (écran blanc, crash au boot, assets manquants) avant merge.
+      # NB : `--with-deps` lançait `apt-get` (install des libs système) qui échouait quand le dépôt
+      # apt Microsoft (packages.microsoft.com) était temporairement « no longer signed » — panne
+      # UPSTREAM qui bloquait tout le job. Les runners ubuntu-latest embarquent déjà les libs système
+      # requises par Chromium ; on installe donc UNIQUEMENT le binaire du navigateur (pas d'apt).
       - name: Install Playwright Chromium
-        run: pnpm --filter web exec playwright install --with-deps chromium
+        run: pnpm --filter web exec playwright install chromium
 
       - name: Smoke E2E (app buildée, sans secret)
         run: pnpm --filter web test:e2e
