@@ -211,11 +211,17 @@ async function recomputeCore(db, only) {
     const k = fpKey(o.fp); if (!k) return true;
     return bestSalesByFp.get(k) === o; // ne garde que le représentant le plus récent du FP
   });
+  // Opportunités FANTÔMES (cf. audit intégral I2) : une opp 'salesData' RETIRÉE de la feuille LIVE
+  // (sans clôture 7/9) est marquée `stale:true` NON-DESTRUCTIVEMENT à l'import (lib/apply.js). On
+  // l'EXCLUT ici des agrégats pipeline actifs (pondéré, funnel, conversion, commandes) — elle reste en
+  // base, ré-activable par un import ultérieur. Réversible : aucune donnée supprimée.
+  const oppsActive = oppsDedup.filter((o) => o.stale !== true);
+  const staleOpps = oppsDedup.filter((o) => o.stale === true); // fantômes (I2) : signalés en Qualité, hors agrégats
   // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
   // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
   // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
-  const salesFps = new Set(oppsDedup.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
-  const opps = oppsDedup.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
+  const salesFps = new Set(oppsActive.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
+  const opps = oppsActive.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
@@ -371,7 +377,7 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/alertsPipeline", data: { items: bucket.pipeline, ...meta } });
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);
+  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps);
   // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
   // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
   const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");

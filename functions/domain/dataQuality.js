@@ -7,9 +7,9 @@ const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
-function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
+function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
-  bcLines = bcLines || []; sheets = sheets || [];
+  bcLines = bcLines || []; sheets = sheets || []; staleOpps = staleOpps || [];
   // Number.isFinite → un seuil configuré à 0 (valide) n'est PAS écrasé par le défaut (le `||` le ferait,
   // en contradiction avec alerts.js). Cf. audit P2.
   const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
@@ -46,6 +46,10 @@ function dataQuality(orders, invoices, opps, bcLines, sheets, thr) {
   // des réconciliations opp↔P&L à faire (saisir la ligne au P&L de l'Excel), sinon CAS/backlog absents.
   const orderFps = new Set(orders.map((o) => fpKey(o.fp)).filter(Boolean));
   add("opps_gagnees_sans_pnl", "high", opps.filter((o) => o.stage === 6 && o.fp && !orderFps.has(fpKey(o.fp))), "Opportunités GAGNÉES sans ligne P&L (à réconcilier au P&L — non comptées en commande)", (o) => o.fp || o.client);
+  // Opportunités FANTÔMES (cf. audit intégral I2) : retirées de la feuille LIVE sans clôture (7/9),
+  // marquées `stale` et EXCLUES du pipeline actif. Signalées ici (non-destructif) → à clôturer
+  // proprement (étape 7 Perdu / 9 Annulé) ou ré-importer si le retrait était accidentel.
+  add("opps_fantomes", "low", staleOpps, "Opportunités retirées de LIVE sans clôture (exclues du pipeline — à clôturer 7/9 ou ré-importer)", (o) => o.fp || o.client);
 
   // Lignes BC
   add("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier);

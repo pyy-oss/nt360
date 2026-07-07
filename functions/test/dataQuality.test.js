@@ -105,6 +105,18 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(t.opps_doublons).toBeUndefined();
     expect(t.bc_doublons).toBeUndefined();
   });
+  it("opportunités FANTÔMES (stale, retirées de LIVE) signalées en Qualité — non-destructif (I2)", () => {
+    const ghosts = [{ fp: "FP/2026/9", client: "ZED", stage: 4 }, { fp: "FP/2026/10", client: "MTN", stage: 3 }];
+    const q6 = dataQuality([], [], [], [], [], undefined, ghosts);
+    const t = Object.fromEntries(q6.issues.map((i) => [i.type, i]));
+    expect(t.opps_fantomes.count).toBe(2);
+    expect(t.opps_fantomes.severity).toBe("low");
+    expect(t.opps_fantomes.refs).toContain("FP/2026/9");
+  });
+  it("sans fantôme (param omis) → pas de signal opps_fantomes", () => {
+    const t = Object.fromEntries(q.issues.map((i) => [i.type, i]));
+    expect(t.opps_fantomes).toBeUndefined();
+  });
   it("issues triées par sévérité (high avant medium avant low)", () => {
     const ranks = q.issues.map((i) => ({ high: 0, medium: 1, low: 2 }[i.severity]));
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
