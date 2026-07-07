@@ -1,9 +1,9 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
 import { useState, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
-import { useCan, useCanImport } from "../lib/rbac";
+import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId } from "../lib/writes";
@@ -141,6 +141,8 @@ export const Am360: FC<Props> = () => {
   const [am, setAm] = useState<string>("");
   if (!rows.length) return <EmptyState label="Aucun commercial renseigné (importer Pipeline / Commandes)." />;
   const sel = rows.find((r) => r.am === am) || rows[0];
+  // Rang par prise de commande (CAS) — classement de performance du leaderboard.
+  const rankOf = new Map([...rows].sort((a, b) => b.cas - a.cas).map((r, i) => [r.am, i + 1] as const));
   return (
     <div className="flex flex-col gap-4">
       <Card title="Commercial (Account Manager)">
@@ -161,13 +163,15 @@ export const Am360: FC<Props> = () => {
       </div>
       <Card title="Classement des commerciaux">
         <Table columns={[
+          colText("#", (r) => <span className="text-faint tabnum">{rankOf.get(r.am)}</span>, (r) => rankOf.get(r.am) ?? 999),
           colText("AM", (r) => (r.am === sel.am ? <b className="text-gold">{r.am}</b> : r.am), (r) => r.am),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas),
+          colNum("Ticket moy.", (r) => (r.orderCount > 0 ? money(r.cas / r.orderCount) : "—"), (r) => (r.orderCount > 0 ? r.cas / r.orderCount : 0)),
           colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
           colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
           colNum("Pipeline pond.", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
-          colNum("R/O CAS", (r) => (r.roCas != null ? pct(r.roCas) : "—"), (r) => r.roCas ?? -1),
+          colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
         ]} rows={rows} />
       </Card>
       <Tip>Vue par commercial <b>sans marge</b> (la rentabilité par AM reste dans « Rentabilité »). Le <b>facturé</b> est rattaché au commercial via la clé N° FP de ses commandes. Le <b>R/O</b> compare le CAS de l'exercice à l'objectif CAS « commercial » de l'année.</Tip>
@@ -177,7 +181,7 @@ export const Am360: FC<Props> = () => {
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", patch: false };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", patch: false };
 
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
@@ -190,16 +194,22 @@ export const OppList: FC<Props> = () => {
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
   const [f, setF] = useState({ ...EMPTY_OPP });
+  const [open, setOpen] = useState(false); // saisie/édition d'opportunité en MODALE
+  const { user } = useClaims(); // identité de l'utilisateur connecté → pré-remplit l'AM d'une nouvelle opp
+  const meAm = (user?.displayName || user?.email || "").trim();
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
-  const prefill = (o: Opportunity, patch: boolean) => setF({
+  const prefill = (o: Opportunity, patch: boolean) => { setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
-    amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "", patch,
-  });
+    amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
+    mbPrev: o.mbPrev != null ? String(o.mbPrev) : "", dr: o.dr ? "oui" : "non", patch,
+  }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
   const fixOpp = (o: Opportunity) => prefill(o, true);   // opp IMPORTÉE → correction (patch, source conservée)
+  // Nouvelle opportunité : AM pré-rempli avec l'identité connectée (éditable), reste vierge.
+  const openNew = () => { setF({ ...EMPTY_OPP, am: meAm }); setOpen(true); };
   // Changer d'étape pré-remplit la proba par défaut de l'étape si elle est vide (évite un pondéré à 0).
   const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
   if (loading && !allRows.length) return <CardSkeleton />;
@@ -223,32 +233,55 @@ export const OppList: FC<Props> = () => {
   const shownOpps = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
   return (
     <div className="flex flex-col gap-4">
-      <FilterNote dims="BU / AM / client" />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <FilterNote dims="BU / AM / client" />
+        {canWrite && <button onClick={openNew} className="btn-gold !px-3 !py-1.5 text-sm shrink-0">+ Ajouter une opportunité</button>}
+      </div>
       {canWrite && (
-        <Card title={f.patch ? "Corriger l'opportunité importée" : f.id ? "Modifier l'opportunité (saisie)" : "Ajouter une opportunité (saisie)"} actions={f.id ? <button onClick={() => setF({ ...EMPTY_OPP })} className="btn-ghost !px-2.5 !py-1 text-xs">Nouvelle</button> : undefined}>
-          <div className="flex flex-wrap gap-2 items-center">
+        <Modal open={open} onClose={() => setOpen(false)} size="md"
+          title={f.patch ? "Actualiser l'opportunité importée" : f.id ? "Modifier l'opportunité (saisie)" : "Ajouter une opportunité (saisie)"}
+          actions={
+            <>
+              <button onClick={() => setOpen(false)} className="btn-ghost !px-3 !py-1.5 text-sm">Annuler</button>
+              <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
+                fn={async () => {
+                  if (f.patch) {
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined });
+                  } else {
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui" });
+                  }
+                  setOpen(false); setF({ ...EMPTY_OPP });
+                }} />
+            </>
+          }>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {/* En correction d'opp importée, le client vient de la source (non modifiable) ; on l'affiche en lecture. */}
-            <input className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} />
-            <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} />
-            <input className="field w-36" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
-            <Select ariaLabel="Business Unit" className="w-36" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} />
-            <input className="field w-28" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-            <Select ariaLabel="Étape du pipeline" className="w-44" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} />
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Client
+              <input data-autofocus className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Account Manager
+              <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">N° FP
+              <input className="field" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Business Unit
+              <Select ariaLabel="Business Unit" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Montant
+              <input className="field" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Étape
+              <Select ariaLabel="Étape du pipeline" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} /></label>
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
-            <input className="field w-28" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} />
-            <DateField className="w-40" ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" />
-            <Busy label={f.patch ? "Corriger" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
-              fn={async () => {
-                if (f.patch) {
-                  await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined });
-                } else {
-                  await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined });
-                }
-                setF({ ...EMPTY_OPP });
-              }} />
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Probabilité (0 à 1)
+              <input className="field" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></label>
+            {/* MB prévisionnel : % de marge brute PRÉVISIONNELLE (prévision commerciale, non confidentielle). */}
+            <label className="flex flex-col gap-1 text-[11px] text-muted">MB prévisionnel (%)
+              <input className="field" aria-label="MB prévisionnel en pourcentage" placeholder="MB prév. %" value={f.mbPrev} onChange={(e) => setF({ ...f, mbPrev: e.target.value })} /></label>
+            {/* DR (Deal Registration / demande de remise) — Oui / Non. */}
+            <label className="flex flex-col gap-1 text-[11px] text-muted">DR
+              <Select ariaLabel="DR (Oui / Non)" value={f.dr} onChange={(v) => setF({ ...f, dr: v })} options={[{ value: "non", label: "Non" }, { value: "oui", label: "Oui" }]} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">D Prev
+              <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></label>
           </div>
           {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
-        </Card>
+        </Modal>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
         {certitudes.length ? (
@@ -302,18 +335,153 @@ export const OppList: FC<Props> = () => {
             colText("P&L", (r: Opportunity) => pnlFlag(r), (r: Opportunity) => (isBooked(r) ? 2 : r.stage === 6 ? 1 : 0)),
             ...(canWrite ? [colText("", (r: Opportunity) => (r.source === "saisie" ? (
               <span className="inline-flex gap-2">
-                <button onClick={() => { editOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs">Éditer</button>
+                <button onClick={() => editOpp(r)} className="text-gold hover:underline text-xs">Éditer</button>
                 <Busy variant="ghost" label="Suppr." okMsg="Supprimée" fn={() => deleteOpportunity(r.oppId || r.id || "")} />
               </span>
             ) : (
               <span className="inline-flex gap-2 items-center">
-                <button onClick={() => { fixOpp(r); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-gold hover:underline text-xs" title="Corriger N° FP / D Prev / montant / étape (opp importée)">Corriger</button>
+                <button onClick={() => fixOpp(r)} className="text-gold hover:underline text-xs" title="Actualiser N° FP / D Prev / montant / étape (opp importée)">Actualiser</button>
                 <DangerBtn label="Suppr." confirm={`Supprimer l'opportunité importée ${r.client || r.fp || r.oppId || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("opportunities", r.oppId || r.id || "")} />
               </span>
             )))] : []),
           ]}
         />
       </Card>
+    </div>
+  );
+};
+
+// ── COCKPIT COMMERCIAL : cockpit de pilotage (KPI de tête + échelle de prévision Commit/Best/Pipeline
+// + top commerciaux + funnel), chaque tuile renvoyant vers la vue de détail. 100 % agrégats existants,
+// aucun back. Sans marge (cloisonnement « rentabilité »).
+export const CommercialCockpit: FC<Props> = ({ period }) => {
+  const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
+  const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
+  const { data: ams } = useDocData<AmsSummary>("summaries/ams");
+  const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
+  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
+  const { go, canGo } = useNav();
+  if (!data) return <EmptyState label="Cockpit indisponible — importer le pipeline puis recalculer (Vue d'ensemble)." />;
+  const tiers = data.tierBreakdown || [];
+  const tierPond = (k: string) => tiers.find((t) => t.key === k && t.active)?.pond || 0;
+  const commit = tierPond("certitudes");
+  const best = commit + tierPond("forecast");
+  const pipe = data.tot?.weighted || 0; // Σ niveaux ACTIFS (échelle cumulée)
+  const objectif = att?.objectif || 0;
+  const gap = Math.max(objectif - (att?.realiseCas || 0), 0);
+  const coverage = objectif > 0 && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
+  const topAm = [...(ams?.rows || [])].sort((a, b) => b.pipelinePondere - a.pipelinePondere).slice(0, 5);
+  const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
+  const jump = (id: string) => { if (canGo(id)) go(id); };
+  const ladder = [
+    { label: "Commit", band: "Certitudes ≥ 90 %", v: commit, color: T.emerald },
+    { label: "Best-case", band: "+ Forecast", v: best, color: T.gold },
+    { label: "Pipeline", band: "+ Pipe", v: pipe, color: T.steel },
+  ];
+  const maxLadder = Math.max(pipe, objectif, 1);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className={grid4}>
+        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
+        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)}`} /></button>
+        <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
+        <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
+      </div>
+      <Card title="Prévision — Commit / Best-case / Pipeline">
+        <div className="flex flex-col gap-2.5">
+          {ladder.map((l) => (
+            <div key={l.label} className="flex items-center gap-3">
+              <div className="w-28 shrink-0"><span className="text-[12px] font-semibold text-ink">{l.label}</span><div className="text-[10px] text-faint">{l.band}</div></div>
+              <div className="flex-1 h-5 rounded bg-panel2 overflow-hidden"><div className="h-full rounded transition-[width]" style={{ width: `${Math.min(100, (l.v / maxLadder) * 100)}%`, background: l.color }} /></div>
+              <div className="w-28 text-right font-display tabnum text-[13px]">{fmt(l.v)}</div>
+            </div>
+          ))}
+          {objectif > 0 && (
+            <div className="flex items-center gap-3 pt-1.5 border-t border-line/60">
+              <div className="w-28 shrink-0 text-[12px] text-muted">Objectif CAS</div>
+              <div className="flex-1 text-[11px] text-faint">écart {fmt(att?.ecart || 0)} · réalisé {fmt(att?.realiseCas)}</div>
+              <div className="w-28 text-right font-display tabnum text-[13px] text-gold">{fmt(objectif)}</div>
+            </div>
+          )}
+        </div>
+        <Tip>Échelle <b>cumulée</b> de prévision : <b>Commit</b> = quasi-certain (≥ 90 %) · <b>Best-case</b> ajoute le Forecast · <b>Pipeline</b> ajoute le Pipe. Confrontée à l'objectif CAS de l'exercice. Poids/paliers réglés dans Habilitations.</Tip>
+      </Card>
+      <div className={cols2}>
+        <Card title="Top commerciaux (pipeline pondéré)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
+          {topAm.length ? <Table columns={[
+            colText("AM", (r) => r.am, (r) => r.am),
+            colNum("Pondéré", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
+            colNum("Actif", (r) => r.activeCount, (r) => r.activeCount),
+            colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
+            colNum("R/O", (r) => (r.roCas != null ? pct(r.roCas) : "—"), (r) => r.roCas ?? -1),
+          ]} rows={topAm} /> : <EmptyState label="Aucun commercial renseigné." />}
+        </Card>
+        <Card title="Funnel pondéré par étape" actions={canGo("pipeline") ? <button onClick={() => jump("pipeline")} className="text-gold text-xs underline">Analyse</button> : undefined}>
+          <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={200} size={22} interval={0} />
+        </Card>
+      </div>
+      <Tip>Cockpit de pilotage commercial — pondéré, prévision, conversion, couverture, top AM. Chaque tuile ouvre la vue détaillée. Rafraîchi à chaque recalcul.</Tip>
+    </div>
+  );
+};
+
+// ── BOARD KANBAN : colonnes par étape (1→5 actives), changement d'étape RAPIDE (patchOpportunity),
+// cartes en retard (D Prev dépassée) flaggées. Lit la collection opportunities en direct. Filtrable.
+const BOARD_STAGES = [1, 2, 3, 4, 5];
+export const PipelineBoard: FC<Props> = () => {
+  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
+  const { match } = useFilters();
+  const canWrite = useCan("pipeline") === "write";
+  const toast = useToast();
+  const today = new Date().toISOString().slice(0, 10);
+  if (loading && !allRows.length) return <CardSkeleton />;
+  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5);
+  const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
+  const move = async (o: Opportunity, v: string) => {
+    try { await patchOpportunity({ id: o.oppId || o.id || "", stage: Number(v) }); toast("Étape mise à jour · recalcul lancé", "ok"); }
+    catch { toast("Changement d'étape refusé", "err"); }
+  };
+  return (
+    <div className="flex flex-col gap-3">
+      <FilterNote dims="BU / AM / client" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+        {BOARD_STAGES.map((s) => {
+          const col = byStage(s);
+          const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
+          return (
+            <div key={s} className="flex flex-col gap-2 rounded-xl border border-line bg-panel2/40 p-2 min-h-[120px]">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[12px] font-semibold text-ink">{s} · {STAGE_SHORT[s]}</span>
+                <span className="text-[11px] text-faint tabnum">{col.length} · {fmt(tot)}</span>
+              </div>
+              {col.map((o) => {
+                const overdue = !!(o.closingDate && o.closingDate.slice(0, 10) < today);
+                return (
+                  <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel", overdue ? "border-clay/40" : "border-line")}>
+                    <div className="text-[12px] font-semibold text-ink truncate" title={o.client || ""}>{o.client || "—"}</div>
+                    {o.designation && <div className="text-[11px] text-muted truncate" title={o.designation}>{o.designation}</div>}
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
+                      <span className="font-display tabnum text-ink">{fmt(o.amount)}</span>
+                      <span className="text-faint">· pond. {fmt(o.weighted)}</span>
+                      {o.am && <span className="text-faint truncate max-w-[90px]">· {o.am}</span>}
+                    </div>
+                    <div className="flex items-center justify-between gap-1.5 mt-1.5">
+                      <span className={cx("text-[10px]", overdue ? "text-clay" : "text-faint")}>{o.closingDate ? (overdue ? `retard · ${o.closingDate.slice(0, 10)}` : o.closingDate.slice(0, 10)) : "sans date"}</span>
+                      {canWrite && (
+                        <Select ariaLabel={`Changer l'étape de ${o.client || "l'opportunité"}`} className="!py-0.5 !px-1.5 text-[11px] w-[92px]" value={String(o.stage)}
+                          onChange={(v) => move(o, v)} options={[1, 2, 3, 4, 5, 6, 7, 9].map((st) => ({ value: String(st), label: `${st}·${STAGE_SHORT[st]}` }))} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {!col.length && <div className="text-[11px] text-faint px-1 py-3 text-center">—</div>}
+            </div>
+          );
+        })}
+      </div>
+      <Tip>Pilotage visuel des deals actifs (étapes 1→5). Changer l'étape d'une carte met à jour l'opportunité et relance le recalcul. Cartes en <b className="text-clay">retard</b> = D Prev dépassée (à requalifier). Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
     </div>
   );
 };

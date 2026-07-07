@@ -5,7 +5,7 @@ import { functions } from "./firebase";
 
 export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
-  probability: number; closingDate?: string; fp?: string;
+  probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
 };
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le

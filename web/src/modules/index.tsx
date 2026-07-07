@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -23,6 +23,8 @@ const Actualite = from(() => import("./news"), "Actualite");
 const Pipeline = from(() => import("./pipeline"), "Pipeline");
 const OppList = from(() => import("./pipeline"), "OppList");
 const Am360 = from(() => import("./pipeline"), "Am360");
+const CommercialCockpit = from(() => import("./pipeline"), "CommercialCockpit");
+const PipelineBoard = from(() => import("./pipeline"), "PipelineBoard");
 const Objectifs = from(() => import("./finance"), "Objectifs");
 const Facturation = from(() => import("./finance"), "Facturation");
 const InvoiceList = from(() => import("./finance"), "InvoiceList");
@@ -49,8 +51,10 @@ const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
 export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "news", key: "overview", label: "Actualité", icon: Newspaper, Component: Actualite },
-  { id: "pipeline", key: "pipeline", label: "Pipeline", icon: GitBranch, Component: Pipeline },
+  { id: "commercial", key: "pipeline", label: "Cockpit commercial", icon: Gauge, Component: CommercialCockpit },
   { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },
+  { id: "board", key: "pipeline", label: "Board pipeline", icon: Kanban, Component: PipelineBoard },
+  { id: "pipeline", key: "pipeline", label: "Pipeline (analyse)", icon: GitBranch, Component: Pipeline },
   { id: "am360", key: "pipeline", label: "AM 360°", icon: UserRound, Component: Am360 },
   { id: "objectifs", key: "objectifs", label: "Objectifs / R-O", icon: Target, Component: Objectifs },
   { id: "facturation", key: "facturation", label: "Facturation", icon: Receipt, Component: Facturation },
@@ -77,7 +81,9 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
 export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Cockpit", ids: ["overview", "news", "guide"] },
-  { label: "Commercial", ids: ["pipeline", "opplist", "am360"] },
+  // « Commercial » = cockpit de pilotage de la performance commerciale + du pipeline : Cockpit (synthèse)
+  // → Opportunités (saisie/édition en modale) → Board (Kanban par étape) → Pipeline (analyse) → AM 360°.
+  { label: "Commercial", ids: ["commercial", "opplist", "board", "pipeline", "am360"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
