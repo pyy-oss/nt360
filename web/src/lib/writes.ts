@@ -1,8 +1,7 @@
 // Écritures gardées (BUILD_KIT §12, F5). Les rules restent la barrière opposable :
 // ces écritures échouent côté serveur si le rôle est insuffisant (UI désactivée en amont).
-import { doc, setDoc, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "./firebase";
+import { functions } from "./firebase";
 
 export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
@@ -209,17 +208,18 @@ export async function upsertCreditLine(id: string, data: { authorized: number; o
 export const objectiveId = (o: { fiscalYear: number; scope?: string; scopeValue?: string }) =>
   `${o.fiscalYear}_${o.scope || "global"}_${o.scopeValue || "all"}`;
 
-/** Crée/met à jour un objectif annuel (périmètre : global / bu / commercial / client). */
+/** Crée/met à jour un objectif annuel (périmètre : global / bu / commercial / client). Écriture
+ *  serveur (callable validé + audité) : la règle Firestore de objectives est en write:false. */
 export async function upsertObjective(o: {
   fiscalYear: number; scope: string; scopeValue: string; label?: string;
   targetCas: number; targetInvoiced: number; targetMargin: number; targetMarginPct?: number;
 }) {
-  await setDoc(doc(db, "objectives", objectiveId(o)), o, { merge: true });
+  await httpsCallable(functions, "upsertObjective")(o);
 }
 
-/** Supprime un objectif. */
+/** Supprime un objectif (callable serveur). */
 export async function deleteObjective(id: string) {
-  await deleteDoc(doc(db, "objectives", id));
+  await httpsCallable(functions, "deleteObjective")({ id });
 }
 
 /** Met à jour la matrice de droits via le callable setPermissions (schéma validé + audité côté

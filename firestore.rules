@@ -112,7 +112,10 @@ service cloud.firestore {
     // Jalons de facturation (échéancier prévisionnel par projet) : lisibles par qui voit le backlog ;
     // écrits uniquement par la Cloud Function setBillingMilestones (direction/PMO).
     match /billingMilestones/{id} { allow read: if canRead('backlog');  allow write: if false; }
-    match /objectives/{id}    { allow read: if canRead('objectifs');    allow write: if canWrite('objectifs'); }
+    // Objectifs annuels : lisibles par qui a le droit « objectifs » ; écrits uniquement par les Cloud
+    // Functions upsertObjective/deleteObjective (validation des cibles + auditLog). Écriture SDK directe
+    // fermée → plus d'objectif posé sans contrôle ni journal, cohérent avec creditLines/billingMilestones.
+    match /objectives/{id}    { allow read: if canRead('objectifs');    allow write: if false; }
 
     // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat.
     match /summaries/{id}     { allow read: if canRead(summaryModule(id)); allow write: if false; }
