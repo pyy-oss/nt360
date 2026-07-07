@@ -93,6 +93,17 @@ function buildFieldWrites(fieldDefs, logical) {
   return out;
 }
 
+/** Retourne le libellé EXACT du statut de la liste correspondant à `wanted` (comparaison normalisée
+ *  accents/casse/espaces), ou null si aucun. Sert à valider le statut initial avant createTask : si le
+ *  statut a été renommé côté ClickUp, on l'OMET (ClickUp applique le statut par défaut) au lieu de faire
+ *  échouer la création. `statuses` = [{status}] de GET /list/{id}. PUR. */
+function matchStatus(statuses, wanted) {
+  const w = norm(wanted);
+  if (!w) return null;
+  const hit = (statuses || []).find((s) => norm(s && (s.status != null ? s.status : s)) === w);
+  return hit ? (hit.status != null ? hit.status : hit) : null;
+}
+
 // Priorité ClickUp : 1 urgent / 2 haute / 3 normale / 4 basse.
 const PRIORITY = { urgente: 1, urgent: 1, haute: 2, high: 2, normale: 3, normal: 3, basse: 4, low: 4 };
 function toPriority(p) {
@@ -234,4 +245,4 @@ function buildTaskFpIndex(tasks, normalize) {
   return idx;
 }
 
-module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority, readTaskSync, taskFp, buildTaskFpIndex };
+module.exports = { FIELD_NAMES, findField, resolveOptionId, toFieldValue, buildFieldWrites, buildCorePayload, buildLogical, toPriority, matchStatus, readTaskSync, taskFp, buildTaskFpIndex };

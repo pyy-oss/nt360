@@ -52,4 +52,18 @@ describe("pushOrderCore — orchestration create/update", () => {
     expect(r.created).toBe(true); // le push réussit malgré les échecs de champs
     expect(r.taskId).toBe("newtask");
   });
+
+  it("statut initial validé contre la liste : présent → posé", async () => {
+    const { clickup, calls } = fakeClient();
+    await pushOrderCore({ token: "t", clickup, cf, safeId, fpKey, listId: "L1", members: [], fieldDefs,
+      statuses: [{ status: "0-affecte" }], links: {}, order: { fp: "FP/3", cas: 1 }, extra: {} });
+    expect(calls.create[0].payload.status).toBe("0-affecte");
+  });
+  it("statut initial ABSENT de la liste (renommé) → OMIS, création quand même", async () => {
+    const { clickup, calls } = fakeClient();
+    const r = await pushOrderCore({ token: "t", clickup, cf, safeId, fpKey, listId: "L1", members: [], fieldDefs,
+      statuses: [{ status: "à faire" }], links: {}, order: { fp: "FP/4", cas: 1 }, extra: {} });
+    expect(r.created).toBe(true);
+    expect(calls.create[0].payload.status).toBeUndefined(); // ClickUp appliquera son statut par défaut
+  });
 });

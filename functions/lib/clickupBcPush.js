@@ -7,11 +7,16 @@
 const { logger } = require("firebase-functions/v2");
 const bc = require("./clickupBc");
 
-async function pushBcCore({ token, clickup, listId, fieldDefs, links, group, extra }) {
+async function pushBcCore({ token, clickup, listId, fieldDefs, statuses, links, group, extra }) {
+  const cf = require("./clickupFields");
   const key = group.key;
   const existing = links[key];
   const corePayload = bc.bcCorePayload(group, extra || {});
-  if (!existing && !corePayload.status) corePayload.status = "placee distributeur";
+  // Statut initial « placee distributeur » à la création seulement s'il existe dans la liste — sinon omis.
+  if (!existing && !corePayload.status) {
+    const s = statuses && statuses.length ? cf.matchStatus(statuses, "placee distributeur") : "placee distributeur";
+    if (s) corePayload.status = s;
+  }
   const fieldWrites = bc.buildBcFieldWrites(fieldDefs, bc.bcLogical(group));
   let task, created = false;
   if (existing) {

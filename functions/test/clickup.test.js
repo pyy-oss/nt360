@@ -30,6 +30,14 @@ describe("resolveAssignee — PM (chaîne libre) → membre ClickUp", () => {
   it("inclusion", () => expect(resolveAssignee(members, "Mireille")).toBe(2));
   it("aucune correspondance → null", () => expect(resolveAssignee(members, "Inconnu X")).toBe(null));
   it("vide → null", () => expect(resolveAssignee(members, "")).toBe(null));
+  it("inclusion AMBIGUË (2 candidats) → null, pas d'assignation au petit bonheur", () => {
+    const two = [{ id: 11, username: "Marie Curie", email: "mc@x.com" }, { id: 22, username: "Marie Dupont", email: "md@x.com" }];
+    expect(resolveAssignee(two, "Marie")).toBe(null); // « Marie » ⊂ deux usernames → refus
+  });
+  it("inclusion NON ambiguë (1 seul candidat) → résolu", () => {
+    const one = [{ id: 11, username: "Marie Curie", email: "mc@x.com" }, { id: 22, username: "Paul", email: "p@x.com" }];
+    expect(resolveAssignee(one, "Marie")).toBe(11);
+  });
 });
 
 describe("updateTask — assignés au format {add, rem}", () => {

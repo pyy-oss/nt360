@@ -59,7 +59,9 @@ async function listMembers(token, teamId) {
     .filter((m) => m.id);
 }
 
-/** Résolution PURE d'un PM (chaîne libre) → id de membre ClickUp : email exact > nom exact > inclusion. */
+/** Résolution PURE d'un PM (chaîne libre) → id de membre ClickUp : email exact > nom exact > inclusion.
+ *  L'inclusion n'est acceptée que si elle est NON AMBIGUË (un seul candidat) — sinon on n'assigne pas,
+ *  plutôt que d'assigner silencieusement la mauvaise personne (même garde que resolveOptionId). */
 function resolveAssignee(members, pm) {
   const q = String(pm || "").trim().toLowerCase();
   if (!q) return null;
@@ -67,11 +69,11 @@ function resolveAssignee(members, pm) {
   if (byEmail) return byEmail.id;
   const byName = members.find((m) => (m.username || "").toLowerCase() === q);
   if (byName) return byName.id;
-  const byIncl = members.find((m) => {
+  const cands = members.filter((m) => {
     const u = (m.username || "").toLowerCase();
     return u && (u.includes(q) || q.includes(u));
   });
-  return byIncl ? byIncl.id : null;
+  return cands.length === 1 ? cands[0].id : null; // ambigu (0 ou ≥2) → pas d'assignation
 }
 
 async function createTask(token, listId, payload) { return api(token, "POST", `/list/${listId}/task`, payload); }
@@ -88,6 +90,13 @@ async function updateTask(token, taskId, payload, remove) {
 async function listFields(token, listId) {
   const d = await api(token, "GET", `/list/${listId}/field`);
   return d.fields || [];
+}
+
+/** Statuts configurés d'une liste (GET /list/{id}) → [{ status, type, ... }]. Sert à valider le statut
+ *  initial posé à la création (omission propre si renommé) plutôt que de faire échouer createTask. */
+async function getListStatuses(token, listId) {
+  const d = await api(token, "GET", `/list/${listId}`);
+  return (d && d.statuses) || [];
 }
 
 /** Pose une valeur de champ personnalisé (uniforme pour tous les types). value déjà normalisée. */
@@ -124,6 +133,10 @@ async function getTaskDetail(token, taskId) {
 async function createSubtask(token, listId, parentId, payload) {
   return api(token, "POST", `/list/${listId}/task`, { ...payload, parent: parentId });
 }
+/** Supprime une tâche (utilisé pour purger les sous-tâches « Jalon i » devenues orphelines). */
+async function deleteTask(token, taskId) {
+  return api(token, "DELETE", `/task/${taskId}`);
+}
 /** Crée une checklist nommée sur une tâche → { checklist: { id, ... } }. */
 async function createChecklist(token, taskId, name) {
   return api(token, "POST", `/task/${taskId}/checklist`, { name });
@@ -136,10 +149,24 @@ async function createChecklistItem(token, checklistId, name) {
 }
 
 // --- Commentaires & tags (Lot 3 : enrichissements app → ClickUp) ---
-/** Commentaires d'une tâche → [{id, comment_text, ...}]. Sert à retrouver notre commentaire marqué. */
+/** Commentaires d'une tâche (du PLUS RÉCENT au plus ancien) → [{id, comment_text, date, ...}].
+ *  PAGINÉ : GET /task/{id}/comment ne renvoie que les ~25 plus récents ; on remonte via start/start_id
+ *  jusqu'à épuisement — sinon notre commentaire de synthèse marqué sort de la fenêtre sur une tâche très
+ *  commentée et se retrouve dupliqué (non-idempotence). Garde-fou : 40 pages (~1000 commentaires). */
 async function listComments(token, taskId) {
-  const d = await api(token, "GET", `/task/${taskId}/comment`);
-  return (d && d.comments) || [];
+  const all = [];
+  let start, startId;
+  for (let page = 0; page < 40; page++) {
+    const qs = start ? `?start=${start}&start_id=${encodeURIComponent(startId)}` : "";
+    const d = await api(token, "GET", `/task/${taskId}/comment${qs}`);
+    const batch = (d && d.comments) || [];
+    all.push(...batch);
+    if (batch.length < 25) break; // dernière page
+    const last = batch[batch.length - 1];
+    if (!last || last.date == null) break;
+    start = last.date; startId = last.id;
+  }
+  return all;
 }
 async function createComment(token, taskId, text) {
   return api(token, "POST", `/task/${taskId}/comment`, { comment_text: text, notify_all: false });
@@ -174,4 +201,4 @@ async function deleteWebhook(token, webhookId) {
   return api(token, "DELETE", `/webhook/${webhookId}`);
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, setField, getTask, getTaskDetail, listTasks, createSubtask, createChecklist, deleteChecklist, createChecklistItem, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, getListStatuses, setField, getTask, getTaskDetail, listTasks, createSubtask, deleteTask, createChecklist, deleteChecklist, createChecklistItem, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };

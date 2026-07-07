@@ -12,6 +12,16 @@ const norm = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]
 const ACTIVE_PREFIXES = ["0-", "1-", "3-"];
 const isActive = (status) => ACTIVE_PREFIXES.some((p) => norm(status).startsWith(p));
 
+// Retard de LIVRAISON d'une commande : date contractuelle dépassée ALORS QUE le projet est encore actif
+// (même définition que le signal du cockpit Qualité). PUR — réutilisé par l'enrichissement (tag/synthèse)
+// pour ne PAS diverger de clickupSignals. status = statut ClickUp, dateContractuelle = ISO (yyyy-mm-dd),
+// today = date du jour ISO.
+function isDeliveryOverdue(status, dateContractuelle, today) {
+  const dc = String(dateContractuelle || "").slice(0, 10);
+  const t = String(today || "").slice(0, 10);
+  return !!(dc && t && dc < t && isActive(status));
+}
+
 /**
  * @param {object[]} orders commandes fusionnées (fp, client, facture, raf)
  * @param {Object<string,object>} syncMap overlay config/clickupSync { safeId(fp): { status, dateContractuelle } }
@@ -105,4 +115,4 @@ function clickupDelays(orders, syncMap, orderPmMap, safeId, asOf) {
   };
 }
 
-module.exports = { clickupSignals, isActive, clickupDelays, daysDiff };
+module.exports = { clickupSignals, isActive, isDeliveryOverdue, clickupDelays, daysDiff };

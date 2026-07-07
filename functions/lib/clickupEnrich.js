@@ -40,11 +40,12 @@ function needsRiskTag(d) {
   return (Array.isArray(o.qualityFlags) && o.qualityFlags.length > 0) || !!o.overdue;
 }
 
-/** Retrouve notre commentaire marqué parmi les commentaires d'une tâche (le plus récent gagne). PUR. */
+/** Retrouve notre commentaire marqué parmi les commentaires d'une tâche. `listComments` renvoie du PLUS
+ *  RÉCENT au plus ancien → on prend le PREMIER marqué (le plus récent) : en cas de doublon résiduel, on
+ *  met à jour celui du dessus du fil, pas une vieille copie enterrée. PUR. */
 function findMarkedComment(comments, marker) {
   const m = marker || MARKER;
-  const mine = (comments || []).filter((c) => String((c && c.comment_text) || "").startsWith(m));
-  return mine.length ? mine[mine.length - 1] : null;
+  return (comments || []).find((c) => String((c && c.comment_text) || "").startsWith(m)) || null;
 }
 
 // --- Jalons → sous-tâches (clé stable = index `Jalon i`) ---
@@ -75,13 +76,20 @@ function subtaskKey(name) {
 }
 
 /** Planifie la réconciliation des sous-tâches jalons. existing = [{id, name, due_date}] (sous-tâches
- *  ClickUp). Renvoie { toCreate:[expected], toUpdate:[{id, expected}] }. NE SUPPRIME rien (préserve un
- *  éventuel suivi manuel) — seul l'écart nom/échéance déclenche une mise à jour. PUR & idempotent. */
+ *  ClickUp). Renvoie { toCreate:[expected], toUpdate:[{id, expected}], toClose:[{id, key}] } :
+ *   - toCreate/toUpdate : par clé `Jalon i` (création des manquantes, maj des divergentes) ;
+ *   - toClose : sous-tâches PORTANT NOTRE PRÉFIXE (`Jalon k`) mais SANS jalon attendu correspondant
+ *     (l'échéancier a rétréci) → à retirer pour ne pas laisser une sous-tâche périmée tromper le PM.
+ *  Ne touche QUE nos sous-tâches (préfixe reconnu) : un suivi manuel hors préfixe est préservé. PUR. */
 function planMilestoneSubtasks(existing, expected) {
+  const expectedKeys = new Set((expected || []).map((e) => e.key));
   const byKey = {};
+  const toClose = [];
   for (const t of (Array.isArray(existing) ? existing : [])) {
     const k = subtaskKey(t && t.name);
-    if (k && !(k in byKey)) byKey[k] = t;
+    if (!k) continue; // pas une sous-tâche générée par nous → intacte
+    if (!(k in byKey)) byKey[k] = t;
+    if (!expectedKeys.has(k)) toClose.push({ id: t.id, key: k });
   }
   const toCreate = [], toUpdate = [];
   for (const e of (expected || [])) {
@@ -91,7 +99,7 @@ function planMilestoneSubtasks(existing, expected) {
     const dueExp = e.dueMs != null ? String(e.dueMs) : "";
     if (String(cur.name || "") !== e.name || dueCur !== dueExp) toUpdate.push({ id: cur.id, expected: e });
   }
-  return { toCreate, toUpdate };
+  return { toCreate, toUpdate, toClose };
 }
 
 // --- BC liés → checklist ---

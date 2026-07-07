@@ -33,4 +33,16 @@ function reverseLinks(map) {
   return out;
 }
 
-module.exports = { WEBHOOK_EVENTS, verifySignature, parseWebhook, reverseLinks };
+/** Décision PURE du routage d'un événement webhook : à quelle entité (commande / BC / aucune) se
+ *  rattache la tâche, et s'agit-il d'une suppression. links/bcLinks = maps { clé: taskId }. Le wrapper
+ *  I/O n'a plus qu'à appliquer les écritures Firestore selon {kind, key, deleted}. PUR & testable. */
+function planTaskEvent(links, bcLinks, taskId, event) {
+  const deleted = event === "taskDeleted";
+  const cmdKey = reverseLinks(links)[String(taskId)];
+  if (cmdKey) return { kind: "commande", key: cmdKey, deleted };
+  const bcKey = reverseLinks(bcLinks)[String(taskId)];
+  if (bcKey) return { kind: "bc", key: bcKey, deleted };
+  return { kind: "ignored", key: null, deleted };
+}
+
+module.exports = { WEBHOOK_EVENTS, verifySignature, parseWebhook, reverseLinks, planTaskEvent };

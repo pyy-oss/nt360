@@ -5,13 +5,18 @@
 // réinitialisé sur une tâche existante). Sur une mise à jour, les anciens assignés sont retirés.
 const { logger } = require("firebase-functions/v2");
 
-async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }) {
+async function pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, statuses, links, order, extra }) {
   const fp = fpKey(order.fp);
   const id = safeId(fp);
   const existing = links[id];
   const assignee = clickup.resolveAssignee(members, order.pm);
   const corePayload = cf.buildCorePayload({ ...order, fp }, extra || {}, assignee);
-  if (!existing && !corePayload.status) corePayload.status = "0-affecte";
+  // Statut initial « 0-affecte » posé à la création UNIQUEMENT s'il existe dans la liste (validé contre
+  // ses statuts si fournis) — sinon omis (ClickUp applique son statut par défaut) plutôt que d'échouer.
+  if (!existing && !corePayload.status) {
+    const s = statuses && statuses.length ? cf.matchStatus(statuses, "0-affecte") : "0-affecte";
+    if (s) corePayload.status = s;
+  }
   const fieldWrites = cf.buildFieldWrites(fieldDefs, cf.buildLogical({ ...order, fp }, extra || {}));
   let task, created = false;
   if (existing) {

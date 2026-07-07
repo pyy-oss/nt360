@@ -1149,6 +1149,8 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   let fieldDefs = [];
   try { fieldDefs = await clickup.listFields(token, listId); }
   catch (e) { logger.warn("ClickUp: champs de liste illisibles", { listId, msg: e && e.message }); }
+  // Statuts de la liste → validation du statut initial (omission propre s'il a été renommé).
+  let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("ClickUp: statuts illisibles", { listId, msg: e && e.message }); }
 
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const fp = fpKey(order.fp), id = safeId(fp);
@@ -1159,7 +1161,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
     catch (e) { logger.warn("ClickUp: réconciliation impossible", { msg: e && e.message }); }
   }
   let r;
-  try { r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links, order, extra }); }
+  try { r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, statuses, links, order, extra }); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation"}`); }
   // Persiste le lien (création OU adoption d'une tâche existante) — idempotent.
   await db.doc("config/clickupLinks").set({ map: { [r.id]: r.taskId } }, { merge: true });
@@ -1188,6 +1190,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   const pays = paysByList[listId];
   let members = []; try { members = await clickup.listMembers(token, teamId); } catch (e) { logger.warn("bulk push: membres non résolus", { msg: e && e.message }); }
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("bulk push: champs illisibles", { msg: e && e.message }); }
+  let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("bulk push: statuts illisibles", { msg: e && e.message }); }
   // ANTI-DOUBLON : index des tâches existantes par FP (Opp ID) → adopter au lieu de dupliquer.
   let fpIndex = {}; try { fpIndex = await buildFpIndex(token, allScanLists(listId)); } catch (e) { logger.warn("bulk push: réconciliation impossible", { msg: e && e.message }); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
@@ -1206,7 +1209,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
       if (!links[id] && !newLinks[id]) { newLinks[id] = existingTaskId; adopted++; pending++; } else skipped++;
     } else {
       try {
-        const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, links: { ...links, ...newLinks, ...(existingTaskId ? { [id]: existingTaskId } : {}) }, order: o, extra: { pays } });
+        const r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, statuses, links: { ...links, ...newLinks, ...(existingTaskId ? { [id]: existingTaskId } : {}) }, order: o, extra: { pays } });
         if (r.created) created++; else updated++;
         if (!links[id]) { newLinks[id] = r.taskId; pending++; } // persiste création OU adoption
       } catch (e) { failed++; logger.warn("bulk push: échec", { fp: o.fp, msg: e && e.message }); }
@@ -1391,7 +1394,9 @@ async function runClickupPull() {
   await db.doc("config/clickupSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // Le PM de l'app reflète l'assigné ClickUp (merge : ne touche pas les commandes sans assigné).
   if (Object.keys(pmUpdates).length) await db.doc("config/orderPm").set({ map: pmUpdates }, { merge: true });
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes"]); }
+  // Couvre tous les summaries dérivés de clickupSync : chunks commandes + Actualité (projets bloqués/
+  // urgents, retard livraison) + Qualité (incohérences statut↔données).
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes", "news", "dataQuality"]); }
   catch (e) { logger.warn("ClickUp pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length, pmUpdated: Object.keys(pmUpdates).length };
 }
@@ -1471,6 +1476,7 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
   let fieldDefs = [];
   try { fieldDefs = await clickup.listFields(token, listId); }
   catch (e) { logger.warn("BC push: champs illisibles", { listId, msg: e && e.message }); }
+  let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC push: statuts illisibles", { listId, msg: e && e.message }); }
   const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
   // ANTI-DOUBLON : si le BC n'a pas de lien mais qu'une tâche porte déjà ce N° de Commande, on l'ADOPTE.
   if (!links[group.key]) {
@@ -1478,7 +1484,7 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
     catch (e) { logger.warn("BC push: réconciliation impossible", { msg: e && e.message }); }
   }
   let r;
-  try { r = await pushBcCore({ token, clickup, listId, fieldDefs, links, group, extra: req.data?.extra || {} }); }
+  try { r = await pushBcCore({ token, clickup, listId, fieldDefs, statuses, links, group, extra: req.data?.extra || {} }); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation BC"}`); }
   await db.doc("config/clickupBcLinks").set({ map: { [r.key]: r.taskId } }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_bc_create" : "clickup_bc_update", module: "bc", entity: "bcLine", entityId: bcNumber, detail: { taskId: r.taskId, listId, fields: r.fields }, ts: FieldValue.serverTimestamp() });
@@ -1499,6 +1505,7 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
   const force = req.data?.force === true;
   const listId = bcListIdOf(cfg, req.data?.listId);
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("BC bulk: champs illisibles", { msg: e && e.message }); }
+  let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC bulk: statuts illisibles", { msg: e && e.message }); }
   let bcIndex = {}; try { bcIndex = (await buildBcClickupIndex(token, listId)).index; } catch (e) { logger.warn("BC bulk: réconciliation impossible", { msg: e && e.message }); }
   const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
   const groups = bc.groupBcByNumber(await loadBcLines(), safeId);
@@ -1512,7 +1519,7 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
       if (!links[g.key] && !newLinks[g.key]) { newLinks[g.key] = existingTaskId; adopted++; pending++; } else skipped++;
     } else {
       try {
-        const r = await pushBcCore({ token, clickup, listId, fieldDefs, links: { ...links, ...newLinks, ...(existingTaskId ? { [g.key]: existingTaskId } : {}) }, group: g, extra: {} });
+        const r = await pushBcCore({ token, clickup, listId, fieldDefs, statuses, links: { ...links, ...newLinks, ...(existingTaskId ? { [g.key]: existingTaskId } : {}) }, group: g, extra: {} });
         if (r.created) created++; else updated++;
         if (!links[g.key]) { newLinks[g.key] = r.taskId; pending++; }
       } catch (e) { failed++; logger.warn("BC bulk: échec", { bc: g.bcNumber, msg: e && e.message }); }
@@ -1579,7 +1586,8 @@ async function runBcPull() {
     } catch (e) { logger.warn("BC pull: échec", { key, msg: e && e.message }); failed++; }
   }
   await db.doc("config/clickupBcSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "qualite"]); }
+  // « dataQuality » (clé canonique, l'ancienne « qualite » était inerte) + « news » (bulletin BC en retard).
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
   catch (e) { logger.warn("BC pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length };
 }
@@ -1623,40 +1631,41 @@ async function applyClickupTaskEvent(token, taskId, event) {
   const clickup = require("./lib/clickup");
   const cf = require("./lib/clickupFields");
   const bc = require("./lib/clickupBc");
-  const { reverseLinks } = require("./lib/clickupWebhook");
+  const { planTaskEvent } = require("./lib/clickupWebhook");
   const [linksDoc, bcLinksDoc] = await Promise.all([db.doc("config/clickupLinks").get(), db.doc("config/clickupBcLinks").get()]);
   const links = (linksDoc.data() || {}).map || {};
   const bcLinks = (bcLinksDoc.data() || {}).map || {};
-  const cmdKey = reverseLinks(links)[String(taskId)];
-  const bcKey = reverseLinks(bcLinks)[String(taskId)];
-  const deleted = event === "taskDeleted";
-  if (cmdKey) {
-    if (deleted) {
-      await db.doc("config/clickupLinks").set({ map: { [cmdKey]: FieldValue.delete() } }, { merge: true });
-      await db.doc("config/clickupSync").set({ map: { [cmdKey]: FieldValue.delete() } }, { merge: true });
+  // Routage PUR (testé) : commande / BC / ignoré + suppression. Le wrapper applique ensuite les I/O.
+  const plan = planTaskEvent(links, bcLinks, taskId, event);
+  const { recomputeAll } = require("./lib/aggregate");
+  if (plan.kind === "commande") {
+    if (plan.deleted) {
+      await db.doc("config/clickupLinks").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
+      await db.doc("config/clickupSync").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
     } else {
       const task = await clickup.getTask(token, taskId);
       const sync = { ...cf.readTaskSync(task), taskId };
-      await db.doc("config/clickupSync").set({ map: { [cmdKey]: sync } }, { merge: true });
-      if (sync.pm) await db.doc("config/orderPm").set({ map: { [cmdKey]: sync.pm } }, { merge: true });
+      await db.doc("config/clickupSync").set({ map: { [plan.key]: sync } }, { merge: true });
+      if (sync.pm) await db.doc("config/orderPm").set({ map: { [plan.key]: sync.pm } }, { merge: true });
     }
-    try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes"]); }
+    // Couvre TOUS les summaries dérivés de clickupSync : chunks commandes + Actualité + Qualité.
+    try { await recomputeAll(db, ["commandes", "news", "dataQuality"]); }
     catch (e) { logger.warn("webhook: recompute commandes échoué", { msg: e && e.message }); }
-    return { kind: "commande", key: cmdKey, deleted };
+    return plan;
   }
-  if (bcKey) {
-    if (deleted) {
-      await db.doc("config/clickupBcLinks").set({ map: { [bcKey]: FieldValue.delete() } }, { merge: true });
-      await db.doc("config/clickupBcSync").set({ map: { [bcKey]: FieldValue.delete() } }, { merge: true });
+  if (plan.kind === "bc") {
+    if (plan.deleted) {
+      await db.doc("config/clickupBcLinks").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
+      await db.doc("config/clickupBcSync").set({ map: { [plan.key]: FieldValue.delete() } }, { merge: true });
     } else {
       const task = await clickup.getTask(token, taskId);
-      await db.doc("config/clickupBcSync").set({ map: { [bcKey]: { ...bc.readBcSync(task), taskId } } }, { merge: true });
+      await db.doc("config/clickupBcSync").set({ map: { [plan.key]: { ...bc.readBcSync(task), taskId } } }, { merge: true });
     }
-    try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "qualite"]); }
+    try { await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
     catch (e) { logger.warn("webhook: recompute BC échoué", { msg: e && e.message }); }
-    return { kind: "bc", key: bcKey, deleted };
+    return plan;
   }
-  return { kind: "ignored" }; // tâche non liée (créée hors app, ou lien pas encore posé)
+  return plan; // ignored : tâche non liée (créée hors app, ou lien pas encore posé)
 }
 
 // clickupWebhook : point d'entrée HTTP des webhooks ClickUp. Vérifie la signature, applique l'événement,
@@ -1758,6 +1767,7 @@ async function runClickupEnrich() {
   if (!keys.length) return { enriched: 0, total: 0 };
   const clickup = require("./lib/clickup");
   const enrich = require("./lib/clickupEnrich");
+  const { isDeliveryOverdue } = require("./domain/clickupSignals");
   const { safeId } = require("./lib/sheets");
   const orders = await loadCommandeRows();
   const orderByKey = {};
@@ -1777,7 +1787,8 @@ async function runClickupEnrich() {
     const taskId = links[key];
     const o = orderByKey[key];
     if (!o) continue; // lien orphelin (commande disparue) → rien à synthétiser
-    const overdue = !!(o.dateContractuelle && String(o.dateContractuelle).slice(0, 10) < today && o.clickupStatus && !/clotur|termin|livr/i.test(String(o.clickupStatus)));
+    // Retard de livraison via le prédicat PARTAGÉ (isActive) → cohérent avec le cockpit Qualité.
+    const overdue = isDeliveryOverdue(o.clickupStatus, o.dateContractuelle, today);
     const d = {
       fp: o.fp, cas: o.cas, facture: o.facture, raf: o.raf,
       milestones: (msByFp[key] || []).map((m) => ({ label: m.label, amount: Number(m.amount || 0), dueDate: m.dueDate || m.date })),
@@ -1804,7 +1815,8 @@ async function runClickupEnrich() {
           const plan = enrich.planMilestoneSubtasks(detail.subtasks, enrich.buildMilestoneSubtasks(d.milestones));
           for (const e of plan.toCreate) { const p = { name: e.name }; if (e.dueMs) { p.due_date = e.dueMs; p.due_date_time = false; } await clickup.createSubtask(token, listId, taskId, p); }
           for (const u of plan.toUpdate) { const p = { name: u.expected.name }; if (u.expected.dueMs) { p.due_date = u.expected.dueMs; p.due_date_time = false; } await clickup.updateTask(token, u.id, p); }
-          if (plan.toCreate.length || plan.toUpdate.length) subtasked++;
+          for (const c of plan.toClose) { await clickup.deleteTask(token, c.id).catch(() => {}); } // purge des « Jalon i » orphelins (échéancier rétréci)
+          if (plan.toCreate.length || plan.toUpdate.length || plan.toClose.length) subtasked++;
         } catch (e) { logger.warn("enrich: sous-tâches jalons échouées", { key, msg: e && e.message }); }
       }
       // 4) BC liés → CHECKLIST (recréée à l'identique = idempotente : supprime la nôtre puis re-crée).

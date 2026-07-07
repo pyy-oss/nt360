@@ -55,11 +55,17 @@ describe("buildMilestoneSubtasks / planMilestoneSubtasks — jalons → sous-tâ
     expect(plan.toUpdate.length).toBe(1);
     expect(plan.toUpdate[0].id).toBe("s2");
   });
-  it("plan : sous-tâche manquante → toCreate ; ne supprime jamais l'existant hors périmètre", () => {
-    const expected = buildMilestoneSubtasks([ms[0]]); // un seul jalon attendu
-    const plan = planMilestoneSubtasks([{ id: "x", name: "Jalon 9 · orphelin" }], expected);
+  it("plan : jalon manquant → toCreate ; « Jalon k » orphelin (échéancier rétréci) → toClose", () => {
+    const expected = buildMilestoneSubtasks([ms[0]]); // un seul jalon attendu (Jalon 1)
+    const plan = planMilestoneSubtasks([{ id: "s1", name: expected[0].name, due_date: String(expected[0].dueMs) }, { id: "x", name: "Jalon 9 · orphelin" }], expected);
+    expect(plan.toCreate.length).toBe(0);
+    expect(plan.toClose).toEqual([{ id: "x", key: "Jalon 9" }]); // le Jalon 9 périmé est purgé
+  });
+  it("plan : une sous-tâche HORS préfixe (suivi manuel) n'est jamais touchée", () => {
+    const expected = buildMilestoneSubtasks([ms[0]]);
+    const plan = planMilestoneSubtasks([{ id: "m", name: "Note manuelle du PM" }], expected);
+    expect(plan.toClose).toEqual([]); // pas notre préfixe → intacte
     expect(plan.toCreate.length).toBe(1);
-    expect(plan.toUpdate.length).toBe(0);
   });
 });
 
@@ -84,14 +90,14 @@ describe("needsRiskTag", () => {
 });
 
 describe("findMarkedComment — upsert idempotent", () => {
-  it("retrouve NOTRE commentaire (le plus récent) parmi d'autres", () => {
+  it("retrouve NOTRE commentaire le plus récent (listComments renvoie du plus récent au plus ancien)", () => {
     const comments = [
       { id: "c1", comment_text: "note humaine" },
-      { id: "c2", comment_text: MARKER + " (mise à jour automatique)\n• …" },
+      { id: "c2", comment_text: MARKER + " (récent)\n• …" }, // plus récent des marqués → gagne
       { id: "c3", comment_text: "autre" },
-      { id: "c4", comment_text: MARKER + " v2" },
+      { id: "c4", comment_text: MARKER + " (ancien doublon)" },
     ];
-    expect(findMarkedComment(comments, MARKER).id).toBe("c4"); // le dernier marqué gagne
+    expect(findMarkedComment(comments, MARKER).id).toBe("c2"); // premier marqué = le plus récent
   });
   it("aucun commentaire marqué → null", () => {
     expect(findMarkedComment([{ id: "c1", comment_text: "rien" }], MARKER)).toBe(null);
