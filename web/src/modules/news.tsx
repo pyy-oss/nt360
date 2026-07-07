@@ -3,6 +3,7 @@
 // (moteur functions/domain/news, sans marge). Chaque bulletin renvoie vers le module concerné.
 import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
+import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { Card, Badge, Tip, EmptyState, cx } from "../design/components";
 import type { Props } from "./_shared";
@@ -17,10 +18,20 @@ const DOMAIN_LABEL: Record<string, string> = {
 
 export const Actualite: FC<Props> = () => {
   const { data } = useDocData<NewsSummary>("summaries/news");
+  // Actualité CLOISONNÉE par module (serveur) : chaque volet n'est lu que si le rôle a le droit du module
+  // → un rôle « overview » seul ne voit plus créances/DSO, fournisseurs saturés, concentration backlog.
+  // Recomposée dans un seul fil, triée par sévérité. Cf. audit P0-C.
+  const { data: dFac } = useDocData<NewsSummary>(useCan("facturation") !== "none" ? "summaries/newsFacturation" : null);
+  const { data: dFrn } = useDocData<NewsSummary>(useCan("fournisseurs") !== "none" ? "summaries/newsFournisseurs" : null);
+  const { data: dBl } = useDocData<NewsSummary>(useCan("backlog") !== "none" ? "summaries/newsBacklog" : null);
+  const { data: dBc } = useDocData<NewsSummary>(useCan("bc") !== "none" ? "summaries/newsBc" : null);
+  const { data: dPl } = useDocData<NewsSummary>(useCan("pipeline") !== "none" ? "summaries/newsPipeline" : null);
   const { go, canGo } = useNav();
-  const bulletins = data?.bulletins || [];
-  const recos = data?.recommendations || [];
-  const counts = data?.counts;
+  const parts = [data, dFac, dFrn, dBl, dBc, dPl];
+  const rankS: Record<string, number> = { high: 0, medium: 1, info: 2 };
+  const bulletins = parts.flatMap((p) => p?.bulletins || []).sort((a, b) => (rankS[a.severity] ?? 3) - (rankS[b.severity] ?? 3));
+  const recos = parts.flatMap((p) => p?.recommendations || []).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+  const counts = parts.reduce((acc, p) => ({ high: acc.high + (p?.counts?.high || 0), medium: acc.medium + (p?.counts?.medium || 0), info: acc.info + (p?.counts?.info || 0) }), { high: 0, medium: 0, info: 0 });
   if (!data || (!bulletins.length && !recos.length)) {
     return <EmptyState label="Aucun événement notable pour l'instant — ou recalcul à lancer (Vue d'ensemble)." />;
   }

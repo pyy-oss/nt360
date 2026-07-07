@@ -390,7 +390,22 @@ async function recomputeAll(db, only) {
       clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
     } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
     const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, clickupBlocked: cuBlockedRefs.length, clickupBlockedRefs: cuBlockedRefs, fy: currentFy, asOf, thr: alertThr });
-    w.push({ path: "summaries/news", data: { ...news, ...stamp } });
+    // CLOISONNEMENT PAR MODULE (cf. audit P0-C) : l'Actualité fuyait créances/DSO (facturation), noms de
+    // fournisseurs saturés, concentration backlog vers tout rôle « overview ». Bulletins ET recommandations
+    // sont routés par leur `domain` (donnée) vers des summaries gatés au bon niveau ; summaries/news ne
+    // garde que l'overview. Le front recompose selon les droits.
+    const NEWS_MOD = { facturation: "facturation", fournisseurs: "fournisseurs", suppliers: "fournisseurs", backlog: "backlog", bc: "bc", pipeline: "pipeline", commandes: "overview", qualite: "overview" };
+    const nm = (o) => NEWS_MOD[o && o.domain] || "overview";
+    const part = (arr) => { const p = { overview: [], facturation: [], fournisseurs: [], backlog: [], bc: [], pipeline: [] }; for (const x of arr || []) p[nm(x)].push(x); return p; };
+    const cnt = (bs) => ({ high: bs.filter((b) => b.severity === "high").length, medium: bs.filter((b) => b.severity === "medium").length, info: bs.filter((b) => b.severity === "info").length });
+    const pb = part(news.bulletins), pr = part(news.recommendations);
+    const mkNews = (mod) => ({ generatedFor: news.generatedFor, bulletins: pb[mod], recommendations: pr[mod], counts: cnt(pb[mod]), ...stamp });
+    w.push({ path: "summaries/news", data: mkNews("overview") });
+    w.push({ path: "summaries/newsFacturation", data: mkNews("facturation") });
+    w.push({ path: "summaries/newsFournisseurs", data: mkNews("fournisseurs") });
+    w.push({ path: "summaries/newsBacklog", data: mkNews("backlog") });
+    w.push({ path: "summaries/newsBc", data: mkNews("bc") });
+    w.push({ path: "summaries/newsPipeline", data: mkNews("pipeline") });
   }
   // Commandes fusionnées matérialisées (lues par « Commandes » & le filtre de la Vue d'ensemble).
   // Découpées en CHUNKS (commandesRows/{i}) pour ne PAS dépasser la limite Firestore ~1 Mio/doc :
