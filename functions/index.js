@@ -964,6 +964,18 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 256, timeoutSeconds: 120
 // agrégats pipeline, sinon l'opp restait invisible des summaries jusqu'au recompute admin/quotidien. ---
 // Autorisation pipeline/BC/fournisseurs : gouvernée par la MATRICE (requireWrite), plus de liste figée.
 
+// Journalise une TRANSITION d'étape dans oppHistory (Lot C) → funnel de conversion réel. La source
+// n'ayant ni date de création ni historique, on construit le funnel à partir de MAINTENANT. Best-effort
+// (n'échoue jamais l'action). Admin SDK → hors rules (oppHistory est write:false côté client).
+async function recordOppTransition({ oppId, from, to, amount, client, am, bu, uid }) {
+  try {
+    await db.collection("oppHistory").add({
+      oppId: oppId || null, from: Number(from) || 0, to: Number(to) || 0, amount: Number(amount) || 0,
+      client: client || null, am: am || null, bu: bu || null, uid: uid || null, at: FieldValue.serverTimestamp(),
+    });
+  } catch (e) { logger.warn("oppHistory: écriture impossible", { message: e && e.message }); }
+}
+
 exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "pipeline");
   const { fpKey } = require("./lib/ids");
@@ -974,6 +986,12 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   if (!client) throw new HttpsError("invalid-argument", "client requis");
   const stage = clampStage(d.stage);
   const amount = Number(d.amount) || 0;
+  // Étape précédente (édition d'une saisie existante) → journal de transition si elle change.
+  let prevStage = null;
+  if (typeof d.id === "string" && d.id.startsWith("saisie_")) {
+    const ps = await db.doc(`opportunities/${d.id}`).get();
+    if (ps.exists) prevStage = Number(ps.data().stage) || 0;
+  }
   // Proba : valeur fournie (0..1) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
   const pr = Number(d.probability);
   const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
@@ -1003,6 +1021,9 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     updatedAt: FieldValue.serverTimestamp(),
   };
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
+  if (prevStage != null && prevStage !== stage) {
+    await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
+  }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
@@ -1070,6 +1091,10 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   }
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger");
   await ref.set(patch, { merge: true });
+  // Transition d'étape (inclut le board Kanban qui passe par ici) → journal du funnel (Lot C).
+  if (patch.stage !== undefined && patch.stage !== (Number(cur.stage) || 0)) {
+    await recordOppTransition({ oppId: id, from: Number(cur.stage) || 0, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
+  }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),

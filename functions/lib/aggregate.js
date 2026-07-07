@@ -17,6 +17,7 @@ const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
 const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
+const { oppFunnel } = require("../domain/oppFunnel");
 const { dataQuality } = require("../domain/dataQuality");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
@@ -318,6 +319,9 @@ async function recomputeCore(db, only) {
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
+  // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory), construit
+  // à partir de MAINTENANT (la source n'a pas d'historique). Lu uniquement sur want("pipeline").
+  if (want("pipeline")) w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(await readAll(db, "oppHistory")), ...stamp } });
   if (want("alerts")) {
     // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte
     // porte des données du module dont elle relève (noms fournisseurs saturés, montant de créances
