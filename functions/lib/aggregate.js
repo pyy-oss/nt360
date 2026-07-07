@@ -225,7 +225,10 @@ async function recomputeCore(db, only) {
   // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
   // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
   // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
-  const salesFps = new Set(oppsActive.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
+  // salesFps calculé sur oppsDedup (AVANT exclusion stale/aged), sinon un FP 'salesData' devenu fantôme
+  // (stale) ou périmé (aged) cesserait de masquer son jumeau 'saisie' → l'opp manuelle RESSUSCITERAIT au
+  // pipeline (cf. vérification). La suppression inter-source doit rester stable quel que soit l'état.
+  const salesFps = new Set(oppsDedup.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
   const opps = oppsActive.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
