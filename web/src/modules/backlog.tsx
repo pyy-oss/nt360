@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast } from "../design/components";
 import { Bars, DonutBU, GroupedBars, Gauge, MultiLine } from "../design/charts";
 import { DateField } from "../design/inputs";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, atteinteTone, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
@@ -320,7 +320,7 @@ export const Prevision: FC<Props> = () => {
         <>
           <div className={cols2}>
             <Card title={`Atterrissage CAS ${att.fy} — prise de commande`}>
-              <Gauge value={att.probaAtteinte || 0} color={(att.ecart || 0) < 0 ? T.clay : T.emerald} />
+              <Gauge value={att.probaAtteinte || 0} color={atteinteTone(att.probaAtteinte || 0)} />
               {(att.objectif || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
                 <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(att.projete)}</div></div>
@@ -330,7 +330,7 @@ export const Prevision: FC<Props> = () => {
               {(att.pipelineRetard || 0) > 0 && <div className="text-[11px] text-clay text-center mt-1" title="Comptées dans le projeté (D Prev dans l'exercice) mais D Prev déjà dépassée — « en retard de closing » côté Pipeline.">dont {fmt(att.pipelineRetard)}{(att.pipelineRetardCount || 0) > 0 ? ` (${att.pipelineRetardCount} opp.)` : ""} à requalifier — D Prev dépassée</div>}
             </Card>
             <Card title={`Atterrissage CAF ${att.fy} — facturation`}>
-              <Gauge value={att.probaAtteinteCaf || 0} color={(att.ecartCaf || 0) < 0 ? T.clay : T.emerald} />
+              <Gauge value={att.probaAtteinteCaf || 0} color={atteinteTone(att.probaAtteinteCaf || 0)} />
               {(att.objectifCaf || 0) > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
               <div className="grid grid-cols-3 gap-2 mt-2 text-center">
                 <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(att.cafProjete)}</div></div>
@@ -534,7 +534,7 @@ export const Simulateur: FC<Props> = () => {
 
       <div className={cols2}>
         <Card title="Atterrissage CAS simulé — prise de commande">
-          <Gauge value={probaCas} color={ecartCas < 0 ? T.clay : T.emerald} />
+          <Gauge value={probaCas} color={atteinteTone(probaCas)} />
           {objectifCas > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div><div className="text-[11px] text-muted">Projeté CAS</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projeteCas)}</div></div>
@@ -543,7 +543,7 @@ export const Simulateur: FC<Props> = () => {
           </div>
         </Card>
         <Card title="Atterrissage CAF simulé — facturation">
-          <Gauge value={probaCaf} color={ecartCaf < 0 ? T.clay : T.emerald} />
+          <Gauge value={probaCaf} color={atteinteTone(probaCaf)} />
           {objectifCaf > 0 && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div><div className="text-[11px] text-muted">Projeté CAF</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projeteCaf)}</div></div>

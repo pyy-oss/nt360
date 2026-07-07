@@ -27,6 +27,17 @@ export function roBadge(real: number | undefined, target: number | undefined) {
   return <Badge tone={real / target >= 1 ? "emerald" : "gold"}>{pct(real / target)}</Badge>;
 }
 
+/** Teinte GRADUÉE d'un ratio d'atteinte (0..1) : vert ≥ 90 %, or ≥ 60 %, clay en-deçà. Rend la couleur
+ *  des jauges d'atterrissage DYNAMIQUE — au lieu du binaire « écart < 0 → rouge » qui les laissait rouges
+ *  presque toute l'année (l'objectif n'étant atteint qu'en fin d'exercice). Mêmes 3 paliers que la jauge
+ *  Qualité (GOOD/FAIR). On grade sur le ratio AFFICHÉ par la jauge (taux d'atteinte projeté/objectif),
+ *  pour que la couleur de l'arc suive son propre remplissage. */
+export const ATTEINTE = { GOOD: 0.9, FAIR: 0.6 };
+export function atteinteTone(ratio: number): string {
+  const r = Number(ratio) || 0;
+  return r >= ATTEINTE.GOOD ? T.emerald : r >= ATTEINTE.FAIR ? T.gold : T.clay;
+}
+
 /** Objectifs de l'année {fy} indexés par périmètre. `.get(scope, scopeValue)` → objectif ou undefined.
  *  Les objectifs étant ANNUELS, le R/O n'a de sens que si la période sélectionnée est cette année-là. */
 export function useObjectives(fy: number | string | undefined) {
