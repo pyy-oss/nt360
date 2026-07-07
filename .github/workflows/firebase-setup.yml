@@ -61,7 +61,11 @@ jobs:
       # - firestore:rules : base nommée nt360 (firebase.json → firestore.database=nt360)
       # - functions : NOS fonctions par nom (jamais --only functions global, qui
       #   proposerait de supprimer les ~50 functions de l'autre app)
-      # - pas de storage / pas d'index (ne rien écraser sur la base (default)).
+      # - firestore:indexes : index de la base NOMMÉE nt360 (firebase.json → firestore.database=nt360) ;
+      #   ne touche PAS la base (default) partagée. (cf. audit intégral O5 : firestore.indexes.json
+      #   n'était jamais déployé, piège latent dès qu'une requête composite l'attend.)
+      # - PAS de storage : le déploiement des Storage rules interroge firebasestorage.defaultBucket.get,
+      #   qui 403 pour ce compte de service et ferait ÉCHOUER TOUT le bootstrap (cf. audit intégral O4).
       # `firebase deploy` renvoie parfois "An unexpected error has occurred" au moment
       # de l'upload des fonctions (erreur transitoire côté backend GCP). On réessaie
       # avec backoff plutôt que d'échouer le run.
@@ -72,7 +76,7 @@ jobs:
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,storage,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --only "hosting,firestore:rules,firestore:indexes,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport" \
               --project "$GCLOUD_PROJECT" --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi

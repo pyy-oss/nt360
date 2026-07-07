@@ -234,7 +234,10 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
 // --- Niveaux de PROJECTION configurables (config/projection) : activer/désactiver et pondérer
 // chacun des 3 niveaux (Certitudes ≥90 · Forecast 70-90 · Pipe 50-70). Édité par la direction ;
 // recompute COMPLET (overview, pipeline, atterrissage, AM 360° en dépendent). Poids bornés [0,1]. ---
-exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
+// Budget aligné sur `recompute`/`importDelta` (512 MiB / 300 s) : recomputeSummaries() reconstruit
+// TOUS les summaries — le défaut 256 MiB / 60 s provoquait timeout/OOM à l'échelle (cf. audit intégral
+// O1), et un kill sur timeout bypasse la libération du verrou → agrégats figés ~10 min (lease).
+exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const w = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
@@ -260,7 +263,8 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", async (req) => {
 // graphies distinctes d'un même client (ex. « SGBCI » ↔ « Société Générale »). Édité par la
 // direction ; recompute COMPLET (le nom canonique pilote tous les regroupements client). Remplace
 // intégralement (merge:false) → retirer une paire la supprime réellement. Bornée à 500 paires. ---
-exports.setClientAliases = onCallG("setClientAliases", async (req) => {
+// Budget 512 MiB / 300 s comme setProjectionConfig : recomputeSummaries() complet (cf. audit intégral O1).
+exports.setClientAliases = onCallG("setClientAliases", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const raw = Array.isArray(req.data && req.data.pairs) ? req.data.pairs : [];
   const pairs = [];
@@ -555,7 +559,9 @@ async function runSalesSync(objectKey) {
   return res;
 }
 
-exports.syncSalesData = onSchedule("every day 06:00", async () => {
+// Forme-OBJET obligatoire pour porter le budget : runSalesSync() lance un recomputeAll COMPLET, que le
+// défaut 60 s / 256 MiB de la forme-chaîne faisait échouer à l'échelle (timeout/OOM, cf. audit intégral O1).
+exports.syncSalesData = onSchedule({ schedule: "every day 06:00", memoryMiB: 512, timeoutSeconds: 300 }, async () => {
   try {
     const res = await runSalesSync();
     // Trace de SUCCÈS queryable (comme scheduledFirestoreExport) : sans elle, seul l'échec laissait une
