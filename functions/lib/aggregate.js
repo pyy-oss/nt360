@@ -608,14 +608,20 @@ async function acquireOrEnqueue(db, only) {
  * triggers, planifiés) passent par ici → un seul recompute effectif à la fois, les autres coalescés.
  * @returns {Promise<{written:string[], currentFy?:number, periods?:object, coalesced?:boolean}>}
  */
-async function recomputeAll(db, only) {
+/**
+ * Enveloppe sérialisée générique : acquiert le verrou (ou coalesce), puis exécute `core(db, only)`
+ * sous exclusion mutuelle, en absorbant les demandes accumulées. `core` est INJECTABLE pour permettre
+ * un test d'intégration de la concurrence sous émulateur (sans dérouler tout le recompute réel).
+ * recomputeAll délègue ici avec core = recomputeCore.
+ */
+async function runSerialized(db, only, core) {
   let acq;
   try {
     acq = await acquireOrEnqueue(db, only);
   } catch (e) {
     // Verrou indisponible (Firestore en erreur) : on NE bloque PAS le recompute — mieux vaut un
     // chevauchement possible qu'un agrégat jamais rafraîchi. Repli sur l'exécution directe.
-    return recomputeCore(db, only);
+    return core(db, only);
   }
   if (acq.role === "enqueued") return { written: [], coalesced: true };
 
@@ -626,7 +632,7 @@ async function recomputeAll(db, only) {
   try {
     // Boucle d'absorption : rejoue tant que des demandes se sont accumulées pendant la passe.
     for (;;) {
-      result = await recomputeCore(db, runOnly);
+      result = await core(db, runOnly);
       const next = await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const d = snap.exists ? (snap.data() || {}) : {};
@@ -650,4 +656,8 @@ async function recomputeAll(db, only) {
   return result;
 }
 
-module.exports = { recomputeAll, recomputeCore, mergeQueued, acquireOrEnqueue, filterInvoices, sanitizeForFirestore, coerceNums };
+async function recomputeAll(db, only) {
+  return runSerialized(db, only, recomputeCore);
+}
+
+module.exports = { recomputeAll, recomputeCore, runSerialized, mergeQueued, acquireOrEnqueue, filterInvoices, sanitizeForFirestore, coerceNums };
