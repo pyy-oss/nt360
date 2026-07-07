@@ -137,6 +137,12 @@ export async function reconcileBcLinks(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "reconcileBcLinks", { timeout: 300_000 })({ listId: opts?.listId });
   return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithNumber: number };
 }
+/** Importe dans l'app les BC saisis directement dans ClickUp (tâches sans bcLine). Dédup par N° BC
+ *  (import comptable prioritaire), statut « émis » (engagement, hors solde SOA), conversion XOF. Admin. */
+export async function importBcFromClickup(opts?: { listId?: string }) {
+  const res = await httpsCallable(functions, "importBcFromClickup", { timeout: 300_000 })({ listId: opts?.listId });
+  return res.data as { ok: boolean; created: number; skippedKnown: number; skippedIncomplete: number; scanned: number };
+}
 /** Sens inverse BC : remonte l'avancement achat (statut) + l'ETA des tâches ClickUp liées vers l'app
  *  (overlay additif). Admin. */
 export async function syncBcFromClickup() {

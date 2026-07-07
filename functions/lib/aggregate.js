@@ -164,6 +164,12 @@ async function recomputeAll(db, only) {
   const clickupBcSyncMap = ((await db.doc("config/clickupBcSync").get()).data() || {}).map || {};
   const clickupBcLinksMap = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
   const { bcKey } = require("./clickupBc");
+  // PRIORITÉ SOURCE : un BC importé depuis ClickUp (source 'clickup') n'est qu'un AMORÇAGE ; dès que le
+  // même N° BC existe via l'import Logistics/PDF/fiche (données comptables curées), on ÉCARTE la ligne
+  // ClickUp → jamais de double compte d'exposition/décaissement, quel que soit l'ordre d'arrivée.
+  const nonCuBcKeys = new Set();
+  for (const b of bcLines) { if (b && b.source !== "clickup" && b.bcNumber) nonCuBcKeys.add(bcKey(b.bcNumber, safeId)); }
+  for (let i = bcLines.length - 1; i >= 0; i--) { const b = bcLines[i]; if (b && b.source === "clickup" && b.bcNumber && nonCuBcKeys.has(bcKey(b.bcNumber, safeId))) bcLines.splice(i, 1); }
   for (const b of bcLines) {
     const raw = String(b.bcNumber || "").trim();
     const k = raw ? bcKey(raw, safeId) : ""; // clé casse-insensible (cohérente avec push/pull BC)

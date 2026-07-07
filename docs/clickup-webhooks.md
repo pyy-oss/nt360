@@ -62,6 +62,22 @@ Le bouton *Habilitations → Intégration ClickUp → **« Enrichir les tâches 
   l'identique** à chaque passage (idempotente).
 - Un **tag « à risque (n360) »** posé/retiré selon les anomalies qualité ou le retard.
 
+## Lot 5 — Importer les BC depuis ClickUp
+
+Bouton *Habilitations → Intégration ClickUp → **« Importer les BC depuis ClickUp »***
+(`importBcFromClickup`, direction) : les bons de commande **saisis directement dans ClickUp** (liste
+« Commandes Fournisseurs », sans ligne `bcLines` correspondante) deviennent des BC dans l'app.
+
+Garde-fous :
+- **Import comptable prioritaire** : un N° BC déjà connu par un import Logistics/PDF/fiche est **ignoré**
+  (jamais de doublon). Un `bcLines` de source `clickup` est en outre **écarté au calcul** dès qu'un même
+  N° BC existe via une source comptable → aucun double compte d'exposition/décaissement, quel que soit
+  l'ordre d'arrivée.
+- **Statut « émis »** = engagé non facturé → alimente l'**engagement** fournisseur, **jamais le solde du
+  compte** (règle SOA : seule une facture bouge le solde).
+- **Conversion XOF** via `config/fxRates` (parité EUR fixe en repli).
+- **Idempotent** : id de document stable par N° BC → un ré-import met à jour, ne duplique pas.
+
 ## Lot 4 — ClickUp → app (avancement, priorité, blocage, temps)
 
 `readTaskSync` remonte désormais aussi, par tâche liée : **priorité**, **blocage** (tag « bloqué »),
