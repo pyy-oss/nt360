@@ -1,12 +1,12 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
-import { useState, type FC, type ReactNode } from "react";
+import { useState, type FC, type ReactNode, type ChangeEvent } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult } from "../lib/writes";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
@@ -230,6 +230,133 @@ const isAgedLost = (o: Opportunity): boolean => {
   return Number(o.probability) <= 0.9;
 };
 
+// Import / export EN MASSE des opportunités (Lot 9). Export = modèle round-trip .xlsx (toutes les opps) ;
+// on l'édite hors-ligne (ex. combler les motifs de perte), puis on le ré-importe. Ré-import en DEUX temps
+// comme le dédoublonnage : Analyser (aperçu dry-run, n'écrit rien) → Appliquer. Rapprochement Opp ID → N° FP →
+// création `saisie` ; seuls les champs RENSEIGNÉS sont mis à jour (jamais l'identité, jamais d'effacement).
+const errText = (e: any) => String(e?.message || e?.code || "").replace(/^functions\//, "");
+function OppBulkExcel() {
+  const toast = useToast();
+  const [busyExport, setBusyExport] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<OppImportResult | null>(null);
+  const [phase, setPhase] = useState<"" | "analyse" | "apply">("");
+
+  const doExport = async () => {
+    setBusyExport(true);
+    try {
+      const r = await exportOpportunities();
+      downloadBase64(r.filename, r.fileB64);
+      toast(`Export de ${r.count.toLocaleString("fr-FR")} opportunité(s)`, "ok");
+    } catch (e: any) { toast(`Export refusé — ${errText(e)}`, "err"); }
+    finally { setBusyExport(false); }
+  };
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; e.target.value = ""; // autorise le ré-import du même fichier
+    if (!f) return;
+    setFile(f); setPhase("analyse"); setPreview(null);
+    try { setPreview(await importOpportunities(f, false)); }
+    catch (e: any) { toast(`Analyse refusée — ${errText(e)}`, "err"); setFile(null); }
+    finally { setPhase(""); }
+  };
+  const doApply = async () => {
+    if (!file) return;
+    setPhase("apply");
+    try {
+      const r = await importOpportunities(file, true);
+      toast(`Appliqué : ${r.updated} mise(s) à jour · ${r.created} création(s)${r.skipped ? ` · ${r.skipped} inchangée(s)` : ""}`, "ok");
+      setPreview(null); setFile(null);
+    } catch (e: any) { toast(`Application refusée — ${errText(e)}`, "err"); }
+    finally { setPhase(""); }
+  };
+  const close = () => { if (phase !== "apply") { setPreview(null); setFile(null); } };
+
+  const p = preview;
+  return (
+    <Card title="Import / mise à jour en masse (Excel)">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[12.5px] text-muted">
+          Exportez le modèle, complétez-le hors-ligne (motifs de perte, étape, montant, IdC, prochaine action…),
+          puis ré-importez : rapprochement par <b>Opp ID</b> puis <b>N° FP</b>, mise à jour des seuls champs renseignés,
+          création des lignes nouvelles. <b>Aperçu avant application.</b>
+        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={doExport} disabled={busyExport} className="btn-ghost !px-3 !py-1.5 text-sm">
+            {busyExport ? "Export…" : "Exporter le modèle"}
+          </button>
+          <label className={cx("btn-gold !px-3 !py-1.5 text-sm cursor-pointer", phase === "analyse" && "opacity-60 pointer-events-none")}>
+            {phase === "analyse" ? "Analyse…" : "Importer / mettre à jour"}
+            <input type="file" accept=".xlsx,.xls,.csv" className="sr-only" onChange={onFile} disabled={phase !== ""} aria-label="Choisir le fichier Excel des opportunités à importer" />
+          </label>
+        </div>
+      </div>
+
+      <Modal open={!!p} onClose={close} size="md" title="Aperçu de l'import — opportunités"
+        actions={
+          <>
+            <button onClick={close} disabled={phase === "apply"} className="btn-ghost !px-3 !py-1.5 text-sm">Annuler</button>
+            <button onClick={doApply} disabled={phase === "apply" || !p || (p.updated + p.created === 0)} className="btn-gold !px-3 !py-1.5 text-sm">
+              {phase === "apply" ? "Application…" : `Appliquer ${p?.updated ?? 0} maj / ${p?.created ?? 0} créations`}
+            </button>
+          </>
+        }>
+        {p && (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border border-line bg-panel2/40 py-2"><div className="font-display text-xl tabnum text-gold">{p.updated}</div><div className="text-[11px] text-muted">mise(s) à jour</div></div>
+              <div className="rounded-lg border border-line bg-panel2/40 py-2"><div className="font-display text-xl tabnum text-emerald">{p.created}</div><div className="text-[11px] text-muted">création(s)</div></div>
+              <div className="rounded-lg border border-line bg-panel2/40 py-2"><div className="font-display text-xl tabnum text-faint">{p.skipped}</div><div className="text-[11px] text-muted">inchangée(s)</div></div>
+            </div>
+            {(p.updated + p.created === 0) && <div className="text-[12px] text-clay">Aucune modification détectée — le fichier est identique aux données actuelles.</div>}
+            {!!p.samples?.update.length && (
+              <details open className="text-[12px]">
+                <summary className="cursor-pointer select-none text-muted hover:text-ink">Mises à jour (aperçu {Math.min(p.samples.update.length, 50)}{p.updated > 50 ? ` / ${p.updated}` : ""})</summary>
+                <ul className="mt-1.5 flex flex-col gap-1 max-h-52 overflow-auto">
+                  {p.samples.update.map((s) => (
+                    <li key={`u${s.line}`} className="flex items-center gap-2 text-muted">
+                      <span className="text-faint tabnum w-10 shrink-0">L{s.line}</span>
+                      <span className="truncate text-ink">{s.client || s.id}</span>
+                      <span className="text-faint truncate">· {(s.changed || []).join(", ")}{s.matchBy === "fp" ? " · via FP" : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {!!p.samples?.create.length && (
+              <details className="text-[12px]">
+                <summary className="cursor-pointer select-none text-muted hover:text-ink">Créations (aperçu {Math.min(p.samples.create.length, 50)}{p.created > 50 ? ` / ${p.created}` : ""})</summary>
+                <ul className="mt-1.5 flex flex-col gap-1 max-h-52 overflow-auto">
+                  {p.samples.create.map((s) => (
+                    <li key={`c${s.line}`} className="flex items-center gap-2 text-muted">
+                      <span className="text-faint tabnum w-10 shrink-0">L{s.line}</span>
+                      <span className="truncate text-ink">{s.client}</span>
+                      {s.fp && <span className="text-faint">· {s.fp}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {!!p.samples?.skip.length && (
+              <details className="text-[12px]">
+                <summary className="cursor-pointer select-none text-faint hover:text-ink">Lignes inchangées / ignorées (aperçu {Math.min(p.samples.skip.length, 50)})</summary>
+                <ul className="mt-1.5 flex flex-col gap-1 max-h-40 overflow-auto">
+                  {p.samples.skip.map((s) => (
+                    <li key={`s${s.line}`} className="flex items-center gap-2 text-faint">
+                      <span className="tabnum w-10 shrink-0">L{s.line}</span>
+                      <span className="truncate">{s.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <div className="text-[11px] text-faint">Rapprochement Opp ID → N° FP → création (source « saisie »). L'identité (Opp ID, N° FP) et les champs laissés vides ne sont jamais modifiés. Action tracée + recalcul des agrégats.</div>
+          </div>
+        )}
+      </Modal>
+    </Card>
+  );
+}
+
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
@@ -411,6 +538,7 @@ export const OppList: FC<Props> = () => {
           colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
+      {canWrite && <OppBulkExcel />}
       <Card title={`Toutes les opportunités · ${shownOpps.length.toLocaleString("fr-FR")}`} actions={
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <Segmented value={seg} onChange={setSeg} ariaLabel="Filtrer par statut d'opportunité" options={[

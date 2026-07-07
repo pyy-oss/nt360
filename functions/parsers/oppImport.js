@@ -1,0 +1,97 @@
+// Parseur du MODÈLE d'import/export en masse des opportunités (BUILD_KIT — Lot 9). Deux fonctions :
+//   • buildTemplateAoa(opps) → matrice [en-tête, ...lignes] pour XLSX.utils.aoa_to_sheet (EXPORT round-trip).
+//   • parseOpportunitiesImport(wb) → lignes NORMALISÉES { oppId, fp, values, line } (RE-IMPORT).
+// L'export écrit les en-têtes EXACTS ci-dessous ; `val()` (lib/sheets) les rapproche d'abord par égalité
+// normalisée → un aller-retour SANS édition ne produit AUCUN changement (cf. domain/oppImport sameField).
+// Seules les cellules RENSEIGNÉES peuplent `values` (mise à jour non effaçante côté domaine).
+const XLSX = require("xlsx");
+const { fpKey, num, cleanBu, cleanName, cleanPerson } = require("../lib/ids");
+const { headerKeys, val, valLabel, toISO } = require("../lib/sheets");
+const { normalizeStage } = require("./salesData");
+
+// En-têtes du modèle, dans l'ordre des colonnes. « Opp ID » et « N° FP » sont les clés de MATCH ;
+// « Source » est informatif (lecture seule). Les intitulés portent le format attendu pour guider la saisie.
+const TEMPLATE_HEADERS = [
+  "Opp ID", "N° FP", "Client", "Désignation", "AM", "BU", "Montant", "Étape (1-9)",
+  "IdC (0-1)", "MB prév. (%)", "DR (Oui/Non)", "D Prev", "Prochaine action",
+  "Échéance action", "Motif de perte", "Source",
+];
+
+// Ligne d'export d'une opportunité (ordre = TEMPLATE_HEADERS). Valeurs BRUTES (nombres/ISO) pour un
+// aller-retour fidèle ; DR en « Oui »/« Non » (lisible + re-parsé). Vide = « — » implicite (cellule vide).
+function templateRow(o) {
+  return [
+    o.oppId || o.id || "", o.fp || "", o.client || "", o.designation || "", o.am || "", o.bu || "",
+    o.amount ?? "", o.stage ?? "", o.probability ?? "", o.mbPrev ?? "", o.dr ? "Oui" : "Non",
+    o.closingDate || "", o.nextStep || "", o.nextStepDate || "", o.lostReason || "", o.source || "",
+  ];
+}
+
+/** Matrice tableur (en-tête + 1 ligne/opp) prête pour XLSX.utils.aoa_to_sheet. PUR. */
+function buildTemplateAoa(opps) {
+  return [TEMPLATE_HEADERS, ...(opps || []).map(templateRow)];
+}
+
+// ---- Coercitions par cellule : renvoient `undefined` si la cellule est VIDE (→ champ non fourni). ----
+const txt = (v) => { const s = (v == null ? "" : String(v)).trim(); return s === "" ? undefined : s; };
+function numPresent(v) { if (v == null || v === "") return undefined; const n = num(String(v).replace(/%/g, "")); return Number.isFinite(n) ? n : undefined; }
+function parseStage(v) { if (v == null || v === "") return undefined; const s = normalizeStage(v); return s >= 1 && s <= 9 ? s : undefined; }
+function parseProba(v) {
+  if (v == null || v === "") return undefined;
+  let n = num(String(v).replace(/%/g, ""));
+  if (!Number.isFinite(n)) return undefined;
+  if (n > 1.5) n = n / 100;            // « 90 » ou « 90% » → 0.9 (parité normalisation IdC salesData)
+  return Math.min(1, Math.max(0, n));
+}
+function parsePct(v) { const n = numPresent(v); return n === undefined ? undefined : Math.min(100, Math.max(0, n)); }
+function parseDate(v) { if (v == null || v === "") return undefined; return toISO(v) || undefined; }
+function parseBu(v) { const s = cleanBu(v); return s || undefined; }
+const DR_TRUE = new Set(["oui", "o", "yes", "y", "true", "vrai", "1", "x", "✓"]);
+function parseDr(v) {
+  if (v == null) return undefined;
+  const s = String(v).trim().toLowerCase();
+  if (s === "") return undefined;
+  return DR_TRUE.has(s);
+}
+
+function pickSheet(wb) {
+  const named = wb.SheetNames.find((n) => /opport|opps?|live|sales|pipe|import/i.test(n));
+  return wb.Sheets[named || wb.SheetNames[0]];
+}
+
+/**
+ * @param {import('xlsx').WorkBook} wb classeur (xlsx OU csv — XLSX.read gère les deux)
+ * @returns {{rows: {oppId:string, fp:string, values:object, line:number}[], report:{rowsIn:number, rowsParsed:number}}}
+ */
+function parseOpportunitiesImport(wb) {
+  const raw = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const rows = [];
+  let rowsIn = 0;
+  raw.forEach((r, i) => {
+    rowsIn++;
+    const keys = headerKeys(r);
+    // Opp ID : JAMAIS « id » seul (matcherait « IdC »). N° FP : clé naturelle normalisée.
+    const oppId = String(val(r, keys, "opp id", "oppid") || "").trim();
+    const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
+    const values = {};
+    const put = (k, v) => { if (v !== undefined) values[k] = v; };
+    put("client", txt(cleanName(val(r, keys, "client", "customer"))));
+    put("designation", txt(valLabel(r, keys, "désignation", "designation", "description du projet", "description projet", "objet", "affaire", "projet", "intitulé", "intitule", "description")));
+    put("am", txt(cleanPerson(val(r, keys, "am", "new am", "commercial", "sales"))));
+    put("bu", parseBu(val(r, keys, "bu", "domaine")));
+    put("amount", numPresent(val(r, keys, "montant (ht)", "montant ht", "montant", "amount")));
+    put("stage", parseStage(val(r, keys, "étape (1-9)", "étape", "etape", "statut", "stage")));
+    put("probability", parseProba(val(r, keys, "idc (0-1)", "idc", "id c", "proba", "probabilité", "probabilite")));
+    put("mbPrev", parsePct(val(r, keys, "mb prév. (%)", "mb prév", "mb prev", "mb prévisionnel", "mb previsionnel")));
+    put("dr", parseDr(val(r, keys, "dr (oui/non)", "dr")));
+    put("closingDate", parseDate(val(r, keys, "d prev", "closing", "date prev", "clôture", "cloture")));
+    put("nextStep", txt(val(r, keys, "prochaine action", "next step")));
+    put("nextStepDate", parseDate(val(r, keys, "échéance action", "echeance action", "next step date")));
+    put("lostReason", txt(val(r, keys, "motif de perte", "motif perte", "lost reason", "raison perte")));
+    if (!oppId && !fp && Object.keys(values).length === 0) return; // ligne entièrement vide → ignorée
+    rows.push({ oppId, fp, values, line: i + 2 }); // +2 : la ligne 1 est l'en-tête
+  });
+  return { rows, report: { rowsIn, rowsParsed: rows.length } };
+}
+
+module.exports = { TEMPLATE_HEADERS, buildTemplateAoa, parseOpportunitiesImport };

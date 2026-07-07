@@ -27,6 +27,38 @@ export async function patchOpportunity(data: { id: string; fp?: string; closingD
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 
+/** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
+ *  base64 (à télécharger via downloadBase64). Réservé au droit « pipeline ». */
+export async function exportOpportunities() {
+  const res = await httpsCallable(functions, "exportOpportunities", { timeout: 120_000 })({});
+  return res.data as { ok: boolean; filename: string; fileB64: string; count: number };
+}
+
+export type OppImportSample = { line: number; id?: string | null; client?: string | null; matchBy?: string; changed?: string[]; fp?: string | null; reason?: string };
+export type OppImportResult = {
+  ok: boolean; applied: boolean;
+  updated: number; created: number; skipped: number; rowsParsed: number;
+  samples?: { update: OppImportSample[]; create: OppImportSample[]; skip: OppImportSample[] };
+};
+/** Importe/actualise en masse les opportunités depuis le modèle édité (.xlsx/.csv). `apply=false` =
+ *  APERÇU (dry-run, n'écrit rien) ; `apply=true` = applique (upsert + recompute). Rapprochement
+ *  Opp ID → N° FP → création `saisie`, mise à jour des seuls champs renseignés. Droit « pipeline ». */
+export async function importOpportunities(file: File, apply: boolean): Promise<OppImportResult> {
+  const fileB64 = await fileToBase64(file);
+  const res = await httpsCallable(functions, "importOpportunities", { timeout: 300_000 })({ fileB64, filename: file.name, apply });
+  return res.data as OppImportResult;
+}
+
+/** Déclenche le téléchargement d'un fichier binaire encodé base64 (ex. .xlsx renvoyé par un callable). */
+export function downloadBase64(filename: string, b64: string, mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Rattache une facture orpheline à sa commande en corrigeant son N° FP (onCall : recalcule). */
 export async function setInvoiceFp(id: string, fp: string) {
   await httpsCallable(functions, "setInvoiceFp")({ id, fp });

@@ -1136,6 +1136,112 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   return { ok: true, id };
 });
 
+// --- Lot 9 : EXPORT du modèle round-trip des opportunités (.xlsx). Réservé au droit « pipeline »
+// (seul un rédacteur a besoin du modèle pour le ré-importer). En-têtes EXACTS du parseur (parité). ---
+exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const XLSX = require("xlsx");
+  const { buildTemplateAoa } = require("./parsers/oppImport");
+  const snap = await db.collection("opportunities").get();
+  const opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Tri lisible : client puis étape (regroupe les lignes à compléter — ex. perdues sans motif).
+  opps.sort((a, b) => String(a.client || "").localeCompare(String(b.client || "")) || (Number(a.stage) || 0) - (Number(b.stage) || 0));
+  const ws = XLSX.utils.aoa_to_sheet(buildTemplateAoa(opps));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Opportunités");
+  const fileB64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "export_opps", module: "pipeline", entity: "opportunity", entityId: "*",
+    detail: { count: opps.length }, ts: FieldValue.serverTimestamp(),
+  });
+  const stamp = new Date().toISOString().slice(0, 10);
+  return { ok: true, filename: `nt360-opportunites-${stamp}.xlsx`, fileB64, count: opps.length };
+});
+
+// --- Lot 9 : IMPORT / MISE À JOUR EN MASSE des opportunités (.xlsx/.csv). Deux temps comme le
+// dédoublonnage : apply=false → APERÇU (dry-run, n'écrit RIEN), apply=true → applique. Rapprochement
+// Opp ID → N° FP → création `saisie` ; met à jour uniquement les champs mutables RENSEIGNÉS (jamais
+// l'identité, jamais d'effacement). Réservé au droit « pipeline ». Audité + recompute complet. ---
+exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const XLSX = require("xlsx");
+  const { fpKey } = require("./lib/ids");
+  const { parseOpportunitiesImport } = require("./parsers/oppImport");
+  const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("./domain/oppImport");
+  const b64 = req.data?.fileB64;
+  const filename = String(req.data?.filename || "opportunites.xlsx");
+  const apply = req.data?.apply === true;
+  if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+  // Plafond de charge serveur (défense en profondeur, cf. importDelta) : ~30 M car. base64 ≈ 22 Mo.
+  if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)");
+  let parsed;
+  try { parsed = parseOpportunitiesImport(XLSX.read(Buffer.from(b64, "base64"), { type: "buffer" })); }
+  catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + (e.message || e)); }
+  const { rows, report } = parsed;
+  if (!rows.length) throw new HttpsError("failed-precondition", "aucune ligne exploitable dans le fichier");
+
+  // Index des opps existantes : par doc id ET oppId (match Opp ID), par N° FP (1re rencontrée si doublon).
+  const snap = await db.collection("opportunities").get();
+  const byId = new Map(), byFp = new Map();
+  for (const d of snap.docs) {
+    const o = { id: d.id, ...d.data() };
+    byId.set(d.id, o);
+    if (o.oppId) byId.set(o.oppId, o);
+    const fk = fpKey(o.fp);
+    if (fk && !byFp.has(fk)) byFp.set(fk, o);
+  }
+  const { toUpdate, toCreate, skipped } = planOpportunityImport(byId, byFp, rows);
+
+  // Échantillons (aperçu ET trace) — bornés pour ne pas gonfler la réponse callable.
+  const cap = (a) => a.slice(0, 50);
+  const samples = {
+    update: cap(toUpdate).map((u) => ({ line: u.line, id: u.id, client: u.client, matchBy: u.matchBy, changed: u.changed })),
+    create: cap(toCreate).map((c) => ({ line: c.line, client: c.client, fp: c.fp })),
+    skip: cap(skipped).map((s) => ({ line: s.line, id: s.id || null, reason: s.reason })),
+  };
+  const counts = { updated: toUpdate.length, created: toCreate.length, skipped: skipped.length, rowsParsed: report.rowsParsed };
+
+  if (!apply) return { ok: true, applied: false, ...counts, samples };
+
+  // --- Application (upsert par batch de 400 ; transitions d'étape journalisées après commit). ---
+  let batch = db.batch(), n = 0;
+  const flush = async () => { if (n) { await batch.commit(); batch = db.batch(); n = 0; } };
+  const transitions = [];
+  for (const u of toUpdate) {
+    const cur = byId.get(u.id) || {};
+    const patch = finalizeUpdatePatch(cur, u.patch);
+    patch.updatedAt = FieldValue.serverTimestamp();
+    batch.set(db.doc(`opportunities/${u.id}`), patch, { merge: true });
+    if (patch.stage !== undefined && patch.stage !== u.stageFrom) {
+      transitions.push({ oppId: u.id, from: u.stageFrom, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
+    }
+    if (++n % 400 === 0) await flush();
+  }
+  let seq = 0;
+  const mkId = () => "saisie_" + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 6);
+  for (const c of toCreate) {
+    const id = mkId();
+    const doc = buildCreateDoc(c.values, c.fp, id);
+    doc.updatedAt = FieldValue.serverTimestamp();
+    batch.set(db.doc(`opportunities/${id}`), doc, { merge: true });
+    if (++n % 400 === 0) await flush();
+  }
+  await flush();
+  for (const t of transitions) await recordOppTransition(t); // journal funnel (parité patch/upsert)
+
+  await db.collection("imports").add({
+    uid: req.auth.uid, kinds: ["opportunities"], filename, objectKey: null, mode: "opp_bulk",
+    rowsIn: report.rowsIn, rowsOk: counts.updated + counts.created, rowsSkipped: counts.skipped,
+    report: { ...counts }, ts: FieldValue.serverTimestamp(),
+  });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "import_opps", module: "pipeline", entity: "opportunity", entityId: filename,
+    detail: { ...counts }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, applied: true, ...counts, samples };
+});
+
 const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 
 exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
