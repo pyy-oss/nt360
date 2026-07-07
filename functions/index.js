@@ -48,22 +48,32 @@ db.settings({ ignoreUndefinedProperties: true });
 async function ingestHandler(event) {
   const { bucket, name } = event.data;
   if (!name || name.endsWith("/")) return; // dossier
-  const [buf] = await getStorage().bucket(bucket).file(name).download();
-  const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
+  // OBSERVABILITÉ : le trigger Storage gen2 NE réessaie PAS par défaut ; une exception (ex. recompute qui
+  // échoue) était perdue SANS trace queryable → docs sources écrits mais summaries périmés en silence. On
+  // encadre donc le corps d'un try/catch qui journalise ok/erreur dans opsLog (comme les callables/planifiés).
+  try {
+    const [buf] = await getStorage().bucket(bucket).file(name).download();
+    const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
 
-  const { kinds, writes, report } = buildWrites(wb);
-  logger.info("ingest", { name, kinds, ...report });
+    const { kinds, writes, report } = buildWrites(wb);
+    logger.info("ingest", { name, kinds, ...report });
 
-  await applyWrites(db, writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
+    await applyWrites(db, writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
-  await db.collection("imports").add({
-    uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
-    rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
-    report, ts: FieldValue.serverTimestamp(),
-  });
+    await db.collection("imports").add({
+      uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
+      rowsIn: report.rowsIn ?? 0, rowsOk: report.rowsOk ?? 0, rowsSkipped: report.rowsSkipped ?? 0,
+      report, ts: FieldValue.serverTimestamp(),
+    });
 
-  if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-  await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+    await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    await logOps({ kind: "ingest", action: "ingest", status: "ok", detail: { name, kinds, rowsOk: report.rowsOk ?? 0 } });
+  } catch (e) {
+    logger.error("ingest a échoué", { name, message: e && e.message, stack: e && e.stack });
+    await logOps({ kind: "ingest", action: "ingest", status: "error", detail: { name }, error: (e && e.message) || String(e) });
+    throw e; // re-propage pour la visibilité côté logs/monitoring (event non réessayé par défaut)
+  }
 }
 
 if (process.env.INGEST_REGION) {
@@ -545,7 +555,10 @@ async function runSalesSync(objectKey) {
 
 exports.syncSalesData = onSchedule("every day 06:00", async () => {
   try {
-    await runSalesSync();
+    const res = await runSalesSync();
+    // Trace de SUCCÈS queryable (comme scheduledFirestoreExport) : sans elle, seul l'échec laissait une
+    // trace → un sync qui ne tourne plus était indétectable. Un dernier opsLog ok manquant/périmé = signal.
+    await logOps({ kind: "scheduled", action: "syncSalesData", status: "ok", detail: res || {} });
   } catch (e) {
     logger.error("syncSalesData a échoué", { message: e && e.message, stack: e && e.stack });
     await logOps({ kind: "scheduled", action: "syncSalesData", status: "error", error: (e && e.message) || String(e) });
@@ -832,18 +845,28 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
 
   if (newFp && newFp !== fp) {
     // Ré-clé : le FP est la clé de jointure (factures, BC…). On copie sous le nouveau FP puis supprime.
-    // Garde-fou : si une commande existe DÉJÀ sous le FP cible, un set(merge) fusionnerait deux
-    // lignes P&L distinctes (perte d'une commande) → on refuse.
     const newId = safeId(newFp);
-    if ((await db.doc(`orders/${newId}`).get()).exists) throw new HttpsError("failed-precondition", `une commande existe déjà pour ${newFp} — ré-clé refusée (fusion destructive)`);
+    const newSnap = await db.doc(`orders/${newId}`).get();
+    // Garde-fou : si une commande DISTINCTE existe déjà sous le FP cible, un set(merge) fusionnerait deux
+    // lignes P&L (perte d'une commande) → on refuse. MAIS on distingue le cas d'une RÉ-CLÉ INTERROMPUE :
+    // si le doc cible porte notre marqueur `_rekeyFrom === fp`, c'est la copie en vol d'un run précédent
+    // (create fait, migrate/delete non terminés) → on REPREND au lieu de bloquer. Sans ça, une interruption
+    // pendant migrateFpSatellites (plusieurs secondes sur un gros FP) laissait DEUX commandes (ancienne +
+    // nouvelle) → double-compte CAS/backlog, et le retry butait sur cette garde (pas d'auto-guérison).
+    if (newSnap.exists && newSnap.get("_rekeyFrom") !== fp) {
+      throw new HttpsError("failed-precondition", `une commande existe déjà pour ${newFp} — ré-clé refusée (fusion destructive)`);
+    }
     // ORDRE SÛR (cf. audit P0-A) : créer la nouvelle commande → MIGRER les satellites → SUPPRIMER
     // l'ancienne EN DERNIER. À tout instant, chaque satellite (facture/BC/fiche/marge/jalons) pointe vers
     // un FP qui PORTE une commande → jamais d'orphelin même si la fonction est interrompue en cours de
-    // route ; migrateFpSatellites est idempotent (re-jouable). L'ancien ordre (create→delete→migrate)
-    // laissait une fenêtre où les satellites pointaient vers un FP sans commande (facturé=0, RAF gonflé).
-    await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    // route ; migrateFpSatellites est idempotent (re-jouable). `_rekeyFrom` rend la ré-clé REPRENABLE
+    // (résout la fenêtre de double-compte de l'ordre create→migrate→delete si interrompu au milieu).
+    await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, _rekeyFrom: fp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await migrateFpSatellites(fp, newFp);
     await ref.delete();
+    // Ré-clé terminée : on retire le marqueur (harmless s'il subsiste — un futur run ne le lira que si
+    // oldId réapparaît, ce qui n'arrive pas). FieldValue.delete pour ne pas laisser un champ interne.
+    await db.doc(`orders/${newId}`).set({ _rekeyFrom: FieldValue.delete() }, { merge: true });
   } else if (Object.keys(patch).length) {
     await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else {
@@ -2112,26 +2135,30 @@ exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, asyn
 });
 
 // --- F7 : export one-pager CODIR (XLSX) → Cloud Storage + URL signée ---
-// Le one-pager CODIR contient des données financières (P&L, atterrissage) → réservé aux
-// profils habilités à la rentabilité (direction / commercial_dir / lecture), pas à tout compte.
-const EXPORT_ROLES = ["direction", "commercial_dir", "lecture"];
+// Le one-pager CODIR agrège des chiffres financiers (chaîne de valeur, backlog, pipeline, atterrissage,
+// marge). AUTORISATION PAR LA MATRICE OPPOSABLE, plus par une liste de rôles figée : le rapport est un
+// document « vue d'ensemble » → droit overview requis pour le générer, et CHAQUE bloc (backlog, pipeline,
+// marge) n'entre dans le classeur que si le rôle a le droit du module correspondant DANS LA MATRICE.
+// Sans ça, révoquer p.ex. « pipeline » à un rôle laissait quand même passer le total pondéré dans l'export
+// (contournement de la source unique de vérité). Cf. audit de bon fonctionnement.
 exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  if (!EXPORT_ROLES.includes(req.auth.token?.role)) throw new HttpsError("permission-denied", "droit de rapport requis");
   const ExcelJS = require("exceljs");
   const { canRead } = require("./domain/authz");
+  const role = req.auth.token?.role;
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  if (!canRead(matrix, role, "overview")) throw new HttpsError("permission-denied", "droit « vue d'ensemble » requis pour le rapport");
+  const canMargin = canRead(matrix, role, "rentabilite");
+  const canBacklog = canRead(matrix, role, "backlog");
+  const canPipeline = canRead(matrix, role, "pipeline");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};
-  // La MARGE n'entre dans l'export que si le rôle appelant a le droit « rentabilite » DANS LA MATRICE
-  // (pas selon une liste figée) : révoquer rentabilite retire la marge de l'export, comme partout.
-  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
-  const canMargin = canRead(matrix, req.auth.token?.role, "rentabilite");
-  const [ov, bl, pl, fiscal] = await Promise.all([
-    get(`summaries/overview_${period}`), get("summaries/backlog_fy"),
-    get("summaries/pipeline"), get("config/fiscal"),
-  ]);
+  const fiscal = await get("config/fiscal");
+  const ov = await get(`summaries/overview_${period}`);
+  const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`); // atterrissage.* → module overview
+  const bl = canBacklog ? await get("summaries/backlog_fy") : {};
+  const pl = canPipeline ? await get("summaries/pipeline") : {};
   const ovm = canMargin ? await get(`summaries/overviewMargin_${period}`) : {};
-  const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`);
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("CODIR");
@@ -2141,10 +2168,11 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   ws.addRow(["Indicateur", "Valeur"]);
   [
     ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
-    ["Backlog (RAF)", bl.total],
+    ...(canBacklog ? [["Backlog (RAF)", bl.total]] : []),
     ...(canMargin ? [["Marge brute", ovm.mb]] : []),
     ["Taux facturation", ov.ratios?.tauxFacturation],
-    ["Pipeline actif pondéré", pl.tot?.weighted], ["Atterrissage projeté", att.projete],
+    ...(canPipeline ? [["Pipeline actif pondéré", pl.tot?.weighted]] : []),
+    ["Atterrissage projeté", att.projete],
     ["Objectif CAS", att.objectif], ["Écart", att.ecart],
   ].forEach((r) => ws.addRow(r));
 

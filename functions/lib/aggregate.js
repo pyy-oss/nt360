@@ -103,7 +103,10 @@ async function recomputeAll(db, only) {
   // 'news' inclus : buildNews consomme bcLines (bulletin BC en retard) + l'overlay BC (bc_achat_retard)
   // + suppliers(…, creditLines) → sinon un recompute only=['…','news'] (ex. setBillingMilestones)
   // reconstruirait l'Actualité avec bcLines/creditLines VIDES et effacerait ces bulletins.
-  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news"]);
+  // 'overview' inclus : le bloc `relances` (→ summaries/relancesBc) tourne aussi sur want("overview") et
+  // consomme bcLines ; sans 'overview' ici, un recompute only=['overview'] chargeait bcLines=[] et
+  // ÉCRASAIT relancesBc à vide (plan de relances fournisseurs effacé). Même piège que 'news'/'relances'.
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news", "overview"]);
   const needCredit = need(["suppliers", "alerts", "news"]);
   // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
   // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces

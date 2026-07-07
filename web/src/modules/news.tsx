@@ -5,7 +5,7 @@ import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
-import { Card, Badge, Tip, EmptyState, cx } from "../design/components";
+import { Card, Badge, Tip, EmptyState, CardSkeleton, cx } from "../design/components";
 import type { Props } from "./_shared";
 import type { NewsSummary, NewsBulletin } from "../types";
 
@@ -17,7 +17,7 @@ const DOMAIN_LABEL: Record<string, string> = {
 };
 
 export const Actualite: FC<Props> = () => {
-  const { data } = useDocData<NewsSummary>("summaries/news");
+  const { data, loading } = useDocData<NewsSummary>("summaries/news");
   // Actualité CLOISONNÉE par module (serveur) : chaque volet n'est lu que si le rôle a le droit du module
   // → un rôle « overview » seul ne voit plus créances/DSO, fournisseurs saturés, concentration backlog.
   // Recomposée dans un seul fil, triée par sévérité. Cf. audit P0-C.
@@ -32,6 +32,9 @@ export const Actualite: FC<Props> = () => {
   const bulletins = parts.flatMap((p) => p?.bulletins || []).sort((a, b) => (rankS[a.severity] ?? 3) - (rankS[b.severity] ?? 3));
   const recos = parts.flatMap((p) => p?.recommendations || []).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
   const counts = parts.reduce((acc, p) => ({ high: acc.high + (p?.counts?.high || 0), medium: acc.medium + (p?.counts?.medium || 0), info: acc.info + (p?.counts?.info || 0) }), { high: 0, medium: 0, info: 0 });
+  // Chargement : squelette tant que le 1er snapshot n'est pas arrivé — sinon flash d'« aucun événement »
+  // (data null au montage) avant l'apparition du fil. Cohérent avec Vue d'ensemble / Finance.
+  if (loading && !data) return <CardSkeleton />;
   if (!data || (!bulletins.length && !recos.length)) {
     return <EmptyState label="Aucun événement notable pour l'instant — ou recalcul à lancer (Vue d'ensemble)." />;
   }
@@ -41,8 +44,10 @@ export const Actualite: FC<Props> = () => {
       {recos.length > 0 && (
         <Card title="Recommandations majeures">
           <div className="flex flex-col gap-2">
-            {recos.map((r) => (
-              <div key={r.priority} className="flex items-start gap-2 text-[13px]">
+            {recos.map((r, i) => (
+              // key={i} : le fil recompose jusqu'à 6 summaries cloisonnés, chacun numérotant sa priorité
+              // depuis 1 → les priorités entrent en collision (plusieurs « 1 ») ; l'index de rendu est unique.
+              <div key={i} className="flex items-start gap-2 text-[13px]">
                 <span className="grid place-items-center w-5 h-5 rounded-full bg-gold/20 text-gold text-[11px] font-bold shrink-0 mt-0.5">{r.priority}</span>
                 <span className="text-ink flex-1">{r.text}</span>
                 {r.module && canGo(r.module) && <button onClick={() => go(r.module!)} className="text-gold text-xs underline shrink-0 min-h-[32px]">Ouvrir</button>}
