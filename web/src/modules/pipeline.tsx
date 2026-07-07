@@ -205,6 +205,18 @@ export const Am360: FC<Props> = () => {
 const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
 const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", patch: false };
 
+// « Mon pipeline » : rapprochement SOUPLE entre l'AM stocké (import : MAJ / nom de famille) et l'identité
+// connectée (displayName : nom complet). Égalité stricte échouait en silence (cf. audit). On matche sur
+// inclusion OU token commun ≥ 3 car. (le nom de famille), insensible à la casse/aux accents.
+const _normAm = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+const amMatch = (a: string, b: string) => {
+  const na = _normAm(a), nb = _normAm(b);
+  if (!na || !nb) return false;
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+  const ta = new Set(na.split(/\s+/).filter((t) => t.length >= 3));
+  return nb.split(/\s+/).some((t) => t.length >= 3 && ta.has(t));
+};
+
 export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
   const { match } = useFilters();
@@ -215,7 +227,7 @@ export const OppList: FC<Props> = () => {
   const meAm = (user?.displayName || user?.email || "").trim();
   const [mine, setMine] = useState(false); // « Mes opportunités » : filtre owner = utilisateur connecté (client-side)
   // « Mon pipeline » : match souple sur l'AM (insensible à la casse/espaces). Filtre transverse appliqué ensuite.
-  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]) && (!mine || (r.am || "").trim().toLowerCase() === meAm.toLowerCase()));
+  const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
@@ -279,6 +291,11 @@ export const OppList: FC<Props> = () => {
           {canWrite && <button onClick={openNew} className="btn-gold !px-3 !py-1.5 text-sm">+ Ajouter une opportunité</button>}
         </div>
       </div>
+      {mine && !rows.length && (
+        <div className="rounded-lg border border-gold/40 bg-gold/5 px-3 py-2 text-[12.5px] text-muted">
+          Aucune opportunité ne correspond à votre nom d'AM (« <b className="text-ink">{meAm}</b> »). Vérifiez l'orthographe côté import (souvent en majuscules / nom de famille), ou désactivez <b>Mon pipeline</b>.
+        </div>
+      )}
       {canWrite && (
         <Modal open={open} onClose={() => setOpen(false)} size="md"
           title={f.patch ? "Actualiser l'opportunité importée" : f.id ? "Modifier l'opportunité (saisie)" : "Ajouter une opportunité (saisie)"}
@@ -406,12 +423,16 @@ export const OppList: FC<Props> = () => {
             colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
             colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
             colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
+            // MB prévisionnel (%) + DR — saisis dans la fiche, désormais RÉAFFICHÉS (cf. audit : champs write-only).
+            colNum("MB prév.", (r: Opportunity) => (r.mbPrev != null ? `${r.mbPrev} %` : "—"), (r: Opportunity) => (r.mbPrev ?? -1)),
+            colText("DR", (r: Opportunity) => (r.dr ? <Badge tone="steel">Oui</Badge> : <span className="text-faint">—</span>), (r: Opportunity) => (r.dr ? 1 : 0)),
             colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || ""),
             colText("P&L", (r: Opportunity) => pnlFlag(r), (r: Opportunity) => (isBooked(r) ? 2 : r.stage === 6 ? 1 : 0)),
             ...(canWrite ? [colText("", (r: Opportunity) => (r.source === "saisie" ? (
               <span className="inline-flex gap-2">
                 <button onClick={() => editOpp(r)} className="text-gold hover:underline text-xs">Éditer</button>
-                <Busy variant="ghost" label="Suppr." okMsg="Supprimée" fn={() => deleteOpportunity(r.oppId || r.id || "")} />
+                {/* DangerBtn (confirmation) comme la suppression d'opp importée — parité + anti-mis-clic (cf. audit). */}
+                <DangerBtn label="Suppr." confirm={`Supprimer définitivement l'opportunité saisie ${r.client || r.fp || r.oppId || r.id} ? Action tracée (auditLog), non annulable.`} fn={() => deleteOpportunity(r.oppId || r.id || "")} />
               </span>
             ) : (
               <span className="inline-flex gap-2 items-center">
@@ -509,14 +530,24 @@ export const PipelineBoard: FC<Props> = () => {
   const { match } = useFilters();
   const canWrite = useCan("pipeline") === "write";
   const toast = useToast();
+  const [movingId, setMovingId] = useState<string | null>(null); // carte en cours de changement d'étape (verrou in-flight)
   const today = new Date().toISOString().slice(0, 10);
+  const move = async (o: Opportunity, v: string) => {
+    const id = o.oppId || o.id || "";
+    const to = Number(v);
+    setMovingId(id); // désactive le select pendant l'appel → pas de double-changement (from périmé)
+    try {
+      await patchOpportunity({ id, stage: to });
+      // Passage en Gagné (6) sans N° FP : la carte quitte le board ET ne deviendra jamais commande (CAS) →
+      // on AVERTIT au lieu d'un succès muet (cf. audit ; parité avec l'avertissement de la fiche).
+      if (to === 6 && !o.fp) toast("Gagnée sans N° FP — ne deviendra pas commande. Renseignez le FP dans Opportunités.", "err");
+      else toast("Étape mise à jour", "ok");
+    } catch { toast("Changement d'étape refusé", "err"); }
+    finally { setMovingId(null); }
+  };
   if (loading && !allRows.length) return <CardSkeleton />;
   const rows = allRows.filter((r) => match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5);
   const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
-  const move = async (o: Opportunity, v: string) => {
-    try { await patchOpportunity({ id: o.oppId || o.id || "", stage: Number(v) }); toast("Étape mise à jour · recalcul lancé", "ok"); }
-    catch { toast("Changement d'étape refusé", "err"); }
-  };
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / AM / client" />
@@ -544,7 +575,7 @@ export const PipelineBoard: FC<Props> = () => {
                     <div className="flex items-center justify-between gap-1.5 mt-1.5">
                       <span className={cx("text-[10px]", overdue ? "text-clay" : "text-faint")}>{o.closingDate ? (overdue ? `retard · ${o.closingDate.slice(0, 10)}` : o.closingDate.slice(0, 10)) : "sans date"}</span>
                       {canWrite && (
-                        <Select ariaLabel={`Changer l'étape de ${o.client || "l'opportunité"}`} className="!py-0.5 !px-1.5 text-[11px] w-[92px]" value={String(o.stage)}
+                        <Select ariaLabel={`Changer l'étape de ${o.client || "l'opportunité"}`} className="!py-0.5 !px-1.5 text-[11px] w-[92px]" value={String(o.stage)} disabled={movingId === (o.oppId || o.id)}
                           onChange={(v) => move(o, v)} options={[1, 2, 3, 4, 5, 6, 7, 9].map((st) => ({ value: String(st), label: `${st}·${STAGE_SHORT[st]}` }))} />
                       )}
                     </div>
