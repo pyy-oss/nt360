@@ -9,14 +9,14 @@
    ASSOMBRIS en clair pour garder un contraste texte suffisant sur fond blanc. */
 :root {
   --bg: 14 22 19;        --panel: 21 31 26;     --panel2: 27 39 33;    --line: 38 53 45;
-  --ink: 238 243 239;    --muted: 143 168 155;  --faint: 94 114 104;
+  --ink: 238 243 239;    --muted: 143 168 155;  --faint: 125 146 136;  /* faint ≥ 4.5:1 (WCAG AA) sur panel2/bg */
   --gold: 201 162 75;    --emerald: 70 192 138; --clay: 217 105 76;    --steel: 110 157 192; --plum: 169 138 196;
   --shadow-card: 0 1px 0 0 rgba(255, 255, 255, .03) inset, 0 8px 24px -12px rgba(0, 0, 0, .6);
   color-scheme: dark;
 }
 :root[data-theme="light"] {
   --bg: 244 246 243;     --panel: 255 255 255;  --panel2: 237 241 236; --line: 214 223 216;
-  --ink: 18 32 26;       --muted: 86 107 96;    --faint: 130 147 138;
+  --ink: 18 32 26;       --muted: 86 107 96;    --faint: 96 113 105;   /* faint ≥ 4.5:1 (WCAG AA) sur bg/blanc */
   --gold: 138 109 36;    --emerald: 31 158 104; --clay: 194 74 46;     --steel: 61 110 150;  --plum: 126 94 160;
   --shadow-card: 0 1px 0 0 rgba(255, 255, 255, .6) inset, 0 4px 16px -8px rgba(20, 40, 30, .15);
   color-scheme: light;
@@ -24,7 +24,7 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     --bg: 244 246 243;   --panel: 255 255 255;  --panel2: 237 241 236; --line: 214 223 216;
-    --ink: 18 32 26;     --muted: 86 107 96;    --faint: 130 147 138;
+    --ink: 18 32 26;     --muted: 86 107 96;    --faint: 96 113 105;   /* faint ≥ 4.5:1 (WCAG AA) sur bg/blanc */
     --gold: 138 109 36;  --emerald: 31 158 104; --clay: 194 74 46;     --steel: 61 110 150;  --plum: 126 94 160;
     --shadow-card: 0 1px 0 0 rgba(255, 255, 255, .6) inset, 0 4px 16px -8px rgba(20, 40, 30, .15);
     color-scheme: light;
