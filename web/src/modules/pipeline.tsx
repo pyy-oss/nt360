@@ -629,7 +629,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
-        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir Funnel" /></button>
+        <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir la liste" /></button>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)}`} /></button>
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
