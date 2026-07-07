@@ -296,6 +296,11 @@ export const Prevision: FC<Props> = () => {
   const factureN = att?.factureN || 0;
   const cafProjete = att?.cafProjete ?? (factureN + backlog + pond);
   const fy = att?.fy || cfg?.currentFy;
+  // Libellé des niveaux de projection DÉRIVÉ de config/projection (comme le Pipeline), et non codé
+  // en dur : un poids/niveau modifié en Habilitations se reflète ici (cf. audit intégral F3).
+  const projActive = (pl?.tierBreakdown || []).filter((t) => t.active);
+  const projLabel = projActive.map((t) => `${Math.round(t.weight * 100)} %·${t.band}`).join(" · ") || "projection pipeline";
+  const projDesc = projActive.map((t) => `${Math.round(t.weight * 100)} % du CA des opportunités IdC ${t.band}`).join(" + ") || "la pondération configurée (Habilitations)";
   return (
     <div className="flex flex-col gap-4">
       {/* Composantes (chacune une seule fois) : le Pipeline projeté et le Backlog alimentent
@@ -304,7 +309,7 @@ export const Prevision: FC<Props> = () => {
         <Kpi label={`Réalisé CAS (FY ${fy || ""})`} value={fmt(realiseCas)} tone="emerald" />
         <Kpi label={`Facturé réalisé (FY ${fy || ""})`} value={fmt(factureN)} tone="emerald" />
         <Kpi label="Backlog (RAF)" value={fmt(backlog)} tone="steel" sub="reste à facturer, glissant" />
-        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub="100 %≥90 · 20 %≥70 · fenêtre FY" />
+        <Kpi label="Pipeline projeté" value={fmt(pond)} tone="gold" sub={`${projLabel} · fenêtre FY`} />
       </div>
       {/* Atterrissages : les deux projections issues des composantes ci-dessus. */}
       <div className={cols2}>
@@ -467,7 +472,7 @@ export const Prevision: FC<Props> = () => {
           <Tip>Un point par recalcul (max 1/jour). Le <b>burn-down du backlog</b> et l'écart <b>projeté vs réalisé</b> se lisent dans le temps à mesure que les données sont mises à jour.</Tip>
         </Card>
       )}
-      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme) = 100 % du CA des opportunités IdC ≥ 90 % + 20 % du CA des IdC ≥ 70 % (&lt; 90 %), dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
+      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme, pondération configurée en Habilitations) = {projDesc}, dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
     </div>
   );
 };

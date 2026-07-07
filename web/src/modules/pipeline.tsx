@@ -19,7 +19,7 @@ const stageArrow = (from: number, to: number) => `${from || "•"} → ${to}`;
 export const Pipeline: FC<Props> = ({ period }) => {
   // Pipeline de la période : opportunités dont la D Prev tombe dans l'année sélectionnée
   // (écarte les opps obsolètes / non mises à jour). « Tout » = tout le pipeline.
-  const { data } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
+  const { data, loading } = useDocData<PipelineSummary>(`summaries/pipeline_${period}`);
   // Taux de conversion vente (règle de gestion) : calculé une seule fois côté Vue d'ensemble.
   const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
@@ -28,6 +28,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
   const { data: funnelC } = useDocData<OppFunnelSummary>("summaries/oppFunnel"); // funnel de conversion réel (Lot C)
+  if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
   const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
   // Couverture du reste-à-faire : combien de fois le pipeline pondéré (exercice) couvre l'écart à

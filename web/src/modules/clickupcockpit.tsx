@@ -15,7 +15,7 @@ const pill = (on: boolean, onLabel: string, offLabel: string) =>
   on ? <Badge tone="emerald">{onLabel}</Badge> : <Badge tone="steel">{offLabel}</Badge>;
 
 export const ClickupCockpit: FC<Props> = () => {
-  const { go } = useNav();
+  const { go, canGo } = useNav();
   // Abonnement gaté par le droit de lecture du summary (mêmes modules que les règles Firestore) → pas
   // d'erreur permission-denied pour un rôle sans accès ; la carte concernée disparaît proprement.
   const { data: cfg } = useDocData<{ enabled?: boolean; webhookActive?: boolean; defaultListId?: string }>("config/clickup");
@@ -39,7 +39,7 @@ export const ClickupCockpit: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       {/* Bandeau d'état de l'intégration */}
       <Card title="Intégration ClickUp"
-        actions={<button className="btn-ghost !py-1 text-xs" onClick={() => go("habilitations")}>Configurer</button>}>
+        actions={canGo("habilitations") ? <button className="btn-ghost !py-1 text-xs" onClick={() => go("habilitations")}>Configurer</button> : undefined}>
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           {pill(enabled, "Intégration active", "Désactivée")}
           {pill(!!cfg?.webhookActive, "Temps réel actif", "Temps réel inactif")}

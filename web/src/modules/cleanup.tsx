@@ -80,8 +80,12 @@ function DedupeCard() {
     <Card title="Doublons (factures / opportunités / BC)" actions={
       <div className="flex gap-2">
         <Busy variant="ghost" label="Analyser" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={async () => { setRes(await callDedupe(undefined, false)); }} />
-        {res && totalDup > 0 && (
-          <Busy label={`Supprimer ${totalDup} doublon${totalDup > 1 ? "s" : ""}`} okMsg="Doublons supprimés" errMsg="Suppression refusée" fn={async () => { setRes(await callDedupe(undefined, true)); }} />
+        {res && !res.applied && totalDup > 0 && (
+          // Suppression IRRÉVERSIBLE (cf. audit intégral F1) : confirmation via DangerBtn, masquée une
+          // fois appliquée (!res.applied) pour éviter un second clic à vide (F2).
+          <DangerBtn label={`Supprimer ${totalDup} doublon${totalDup > 1 ? "s" : ""}`} okMsg="Doublons supprimés" errMsg="Suppression refusée"
+            confirm={`Supprimer définitivement ${totalDup.toLocaleString("fr-FR")} doublon(s) ? Le meilleur enregistrement de chaque groupe (source figée, plus récent) est conservé.`}
+            fn={async () => { setRes(await callDedupe(undefined, true)); }} />
         )}
       </div>
     }>

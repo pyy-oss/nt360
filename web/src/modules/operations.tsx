@@ -409,10 +409,20 @@ function BcAmount({ row }: { row: BcLine }) {
 }
 function StatusSelect({ id, status }: { id: string; status: string }) {
   const [s, setS] = useState(status);
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
+  // Resync sur MAJ de snapshot : la Table clé les lignes par index → le prop `status` peut changer
+  // sous le même composant sans remontage, sinon le menu affiche un statut périmé (cf. audit intégral F6).
+  useEffect(() => { setS(status); }, [status]);
   return (
-    <Select ariaLabel="Statut de la ligne BC" className="!py-1" value={s}
-      onChange={async (v) => { const prev = s; setS(v); try { await setBcStatus(id, v); toast("Statut mis à jour", "ok"); } catch { setS(prev); toast("Échec de la mise à jour du statut", "err"); } }}
+    <Select ariaLabel="Statut de la ligne BC" className="!py-1" value={s} disabled={busy}
+      onChange={async (v) => {
+        // Verrou in-flight : désactive le menu pendant l'écriture → pas de double déclenchement (F6).
+        const prev = s; setS(v); setBusy(true);
+        try { await setBcStatus(id, v); toast("Statut mis à jour", "ok"); }
+        catch { setS(prev); toast("Échec de la mise à jour du statut", "err"); }
+        finally { setBusy(false); }
+      }}
       options={BC_STAGES.map((x) => ({ value: x, label: bcLabel(x) }))} />
   );
 }
@@ -536,8 +546,9 @@ const ISSUE_FIX = (type: string): { module: string; segment?: string } | null =>
 
 // Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
 export const DataQuality: FC<Props> = () => {
-  const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  const { data, loading } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const { go, canGo } = useNav();
+  if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
   const issues = data.issues || [];
   const c = data.counts || {};
