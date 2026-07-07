@@ -9,11 +9,10 @@ import { useState, type FC, type ReactNode } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
-import { useNav } from "../lib/nav";
-import { Card, Tip, Badge, Busy, DangerBtn, EmptyState, Table, colText, colNum, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx } from "../design/components";
 import { pct } from "../design/tokens";
 import { deleteRecords, callDedupe, type DedupeResult } from "../lib/writes";
-import { Props, relTime } from "./_shared";
+import { Props, relTime, AnomaliesList } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
 
 // Sparkline SVG minimaliste (aucune dépendance chart dans ce chunk admin). points ∈ [0,1].
@@ -108,18 +107,6 @@ function DedupeCard() {
   );
 }
 
-// Anomalie → écran de correction (miroir du cockpit Qualité). Le drill-through transporte la 1re
-// référence en recherche pour arriver directement sur la ligne (éditeur + suppression sur place).
-const FIX = (type: string): { module: string; segment?: string } | null => {
-  if (type === "factures_orphelines") return { module: "invoicelist", segment: "orphan" };
-  if (type.startsWith("factures")) return { module: "invoicelist" };
-  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation" || type.startsWith("clickup")) return { module: "orderlist" };
-  if (type.startsWith("opps")) return { module: "opplist" };
-  if (type.startsWith("bc_")) return { module: "bc" };
-  if (type.startsWith("fiches")) return { module: "pnlprojet" };
-  return null;
-};
-
 export const Cleanup: FC<Props> = () => {
   const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const { data: qh } = useDocData<QualityHistory>("summaries/qualityHistory");
@@ -127,7 +114,6 @@ export const Cleanup: FC<Props> = () => {
   const canBc = useCan("bc") !== "none";
   const canPipe = useCan("pipeline") !== "none";
   const isDirection = useClaims().role === "direction"; // le dédoublonnage (callable) est direction-only
-  const { go, canGo } = useNav();
   // Collections chargées seulement si le rôle a l'accès (chaque purge est gouvernée par son module).
   const { rows: invoices } = useCollectionData<Invoice>(canImport ? "invoices" : null);
   const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
@@ -140,7 +126,6 @@ export const Cleanup: FC<Props> = () => {
   // Opportunités PERDUES (7) / ANNULÉES (9) : mortes. Purge OPTIONNELLE (retire de l'historique).
   const deadOppIds = opps.filter((o) => (o.stage === 7 || o.stage === 9) && o.id).map((o) => o.id!) as string[];
   const issues = data?.issues || [];
-  const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   const days = (qh?.days || []).slice(-30);
   const score = data?.score;
   const totalAnomalies = (data?.issues || []).reduce((s, i) => s + i.count, 0);
@@ -192,28 +177,7 @@ export const Cleanup: FC<Props> = () => {
       {isDirection && <DedupeCard />}
 
       <Card title={`Anomalies à corriger · ${issues.length}`}>
-        {issues.length ? (
-          <div className="flex flex-col gap-2">
-            {issues.map((it, i) => {
-              const fix = FIX(it.type);
-              const actionable = !!fix && canGo(fix.module);
-              return (
-                <div key={i} className="flex items-start gap-2 text-[13px]">
-                  <Badge tone={(tone[it.severity] || "neutral") as any}>{it.count}</Badge>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    {actionable
-                      ? <button onClick={() => go(fix!.module, { ...(fix!.segment ? { segment: fix!.segment } : {}), search: it.refs?.[0] })} className={cx("text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left")} title="Ouvrir l'écran pré-filtré pour corriger ou supprimer cette ligne">{it.label}</button>
-                      : <span>{it.label}</span>}
-                    {(it.refs || []).slice(0, 6).map((r, j) => (
-                      <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
-                    ))}
-                    {(it.refs || []).length > 6 && <span className="text-[11px] text-faint">+{(it.refs || []).length - 6}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : <EmptyState label="Aucune anomalie — base saine." />}
+        <AnomaliesList issues={issues} emptyLabel="Aucune anomalie — base saine." />
         <Tip>Cliquez une anomalie pour ouvrir l'écran <b>pré-filtré sur la ligne</b> : vous pouvez y <b>corriger</b> (champ manquant/erroné) ou <b>supprimer</b> l'enregistrement. Les corrections & suppressions relancent le recalcul ; les anomalies se résorbent en direct.</Tip>
       </Card>
 
