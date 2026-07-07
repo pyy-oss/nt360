@@ -49,4 +49,16 @@ describe("pushBcCore — orchestration create/update BC", () => {
     expect(r.created).toBe(true);
     expect(r.taskId).toBe("newbc");
   });
+
+  it("statut initial validé : absent de la liste → omis, création quand même", async () => {
+    const { clickup, calls } = fakeClient();
+    const r = await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, statuses: [{ status: "autre" }], links: {}, group: group(), extra: {} });
+    expect(r.created).toBe(true);
+    expect(calls.create[0].payload.status).toBeUndefined();
+  });
+  it("statut initial validé : présent → posé", async () => {
+    const { clickup, calls } = fakeClient();
+    await pushBcCore({ token: "t", clickup, listId: "L", fieldDefs: bcFieldDefs, statuses: [{ status: "placee distributeur" }], links: {}, group: group(), extra: {} });
+    expect(calls.create[0].payload.status).toBe("placee distributeur");
+  });
 });

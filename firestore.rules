@@ -54,6 +54,10 @@ service cloud.firestore {
         : id.matches('clickupHealth.*') ? 'habilitations'
         // Suivi BC ⇄ ClickUp (avancement achat + retards) → module fournisseurs.
         : id.matches('clickupBc.*') ? 'fournisseurs'
+        // Délais & échéances ClickUp (carte Suivi Backlog, par PM/statut) → module backlog (pmo).
+        : id.matches('clickupDelays.*') ? 'backlog'
+        // Charge par Project Manager (carte Commandes + filtre PM transverse) → lisible à overview.
+        : id.matches('pms.*') ? 'overview'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';

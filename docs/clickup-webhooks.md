@@ -47,18 +47,20 @@ des bons de commande) vers Neurone360, sans attendre le tirage quotidien (`sched
 
 # Enrichissements croisés (Lots 3 & 4)
 
-## Lot 3 — app → ClickUp (synthèse + tag)
+## Lot 3 — app → ClickUp (synthèse + sous-tâches + checklist + tag)
 
 Le bouton *Habilitations → Intégration ClickUp → **« Enrichir les tâches »*** (et un entretien quotidien
 `scheduledClickupEnrich`) pose sur **chaque tâche commande liée** :
 
 - Un **commentaire de synthèse idempotent** (1re ligne = marqueur `🔄 Synthèse Neurone360`) : CA signé /
-  facturé (%) / RAF, jalons de facturation à venir, **BC fournisseurs liés**, anomalies **qualité**,
-  retard de livraison. Retrouvé et **mis à jour** à chaque passage → jamais de doublon.
+  facturé (%) / RAF, anomalies **qualité**, retard de livraison, + pointeurs de comptage vers les
+  jalons/BC. Retrouvé et **mis à jour** à chaque passage → jamais de doublon.
+- Les **jalons de facturation** éclatés en **vraies sous-tâches** (`Jalon i · … — montant XOF`, échéance
+  = date du jalon). Réconciliées par **clé stable `Jalon i`** : les manquantes sont créées, les
+  divergentes mises à jour, aucune n'est supprimée (un éventuel suivi manuel est préservé).
+- Les **BC fournisseurs liés** éclatés en une **checklist** « Bons de commande (n360) », **recréée à
+  l'identique** à chaque passage (idempotente).
 - Un **tag « à risque (n360) »** posé/retiré selon les anomalies qualité ou le retard.
-
-La synthèse consolide jalons et BC dans un commentaire unique (plutôt que des sous-tâches / checklists
-recréées) pour garantir l'**idempotence**.
 
 ## Lot 4 — ClickUp → app (avancement, priorité, blocage, temps)
 

@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-const { clickupSignals, isActive, clickupDelays, daysDiff } = require("../domain/clickupSignals");
+const { clickupSignals, isActive, isDeliveryOverdue, clickupDelays, daysDiff } = require("../domain/clickupSignals");
+
+describe("isDeliveryOverdue — prédicat partagé (cohérent enrich ↔ cockpit Qualité)", () => {
+  const today = "2026-06-01";
+  it("actif (0-/1-/3-) + date contractuelle passée → en retard", () => {
+    expect(isDeliveryOverdue("3-en cours - deploiement", "2026-05-01", today)).toBe(true);
+    expect(isDeliveryOverdue("0-affecte", "2026-05-31", today)).toBe(true);
+  });
+  it("facturé / clôturé / livré → JAMAIS en retard (même si date passée)", () => {
+    expect(isDeliveryOverdue("5-facturé - attente df", "2026-01-01", today)).toBe(false);
+    expect(isDeliveryOverdue("9-clôturé", "2026-01-01", today)).toBe(false);
+    expect(isDeliveryOverdue("4-terminé", "2026-01-01", today)).toBe(false);
+  });
+  it("date future ou absente → pas en retard", () => {
+    expect(isDeliveryOverdue("3-en cours", "2026-12-01", today)).toBe(false);
+    expect(isDeliveryOverdue("3-en cours", null, today)).toBe(false);
+  });
+});
 
 const safeId = (fp) => String(fp || "").replace(/[^a-z0-9]/gi, "_");
 const ms = (iso) => new Date(iso + "T00:00:00Z").getTime();

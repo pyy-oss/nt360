@@ -1,6 +1,26 @@
 import { describe, it, expect } from "vitest";
 const crypto = require("crypto");
-const { verifySignature, parseWebhook, reverseLinks, WEBHOOK_EVENTS } = require("../lib/clickupWebhook");
+const { verifySignature, parseWebhook, reverseLinks, planTaskEvent, WEBHOOK_EVENTS } = require("../lib/clickupWebhook");
+
+describe("planTaskEvent — routage PUR commande / BC / ignoré (+ suppression)", () => {
+  const links = { fp_a: "t1" }, bcLinks = { bc_x: "t9" };
+  it("tâche liée à une commande", () => {
+    expect(planTaskEvent(links, bcLinks, "t1", "taskUpdated")).toEqual({ kind: "commande", key: "fp_a", deleted: false });
+  });
+  it("tâche liée à un BC", () => {
+    expect(planTaskEvent(links, bcLinks, "t9", "taskStatusUpdated")).toEqual({ kind: "bc", key: "bc_x", deleted: false });
+  });
+  it("tâche non liée → ignoré", () => {
+    expect(planTaskEvent(links, bcLinks, "t42", "taskUpdated")).toEqual({ kind: "ignored", key: null, deleted: false });
+  });
+  it("taskDeleted → deleted=true sur la bonne entité", () => {
+    expect(planTaskEvent(links, bcLinks, "t1", "taskDeleted")).toEqual({ kind: "commande", key: "fp_a", deleted: true });
+    expect(planTaskEvent(links, bcLinks, "t9", "taskDeleted")).toEqual({ kind: "bc", key: "bc_x", deleted: true });
+  });
+  it("priorité commande sur BC si une tâche figurait dans les deux (anormal)", () => {
+    expect(planTaskEvent({ k: "dup" }, { j: "dup" }, "dup", "taskUpdated").kind).toBe("commande");
+  });
+});
 
 describe("verifySignature — HMAC-SHA256 du corps brut", () => {
   const secret = "sh_secret_123";

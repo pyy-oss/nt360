@@ -155,6 +155,19 @@ describe("taskFp / buildTaskFpIndex — réconciliation anti-doublons", () => {
   });
 });
 
+describe("matchStatus — validation du statut initial (accents/casse)", () => {
+  const statuses = [{ status: "0-affecte" }, { status: "3-en Cours - Déploiement" }, { status: "livre" }];
+  it("retourne le libellé EXACT de la liste (normalisé accents/casse)", () => {
+    expect(cf.matchStatus(statuses, "0-affecte")).toBe("0-affecte");
+    expect(cf.matchStatus(statuses, "3-en cours - deploiement")).toBe("3-en Cours - Déploiement");
+  });
+  it("statut renommé/absent → null (l'appelant l'omet au lieu de faire échouer createTask)", () => {
+    expect(cf.matchStatus(statuses, "0 - Affecté")).toBe(null);
+    expect(cf.matchStatus(statuses, "")).toBe(null);
+    expect(cf.matchStatus([], "0-affecte")).toBe(null);
+  });
+});
+
 describe("toPriority", () => {
   it("libellés FR/EN → 1..4", () => {
     expect(cf.toPriority("Urgente")).toBe(1);

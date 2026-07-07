@@ -98,10 +98,26 @@ describe("bcCorePayload — cœur de la tâche BC", () => {
   });
 });
 
+describe("bcKey — clé casse-insensible (anti-doublon)", () => {
+  it("normalise la casse : « BC/2026/1 » et « bc/2026/1 » → même clé", () => {
+    expect(bc.bcKey("bc/2026/1", safeId)).toBe(bc.bcKey("BC/2026/1", safeId));
+    expect(bc.bcKey(" Bc/2026/1 ", safeId)).toBe(bc.bcKey("BC/2026/1", safeId));
+  });
+  it("groupBcByNumber agrège deux casses différentes en UN seul groupe", () => {
+    const g = bc.groupBcByNumber([{ id: "a", bcNumber: "BC-7", amount: 10 }, { id: "b", bcNumber: "bc-7", amount: 5 }], safeId);
+    expect(g.length).toBe(1);
+    expect(g[0].amount).toBe(15);
+  });
+});
+
 describe("mapBcStatus / readBcSync — sens inverse ClickUp → app", () => {
-  it("statut d'avancement → livre / annule / en_cours", () => {
+  it("statut d'avancement → livre / annule / en_cours (matching par inclusion)", () => {
     expect(bc.mapBcStatus("livre")).toBe("livre");
+    expect(bc.mapBcStatus("Livrée")).toBe("livre");      // libellé réel varié
+    expect(bc.mapBcStatus("Réceptionné")).toBe("livre");
     expect(bc.mapBcStatus("annulee")).toBe("annule");
+    expect(bc.mapBcStatus("Annulé")).toBe("annule");     // masculin
+    expect(bc.mapBcStatus("livraison annulée")).toBe("annule"); // « annul » prime sur « livr »
     expect(bc.mapBcStatus("en transit")).toBe("en_cours");
     expect(bc.mapBcStatus("")).toBe(null);
   });

@@ -20,14 +20,20 @@ const BC_FIELD = {
 };
 const PAYS = { CI: "CI", BF: "BF", GN: "GN", "COTE D'IVOIRE": "CI", "BURKINA FASO": "BF", "GUINEE": "GN" };
 
+// Clé d'overlay/anti-doublon d'un N° BC : INSENSIBLE À LA CASSE (comme fpKey l'est pour les FP) →
+// « BC/2026/1 » et « bc/2026/1 » partagent la même tâche. safeId reçoit la forme trim + MAJUSCULES.
+function bcKey(bcNumber, safeId) {
+  return safeId(String(bcNumber == null ? "" : bcNumber).trim().toUpperCase());
+}
+
 /** Regroupe les lignes BC par N° BC → un groupe (une tâche) par bon de commande. PUR.
- *  key = safeId(numéro de commande). Montant = Σ amount (devise d'origine) sinon Σ amountXof. */
+ *  key = bcKey(numéro de commande) (casse-insensible). Montant = Σ amount (devise) sinon Σ amountXof. */
 function groupBcByNumber(bcLines, safeId) {
   const groups = new Map();
   for (const b of bcLines || []) {
     const num = String(b.bcNumber || "").trim();
     if (!num) continue; // sans N° BC → non poussable (pas de clé stable)
-    const key = safeId(num);
+    const key = bcKey(num, safeId);
     const g = groups.get(key) || { key, bcNumber: num, supplier: b.supplier || "", customer: b.customer || "", fp: b.fp || "", country: b.country || "", currency: b.currency || "", amount: 0, amountXof: 0, eta: b.etaReel || b.etaContrat || null, ids: [] };
     g.amount += Number(b.amount || 0);
     g.amountXof += Number(b.amountXof || 0);
@@ -90,12 +96,14 @@ function bcCorePayload(group, extra) {
   return payload;
 }
 
-// Statut ClickUp (avancement achat) → statut simplifié app. Livré / annulé / en cours.
+// Statut ClickUp (avancement achat) → statut simplifié app. Livré / annulé / en cours. Matching par
+// INCLUSION (aligné sur parsers/logistics.js) → tolère les libellés réels variables (« Livrée »,
+// « Reçu », « Réceptionné », « Annulé »…) sans figer un BC livré en « en cours » (donc en retard à vie).
 function mapBcStatus(clickupStatus) {
   const s = norm(clickupStatus);
   if (!s) return null;
-  if (s === "livre") return "livre";
-  if (s === "annulee") return "annule";
+  if (s.includes("annul")) return "annule";
+  if (s.includes("livr") || s.includes("recu") || s.includes("receptionn")) return "livre";
   return "en_cours";
 }
 
@@ -122,8 +130,8 @@ function taskBcNumber(task) {
 }
 function buildBcIndex(tasks, safeId) {
   const idx = {};
-  for (const t of tasks || []) { const n = taskBcNumber(t); if (n && !(safeId(n) in idx)) idx[safeId(n)] = t.id; }
+  for (const t of tasks || []) { const n = taskBcNumber(t); if (n && !(bcKey(n, safeId) in idx)) idx[bcKey(n, safeId)] = t.id; }
   return idx;
 }
 
-module.exports = { BC_FIELD, groupBcByNumber, bcLogical, buildBcFieldWrites, bcCorePayload, mapBcStatus, readBcSync, taskBcNumber, buildBcIndex };
+module.exports = { BC_FIELD, bcKey, groupBcByNumber, bcLogical, buildBcFieldWrites, bcCorePayload, mapBcStatus, readBcSync, taskBcNumber, buildBcIndex };

@@ -100,8 +100,11 @@ async function recomputeAll(db, only) {
   const need = (keys) => !only || keys.some((k) => only.includes(k));
   // NB : ces ensembles DOIVENT couvrir tous les summaries qui utilisent la collection — y compris
   // les co-déclenchements (cashflow s'écrit aussi sur want("facturation") ; ams sur want("pipeline")).
-  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances"]);
-  const needCredit = need(["suppliers", "alerts"]);
+  // 'news' inclus : buildNews consomme bcLines (bulletin BC en retard) + l'overlay BC (bc_achat_retard)
+  // + suppliers(…, creditLines) → sinon un recompute only=['…','news'] (ex. setBillingMilestones)
+  // reconstruirait l'Actualité avec bcLines/creditLines VIDES et effacerait ces bulletins.
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news"]);
+  const needCredit = need(["suppliers", "alerts", "news"]);
   const needObj = need(["atterrissage", "ams", "pipeline"]);
   const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
     readAll(db, "orders"),
@@ -160,8 +163,10 @@ async function recomputeAll(db, only) {
   // seulement des champs clickupBc* parallèles. Fusionné sur les lignes bcLines ci-dessous.
   const clickupBcSyncMap = ((await db.doc("config/clickupBcSync").get()).data() || {}).map || {};
   const clickupBcLinksMap = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
+  const { bcKey } = require("./clickupBc");
   for (const b of bcLines) {
-    const k = safeId(String(b.bcNumber || "").trim());
+    const raw = String(b.bcNumber || "").trim();
+    const k = raw ? bcKey(raw, safeId) : ""; // clé casse-insensible (cohérente avec push/pull BC)
     if (!k) continue;
     const cu = clickupBcSyncMap[k];
     if (cu) { b.clickupBcStatus = cu.status || null; b.clickupBcStatusRaw = cu.statusRaw || null; b.clickupBcEta = cu.eta || null; }
