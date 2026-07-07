@@ -15,12 +15,17 @@ const invoiceKey = (o) => {
   return "inv:" + [n(o.fp), n(o.client), o.date || "", money(o.amountHt)].join("|");
 };
 
-/** Opportunité : même N° FP + client/AM/BU/montant/étape/date de clôture ⇒ doublon (double saisie).
- *  Le FP entre dans la clé (quand présent) : deux affaires DISTINCTES de même client/montant/étape
- *  mais de FP différents ne sont PLUS fusionnées (sinon suppression destructive d'une opp réelle).
- *  FP absent des deux → clé inchangée (comportement historique préservé pour les opps sans FP). */
-const opportunityKey = (o) =>
-  "opp:" + [n(o.fp), n(o.client), n(o.am), n(o.bu), money(o.amount), o.stage ?? "", o.closingDate || ""].join("|");
+/** Opportunité :
+ *  - FP PRÉSENT → clé = FP SEUL (clé naturelle stable). Deux docs de même FP sont des doublons, même si
+ *    D Prev/montant/étape diffèrent (attributs MUTABLES d'un même deal). Fait converger les orphelins dont
+ *    l'oppId a dérivé sur d'anciens imports (formule héritée incluant D Prev/AM/client). Cf. audit cycle de vie.
+ *  - FP ABSENT → clé métier COMPLÈTE (client/AM/BU/montant/étape/date) : sans clé naturelle, on ne fusionne
+ *    PAS deux affaires distinctes de même client (suppression destructive). Comportement historique préservé. */
+const opportunityKey = (o) => {
+  const fp = n(o.fp);
+  if (fp) return "opp:fp:" + fp;
+  return "opp:" + [n(o.client), n(o.am), n(o.bu), money(o.amount), o.stage ?? "", o.closingDate || ""].join("|");
+};
 
 /** BC fournisseur : n° BC + FP + fournisseur + description + MONTANT (toujours). */
 const bcKey = (o) => {

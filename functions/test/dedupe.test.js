@@ -17,6 +17,13 @@ describe("dédoublonnage — clés métier", () => {
     // ...mais un même FP dédoublé reste un doublon.
     expect(opportunityKey(a)).toBe(opportunityKey({ ...a, client: "orange ci" }));
   });
+  it("opportunité : même FP mais D Prev / montant / étape DIFFÉRENTS ⇒ MÊME clé (converge les orphelins)", () => {
+    // cf. audit cycle de vie : un orphelin dont l'id a dérivé (D Prev/AM/montant changés) doit être
+    // fusionnable par `dedupe` — la clé d'une opp AVEC FP ne dépend QUE du FP.
+    const a = { fp: "FP/2026/7", client: "MTN", am: "AWA", amount: 1000, stage: 3, closingDate: "2026-06-30" };
+    const b = { fp: "FP/2026/7", client: "MTN", am: "AWA DIOP", amount: 2000, stage: 5, closingDate: "2026-09-30" };
+    expect(opportunityKey(a)).toBe(opportunityKey(b));
+  });
   it("BC : même n° BC + FP + fournisseur + montant ⇒ même clé (fiche vs logistics)", () => {
     const a = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "kukuza", description: "Routeur", amountXof: 500000, source: "fiche" };
     const b = { fp: "FP/2024/1", bcNumber: "BC N° 06457", supplier: "KUKUZA", description: "routeur", amountXof: 500000, source: "logistics" };
