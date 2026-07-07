@@ -52,6 +52,13 @@ service cloud.firestore {
         : id.matches('dataQuality.*') ? 'overview'
         : id.matches('qualityHistory.*') ? 'overview'
         : id.matches('trends.*') ? 'overview'
+        // Actualité CLOISONNÉE par module (bulletins/recos sensibles) — AVANT news.* qui matcherait
+        // ces identifiants. Cf. audit P0-C (fuite créances/DSO, fournisseurs, backlog).
+        : id.matches('newsFacturation.*') ? 'facturation'
+        : id.matches('newsFournisseurs.*') ? 'fournisseurs'
+        : id.matches('newsBacklog.*') ? 'backlog'
+        : id.matches('newsBc.*') ? 'bc'
+        : id.matches('newsPipeline.*') ? 'pipeline'
         : id.matches('news.*') ? 'overview'
         // Plan de relance : CLOISONNÉ par module (le montant d'une créance ne fuite pas hors facturation).
         : id.matches('relancesCreances.*') ? 'facturation'

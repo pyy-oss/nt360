@@ -190,6 +190,19 @@ describe("Agrégats & audit", () => {
     await assertSucceeds(getDoc(doc(as("pmo"), "summaries/alertsBacklog")));            // backlog=write
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/alertsFacturation")));    // facturation=read
   });
+  it("Actualité CLOISONNÉE par module : commercial (overview+pipeline) refusé sur newsFacturation/Fournisseurs/Backlog/Bc", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/news")));            // overview → OK
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/newsPipeline")));    // pipeline:write → OK
+    await assertFails(getDoc(doc(as("commercial"), "summaries/newsFacturation")));    // facturation=none → plus de fuite créances/DSO
+    await assertFails(getDoc(doc(as("commercial"), "summaries/newsFournisseurs")));   // fournisseurs=none
+    await assertFails(getDoc(doc(as("commercial"), "summaries/newsBacklog")));        // backlog=none
+    await assertFails(getDoc(doc(as("commercial"), "summaries/newsBc")));             // bc=none
+  });
+  it("Actualité : chaque module habilité lit son volet", async () => {
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/newsFacturation")));    // facturation:read
+    await assertSucceeds(getDoc(doc(as("achats"), "summaries/newsFournisseurs")));    // fournisseurs:write
+    await assertSucceeds(getDoc(doc(as("pmo"), "summaries/newsBacklog")));            // backlog:write
+  });
   it("config/* : allowlist fail-closed (config/alerts lisible, config non listé refusé même pour direction)", async () => {
     await assertSucceeds(getDoc(doc(as("commercial"), "config/alerts")));
     await assertFails(getDoc(doc(as("direction"), "config/secretFutur")));
