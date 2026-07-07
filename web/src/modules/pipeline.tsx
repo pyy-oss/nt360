@@ -614,6 +614,10 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const coverage = objectif > 0 && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
   const topAm = [...(ams?.rows || [])].sort((a, b) => b.pipelinePondere - a.pipelinePondere).slice(0, 5);
   const funnel = buildStageFunnel(data.byStage);
+  // Pipeline COMPLET NON PONDÉRÉ : somme des montants BRUTS de toutes les phases actives (1→5) — le
+  // pendant « brut » du Pondéré projeté (montants réels, sans pondération par l'IdC). = Σ des barres
+  // « Brut » du funnel.
+  const brutPhases = [1, 2, 3, 4, 5].reduce((s, st) => s + (data.byStage?.[st]?.amount || 0), 0);
   const jump = (id: string) => { if (canGo(id)) go(id); };
   const ladder = [
     { label: "Commit", band: "Certitudes ≥ 90 %", v: commit, color: T.emerald },
@@ -625,6 +629,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
     <div className="flex flex-col gap-4">
       <div className={grid4}>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
+        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir Funnel" /></button>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)}`} /></button>
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
