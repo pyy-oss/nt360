@@ -142,9 +142,6 @@ export const Overview: FC<Props> = ({ period }) => {
         <Card title="Atterrissage de l'exercice"><EmptyState label="Atterrissage indisponible — importer données & objectifs, puis recalculer." /></Card>
       )}
 
-      {/* Alertes actionnables — ce qui bloque / à arbitrer, en haut du cockpit. */}
-      <AlertsBanner />
-
       {/* Chaîne de valeur (non additive) — filtrée par périmètre si le filtre est actif. */}
       <Chain>
         <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(v.certitudes)} sub="pondéré IdC ≥ 90 % · D Prev période" />
@@ -180,6 +177,11 @@ export const Overview: FC<Props> = ({ period }) => {
           ]} h={220} />
         </Card>
       )}
+
+      {/* Alertes actionnables — ce qui bloque / à arbitrer, déplacé en BAS du cockpit (après la
+          chaîne de valeur, la marge, les KPI et la trajectoire) pour laisser la lecture décisionnelle
+          en tête. */}
+      <AlertsBanner />
 
       <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Backlog</b> (RAF) est <b>glissant</b> (toutes les commandes ouvertes). <b>Certitudes</b> = pondéré ≥ 90 % des opportunités dont la <b>D Prev</b> tombe dans la période sélectionnée. L'<b>atterrissage</b> combine réalisé + pipeline pondéré pour projeter la fin d'exercice.</Tip>
     </div>
