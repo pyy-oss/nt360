@@ -92,7 +92,7 @@ async function ensureImportPermission(db) {
   if (Object.keys(patch).length) await ref.update(patch);
 }
 
-async function recomputeAll(db, only) {
+async function recomputeCore(db, only) {
   try { await ensureImportPermission(db); } catch (e) { /* migration best-effort, ne bloque pas le recompute */ }
   // Recompute PARTIEL : orders/invoices/opps/projectSheets alimentent toujours mergeCommandes ;
   // bcLines/creditLines/objectives ne sont lus QUE si un summary demandé en a besoin. Un recompute
@@ -558,4 +558,96 @@ async function recomputeAll(db, only) {
   return { written: w.map((x) => x.path), currentFy, periods };
 }
 
-module.exports = { recomputeAll, filterInvoices, sanitizeForFirestore, coerceNums };
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// SÉRIALISATION DES RECOMPUTES (verrou + coalescing) — audit résilience.
+// Problème : plusieurs recomputes peuvent se chevaucher (planifié 05:00 + recompute manuel + trigger
+// d'ingestion + rafales de webhooks ClickUp). Chacun lit-puis-écrit summaries/* SANS exclusion → un
+// recompute PLUS LENT (démarré avec des sources plus anciennes) peut TERMINER APRÈS un plus récent et
+// ÉCRASER ses agrégats frais (stale-overwrites-fresh), ou produire un état incohérent (torn snapshot).
+//
+// Solution : un verrou de bail (config/recomputeLock, Admin SDK → hors rules) rend les recomputes
+// MUTUELLEMENT EXCLUSIFs. Un appelant qui trouve le verrou tenu ne bloque pas : il MET EN FILE sa portée
+// (`only`) — union des clés, `full` domine — et rend la main ; le détenteur, à la fin de sa passe, ABSORBE
+// la file et rejoue jusqu'à l'épuiser (coalescing). Bail = filet anti-blocage : un détenteur mort (crash/
+// timeout) voit son bail expirer et un autre appel le récupère. Le front s'abonnant en temps réel aux
+// summaries, la cohérence est éventuelle (l'absorption converge en une passe supplémentaire par rafale).
+const RECOMPUTE_LOCK_PATH = "config/recomputeLock";
+// Bail > durée max d'une fonction (540 s) : un détenteur VIVANT ne dépasse jamais son bail (la plateforme
+// le tuerait avant) → aucun vol en cours de passe ; seul un détenteur MORT est récupéré (après ≤ bail).
+const RECOMPUTE_LEASE_MS = 600_000;
+
+/** Fusionne une portée `only` entrante dans l'état de file. `only` falsy = recompute COMPLET (domine).
+ *  Pur & testable. state: {queuedFull:boolean, queuedKeys:string[]}. */
+function mergeQueued(state, only) {
+  const full = !!(state && state.queuedFull) || !only;
+  const prev = (state && Array.isArray(state.queuedKeys)) ? state.queuedKeys : [];
+  const keys = full ? [] : Array.from(new Set([...prev, ...only]));
+  return { queuedFull: full, queuedKeys: keys };
+}
+
+async function acquireOrEnqueue(db, only) {
+  const ref = db.doc(RECOMPUTE_LOCK_PATH);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const d = snap.exists ? (snap.data() || {}) : {};
+    const now = Date.now();
+    const held = d.holder && typeof d.expiresAtMs === "number" && d.expiresAtMs > now;
+    if (held) {
+      const q = mergeQueued({ queuedFull: d.queuedFull, queuedKeys: d.queuedKeys }, only);
+      tx.set(ref, { queued: true, queuedFull: q.queuedFull, queuedKeys: q.queuedKeys, queuedAtMs: now }, { merge: true });
+      return { role: "enqueued" };
+    }
+    const holder = `${now}_${Math.floor(Math.random() * 1e9)}`;
+    tx.set(ref, { holder, acquiredAtMs: now, expiresAtMs: now + RECOMPUTE_LEASE_MS, queued: false, queuedFull: false, queuedKeys: [] }, { merge: true });
+    return { role: "holder", holder };
+  });
+}
+
+/**
+ * Point d'entrée SÉRIALISÉ (remplace l'ancien recomputeAll direct). Tous les appelants (callables,
+ * triggers, planifiés) passent par ici → un seul recompute effectif à la fois, les autres coalescés.
+ * @returns {Promise<{written:string[], currentFy?:number, periods?:object, coalesced?:boolean}>}
+ */
+async function recomputeAll(db, only) {
+  let acq;
+  try {
+    acq = await acquireOrEnqueue(db, only);
+  } catch (e) {
+    // Verrou indisponible (Firestore en erreur) : on NE bloque PAS le recompute — mieux vaut un
+    // chevauchement possible qu'un agrégat jamais rafraîchi. Repli sur l'exécution directe.
+    return recomputeCore(db, only);
+  }
+  if (acq.role === "enqueued") return { written: [], coalesced: true };
+
+  const ref = db.doc(RECOMPUTE_LOCK_PATH);
+  const release = () => ref.set({ holder: FieldValue.delete(), acquiredAtMs: FieldValue.delete(), expiresAtMs: FieldValue.delete() }, { merge: true });
+  let runOnly = only;
+  let result = { written: [] };
+  try {
+    // Boucle d'absorption : rejoue tant que des demandes se sont accumulées pendant la passe.
+    for (;;) {
+      result = await recomputeCore(db, runOnly);
+      const next = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const d = snap.exists ? (snap.data() || {}) : {};
+        if (d.holder !== acq.holder) return { action: "lost" }; // bail volé (expiré) → un autre a repris
+        if (d.queued) {
+          const pendingOnly = d.queuedFull ? null : (Array.isArray(d.queuedKeys) ? d.queuedKeys : []);
+          tx.set(ref, { queued: false, queuedFull: false, queuedKeys: [], expiresAtMs: Date.now() + RECOMPUTE_LEASE_MS }, { merge: true });
+          return { action: "drain", pendingOnly };
+        }
+        tx.set(ref, { holder: FieldValue.delete(), acquiredAtMs: FieldValue.delete(), expiresAtMs: FieldValue.delete() }, { merge: true });
+        return { action: "release" };
+      });
+      if (next.action === "drain") { runOnly = next.pendingOnly; continue; }
+      break; // release | lost
+    }
+  } catch (e) {
+    // Échec du core : libérer le verrou pour ne pas immobiliser les recomputes jusqu'à l'expiration.
+    try { await release(); } catch (_) { /* le bail expirera de toute façon */ }
+    throw e;
+  }
+  return result;
+}
+
+module.exports = { recomputeAll, recomputeCore, mergeQueued, acquireOrEnqueue, filterInvoices, sanitizeForFirestore, coerceNums };
