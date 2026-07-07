@@ -336,6 +336,13 @@ export async function setCancellation(collection: "orders" | "invoices", id: str
  *  cibler orders/{safeId(fp)} depuis une ligne de commande (qui ne porte que le FP). */
 export const fpDocId = (fp: string) => String(fp || "").trim().replace(/_/g, "%5F").replace(/\//g, "_").replace(/\s+/g, "");
 
+/** Relance la CURATION LLM de la veille (scoring de pertinence des bulletins). Direction. Échoue avec
+ *  « failed-precondition » si le secret ANTHROPIC_API_KEY n'est pas configuré. */
+export async function curateNewsNow() {
+  const res = await httpsCallable(functions, "curateNewsNow", { timeout: 120_000 })({});
+  return res.data as { ok: boolean; scored?: number; active?: number; model?: string };
+}
+
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
   const res = await httpsCallable(functions, "recompute")({});
