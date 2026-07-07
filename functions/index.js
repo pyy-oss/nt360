@@ -1529,6 +1529,22 @@ exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], m
   return { ok: true, ...res };
 });
 
+// C1 (audit intégral) : l'assigné ClickUp ne REMPLIT le PM app (config/orderPm) QUE pour les
+// commandes SANS PM app. Le PM posé dans l'app (setOrderPm) fait AUTORITÉ : un pull nocturne ou un
+// webhook ne doit JAMAIS écraser une affectation humaine par l'assigné ClickUp (potentiellement
+// périmé/différent), ce qui la « révertait » silencieusement à chaque événement. Renvoie le nombre
+// de PM effectivement remplis (commandes jusque-là sans PM).
+async function fillOrderPmFromClickup(updates) {
+  const keys = Object.keys(updates || {});
+  if (!keys.length) return 0;
+  const current = ((await db.doc("config/orderPm").get()).data() || {}).map || {};
+  const fill = {};
+  for (const k of keys) if (!String(current[k] || "").trim()) fill[k] = updates[k];
+  const n = Object.keys(fill).length;
+  if (n) await db.doc("config/orderPm").set({ map: fill, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return n;
+}
+
 // SENS INVERSE ClickUp → app : lit le statut projet + les dates des tâches liées et les stocke en
 // overlay config/clickupSync (survit au recompute). Recalcule ensuite les commandes pour fusionner
 // immédiatement ces champs dans les lignes. Préserve la dernière valeur connue si un getTask échoue.
@@ -1557,13 +1573,13 @@ async function runClickupPull() {
     } catch (e) { logger.warn("ClickUp pull: échec", { key, msg: e && e.message }); failed++; }
   }
   await db.doc("config/clickupSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
-  // Le PM de l'app reflète l'assigné ClickUp (merge : ne touche pas les commandes sans assigné).
-  if (Object.keys(pmUpdates).length) await db.doc("config/orderPm").set({ map: pmUpdates }, { merge: true });
+  // App-wins : l'assigné ClickUp ne remplit le PM app QUE pour les commandes sans PM app (cf. C1).
+  const pmFilled = await fillOrderPmFromClickup(pmUpdates);
   // Couvre tous les summaries dérivés de clickupSync : chunks commandes + Actualité (projets bloqués/
   // urgents, retard livraison) + Qualité (incohérences statut↔données).
   try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes", "news", "dataQuality"]); }
   catch (e) { logger.warn("ClickUp pull: recompute partiel échoué", { msg: e && e.message }); }
-  return { pulled, failed, total: keys.length, pmUpdated: Object.keys(pmUpdates).length };
+  return { pulled, failed, total: keys.length, pmUpdated: pmFilled };
 }
 
 // syncFromClickup : bouton « Synchroniser depuis ClickUp » (statut projet + dates). Direction.
@@ -1876,7 +1892,7 @@ async function applyClickupTaskEvent(token, taskId, event) {
       const task = await clickup.getTask(token, taskId);
       const sync = { ...cf.readTaskSync(task), taskId };
       await db.doc("config/clickupSync").set({ map: { [plan.key]: sync } }, { merge: true });
-      if (sync.pm) await db.doc("config/orderPm").set({ map: { [plan.key]: sync.pm } }, { merge: true });
+      if (sync.pm) await fillOrderPmFromClickup({ [plan.key]: sync.pm }); // app-wins (cf. C1)
     }
     // Couvre TOUS les summaries dérivés de clickupSync : chunks commandes + Actualité + Qualité.
     try { await recomputeAll(db, ["commandes", "news", "dataQuality"]); }

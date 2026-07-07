@@ -248,6 +248,11 @@ describe("Agrégats & audit", () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "config/cancelInvoices")));    // facturation=read
     await assertFails(setDoc(doc(as("direction"), "config/cancelOrders"), { items: [] })); // écriture = callable only
   });
+  it("config/clickupBcLinks : cloisonné module bc (n° BC procurement), plus dans l'allowlist world-readable (R1)", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "config/clickupBcLinks")));    // bc=none → refusé
+    await assertSucceeds(getDoc(doc(as("achats"), "config/clickupBcLinks")));     // bc (achats) → autorisé
+    await assertFails(setDoc(doc(as("direction"), "config/clickupBcLinks"), { map: {} })); // écriture = callable only
+  });
   it("personne n'écrit summaries (Functions only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "summaries/overview_2026"), { certitudes: 2 }));
   });

@@ -21,12 +21,17 @@ async function pushBcCore({ token, clickup, listId, fieldDefs, statuses, links, 
   let task, created = false;
   if (existing) {
     task = await clickup.updateTask(token, existing, corePayload); task.id = existing;
+    // Champs d'une tâche EXISTANTE : Set-Field best-effort (le lien/la clé existent déjà).
+    for (const w of fieldWrites) {
+      try { await clickup.setField(token, task.id, w.id, w.value); }
+      catch (e) { logger.warn("ClickUp BC: champ non posé", { field: w.id, msg: e && e.message }); }
+    }
   } else {
+    // C3 (audit intégral) : champs personnalisés (dont la clé de réconciliation) posés DANS le payload
+    // de CRÉATION → la tâche naît identifiable ; pas de fenêtre où un Set-Field en échec laisserait un
+    // orphelin non réconciliable (doublon au passage suivant).
+    if (fieldWrites.length) corePayload.custom_fields = fieldWrites.map((w) => ({ id: w.id, value: w.value }));
     task = await clickup.createTask(token, listId, corePayload); created = true;
-  }
-  for (const w of fieldWrites) {
-    try { await clickup.setField(token, task.id, w.id, w.value); }
-    catch (e) { logger.warn("ClickUp BC: champ non posé", { field: w.id, msg: e && e.message }); }
   }
   return { key, taskId: task.id, url: task.url || `https://app.clickup.com/t/${task.id}`, created, fields: fieldWrites.length };
 }
