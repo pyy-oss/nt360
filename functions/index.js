@@ -784,11 +784,14 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
     // lignes P&L distinctes (perte d'une commande) → on refuse.
     const newId = safeId(newFp);
     if ((await db.doc(`orders/${newId}`).get()).exists) throw new HttpsError("failed-precondition", `une commande existe déjà pour ${newFp} — ré-clé refusée (fusion destructive)`);
+    // ORDRE SÛR (cf. audit P0-A) : créer la nouvelle commande → MIGRER les satellites → SUPPRIMER
+    // l'ancienne EN DERNIER. À tout instant, chaque satellite (facture/BC/fiche/marge/jalons) pointe vers
+    // un FP qui PORTE une commande → jamais d'orphelin même si la fonction est interrompue en cours de
+    // route ; migrateFpSatellites est idempotent (re-jouable). L'ancien ordre (create→delete→migrate)
+    // laissait une fenêtre où les satellites pointaient vers un FP sans commande (facturé=0, RAF gonflé).
     await db.doc(`orders/${newId}`).set({ ...snap.data(), ...patch, _id: newId, fp: newFp, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    await ref.delete();
-    // Le FP est la clé de jointure : on migre aussi les satellites (factures, BC, fiche, jalons),
-    // sinon ils resteraient orphelins sous l'ancien FP (facturé=0, RAF gonflé, marge & report perdus).
     await migrateFpSatellites(fp, newFp);
+    await ref.delete();
   } else if (Object.keys(patch).length) {
     await ref.set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else {
