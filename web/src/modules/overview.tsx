@@ -6,9 +6,9 @@ import { useCanExport, useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
-import { Gauge, MultiLine } from "../design/charts";
+import { MultiLine } from "../design/charts";
 import { callRecompute, callExportReport } from "../lib/writes";
-import { Props, cols2, AlertsBanner, useObjectives, roBadge, atteinteTone, relTime, useCommandesRows } from "./_shared";
+import { Props, cols2, AlertsBanner, useObjectives, roBadge, AtterrissageGauge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
 import { normalizeTiers, type ProjectionConfig } from "../lib/projection";
 import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice, RentabiliteSummary } from "../types";
@@ -24,8 +24,7 @@ function Landing({ title, proba, realise, projete, objectif, ecart, sub, retard,
   const hasObj = (objectif || 0) > 0;
   return (
     <Card title={title} actions={hasObj ? <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">R/O {roBadge(realise, objectif)}</span> : undefined}>
-      <Gauge value={proba || 0} color={atteinteTone(proba || 0)} h={170} />
-      {hasObj && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
+      <AtterrissageGauge proba={proba} hasObjectif={hasObj} h={170} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-center">
         <div><div className="text-[11px] text-muted">Réalisé</div><div className="font-display tabnum">{fmt(realise)}</div></div>
         <div><div className="text-[11px] text-muted">Projeté</div><div className="font-display tabnum text-[17px] leading-tight text-gold">{fmt(projete)}</div></div>

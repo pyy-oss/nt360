@@ -10,7 +10,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { Select, DateField } from "../design/inputs";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink, AnomaliesList } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
@@ -533,28 +533,15 @@ export const Fp360: FC<Props> = () => {
 };
 
 // Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-// Anomalie → module de remédiation (le drill-through remplace le cul-de-sac « export CSV » par un
-// accès direct au widget de correction déjà existant : rattacher facture, corriger commande, etc.).
-const ISSUE_FIX = (type: string): { module: string; segment?: string } | null => {
-  if (type === "factures_orphelines") return { module: "invoicelist", segment: "orphan" };
-  if (type.startsWith("factures")) return { module: "invoicelist" };
-  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation") return { module: "orderlist" };
-  if (type.startsWith("opps")) return { module: "opplist" };
-  if (type.startsWith("bc_")) return { module: "bc" };
-  if (type.startsWith("fiches")) return { module: "pnlprojet" };
-  return null;
-};
-
-// Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
+// La liste d'anomalies + drill-through est le composant PARTAGÉ `AnomaliesList` (source unique
+// summaries/dataQuality) — même widget que l'Assainissement (cleanup), plus de copie divergente.
 export const DataQuality: FC<Props> = () => {
   const { data, loading } = useDocData<DataQualitySummary>("summaries/dataQuality");
-  const { go, canGo } = useNav();
   if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
   const issues = data.issues || [];
   const c = data.counts || {};
   const score = data.score ?? 1;
-  const tone: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
   // Export CSV des anomalies (à corriger à la source puis ré-importer).
   const exportCsv = () => {
     const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
@@ -583,28 +570,7 @@ export const DataQuality: FC<Props> = () => {
         </Card>
       </div>
       <Card title={`Anomalies de données · ${issues.length}`} actions={issues.length ? <button onClick={exportCsv} className="btn-ghost !px-2.5 !py-1 text-xs">Exporter (CSV)</button> : undefined}>
-        {issues.length ? (
-          <div className="flex flex-col gap-2">
-            {issues.map((it, i) => {
-              const fix = ISSUE_FIX(it.type);
-              const actionable = !!fix && canGo(fix.module);
-              return (
-              <div key={i} className="flex items-start gap-2 text-[13px]">
-                <Badge tone={(tone[it.severity] || "neutral") as any}>{it.count}</Badge>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  {actionable
-                    ? <button onClick={() => go(fix!.module, { ...(fix!.segment ? { segment: fix!.segment } : {}), search: it.refs?.[0] })} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir la vue pré-filtrée sur la 1re ligne à corriger">{it.label}</button>
-                    : <span>{it.label}</span>}
-                  {(it.refs || []).slice(0, 6).map((r, j) => (
-                    <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
-                  ))}
-                  {(it.refs || []).length > 6 && <span className="text-[11px] text-faint">+{(it.refs || []).length - 6}</span>}
-                </div>
-              </div>
-              );
-            })}
-          </div>
-        ) : <EmptyState label="Aucune anomalie détectée — données propres." />}
+        <AnomaliesList issues={issues} />
       </Card>
       <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> (champs manquants, rattachements rompus, incohérences) pour fiabiliser les données — distinct du Centre d'alertes (alertes métier). <b>Clique une anomalie</b> pour ouvrir l'écran où la corriger directement dans l'app (rattacher, corriger l'opp/la commande/le BC/la facture, saisir le prix de vente…) ; les anomalies se recalculent automatiquement. Un ré-import reste possible pour les corrections de masse.</Tip>
     </div>

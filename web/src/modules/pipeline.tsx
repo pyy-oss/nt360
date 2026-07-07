@@ -7,7 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult } from "../lib/writes";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, useCommandesRows, useBusinessUnits } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
@@ -28,9 +28,10 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
   const { data: funnelC } = useDocData<OppFunnelSummary>("summaries/oppFunnel"); // funnel de conversion réel (Lot C)
+  const { go, canGo } = useNav(); // renvoi vers AM 360° (source unique du classement par commercial)
   if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
-  const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
+  const funnel = buildStageFunnel(data.byStage);
   // Couverture du reste-à-faire : combien de fois le pipeline pondéré (exercice) couvre l'écart à
   // l'objectif CAS. Numérateur et dénominateur au MÊME périmètre (currentFy). null si pas d'objectif.
   const hasObj = (att?.objectif || 0) > 0;
@@ -83,18 +84,19 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       </div>
-      <Card title="Conversion par commercial (AM)">
-        {(data.byAmConv || []).length ? (
-          <Table columns={[
-            colText("AM", (r) => r.am, (r) => r.am),
-            colNum("Actif", (r) => r.activeCount, (r) => r.activeCount),
-            colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
-            colNum("Gagné", (r) => r.won, (r) => r.won),
-            colNum("Perdu", (r) => r.lost, (r) => r.lost),
-            colNum("Taux transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
-          ]} rows={data.byAmConv || []} />
-        ) : <EmptyState label="Pas de commercial renseigné." />}
-      </Card>
+      {/* Le CLASSEMENT par commercial (pondéré / taux de transfo. / R-O …) vit désormais UNIQUEMENT dans
+          AM 360° (source unique summaries/ams). Il était ici recalculé depuis un AUTRE agrégat
+          (pipeline_${period}.byAmConv) → un même AM pouvait afficher un pondéré/transfo. différent selon
+          l'écran. On renvoie vers la source unique ; la distribution « Pondéré par AM » (période) ci-dessus
+          reste, elle, une lecture de répartition et non un classement. */}
+      {canGo("am360") && (
+        <Card title="Performance par commercial (AM)">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-[12.5px] text-muted">Le <b>classement complet</b> par commercial (CAS, facturé, backlog, pondéré, taux de transformation, R/O) est dans <b>AM 360°</b> — source unique pour garantir la cohérence des chiffres.</p>
+            <button onClick={() => go("am360")} className="btn-ghost !px-3 !py-1.5 text-sm shrink-0">Ouvrir AM 360°</button>
+          </div>
+        </Card>
+      )}
 
       {data.closing && (
         <>
@@ -611,7 +613,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const gap = Math.max(objectif - (att?.realiseCas || 0), 0);
   const coverage = objectif > 0 && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
   const topAm = [...(ams?.rows || [])].sort((a, b) => b.pipelinePondere - a.pipelinePondere).slice(0, 5);
-  const funnel = [1, 2, 3, 4, 5].map((s) => ({ name: STAGE_SHORT[s], Brut: data.byStage?.[s]?.amount || 0, "Pondéré": data.byStage?.[s]?.weighted || 0 }));
+  const funnel = buildStageFunnel(data.byStage);
   const jump = (id: string) => { if (canGo(id)) go(id); };
   const ladder = [
     { label: "Commit", band: "Certitudes ≥ 90 %", v: commit, color: T.emerald },

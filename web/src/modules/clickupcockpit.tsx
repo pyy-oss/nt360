@@ -83,9 +83,11 @@ export const ClickupCockpit: FC<Props> = () => {
         </Card>
       )}
 
-      {/* BC en retard détaillés */}
+      {/* BC en retard détaillés — retard = ETA CLICKUP dépassée (état de synchro ClickUp). À distinguer
+          du « BC en retard » de l'Exécution BC / des Relances, calculé sur l'ETA de l'app (réelle sinon
+          contractuelle) : les comptes peuvent différer si ClickUp n'est pas synchronisé. */}
       {(bc?.overdue?.length || 0) > 0 && (
-        <Card title={`Bons de commande en retard · ${bc!.overdue!.length}`}
+        <Card title={`Bons de commande en retard (ETA ClickUp) · ${bc!.overdue!.length}`}
           actions={<button className="btn-ghost !py-1 text-xs" onClick={() => go("bc", { segment: "late" })}>Exécution BC</button>}>
           <div className="overflow-x-auto -mx-1">
             <table className="w-full text-sm rtable">
