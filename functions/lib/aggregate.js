@@ -193,11 +193,29 @@ async function recomputeCore(db, only) {
   const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
   const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));
 
+  // Dédup INTRA-source 'salesData' par FP (cf. audit cycle de vie) : si l'oppId a dérivé sur d'anciens
+  // imports (formule héritée incluant D Prev/AM/client), plusieurs docs 'salesData' de MÊME FP coexistent
+  // → double-compte du pipeline pondéré. On ne garde que le PLUS RÉCENT (updatedAt) par FP. Filet
+  // complémentaire à l'id désormais dérivé du seul FP : neutralise aussi les orphelins historiques SANS
+  // attendre un passage `dedupe`. (Les opps 'salesData' sans FP ne sont pas dédupliquées — pas de clé.)
+  const _ts = (o) => { const u = o.updatedAt; return u && typeof u.toMillis === "function" ? u.toMillis() : (Number(u) || 0); };
+  const bestSalesByFp = new Map();
+  for (const o of oppsRaw) {
+    if (o.source !== "salesData") continue;
+    const k = fpKey(o.fp); if (!k) continue;
+    const prev = bestSalesByFp.get(k);
+    if (!prev || _ts(o) >= _ts(prev)) bestSalesByFp.set(k, o);
+  }
+  const oppsDedup = oppsRaw.filter((o) => {
+    if (o.source !== "salesData") return true;
+    const k = fpKey(o.fp); if (!k) return true;
+    return bestSalesByFp.get(k) === o; // ne garde que le représentant le plus récent du FP
+  });
   // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
   // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
   // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
-  const salesFps = new Set(oppsRaw.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
-  const opps = oppsRaw.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
+  const salesFps = new Set(oppsDedup.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
+  const opps = oppsDedup.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
@@ -321,7 +339,12 @@ async function recomputeCore(db, only) {
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory), construit
   // à partir de MAINTENANT (la source n'a pas d'historique). Lu uniquement sur want("pipeline").
-  if (want("pipeline")) w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(await readAll(db, "oppHistory")), ...stamp } });
+  // Lecture BORNÉE de oppHistory (append-only, non purgé) : on ne relit que les 5000 transitions les plus
+  // récentes → coût de recompute borné dans le temps (cf. audit). Suffit largement au funnel courant.
+  if (want("pipeline")) {
+    const histSnap = await db.collection("oppHistory").orderBy("at", "desc").limit(5000).get();
+    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(histSnap.docs.map((d) => d.data())), ...stamp } });
+  }
   if (want("alerts")) {
     // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte
     // porte des données du module dont elle relève (noms fournisseurs saturés, montant de créances

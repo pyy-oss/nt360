@@ -73,15 +73,22 @@ function parseSalesData(wb) {
     let oppId;
     if (extId) {
       oppId = safeId(extId);
+    } else if (fp) {
+      // FP présent = CLÉ NATURELLE STABLE : l'id ne dépend QUE du FP (+ index d'occurrence parmi les lignes
+      // partageant ce FP). Ni la D Prev, ni l'AM, ni le client (tous MUTABLES) n'entrent dans l'id — sinon un
+      // simple glissement de D Prev ou une correction d'AM créait un orphelin qui DOUBLE-COMPTAIT le pipeline
+      // pondéré, que `dedupe` ne pouvait pas fusionner (clé mutable). Complète l'audit P0-E (qui avait retiré
+      // montant/étape mais laissé D Prev/AM/client). La dédup par FP au recompute est le filet complémentaire.
+      const seq = dupSeq.get("fp:" + fp) || 0;
+      dupSeq.set("fp:" + fp, seq + 1);
+      oppId = hashId(fp, seq);
     } else {
-      // IDENTITÉ STABLE (cf. audit P0-E) : la clé N'INCLUT PAS montant/étape — ce sont des attributs
-      // MUTABLES d'un même deal. Les y mettre créait un nouvel oppId à chaque changement de montant ou de
-      // stade → l'ancien doc devenait orphelin et DOUBLE-COMPTAIT le pipeline pondéré. La clé métier stable
-      // = client + AM + FP + échéance brute (+ index d'occurrence parmi lignes strictement identiques).
-      const mkey = [client, am, fp || "", rawClosing].join("|");
+      // Ni Opp ID ni FP : aucune clé naturelle stable → repli sur la clé métier (client + AM + échéance brute)
+      // + index d'occurrence. Ces lignes n'ont de toute façon aucune jointure au carnet (pas de FP).
+      const mkey = [client, am, rawClosing].join("|");
       const seq = dupSeq.get(mkey) || 0;
       dupSeq.set(mkey, seq + 1);
-      oppId = hashId(client, am, fp || "", rawClosing, seq);
+      oppId = hashId(client, am, rawClosing, seq);
     }
 
     out.push({

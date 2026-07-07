@@ -297,7 +297,9 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", async (req) => {
   });
   // 'atterrissage' (report N+1 + tendance de facturation) ET 'news' : sinon l'Actualité (retard de
   // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
-  await recomputeSummaries(["atterrissage", "news"]);
+  // 'relances' inclus (cf. audit cycle de vie) : les jalons pilotent summaries/relancesJalons (jalons échus
+  // non facturés) ; sans lui, éditer les jalons ne rafraîchissait pas le plan de relance sur échéances.
+  await recomputeSummaries(["atterrissage", "news", "relances"]);
   return { ok: true, fp, milestones };
 });
 
@@ -679,7 +681,10 @@ exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSecond
   }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "delete_records", module, entity: collection, entityId: String(ids.length),
-    detail: { collection, count: ids.length }, ts: FieldValue.serverTimestamp(),
+    // Traçabilité au NIVEAU RECORD (cf. audit) : on capture les ids réellement supprimés (bornés à 500
+    // pour rester sous la limite de taille du doc auditLog) — sinon un purge en masse n'était attribuable
+    // qu'au compte, jamais aux FP/numéros retirés.
+    detail: { collection, count: ids.length, ids: ids.slice(0, 500), truncated: ids.length > 500 }, ts: FieldValue.serverTimestamp(),
   });
   await recomputeSummaries();
   return { ok: true, count: ids.length };
@@ -803,6 +808,20 @@ async function migrateFpSatellites(oldFp, newFp) {
     if (!s.exists) continue;
     await db.doc(`${col}/${newI}`).set({ ...s.data(), _id: newI, fp: newFp }, { merge: true });
     await db.doc(`${col}/${oldI}`).delete();
+  }
+  // OVERLAYS clés par safeId(fp), stockés HORS du doc commande pour survivre aux ré-imports : ils DOIVENT
+  // suivre la ré-clé, sinon ils pointent vers un FP disparu → annulation / affectation PMO / lien ClickUp
+  // PERDUS. Cas le plus grave : une commande ANNULÉE ré-clée « ressusciterait » dans CAS/backlog/rentabilité
+  // (le flag d'annulation vit dans config/cancelOrders, pas dans le doc commande). Cf. audit cycle de vie.
+  for (const path of ["config/orderPm", "config/clickupLinks", "config/clickupSync"]) {
+    const map = ((await db.doc(path).get()).data() || {}).map || {};
+    if (Object.prototype.hasOwnProperty.call(map, oldI)) {
+      await db.doc(path).set({ map: { [newI]: map[oldI], [oldI]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+  }
+  const cancel = ((await db.doc("config/cancelOrders").get()).data() || {}).items || [];
+  if (cancel.some((e) => e && e.id === oldI)) {
+    await db.doc("config/cancelOrders").set({ items: cancel.map((e) => (e && e.id === oldI ? { ...e, id: newI } : e)), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 }
 
@@ -1036,7 +1055,15 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
   await requireWrite(req, "pipeline");
   const id = String(req.data?.id || "");
   if (!id.startsWith("saisie_")) throw new HttpsError("failed-precondition", "seules les opportunités saisies sont supprimables");
+  // TRAÇABILITÉ (cf. audit) : lecture AVANT suppression pour capturer le contenu supprimé dans auditLog —
+  // sinon une suppression manuelle (bouton « Suppr. ») ne laissait AUCUNE trace de qui/quand/quoi.
+  const snap = await db.doc(`opportunities/${id}`).get();
+  const cur = snap.exists ? (snap.data() || {}) : {};
   await db.doc(`opportunities/${id}`).delete();
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "delete_opp", module: "pipeline", entity: "opportunity", entityId: id,
+    detail: { client: cur.client || null, am: cur.am || null, fp: cur.fp || null, stage: cur.stage ?? null, amount: cur.amount ?? null }, ts: FieldValue.serverTimestamp(),
+  });
   await recomputeSummaries(); // saisie occasionnelle → recalcul complet (l'opp peut devenir commande, etc.)
   return { ok: true };
 });
@@ -1158,7 +1185,9 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
     uid: req.auth.uid, action: "add_bc", module: "bc", entity: "bcLine", entityId: id,
     detail: { bcNumber, supplier, fp }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["suppliers", "alerts"]);
+  // 'cashflow' inclus (cf. audit cycle de vie) : un BC ajouté alimente immédiatement les décaissements
+  // prévisionnels (domain/cashflow) ; sans lui la prévision cash restait périmée jusqu'au recompute complet.
+  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
@@ -2070,7 +2099,9 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
     uid: req.auth.uid, action: "bc_status", module: "bc", entity: "bcLine", entityId: id,
     detail: { status }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["suppliers", "alerts"]);
+  // 'cashflow' inclus (cf. audit cycle de vie) : passer un BC en « facturé » en fait un décaissement
+  // (SOA) → la prévision cash doit se rafraîchir tout de suite, pas au prochain recompute complet.
+  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
   return { ok: true };
 });
 
@@ -2260,9 +2291,24 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   });
   (b.pipeOpps || []).forEach((o, idx) => push(`opportunities/${o.oppId ? safeId(o.oppId) : "legacy_" + idx}`, { ...o, source: o.source || "salesData" }));
 
+  // GARDE ANTI-ÉCRASEMENT (cf. audit) : par défaut, on REFUSE d'écraser des données déjà présentes — un
+  // outil de migration ne doit pas clobber en silence des corrections manuelles (CAS/RAF via patchOrder,
+  // marge via patchProjectSheet…). `force:true` requis pour réappliquer sur des collections non vides.
+  if (req.data?.force !== true) {
+    for (const col of ["orders", "invoices", "opportunities"]) {
+      const one = await db.collection(col).limit(1).get();
+      if (!one.empty) throw new HttpsError("failed-precondition", `${col} n'est pas vide — import legacy refusé (passer force:true pour réappliquer et écraser)`);
+    }
+  }
   let batch = db.batch(), n = 0;
   for (const w of writes) { batch.set(db.doc(w.path), w.data, { merge: true }); if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); } }
   await batch.commit();
+  // TRAÇABILITÉ (cf. audit) : journaliser la migration (qui, combien, forcée ou non) — sinon un import
+  // legacy réappliqué ne laissait aucune trace, contrairement à importDelta/reingest.
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "import_legacy", module: "import", entity: "backup", entityId: String(writes.length),
+    detail: { written: writes.length, force: req.data?.force === true }, ts: FieldValue.serverTimestamp(),
+  });
   const { recomputeAll } = require("./lib/aggregate");
   await recomputeAll(db);
   return { ok: true, written: writes.length };

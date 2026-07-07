@@ -38,7 +38,12 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // chacun activable/pondérable (config/projection). On ne mélange pas : on expose la décomposition
   // ET la somme des niveaux ACTIFS. « certitudes » = contribution pondérée du niveau ≥90.
   const tiers = opts.tiers || normalizeTiers();
-  const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5);
+  // Exclusion « déjà au carnet » (cf. audit cycle de vie — parité avec atterrissage.alreadyBooked) : une opp
+  // ACTIVE dont le FP porte DÉJÀ une commande est comptée dans `commandes` (CAS) ; la garder aussi dans le
+  // pipeline projeté la double-compterait dans le dénominateur de conversion (taux sous-estimé). Les FP des
+  // commandes viennent de `orders` ; les opps sans FP ou dont le FP n'est pas au carnet restent dans le pipe.
+  const bookedFps = new Set(orders.map((o) => o.fp).filter(Boolean));
+  const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5 && !(o.fp && bookedFps.has(o.fp)));
   const breakdown = tierBreakdown(active, tiers);
   const pipelineProjete = breakdown.reduce((s, b) => s + b.pond, 0); // Σ niveaux ACTIFS
   const pondCertain = breakdown.find((b) => b.key === "certitudes")?.pond || 0;
