@@ -316,12 +316,29 @@ async function recomputeAll(db, only) {
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
   if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
   if (want("alerts")) {
-    // Isolation marge : les alertes dérivées de la marge (marge négative / achats > vente) exposent le
-    // SIGNE de la marge par affaire nommée → écrites dans summaries/alertsMargin (gaté « rentabilite »),
-    // jamais dans summaries/alerts (lisible à « overview »).
+    // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte
+    // porte des données du module dont elle relève (noms fournisseurs saturés, montant de créances
+    // orphelines, réfs BC en retard…). Chaque alerte est routée vers le summary gaté au bon niveau par
+    // les règles Firestore — un rôle « overview » seul ne lit plus que les alertes overview. Modèle déjà
+    // appliqué à la marge (alertsMargin). Le type d'alerte → module (défaut overview).
+    const ALERT_MOD = {
+      factures_non_rattachees: "facturation", facture_pre_po: "facturation", surfacturation: "facturation",
+      raf_incoherent: "backlog", backlog_dormant: "backlog",
+      ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
+      bc_en_attente: "bc", bc_en_retard: "bc",
+      opp_dormante: "pipeline",
+    };
     const allAlerts = alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr);
-    w.push({ path: "summaries/alerts", data: { items: allAlerts.filter((a) => !a.margin), fy: currentFy, ...stamp } });
-    w.push({ path: "summaries/alertsMargin", data: { items: allAlerts.filter((a) => a.margin), fy: currentFy, ...stamp } });
+    const bucket = { overview: [], facturation: [], backlog: [], fournisseurs: [], bc: [], pipeline: [] };
+    for (const a of allAlerts) { if (a.margin) continue; (bucket[ALERT_MOD[a.type] || "overview"]).push(a); }
+    const meta = { fy: currentFy, ...stamp };
+    w.push({ path: "summaries/alerts", data: { items: bucket.overview, ...meta } });           // overview
+    w.push({ path: "summaries/alertsMargin", data: { items: allAlerts.filter((a) => a.margin), ...meta } }); // rentabilite
+    w.push({ path: "summaries/alertsFacturation", data: { items: bucket.facturation, ...meta } });
+    w.push({ path: "summaries/alertsBacklog", data: { items: bucket.backlog, ...meta } });
+    w.push({ path: "summaries/alertsFournisseurs", data: { items: bucket.fournisseurs, ...meta } });
+    w.push({ path: "summaries/alertsBc", data: { items: bucket.bc, ...meta } });
+    w.push({ path: "summaries/alertsPipeline", data: { items: bucket.pipeline, ...meta } });
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr);

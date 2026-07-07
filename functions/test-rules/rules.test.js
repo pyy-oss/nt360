@@ -176,6 +176,20 @@ describe("Agrégats & audit", () => {
     await assertFails(getDoc(doc(as("commercial"), "summaries/alertsMargin")));
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/alertsMargin")));
   });
+  it("alertes CLOISONNÉES par module : commercial (overview+pipeline) ne lit pas les alertes facturation/fournisseurs/backlog/BC", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/alerts")));            // overview:read → OK
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/alertsPipeline")));    // pipeline:write → OK
+    await assertFails(getDoc(doc(as("commercial"), "summaries/alertsFacturation")));    // facturation=none
+    await assertFails(getDoc(doc(as("commercial"), "summaries/alertsFournisseurs")));   // fournisseurs=none → plus de fuite noms fournisseurs
+    await assertFails(getDoc(doc(as("commercial"), "summaries/alertsBacklog")));        // backlog=none
+    await assertFails(getDoc(doc(as("commercial"), "summaries/alertsBc")));             // bc=none
+  });
+  it("alertes cloisonnées : chaque module habilité lit son summary d'alerte", async () => {
+    await assertSucceeds(getDoc(doc(as("achats"), "summaries/alertsFournisseurs")));    // fournisseurs=write
+    await assertSucceeds(getDoc(doc(as("achats"), "summaries/alertsBc")));              // bc (achats)
+    await assertSucceeds(getDoc(doc(as("pmo"), "summaries/alertsBacklog")));            // backlog=write
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/alertsFacturation")));    // facturation=read
+  });
   it("config/* : allowlist fail-closed (config/alerts lisible, config non listé refusé même pour direction)", async () => {
     await assertSucceeds(getDoc(doc(as("commercial"), "config/alerts")));
     await assertFails(getDoc(doc(as("direction"), "config/secretFutur")));

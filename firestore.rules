@@ -41,6 +41,13 @@ service cloud.firestore {
         // Alertes DÉRIVÉES DE LA MARGE (marge négative / achats > vente) isolées → « Rentabilité »
         // requis (avant alerts.* qui matcherait aussi « alertsMargin »).
         : id.matches('alertsMargin.*') ? 'rentabilite'
+        // Alertes CLOISONNÉES par module (données sensibles du module concerné) — testées AVANT
+        // alerts.* qui matcherait ces identifiants. Cf. audit P0-C (fuite inter-modules).
+        : id.matches('alertsFacturation.*') ? 'facturation'
+        : id.matches('alertsFournisseurs.*') ? 'fournisseurs'
+        : id.matches('alertsBacklog.*') ? 'backlog'
+        : id.matches('alertsBc.*') ? 'bc'
+        : id.matches('alertsPipeline.*') ? 'pipeline'
         : id.matches('alerts.*') ? 'overview'
         : id.matches('dataQuality.*') ? 'overview'
         : id.matches('qualityHistory.*') ? 'overview'
