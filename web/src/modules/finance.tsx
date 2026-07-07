@@ -49,9 +49,12 @@ export const Objectifs: FC<Props> = () => {
       targetCas: Number(f.targetCas) || 0, targetInvoiced: Number(f.targetInvoiced) || 0,
       targetMargin: Number(f.targetMargin) || 0, targetMarginPct: Number(f.targetMarginPct) || 0,
     };
-    // Si la clé (année/périmètre/valeur) a changé lors d'une édition, supprimer l'ancien doc.
-    if (editingId && editingId !== objectiveId(payload)) await deleteObjective(editingId);
+    // ORDRE SÛR : écrire le nouveau doc AVANT de supprimer l'ancien (édition à clé changée). Si l'upsert
+    // échoue, l'objectif d'origine reste intact ; l'inverse (delete-puis-upsert) détruisait l'objectif quand
+    // l'upsert échouait ensuite, avec un simple « Action refusée » — perte sans avertissement.
+    const staleId = editingId && editingId !== objectiveId(payload) ? editingId : null;
     await upsertObjective(payload);
+    if (staleId) await deleteObjective(staleId);
     reset();
   };
 
