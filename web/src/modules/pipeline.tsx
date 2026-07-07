@@ -151,7 +151,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
             ]} rows={funnelC?.transitions || []} />
           </>
         ) : <EmptyState label="Le funnel de conversion se construit à partir des changements d'étape (board / édition d'opportunité)." />}
-        <Tip>Funnel <b>réel</b> mesuré sur les transitions d'étape journalisées (board Kanban / édition) — la source Excel n'ayant ni date de création ni historique, il se construit <b>à partir de maintenant</b> et gagne en fiabilité avec le temps. <b>Taux de gain</b> = passages en Gagné / (Gagné + Perdu).</Tip>
+        <Tip>Funnel <b>réel</b> mesuré sur les transitions d'étape journalisées (board Kanban / édition) — la source Excel n'ayant ni date de création ni historique, il se construit <b>à partir de maintenant</b> et gagne en fiabilité avec le temps. <b>Taux de gain</b> = passages en Gagné / (Gagné + Perdu).{funnelC?.truncated ? ` Au-delà de ${(funnelC?.windowSize ?? 0).toLocaleString("fr-FR")} transitions, la mesure porte sur cette FENÊTRE GLISSANTE des plus récentes (les plus anciennes en sortent).` : ""}</Tip>
       </Card>
     </div>
   );

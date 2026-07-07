@@ -278,6 +278,23 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(acme.facture).toBe(900);
     expect(acme.backlog).toBe(1200);
   });
+  it("byEntity au-delà de 100 entités → longue traîne AGRÉGÉE en « Autres » (cf. audit intégral A2)", () => {
+    // 130 clients distincts, CAS décroissant → top 100 + 1 ligne « Autres (30) ».
+    const many = Array.from({ length: 130 }, (_, i) => ({ client: `C${String(i).padStart(3, "0")}`, cas: 1000 - i, raf: 0, mb: 0 }));
+    const rows = byEntity(many, [], (x) => x.client);
+    expect(rows).toHaveLength(101); // 100 + Autres
+    const other = rows[rows.length - 1];
+    expect(other.isOther).toBe(true);
+    expect(other.key).toBe("Autres (30)");
+    // Somme préservée : Σ(top100) + Autres = Σ(tous) → aucune entité perdue silencieusement.
+    const totalRows = rows.reduce((s, r) => s + r.cas, 0);
+    const totalAll = many.reduce((s, r) => s + r.cas, 0);
+    expect(totalRows).toBe(totalAll);
+  });
+  it("byEntity ≤ 100 entités → pas de ligne « Autres »", () => {
+    const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
+    expect(rows.some((r) => r.isOther)).toBe(false);
+  });
 });
 
 describe("filterInvoices — période", () => {

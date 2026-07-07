@@ -47,7 +47,7 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
       const active = myOpps.filter((o) => o.stage >= 1 && o.stage <= 5);
       const won = myOpps.filter((o) => o.stage === 6).length;
       const lost = myOpps.filter((o) => o.stage === 7).length;
-      // « Pondéré » = PROJECTION tiérée (100/20/10), cohérent avec pipeline/atterrissage.
+      // « Pondéré » = PROJECTION tiérée (défauts 100/20/5, configurables en Habilitations), cohérent avec pipeline/atterrissage.
       const pipelinePondere = sum(active, pw);
 
       const ob = objByAm[am.toUpperCase()];
