@@ -6,6 +6,7 @@ import { functions } from "./firebase";
 export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
+  nextStep?: string; nextStepDate?: string | null; lostReason?: string;
 };
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
@@ -22,7 +23,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string }) {
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 
