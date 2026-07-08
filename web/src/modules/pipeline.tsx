@@ -11,6 +11,7 @@ import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
+import { useRecordScope } from "../lib/scope";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
 
 // Libellés courts d'étape pour le funnel de transitions (from→to).
@@ -365,7 +366,8 @@ function OppBulkExcel() {
 }
 
 export const OppList: FC<Props> = () => {
-  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
+  const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
+  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
   const { match } = useFilters();
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
@@ -741,7 +743,8 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: 
 }
 
 export const PipelineBoard: FC<Props> = () => {
-  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
+  const oppScope = useRecordScope("opportunities");
+  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
   const { match, f } = useFilters();
   const filterKey = `${f.bu}|${f.am}|${f.client}|${f.pm}`; // identité du filtre → réinitialise la pagination des colonnes
   const canWrite = useCan("pipeline") === "write";

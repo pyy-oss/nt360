@@ -10,6 +10,7 @@ import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
+import { useRecordScope } from "../lib/scope";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast } from "../design/components";
 import { pct } from "../design/tokens";
 import {
@@ -438,7 +439,8 @@ export const Cleanup: FC<Props> = () => {
   // Collections chargées seulement si le rôle a l'accès (chaque purge est gouvernée par son module).
   const { rows: invoices } = useCollectionData<Invoice>(canImport ? "invoices" : null);
   const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
-  const { rows: opps } = useCollectionData<Opportunity>(canPipe ? "opportunities" : null);
+  const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
+  const { rows: opps } = useCollectionData<Opportunity>(canPipe ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
 
   const orphanIds = invoices.filter((r) => r.linked !== true && r.id).map((r) => r.id!) as string[];
   const orphanAmt = invoices.filter((r) => r.linked !== true).reduce((s, r) => s + (r.amountHt || 0), 0);

@@ -6,7 +6,7 @@ import { functions } from "./firebase";
 export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
-  nextStep?: string; nextStepDate?: string | null; lostReason?: string;
+  nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
 };
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
@@ -23,7 +23,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null }) {
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 
@@ -123,6 +123,35 @@ export async function upsertContact(data: { id?: string; account: string; name: 
   return res.data as { ok: boolean; id: string; accountId: string };
 }
 export async function deleteContact(id: string) { await httpsCallable(functions, "deleteContact")({ id }); }
+
+// SÉCURITÉ PAR ENREGISTREMENT (Lot 2) — propriété + hiérarchie + OWD + MFA.
+/** Réaffecte le propriétaire d'un enregistrement (opportunité/compte) — recalcule visibleTo. Droit « pipeline ». */
+export async function assignOwner(collection: "opportunities" | "accounts", id: string, ownerUid: string | null) {
+  const res = await httpsCallable(functions, "assignOwner")({ collection, id, ownerUid });
+  return res.data as { ok: boolean; id: string; ownerUid: string | null };
+}
+/** Pose le manager d'un utilisateur (hiérarchie de rôles) — direction. Refuse cycle/auto-management ; ré-indexe. */
+export async function callSetManager(uid: string, managerUid: string | null) {
+  const res = await httpsCallable(functions, "setManager", { timeout: 300_000 })({ uid, managerUid });
+  return res.data as { ok: boolean; uid: string; managerUid: string | null; reindexed: number };
+}
+export type RecordAccess = { opportunities: "public" | "private"; accounts: "public" | "private" };
+/** OWD par objet (config/recordAccess) — direction. « private » = propriétaire + hiérarchie + admins seulement. */
+export async function callSetRecordAccess(cfg: Partial<RecordAccess>) {
+  const res = await httpsCallable(functions, "setRecordAccess")(cfg);
+  return res.data as RecordAccess & { ok: boolean };
+}
+/** Politique d'authentification (config/security) : MFA obligatoire pour actions sensibles — direction. */
+export async function callSetSecurityConfig(require2fa: boolean) {
+  const res = await httpsCallable(functions, "setSecurityConfig")({ require2fa });
+  return res.data as { ok: boolean; require2fa: boolean };
+}
+/** Ré-indexe visibleTo sur tous les enregistrements (backfill avant bascule OWD « private ») — direction.
+ *  deriveFromAm : dérive un propriétaire depuis le champ AM des opps sans propriétaire (mapping par nom). */
+export async function callReindexVisibility(deriveFromAm = false) {
+  const res = await httpsCallable(functions, "reindexVisibility", { timeout: 300_000 })({ deriveFromAm });
+  return res.data as { ok: boolean; reindexed: number; derived: number };
+}
 
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
