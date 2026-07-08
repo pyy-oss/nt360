@@ -757,7 +757,10 @@ exports.syncSalesData = onSchedule({ schedule: "every day 06:00", memoryMiB: 512
 // par ID déterministe (un delta partiel se fusionne), journalise puis recalcule. ---
 // Capacité d'IMPORT / fiabilisation (importDelta, setInvoiceFp, patchOrder) gouvernée par le module
 // « import » de la matrice opposable (requireWrite) — plus de liste de rôles figée.
-exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+// memoryMiB 2048 / timeout 540 : un ZIP de dizaines de classeurs parsés en mémoire (exceljs) dépasse
+// 512 Mo → OOM remonté en « internal » côté client. On dimensionne pour un import en lot ; le plafond
+// de payload (~22 Mo, ci-dessous) borne l'entrée, et un ZIP énorme reste à découper (import idempotent).
+exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 540 }, async (req) => {
   await requireWrite(req, "import");
   const b64 = req.data?.fileB64;
   const filename = String(req.data?.filename || "delta.xlsx");
