@@ -87,6 +87,39 @@ describe("oppImport — rapprochement & création", () => {
   });
 });
 
+describe("oppImport — cellules vides / bruit ne touchent PAS le champ (audit H2/M1/M2)", () => {
+  const colOf = (h) => TEMPLATE_HEADERS.indexOf(h);
+  it("H2 — une cellule BU VIDE ne bascule pas la BU courante en « AUTRE »", () => {
+    const aoa = buildTemplateAoa(OPPS);
+    aoa[1][colOf("BU")] = ""; // vide la BU de saisie_a (ICT)
+    const { rows } = parseOpportunitiesImport(wbFromAoa(aoa));
+    const row = rows.find((r) => r.oppId === "saisie_a");
+    expect(row.values).not.toHaveProperty("bu"); // cellule vide → champ non fourni
+    const { byId, byFp } = indexes(OPPS);
+    expect(planOpportunityImport(byId, byFp, rows).toUpdate).toHaveLength(0);
+  });
+  it("M1 — un « Montant » non numérique (« N/A ») ne met pas le montant à 0", () => {
+    const aoa = buildTemplateAoa(OPPS);
+    aoa[1][colOf("Montant")] = "N/A";
+    const { rows } = parseOpportunitiesImport(wbFromAoa(aoa));
+    expect(rows.find((r) => r.oppId === "saisie_a").values).not.toHaveProperty("amount");
+  });
+  it("M1 — un vrai « 0 » reste présent (met bien le montant à 0)", () => {
+    const aoa = buildTemplateAoa(OPPS);
+    aoa[1][colOf("Montant")] = 0;
+    const { rows } = parseOpportunitiesImport(wbFromAoa(aoa));
+    expect(rows.find((r) => r.oppId === "saisie_a").values.amount).toBe(0);
+    const plan = planOpportunityImport(indexes(OPPS).byId, indexes(OPPS).byFp, rows);
+    expect(plan.toUpdate[0].changed).toContain("amount"); // 120000 → 0 = vrai changement
+  });
+  it("M2 — aller-retour SANS édition d'une opp en casse mixte = AUCUN changement", () => {
+    const mixed = [{ ...OPPS[0], client: "Orange CI", am: "Kouame" }];
+    const { rows } = parseOpportunitiesImport(wbFromAoa(buildTemplateAoa(mixed)));
+    const { byId, byFp } = indexes(mixed);
+    expect(planOpportunityImport(byId, byFp, rows).toUpdate).toHaveLength(0);
+  });
+});
+
 describe("oppImport — dérivations (finalize + create)", () => {
   it("un changement d'étape SEUL ajoute stageLabel sans toucher au pondéré (montant/proba inchangés)", () => {
     const cur = { amount: 100000, probability: 0.6, stage: 4 };

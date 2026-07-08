@@ -129,13 +129,26 @@ async function recomputeSummaries(only) {
   }
 }
 
-// Portée de recompute CIBLÉE pour une mutation d'OPPORTUNITÉ (saisie/board/import). Une opp n'écrit
-// JAMAIS dans orders/invoices/bcLines : le lien « au P&L » est une jointure d'AFFICHAGE (front, par N° FP),
-// pas une dépendance d'agrégat. On reconstruit donc uniquement les summaries réellement dérivés des opps —
-// pipeline (+ funnel), ams, atterrissage (le pondéré nourrit le projeté CAS), overview (certitudes/
-// conversion), news, alerts, dataQuality (compte + « gagnées sans FP/P&L ») — et on saute commandes/
-// backlog/facturation/rentabilité/clients/domaines/fournisseurs/cash (inchangés). ~2× moins d'écritures.
+// Portée de recompute CIBLÉE pour une mutation d'OPPORTUNITÉ NON GAGNÉE (saisie/board/import). Elle ne
+// nourrit que les summaries réellement dérivés des opportunités — pipeline (+ funnel), ams, atterrissage
+// (le pondéré nourrit le projeté CAS), overview (certitudes/conversion), news, alerts, dataQuality (compte
+// + « gagnées sans FP/P&L ») — et saute commandes/backlog/rentabilité/clients/domaines/fournisseurs/cash.
 const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality"];
+
+// MAIS une opp GAGNÉE (stage 6) dont le N° FP matche une ligne P&L RÉCONCILIE la commande dans
+// mergeCommandes (domain/commandes.js) — c'est un AGRÉGAT, pas une jointure d'affichage : elle écrase
+// CAS/client/BU/AM/affaire de l'`order`. On élargit alors la portée aux summaries dérivés des orders
+// (carnet Commandes, backlog, rentabilité, clients, domaines, fournisseurs, cash indicatif) — sinon le
+// carnet resterait périmé et CONTREDIRAIT l'en-tête (overview/atterrissage/AM, eux recalculés sur les
+// nouveaux orders) jusqu'au recompute nocturne. On ne paie ce surcoût QUE quand une opp gagnée est en jeu.
+const OPP_RECOMPUTE_WON = [...OPP_RECOMPUTE, "commandes", "backlog", "rentabilite", "clients", "domaines", "suppliers", "cashflow"];
+
+// Portée d'une mutation d'opp : élargie DÈS QUE l'étape « Gagné » (6) est impliquée AVANT ou APRÈS la
+// mutation (passage à gagné, sortie de gagné, ou édition/suppression d'une opp déjà gagnée) — tous les
+// cas où la réconciliation commande change. Sinon portée étroite (le cas courant : édition d'opps ouvertes).
+function oppScope(prevStage, nextStage) {
+  return (Number(prevStage) === 6 || Number(nextStage) === 6) ? OPP_RECOMPUTE_WON : OPP_RECOMPUTE;
+}
 
 // Recompute DIFFÉRÉ (opt-in) — au lieu d'attendre le recompute (plusieurs secondes) AVANT de répondre,
 // une mutation dépose une DEMANDE (config/recomputeRequest) et répond en ~ms ; le trigger Firestore
@@ -1155,7 +1168,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; pas les commandes)
+  await requestRecompute(oppScope(prevStage, stage)); // CIBLÉ (élargi si l'opp est/devient « Gagné » → réconciliation carnet)
   return { ok: true, id };
 });
 
@@ -1172,7 +1185,7 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
     uid: req.auth.uid, action: "delete_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client: cur.client || null, am: cur.am || null, fp: cur.fp || null, stage: cur.stage ?? null, amount: cur.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps uniquement)
+  await requestRecompute(oppScope(cur.stage, cur.stage)); // CIBLÉ (élargi si l'opp supprimée était « Gagné » → carnet revient au P&L)
   return { ok: true };
 });
 
@@ -1234,7 +1247,9 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; la « réconciliation » commande est une jointure d'affichage, pas d'agrégat)
+  // CIBLÉ, élargi si l'opp est/devient « Gagné » : attacher/détacher un FP, changer le montant ou passer
+  // à/de l'étape Gagné modifie la réconciliation de la commande → il faut rafraîchir le carnet.
+  await requestRecompute(oppScope(cur.stage, patch.stage !== undefined ? patch.stage : cur.stage));
   return { ok: true, id };
 });
 
@@ -1309,10 +1324,14 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
   let batch = db.batch(), n = 0;
   const flush = async () => { if (n) { await batch.commit(); batch = db.batch(); n = 0; } };
   const transitions = [];
+  // Une opp GAGNÉE (stage 6) touchée par l'import réconcilie une commande (mergeCommandes) → portée élargie
+  // (cf. oppScope). On lève le drapeau si une MAJ part de/arrive à Gagné, ou si une création naît Gagné.
+  let wonTouched = false;
   for (const u of toUpdate) {
     const cur = byId.get(u.id) || {};
     const patch = finalizeUpdatePatch(cur, u.patch);
     patch.updatedAt = FieldValue.serverTimestamp();
+    if (u.stageFrom === 6 || patch.stage === 6) wonTouched = true;
     batch.set(db.doc(`opportunities/${u.id}`), patch, { merge: true });
     if (patch.stage !== undefined && patch.stage !== u.stageFrom) {
       transitions.push({ oppId: u.id, from: u.stageFrom, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
@@ -1325,6 +1344,7 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
     const id = mkId();
     const doc = buildCreateDoc(c.values, c.fp, id);
     doc.updatedAt = FieldValue.serverTimestamp();
+    if ((doc.stage || 0) === 6) wonTouched = true;
     batch.set(db.doc(`opportunities/${id}`), doc, { merge: true });
     if (++n % 400 === 0) await flush();
   }
@@ -1340,7 +1360,7 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
     uid: req.auth.uid, action: "import_opps", module: "pipeline", entity: "opportunity", entityId: filename,
     detail: { ...counts }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (import/MAJ d'opps → agrégats pipeline uniquement)
+  await requestRecompute(wonTouched ? OPP_RECOMPUTE_WON : OPP_RECOMPUTE); // CIBLÉ (élargi si une opp gagnée est touchée → carnet)
   return { ok: true, applied: true, ...counts, samples };
 });
 

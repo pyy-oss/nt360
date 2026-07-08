@@ -22,7 +22,10 @@ const MUTABLE_KEYS = [
 function sameField(cur, next) {
   if (typeof next === "number") return (Number(cur) || 0) === next;
   if (typeof next === "boolean") return !!cur === next;
-  return String(cur == null ? "" : cur).trim() === String(next == null ? "" : next).trim();
+  // Texte comparé INSENSIBLE À LA CASSE : le parseur canonicalise client/AM en MAJUSCULES (cleanName/
+  // cleanPerson) alors que la saisie in-app les stocke en casse mixte — sans ça un aller-retour SANS
+  // édition proposerait un faux changement et réécrirait silencieusement le champ en majuscules.
+  return String(cur == null ? "" : cur).trim().toLowerCase() === String(next == null ? "" : next).trim().toLowerCase();
 }
 
 const pickBefore = (cur, keys) => Object.fromEntries(keys.map((k) => [k, cur[k] ?? null]));

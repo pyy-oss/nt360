@@ -681,12 +681,15 @@ const BOARD_PAGE = 30; // cartes affichées par colonne avant « Voir plus » (u
 // Colonne du board : PAGINÉE par révélation incrémentale (« Voir plus ») — sans quoi une étape à
 // plusieurs centaines d'opps (ex. Qualification) rendait autant de cartes d'un coup (coût + illisibilité).
 // L'en-tête garde le compte RÉEL (total colonne) ; le pas revient à BOARD_PAGE quand le filtre change.
-function BoardColumn({ stage, col, canWrite, movingId, move, today }: {
+function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: {
   stage: number; col: Opportunity[]; canWrite: boolean; movingId: string | null;
-  move: (o: Opportunity, v: string) => void; today: string;
+  move: (o: Opportunity, v: string) => void; today: string; resetKey: string;
 }) {
   const [shown, setShown] = useState(BOARD_PAGE);
-  useEffect(() => { setShown(BOARD_PAGE); }, [col.length]); // filtre appliqué (taille de colonne change) → repart au 1er lot
+  // Repart au 1er lot UNIQUEMENT quand le FILTRE change (resetKey) — pas sur tout changement de taille de
+  // colonne : un move optimiste ou un snapshot d'un autre écrivain fait varier col.length sans que
+  // l'utilisateur ait rien filtré, et réinitialiser « Voir plus » lui ferait perdre sa place.
+  useEffect(() => { setShown(BOARD_PAGE); }, [resetKey]);
   const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
   const rest = col.length - shown;
   return (
@@ -732,7 +735,8 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today }: {
 
 export const PipelineBoard: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities");
-  const { match } = useFilters();
+  const { match, f } = useFilters();
+  const filterKey = `${f.bu}|${f.am}|${f.client}|${f.pm}`; // identité du filtre → réinitialise la pagination des colonnes
   const canWrite = useCan("pipeline") === "write";
   const toast = useToast();
   const [movingId, setMovingId] = useState<string | null>(null); // carte en cours de changement d'étape (verrou in-flight)
@@ -787,7 +791,7 @@ export const PipelineBoard: FC<Props> = () => {
       <FilterNote dims="BU / AM / client" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
         {BOARD_STAGES.map((s) => (
-          <BoardColumn key={s} stage={s} col={byStage(s)} canWrite={canWrite} movingId={movingId} move={move} today={today} />
+          <BoardColumn key={s} stage={s} col={byStage(s)} canWrite={canWrite} movingId={movingId} move={move} today={today} resetKey={filterKey} />
         ))}
       </div>
       <Tip>Pilotage visuel des deals actifs (étapes 1→5). Chaque colonne affiche les opportunités <b>les plus pondérées d'abord</b> ; « <b>Voir plus</b> » révèle la suite (le compte total reste affiché en tête). Changer l'étape d'une carte met à jour l'opportunité et relance le recalcul. Cartes en <b className="text-clay">retard</b> = D Prev dépassée (à requalifier). Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
