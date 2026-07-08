@@ -57,9 +57,9 @@ beforeEach(async () => {
   });
 });
 
-// Fabrique un client Firestore authentifié avec un rôle donné (custom claim).
+// Fabrique un client Firestore authentifié avec un rôle donné (custom claim NAMESPACÉ nt360Role).
 const as = (role, uid = role || "anon") =>
-  (role ? testEnv.authenticatedContext(uid, { role }) : testEnv.unauthenticatedContext()).firestore();
+  (role ? testEnv.authenticatedContext(uid, { nt360Role: role }) : testEnv.unauthenticatedContext()).firestore();
 
 describe("Lectures selon la matrice", () => {
   it("lecture (rôle) lit overview→orders", async () => {
@@ -85,24 +85,25 @@ describe("Collections sources : écriture client toujours refusée", () => {
   });
 });
 
-describe("Opportunités : seules les saisies sont modifiables", () => {
-  it("commercial crée une opp source=saisie", async () => {
-    await assertSucceeds(
+describe("Opportunités : écriture client interdite (callable-only)", () => {
+  // Durcissement sécurité : toute écriture passe par les callables (Admin SDK), qui valident,
+  // auditent et journalisent les transitions. Une écriture SDK directe est refusée par les rules —
+  // même pour un rédacteur pipeline — pour empêcher la corruption non tracée du carnet (opp gagnée).
+  it("un rédacteur pipeline (commercial) ne peut PAS créer d'opp en SDK direct", async () => {
+    await assertFails(
       setDoc(doc(as("commercial"), "opportunities/OPP_NEW"), { fp: "FP/2026/2", source: "saisie", amount: 5 })
     );
   });
-  it("commercial ne peut PAS créer une opp source=salesData", async () => {
+  it("un rédacteur pipeline ne peut PAS modifier une opp en SDK direct", async () => {
     await assertFails(
-      setDoc(doc(as("commercial"), "opportunities/OPP_BAD"), { fp: "FP/2026/2", source: "salesData" })
+      setDoc(doc(as("commercial"), "opportunities/OPP1"), { fp: "FP/2026/1", source: "saisie", amount: 99 })
     );
   });
-  it("lecture (pipeline=read) ne peut PAS créer d'opp", async () => {
-    await assertFails(
-      setDoc(doc(as("lecture"), "opportunities/OPP_R"), { source: "saisie" })
-    );
+  it("un rédacteur pipeline ne peut PAS supprimer une opp en SDK direct", async () => {
+    await assertFails(deleteDoc(doc(as("commercial"), "opportunities/OPP1")));
   });
-  it("commercial peut supprimer une opp", async () => {
-    await assertSucceeds(deleteDoc(doc(as("commercial"), "opportunities/OPP1")));
+  it("la LECTURE reste autorisée à qui a pipeline:read", async () => {
+    await assertSucceeds(getDoc(doc(as("commercial"), "opportunities/OPP1")));
   });
 });
 
