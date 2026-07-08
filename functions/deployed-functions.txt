@@ -16,6 +16,7 @@ createOrder
 createUser
 curateNews
 curateNewsNow
+decideApproval
 dedupe
 deleteActivity
 deleteClickupWebhook
@@ -31,6 +32,7 @@ importDelta
 importLegacyBackup
 importOpportunities
 listActivities
+listApprovals
 listClickupMembers
 logClientError
 logLogin
@@ -75,6 +77,7 @@ setSecurityConfig
 setUserActive
 setUserRole
 setupClickupWebhook
+submitForApproval
 syncBcFromClickup
 syncClickupCaf
 syncFromClickup

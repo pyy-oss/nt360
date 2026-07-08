@@ -162,6 +162,17 @@ describe("Activités & tâches : accès callable-only (Lot 3)", () => {
   });
 });
 
+describe("Approbations : accès callable-only (Lot 4)", () => {
+  it("lecture/écriture directes refusées (passe par submit/decide/listApprovals)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "approvals/AP1"), { kind: "remise_opp", status: "pending", approverUid: "commercial" });
+    });
+    await assertFails(getDoc(doc(as("commercial"), "approvals/AP1")));
+    await assertFails(getDoc(doc(as("direction"), "approvals/AP1")));
+    await assertFails(setDoc(doc(as("direction"), "approvals/AP_NEW"), { kind: "autre", status: "pending" }));
+  });
+});
+
 describe("Lignes BC : seul le statut est modifiable", () => {
   it("achats change le statut", async () => {
     await assertSucceeds(updateDoc(doc(as("achats"), "bcLines/FP_2026_1_0"), { status: "emis" }));

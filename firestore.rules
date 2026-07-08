@@ -144,6 +144,9 @@ service cloud.firestore {
     // listActivities applique la visibilité par enregistrement côté serveur (évite index composite +
     // cadrage client). L'écriture passe par upsert/deleteActivity (validés, audités). Donc read/write:false.
     match /activities/{id} { allow read: if false; allow write: if false; }
+    // Approbations (Lot 4) : idem, accès 100% par callable (submit/decide/listApprovals) — la visibilité
+    // et le contrôle de l'approbateur sont appliqués serveur. Lecture/écriture directes fermées.
+    match /approvals/{id} { allow read: if false; allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
