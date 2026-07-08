@@ -287,8 +287,13 @@ async function recomputeCore(db, only) {
   // recompute. Auto-résorbant (plus rien à migrer ensuite) → confidentialité effective sur un Recalculer.
   for (const s of sheetsBase) {
     if (s._id && (s.costTotal != null || s.saleTotal != null || s.margin != null || s.marginPct != null) && !smBy.has(s._id)) {
-      w.push({ path: `projectSheets/${s._id}`, data: { costTotal: FieldValue.delete(), saleTotal: FieldValue.delete(), margin: FieldValue.delete(), marginPct: FieldValue.delete() } });
+      // ORDRE IMPORTANT (intégrité, audit F3) : ÉCRIRE la marge isolée AVANT de purger la base. Les
+      // deux writes visent des docs différents et sont commités par lots (non atomiques) ; si l'on
+      // supprimait d'abord, un crash entre les deux perdrait définitivement la marge (plus de source).
+      // Dans l'autre sens, une interruption laisse au pire la marge dupliquée (base + isolée) — sans
+      // perte ; un recompute ultérieur ne re-migre pas (smBy la contient) mais la valeur est sauve.
       w.push({ path: `projectSheetsMargin/${s._id}`, data: { _id: s._id, fp: s.fp, costTotal: s.costTotal ?? null, saleTotal: s.saleTotal ?? null, margin: s.margin ?? null, marginPct: s.marginPct ?? null } });
+      w.push({ path: `projectSheets/${s._id}`, data: { costTotal: FieldValue.delete(), saleTotal: FieldValue.delete(), margin: FieldValue.delete(), marginPct: FieldValue.delete() } });
     }
   }
 

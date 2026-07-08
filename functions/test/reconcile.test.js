@@ -148,6 +148,17 @@ describe("reconcileClients — dossier client & propositions de rapprochement FP
     expect(out[0].suggestions).toHaveLength(1);
   });
 
+  it("montants NULS des deux côtés → aucune proposition « montant » (0 ≈ 0 rejeté, audit)", () => {
+    const out = reconcileClients({
+      orders: [{ fp: "FP/2026/500", client: "ACME", cas: 0 }], // commande sans CAS exploitable
+      invoices: [],
+      opps: [{ fp: "FP/2026/13", client: "ACME", amount: 0, stage: 6 }], // opp gagnée sans montant
+      fpKeyOf: keyOf(), normClient: nc,
+    });
+    // Deux clusters à montant nul ne doivent PAS être appariés par « montant concordant ».
+    expect(find(out, "ACME").suggestions).toHaveLength(0);
+  });
+
   it("opp NON gagnée sans P&L → ni écart ni proposition (seul le gagné se réconcilie)", () => {
     const out = reconcileClients({
       orders: [{ fp: "FP/2026/500", client: "ACME", cas: 800 }],

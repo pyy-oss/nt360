@@ -77,10 +77,14 @@ jobs:
         if: ${{ inputs.run_deploy }}
         run: |
           export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          # Cibles functions depuis la SOURCE UNIQUE deployed-functions.txt (comme firebase-deploy.yml) —
+          # PAS de liste codée en dur : un bootstrap ne doit pas déployer un sous-ensemble périmé (13/69)
+          # laissant la moitié des callables absents sur un projet neuf.
+          FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,firestore:indexes,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport" \
+              --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
               --project "$GCLOUD_PROJECT" --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi

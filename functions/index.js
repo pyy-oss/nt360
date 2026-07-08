@@ -649,6 +649,9 @@ exports.curateNewsNow = onCallG("curateNewsNow", { secrets: [ANTHROPIC_API_KEY],
 // --- logLogin : audit de connexion (critère F1) ---
 exports.logLogin = onCallG("logLogin", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  // Projet PARTAGÉ : n'accepter QUE les utilisateurs provisionnés nt360 (claim namespacé) — sinon un
+  // compte de l'app sœur pourrait injecter dans l'auditLog nt360.
+  if (!req.auth.token?.nt360Role) throw new HttpsError("permission-denied", "compte nt360 requis");
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "login", module: "auth", entity: "session", entityId: req.auth.uid,
     detail: { role: req.auth.token.nt360Role || null, email: req.auth.token.email || null },
@@ -663,6 +666,7 @@ exports.logLogin = onCallG("logLogin", async (req) => {
 // (anti-abus). Champs bornés (garde-fou de taille / coût). N'échoue jamais côté client (best-effort). ---
 exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!req.auth.token?.nt360Role) throw new HttpsError("permission-denied", "compte nt360 requis"); // projet partagé : pas d'injection par l'app sœur
   // Anti-flood SERVEUR (le plafond client d'errorReporter est contournable) : au-delà de 30 erreurs/min
   // par compte, on abandonne silencieusement (l'appel reste best-effort côté front, jamais bloquant).
   if (!(await rateLimit(req.auth.uid, "clientError", 30, 60_000))) return { ok: true, throttled: true };
@@ -946,16 +950,22 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
-    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale").get(),
-    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "status").get(),
+    // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
+    // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
+    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability").get(),
+    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").get(),
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
     db.doc("config/alerts").get(),
   ]);
   const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const orders = withId(ordSnap), invoices = withId(invSnap), opps = withId(oppSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
+  const orders = withId(ordSnap), invoices = withId(invSnap), allOpps = withId(oppSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
   const thr = thrDoc.data() || {};
-  const staleOpps = opps.filter((o) => o.stale === true);
-  const agedOpps = opps.filter((o) => o.stale !== true && isAgedLost(o));
+  // MÊME préparation des opportunités que le recompute (aggregate.js) → les compteurs du Centre de
+  // correction collent au score/aux bulletins : fantômes (stale) et périmées (aged) sont sortis de
+  // l'assiette « active », et signalés via leurs buckets dédiés (opps_fantomes / opps_agees).
+  const staleOpps = allOpps.filter((o) => o.stale === true);
+  const agedOpps = allOpps.filter((o) => o.stale !== true && isAgedLost(o));
+  const opps = allOpps.filter((o) => o.stale !== true && !isAgedLost(o));
   const defs = issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps);
   const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
   const buckets = defs.filter((d) => d.records.length).map((d) => ({

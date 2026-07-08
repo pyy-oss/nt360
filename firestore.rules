@@ -7,6 +7,10 @@ service cloud.firestore {
     // Claim NAMESPACÉ (nt360Role) : projet Firebase PARTAGÉ avec une autre app → un claim générique
     // `role` serait commun aux deux (un `role:direction` de l'app sœur escaladerait ici). On ne lit que nt360Role.
     function role() { return request.auth.token.nt360Role; }
+    // Utilisateur PROVISIONNÉ nt360 (porte le claim namespacé) — distinct de signedIn() : un compte
+    // authentifié par l'app SŒUR satisfait signedIn() mais n'a pas de nt360Role. Sert à cloisonner les
+    // lectures « connecté » (matrice, référentiels) pour ne rien exposer à l'app sœur.
+    function isNt360() { return signedIn() && request.auth.token.nt360Role != null; }
     function matrix() { return get(/databases/$(db)/documents/config/permissions).data.matrix; }
     function level(m) { return role() == 'direction' ? 'write' : matrix()[role()][m]; }
     function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
@@ -138,7 +142,7 @@ service cloud.firestore {
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour
     // tous). Lecture par tout utilisateur connecté (nécessaire à la résolution de niveau côté front).
-    match /config/permissions { allow read: if signedIn();              allow write: if false; }
+    match /config/permissions { allow read: if isNt360();               allow write: if false; }
     // config/notifications contient l'URL de webhook (sensible) → lecture réservée aux habilitations.
     match /config/notifications { allow read: if canWrite('habilitations'); allow write: if false; }
     // Table d'alias de normalisation clients : éditée via setClientAliases, lue par l'écran Admin.
@@ -160,7 +164,7 @@ service cloud.firestore {
     // un futur doc config/* non listé n'est PAS lisible par défaut). Inclut les référentiels éditables
     // (projectManagers, businessUnits), les taux de change (fxRates) et la config ClickUp NON sensible
     // (enabled/teamId/listId ; le token vit dans Secret Manager, jamais ici) — tous lus par le front.
-    match /config/{id}        { allow read: if signedIn() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup']; allow write: if false; }
+    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }

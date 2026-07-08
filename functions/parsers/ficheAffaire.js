@@ -60,6 +60,30 @@ function parseFicheSheet(ws) {
     for (let k = c.ci + 1; k < row.length; k++) if (row[k] != null && row[k] !== "") last = row[k];
     return last;
   };
+  // Cellule qui contient TOUS les fragments donnés (normalisés) — sert à cibler la bonne variante
+  // d'un montant (ex. la ligne « … (XOF) » plutôt que « … (EN DEVISE) »).
+  const findWith = (...parts) => {
+    const P = parts.map(noAcc);
+    return cells.find((x) => typeof x.v === "string" && P.every((p) => noAcc(x.v).includes(p)));
+  };
+  // Dernière cellule NUMÉRIQUE à droite du label (droite→gauche) : ignore une cellule d'unité en fin
+  // de ligne (« XOF », « FCFA », note) qui, prise comme valeur, donnerait 0 (audit F2).
+  const numRowOf = (cell) => {
+    if (!cell) return null;
+    const row = aoa[cell.ri] || [];
+    for (let k = row.length - 1; k > cell.ci; k--) {
+      const v = row[k];
+      if (v == null || v === "") continue;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      const n = num(v); if (n) return n; // chaîne numérique tolérante (« 1 085 668 »)
+    }
+    return null;
+  };
+  // Montant d'un poste : priorité au montant en XOF (converti) sur le montant « en devise » d'une fiche
+  // USD/EUR (audit F1), puis repli sur le libellé « NEURONES », puis sur le libellé générique — la
+  // détection accepte déjà « prix de vente » sans « neurones », l'extraction doit suivre.
+  const amount = (base) =>
+    numRowOf(findWith(base, "xof")) ?? numRowOf(findWith(base, "neurones")) ?? numRowOf(findWith(base)) ?? 0;
 
   const fp = fpKey(rightOf("N° DE FP"));
   const sid = safeId(fp); // FP contient des '/' → sanitisé pour les IDs Firestore
@@ -69,9 +93,9 @@ function parseFicheSheet(ws) {
     client: String(rightOf("CLIENT") || "").trim(),
     affaire: String(rightOf("AFFAIRE") || "").trim(),
     commercial: String(rightOf("COMMERCIAL") || "").trim(),
-    costTotal: num(lastOf("PRIX DE REVIENT")),
-    saleTotal: num(lastOf("PRIX DE VENTE NEURONES")),
-    margin: num(lastOf("MARGE BRUTE NEURONES")),
+    costTotal: num(amount("prix de revient")),
+    saleTotal: num(amount("prix de vente")),
+    margin: num(amount("marge brute")),
     marginPct: ((v) => (Math.abs(v) > 1.5 ? v / 100 : v))(num(lastOf("% DE MARGE BRUTE"))), // base 100→1 sur |v| (gère marges négatives / faibles)
     source: "fiche",
   };

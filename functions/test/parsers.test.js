@@ -199,6 +199,34 @@ describe("parseFiche → projectSheets + bcLines (§18.4, contrôle PAM-BF)", ()
   });
 });
 
+describe("parseFiche — montants : priorité XOF sur devise, ignore une cellule d'unité (audit F1/F2)", () => {
+  // Fiche USD (labels réels Neurones) : ligne « (EN DEVISE) » AVANT « (XOF) », et une cellule d'unité
+  // « XOF » APRÈS le montant. On doit retenir le montant EN XOF (converti), pas la devise, ni « XOF ».
+  const aoa = [
+    [null, "N° DE FP :", "FP/2026/777"],
+    [null, "CLIENT :", "2ACI"],
+    [null, "AFFAIRE :", "Licences"],
+    [],
+    [null, "PRIX DE REVIENT TOTAL NEURONES TECHNOLOGIES HT (EN DEVISE)", 7000],
+    [null, "PRIX DE REVIENT TOTAL NEURONES TECHNOLOGIES HT (XOF)", 4399920],
+    [null, "PRIX DE VENTE NEURONES TECHNOLOGIES HT (EN DEVISE)", 8000],
+    [null, "PRIX DE VENTE NEURONES TECHNOLOGIES HT (XOF)", 4813043, "XOF"],
+    [null, "MARGE BRUTE NEURONES TECHNOLOGIES (XOF)", 413123],
+    [null, "% DE MARGE BRUTE NEURONES TECHNOLOGIES", 0.0858],
+  ];
+  const { sheet } = parseFiche(wbFromAoa("Fiche", aoa));
+  it("saleTotal = montant XOF (converti), pas la valeur en devise ni l'unité", () => {
+    expect(sheet.saleTotal).toBe(4813043);
+  });
+  it("costTotal = montant XOF", () => {
+    expect(sheet.costTotal).toBe(4399920);
+  });
+  it("marge et %MB extraits", () => {
+    expect(sheet.margin).toBe(413123);
+    expect(sheet.marginPct).toBeCloseTo(0.0858, 4);
+  });
+});
+
 describe("parseFicheAll — deux onglets de MÊME FP ne perdent plus de lignes (cf. audit intégral I3)", () => {
   // Fabrique une fiche cellulaire à une ligne BC (fournisseur/description/montant paramétrables).
   const fiche = (frn, desc, xof) => [
