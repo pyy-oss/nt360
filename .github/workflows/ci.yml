@@ -47,6 +47,9 @@ jobs:
       - name: Cohérence du déploiement (exports index.js ⇔ deployed-functions.txt)
         run: node functions/scripts/check-deploy-targets.mjs
 
+      - name: Validité des index Firestore (pas d'index mono-champ → déploiement)
+        run: node functions/scripts/check-firestore-indexes.mjs
+
       - name: Build web
         run: pnpm --filter web build
 

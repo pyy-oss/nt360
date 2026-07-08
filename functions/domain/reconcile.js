@@ -23,7 +23,9 @@ const WON_STAGE = 6;
 const TEXT_MIN = 0.6; // recouvrement min. des mots significatifs pour valider une même désignation/affaire
 // Proximité relative (défaut 1 %) : deux montants « du même ordre » sont considérés identiques malgré
 // les arrondis. max(|a|,|b|,1) évite la division par ~0 et le faux positif 0≈0.
-const near = (a, b, tol) => Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * tol;
+// Deux montants « du même ordre » (tolérance relative). Exige au moins un montant NON nul : deux zéros
+// (opp/commande sans montant) ne sont PAS un appariement — sinon faux positif « montant » (audit).
+const near = (a, b, tol) => (a !== 0 || b !== 0) && Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * tol;
 const sum = (rows, f) => rows.reduce((s, x) => s + (Number(f(x)) || 0), 0);
 
 // Similarité de libellé : coefficient de recouvrement des mots significatifs (≥ 3 lettres, sans
