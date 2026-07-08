@@ -10,6 +10,7 @@ import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNo
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
+import { useRecordScope } from "../lib/scope";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
@@ -852,7 +853,8 @@ function OrderPmFixer({ row }: { row: Order }) {
 // comptent pas en commande (CAS/backlog absents). « Inscrire au P&L » crée la commande depuis l'opp
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
 function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
-  const { rows: opps, loading } = useCollectionData<Opportunity>("opportunities");
+  const oppScope = useRecordScope("opportunities");
+  const { rows: opps, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
   const won = opps.filter((o) => o.stage === 6 && o.fp && !commandeFps.has(o.fp));
   if (loading || !won.length) return null;
   return (

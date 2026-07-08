@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, type RecordAccess, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -34,6 +34,8 @@ export const Habilitations: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       {canImport && <DataImportCard />}
+      <MfaEnrollCard />
+      {isDirection && <SecurityCard users={users} />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
       {isDirection && <ProjectionConfigCard />}
@@ -72,8 +74,9 @@ export const Habilitations: FC<Props> = () => {
             ? colText("Actif", (u: UserRow) => <ActiveToggle uid={u.id!} active={u.active} />, (u: UserRow) => (u.active ? 1 : 0))
             : colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
           ...(isDirection ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} current={u.role} />)] : []),
+          ...(isDirection ? [colText("Manager (hiérarchie)", (u: UserRow) => <ManagerSetter uid={u.id!} current={u.managerUid} users={users} />)] : []),
         ]} rows={users} />
-        <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée). Après un changement de rôle ou une désactivation, l'utilisateur concerné doit rafraîchir sa session (reconnexion) pour que l'effet soit immédiat.</Tip>
+        <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée). Après un changement de rôle ou une désactivation, l'utilisateur concerné doit rafraîchir sa session (reconnexion) pour que l'effet soit immédiat. Le <b>manager</b> définit la ligne hiérarchique de la sécurité par enregistrement (un manager voit les enregistrements de ses collaborateurs).</Tip>
       </Card>
     </div>
   );
@@ -799,5 +802,118 @@ function RoleSetter({ uid, current }: { uid: string; current?: string }) {
         options={ROLE_LIST.map((r) => ({ value: r, label: r }))} />
       <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
     </span>
+  );
+}
+
+// Pose le MANAGER d'un utilisateur (hiérarchie de rôles). Le serveur refuse cycle/auto-management et
+// ré-indexe la visibilité. La liste exclut l'utilisateur lui-même.
+function ManagerSetter({ uid, current, users }: { uid: string; current?: string | null; users: UserRow[] }) {
+  const [mgr, setMgr] = useState(current || "");
+  const options = [{ value: "", label: "— aucun —" }, ...users.filter((u) => u.id !== uid).map((u) => ({ value: u.id!, label: u.name || u.email || u.id! }))];
+  return (
+    <span className="inline-flex gap-1.5">
+      <Select ariaLabel="Manager de l'utilisateur" className="!py-1" value={mgr} onChange={setMgr} options={options} />
+      <Busy label="Poser" okMsg="Manager posé (visibilité ré-indexée)" errMsg="Refusé (cycle ou droit insuffisant)" fn={() => callSetManager(uid, mgr || null)} />
+    </span>
+  );
+}
+
+// Sécurité par enregistrement (direction) : OWD par objet (public/privé), dérivation/ré-indexage de la
+// visibilité, politique MFA. Non destructif : par défaut tout est « public » (comportement historique).
+function SecurityCard({ users: _users }: { users: UserRow[] }) {
+  const { data: owd } = useDocData<Partial<RecordAccess>>("config/recordAccess");
+  const { data: sec } = useDocData<{ require2fa?: boolean }>("config/security");
+  const toast = useToast();
+  const [derive, setDerive] = useState(true);
+  const opps = owd?.opportunities === "private" ? "private" : "public";
+  const accts = owd?.accounts === "private" ? "private" : "public";
+  const OwdRow = ({ label, obj, value }: { label: string; obj: keyof RecordAccess; value: "public" | "private" }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <div>
+        <div className="text-[13px]">{label} <Badge tone={value === "private" ? "gold" : "steel"}>{value === "private" ? "privé" : "public"}</Badge></div>
+        <div className="text-[11px] text-muted">{value === "private" ? "Propriétaire + hiérarchie + administrateurs seulement" : "Tout rôle habilité au module (défaut)"}</div>
+      </div>
+      <Busy variant="ghost" label={value === "private" ? "Rendre public" : "Rendre privé"} okMsg="OWD mis à jour"
+        fn={() => callSetRecordAccess({ [obj]: value === "private" ? "public" : "private" } as Partial<RecordAccess>)} />
+    </div>
+  );
+  return (
+    <Card title="Sécurité par enregistrement (propriétaire + hiérarchie)">
+      <div className="flex flex-col gap-1">
+        <OwdRow label="Opportunités" obj="opportunities" value={opps} />
+        <OwdRow label="Comptes & contacts" obj="accounts" value={accts} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-hair pt-3">
+        <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={derive} onChange={(e) => setDerive(e.target.checked)} /> dériver les propriétaires depuis l'AM</label>
+        <Busy variant="ghost" label="Ré-indexer la visibilité" okMsg="Visibilité ré-indexée"
+          fn={async () => { const r = await callReindexVisibility(derive); toast(`${r.reindexed} enregistrement(s) ré-indexé(s)${r.derived ? `, ${r.derived} propriétaire(s) dérivé(s) de l'AM` : ""}`); }} />
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-hair pt-3">
+        <div><div className="text-[13px]">MFA obligatoire (actions sensibles)</div><div className="text-[11px] text-muted">Exige un 2e facteur pour les opérations d'administration.</div></div>
+        <Toggle checked={!!sec?.require2fa} onChange={(v) => { callSetSecurityConfig(v).catch(() => {}); }} ariaLabel="MFA obligatoire" />
+      </div>
+      <Tip>Passez un objet en <b>privé</b> APRÈS un ré-indexage (sinon les enregistrements sans propriétaire seraient invisibles des non-administrateurs). La direction et les administrateurs (droit « habilitations ») voient tout. Le SSO et le fournisseur MFA se configurent côté Identity Platform (console Firebase).</Tip>
+    </Card>
+  );
+}
+
+// Inscription MFA (TOTP) en libre-service — pour tout utilisateur connecté. Best-effort : si le projet
+// n'a pas activé l'authentification multi-facteur (Identity Platform), l'appel échoue proprement et le
+// message l'explique. Le secret est affiché en URI otpauth (à coller dans une app d'authentification).
+function MfaEnrollCard() {
+  const { user } = useClaims();
+  const toast = useToast();
+  const [uri, setUri] = useState<string | null>(null);
+  const [secret, setSecret] = useState<import("firebase/auth").TotpSecret | null>(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const enrolled = user ? (user as any).multiFactor?.enrolledFactors?.length > 0 : false;
+  const begin = async () => {
+    if (!user) return;
+    setBusy(true);
+    try {
+      const { multiFactor, TotpMultiFactorGenerator } = await import("firebase/auth");
+      const session = await multiFactor(user).getSession();
+      const s = await TotpMultiFactorGenerator.generateSecret(session);
+      setSecret(s);
+      setUri(s.generateQrCodeUrl(user.email || "nt360", "nt360"));
+    } catch (e) {
+      toast(`MFA indisponible : ${(e as Error)?.message || "activez l'authentification multi-facteur (Identity Platform)"}`);
+    } finally { setBusy(false); }
+  };
+  const finish = async () => {
+    if (!user || !secret) return;
+    setBusy(true);
+    try {
+      const { multiFactor, TotpMultiFactorGenerator } = await import("firebase/auth");
+      const assertion = TotpMultiFactorGenerator.assertionForEnrollment(secret, code.trim());
+      await multiFactor(user).enroll(assertion, "Authenticator");
+      toast("MFA activé — reconnectez-vous pour que le 2e facteur soit pris en compte.");
+      setUri(null); setSecret(null); setCode("");
+    } catch (e) {
+      toast(`Échec de l'inscription : ${(e as Error)?.message || "code invalide"}`);
+    } finally { setBusy(false); }
+  };
+  return (
+    <Card title="Ma sécurité — authentification à deux facteurs (MFA)">
+      {enrolled ? (
+        <Tip>Un second facteur (TOTP) est déjà associé à votre compte. ✔️</Tip>
+      ) : !uri ? (
+        <div className="flex items-center gap-3">
+          <button type="button" className="btn-ghost !py-1.5" disabled={busy || !user} onClick={begin}>Activer le TOTP</button>
+          <span className="text-[12px] text-muted">Renforce l'accès (recommandé pour les profils administrateurs).</span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] text-muted">Ajoutez ce compte dans votre application d'authentification (URI otpauth), puis saisissez le code à 6 chiffres :</div>
+          <code className="text-[11px] break-all rounded bg-panel2 p-2">{uri}</code>
+          <div className="flex items-center gap-2">
+            <input className="field !py-1 w-32" aria-label="Code TOTP" placeholder="000000" value={code} onChange={(e) => setCode(e.target.value)} />
+            <button type="button" className="btn-ghost !py-1.5" disabled={busy || code.trim().length < 6} onClick={finish}>Confirmer</button>
+            <button type="button" className="btn-ghost !py-1.5" disabled={busy} onClick={() => { setUri(null); setSecret(null); }}>Annuler</button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

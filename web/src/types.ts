@@ -204,7 +204,7 @@ export type Objective = {
   id?: string; label?: string; fiscalYear?: number; scope?: string; scopeValue?: string;
   targetCas?: number; targetInvoiced?: number; targetMargin?: number; targetMarginPct?: number;
 };
-export type UserRow = { id?: string; email?: string; name?: string; active?: boolean; role?: string; createdAt?: any };
+export type UserRow = { id?: string; email?: string; name?: string; active?: boolean; role?: string; managerUid?: string | null; createdAt?: any };
 
 // Actualité : bulletins d'événements clés + recommandations (moteur functions/domain/news).
 export type NewsBulletin = { id: string; domain: string; severity: "high" | "medium" | "info"; title: string; detail?: string; refs?: string[]; module?: string; segment?: string; action?: string };

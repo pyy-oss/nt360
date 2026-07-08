@@ -108,6 +108,46 @@ describe("Opportunités : écriture client interdite (callable-only)", () => {
   });
 });
 
+describe("Sécurité par enregistrement (OWD privé : propriétaire + hiérarchie)", () => {
+  // OWD « private » : seuls propriétaire + ligne hiérarchique (visibleTo) + admins (direction /
+  // habilitations) lisent. Par défaut (pas de config/recordAccess) l'objet reste public (cf. bloc plus haut,
+  // « la LECTURE reste autorisée à qui a pipeline:read »). On seed l'OWD privé et des opps/comptes avec visibleTo.
+  const seedPrivate = async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "config/recordAccess"), { opportunities: "private", accounts: "private" });
+      await setDoc(doc(db, "opportunities/OPP_OWNED"), { fp: "FP/2026/9", source: "saisie", amount: 1, ownerUid: "alice", visibleTo: ["alice", "boss"] });
+      await setDoc(doc(db, "opportunities/OPP_ORPHAN"), { fp: "FP/2026/8", source: "saisie", amount: 1 });
+      await setDoc(doc(db, "accounts/ACME"), { name: "ACME", ownerUid: "alice", visibleTo: ["alice", "boss"] });
+    });
+  };
+  it("le propriétaire (dans visibleTo) lit son opportunité privée", async () => {
+    await seedPrivate();
+    await assertSucceeds(getDoc(doc(as("commercial", "alice"), "opportunities/OPP_OWNED")));
+  });
+  it("le manager (dans visibleTo) lit l'opportunité privée de son collaborateur", async () => {
+    await seedPrivate();
+    await assertSucceeds(getDoc(doc(as("commercial", "boss"), "opportunities/OPP_OWNED")));
+  });
+  it("un tiers (hors visibleTo) NE lit PAS l'opportunité privée", async () => {
+    await seedPrivate();
+    await assertFails(getDoc(doc(as("commercial", "mallory"), "opportunities/OPP_OWNED")));
+  });
+  it("la direction (admin d'enregistrements) lit toute opportunité privée", async () => {
+    await seedPrivate();
+    await assertSucceeds(getDoc(doc(as("direction", "dg"), "opportunities/OPP_OWNED")));
+  });
+  it("une opportunité privée SANS propriétaire n'est PAS lisible par un non-admin", async () => {
+    await seedPrivate();
+    await assertFails(getDoc(doc(as("commercial", "alice"), "opportunities/OPP_ORPHAN")));
+  });
+  it("un compte privé : propriétaire OK, tiers refusé", async () => {
+    await seedPrivate();
+    await assertSucceeds(getDoc(doc(as("commercial", "alice"), "accounts/ACME")));
+    await assertFails(getDoc(doc(as("commercial", "mallory"), "accounts/ACME")));
+  });
+});
+
 describe("Lignes BC : seul le statut est modifiable", () => {
   it("achats change le statut", async () => {
     await assertSucceeds(updateDoc(doc(as("achats"), "bcLines/FP_2026_1_0"), { status: "emis" }));

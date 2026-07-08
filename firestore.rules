@@ -16,6 +16,25 @@ service cloud.firestore {
     function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
     function canWrite(m) { return signedIn() && level(m) == 'write'; }
 
+    // --- Sécurité par ENREGISTREMENT (Lot 2 « niveau Salesforce ») : PROPRIÉTAIRE + HIÉRARCHIE ---
+    // OWD (Org-Wide Default) par objet, édité par setRecordAccess (config/recordAccess). Défaut = « public »
+    // (le doc peut ne pas exister → comportement historique inchangé). Passé à « private », un enregistrement
+    // n'est visible que de son propriétaire, de sa ligne hiérarchique (via `visibleTo` dénormalisée) et des
+    // administrateurs. `visibleTo` = chaîne ascendante du propriétaire, matérialisée par les callables — d'où
+    // un filtrage O(1) (`uid in resource.data.visibleTo`) sans traversée récursive (impossible en rules).
+    function owdPrivate(obj) {
+      return exists(/databases/$(db)/documents/config/recordAccess)
+        && get(/databases/$(db)/documents/config/recordAccess).data[obj] == 'private';
+    }
+    // Administrateur d'enregistrements = voit TOUT quel que soit l'OWD (direction ou droit « habilitations »).
+    function isRecordAdmin() { return signedIn() && (role() == 'direction' || level('habilitations') == 'write'); }
+    // Autorisation de lecture d'un enregistrement gouverné : droit du module ET (OWD public, ou admin, ou
+    // appartenance à la ligne hiérarchique du propriétaire). En requête (list), la contrainte serveur
+    // `where('visibleTo','array-contains', uid)` garantit le dernier terme ; le front l'ajoute sous OWD privé.
+    function canSeeRecord(m, obj) {
+      return canRead(m) && (!owdPrivate(obj) || isRecordAdmin() || (request.auth.uid in resource.data.visibleTo));
+    }
+
     // Module d'appartenance d'un agrégat summaries/{id}, d'après le préfixe d'identifiant.
     // Applique le cloisonnement de la matrice AUSSI aux summaries (sinon un rôle sans droit
     // sur un module — ex. commercial sur fournisseurs — pourrait lire ses agrégats).
@@ -105,7 +124,9 @@ service cloud.firestore {
     // directe contournerait tout cela et pourrait, via une opp gagnée (stage 6) réconciliée au carnet
     // (mergeCommandes), corrompre le CAS/client d'une commande sans aucune trace. Donc write:false.
     match /opportunities/{id} {
-      allow read: if canRead('pipeline');
+      // Sécurité par enregistrement : sous OWD « private » (opportunities), seuls propriétaire + hiérarchie
+      // + admins lisent. Sous « public » (défaut), tout rôle « pipeline » lit (comportement historique).
+      allow read: if canSeeRecord('pipeline', 'opportunities');
       allow write: if false;
     }
     // Historique des transitions d'étape (Lot C) : lisible par qui voit le pipeline ; écrit UNIQUEMENT
@@ -115,8 +136,9 @@ service cloud.firestore {
     // Objet COMPTE (Account 360) + CONTACTS rattachés : entité relationnelle stable clé sur le nom
     // client canonique. Lecture par qui voit le carnet (overview) ; écriture via callables (upsert/
     // deleteAccount/Contact, Admin SDK, droit « pipeline », validés + audités) → write:false.
-    match /accounts/{id} { allow read: if canRead('overview'); allow write: if false; }
-    match /contacts/{id} { allow read: if canRead('overview'); allow write: if false; }
+    // Sécurité par enregistrement : les contacts SUIVENT l'OWD des comptes (leur visibleTo = celui du compte).
+    match /accounts/{id} { allow read: if canSeeRecord('overview', 'accounts'); allow write: if false; }
+    match /contacts/{id} { allow read: if canSeeRecord('overview', 'accounts'); allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
@@ -170,7 +192,11 @@ service cloud.firestore {
     // un futur doc config/* non listé n'est PAS lisible par défaut). Inclut les référentiels éditables
     // (projectManagers, businessUnits), les taux de change (fxRates) et la config ClickUp NON sensible
     // (enabled/teamId/listId ; le token vit dans Secret Manager, jamais ici) — tous lus par le front.
-    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup']; allow write: if false; }
+    // recordAccess (OWD par objet) + security (politique MFA) : lus par tout utilisateur provisionné —
+    // le front en a besoin pour cadrer ses requêtes (scoping visibleTo) et proposer l'enrôlement MFA.
+    // Non sensibles (des drapeaux public/private + un booléen), écrits via callables (setRecordAccess/
+    // setSecurityConfig) — jamais en direct.
+    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup', 'recordAccess', 'security']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }

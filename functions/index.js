@@ -974,6 +974,180 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   return { ok: true, buckets, cap: CAP, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
+// === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
+// Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
+// `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).
+// Les Security Rules et les requêtes client filtrent en O(1) (`array-contains uid`) SANS traversée
+// récursive (impossible en rules). L' APPLICATION est GOUVERNÉE par l'OWD (config/recordAccess) : par
+// défaut « public » (comportement historique inchangé, aucune régression) ; passé à « private » par la
+// direction, seuls le propriétaire, sa ligne hiérarchique et les administrateurs voient l'enregistrement.
+async function loadUsersMap() {
+  const snap = await db.collection("users").select("managerUid").get();
+  const map = {};
+  snap.forEach((d) => { map[d.id] = { managerUid: d.data().managerUid || null }; });
+  return map;
+}
+// visibleTo d'un propriétaire (charge la hiérarchie si non fournie). ownerUid vide → [] (sans propriétaire).
+async function visibleToFor(ownerUid, usersMap) {
+  const { ownerChain } = require("./domain/hierarchy");
+  const map = usersMap || (await loadUsersMap());
+  return ownerChain(map, ownerUid);
+}
+// Ré-indexe visibleTo sur TOUS les enregistrements (opportunités, comptes, contacts) à partir des
+// propriétaires courants et de la hiérarchie courante. À exécuter après un changement de hiérarchie
+// (setManager) ou avant de basculer un objet en OWD « private » (backfill). Batché (chunks de 400).
+// opts.deriveFromAm : pour une opportunité SANS propriétaire, en dérive un depuis son champ `am` (nom
+// du commercial) en le mappant sur l'utilisateur de même nom (normalisé). Rend l'OWD « private »
+// immédiatement exploitable sur les opps importées (sinon toutes « sans propriétaire » = admins seuls).
+async function reindexAllVisibility(opts = {}) {
+  const { ownerChain } = require("./domain/hierarchy");
+  const usersSnap = await db.collection("users").select("managerUid", "name").get();
+  const usersMap = {}; const nameToUid = {};
+  usersSnap.forEach((d) => {
+    usersMap[d.id] = { managerUid: d.data().managerUid || null };
+    const nm = String(d.data().name || "").trim().toUpperCase();
+    if (nm && !nameToUid[nm]) nameToUid[nm] = d.id;
+  });
+  const deriveFromAm = opts.deriveFromAm === true;
+  let updated = 0, derived = 0;
+  // Opportunités : propriétaire existant, sinon (option) dérivé de l'AM. L'owner dérivé est PERSISTÉ.
+  {
+    const snap = await db.collection("opportunities").select("ownerUid", "am").get();
+    let batch = db.batch(); let n = 0;
+    for (const doc of snap.docs) {
+      let owner = doc.data().ownerUid || null;
+      if (!owner && deriveFromAm) {
+        const cand = nameToUid[String(doc.data().am || "").trim().toUpperCase()];
+        if (cand) { owner = cand; derived++; }
+      }
+      const patch = { visibleTo: ownerChain(usersMap, owner) };
+      if (owner && !doc.data().ownerUid) patch.ownerUid = owner;
+      batch.set(doc.ref, patch, { merge: true });
+      updated++; n++;
+      if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+    }
+    if (n) await batch.commit();
+  }
+  // Comptes : propriétaire uniquement (pas d'AM). Contacts : visibilité HÉRITÉE du compte de rattachement.
+  const accSnap = await db.collection("accounts").select("ownerUid").get();
+  const accOwner = {}; accSnap.forEach((d) => { accOwner[d.id] = d.data().ownerUid || null; });
+  const commitChunks = async (docs, ownerOf) => {
+    let batch = db.batch(); let n = 0;
+    for (const doc of docs) {
+      batch.set(doc.ref, { visibleTo: ownerChain(usersMap, ownerOf(doc)) }, { merge: true });
+      updated++; n++;
+      if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+    }
+    if (n) await batch.commit();
+  };
+  await commitChunks(accSnap.docs, (d) => d.data().ownerUid || null);
+  const cSnap = await db.collection("contacts").select("accountId").get();
+  await commitChunks(cSnap.docs, (d) => accOwner[d.data().accountId] || null);
+  return { updated, derived };
+}
+// « Administrateur d'enregistrements » = voit TOUT quel que soit l'OWD (direction ou droit
+// d'écriture « habilitations »). Aligné sur le helper isRecordAdmin() des Security Rules.
+async function isRecordAdmin(req) {
+  if (req.auth?.token?.nt360Role === "direction") return true;
+  const { canWrite } = require("./domain/authz");
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  return canWrite(matrix, req.auth?.token?.nt360Role, "habilitations");
+}
+// OWD courant d'un objet (config/recordAccess) : 'private' ou 'public' (défaut). Lecture unique.
+async function recordAccessOwd(obj) {
+  const cfg = (await db.doc("config/recordAccess").get()).data() || {};
+  return cfg[obj] === "private" ? "private" : "public";
+}
+
+// Exige un 2e facteur (MFA) pour les actions sensibles SI config/security.require2fa est actif. Le jeton
+// Firebase porte `firebase.sign_in_second_factor` quand l'utilisateur s'est authentifié avec un second
+// facteur. Direction INCLUSE (pas d'exception : un compte admin est la cible la plus sensible). Par
+// défaut inactif (require2fa=false) → aucun changement de comportement tant que la direction ne l'active pas.
+async function requireStrongAuth(req) {
+  const sec = (await db.doc("config/security").get()).data() || {};
+  if (!sec.require2fa) return;
+  if (!req.auth?.token?.firebase?.sign_in_second_factor) {
+    throw new HttpsError("permission-denied", "authentification à deux facteurs requise pour cette action");
+  }
+}
+
+// Réaffecte le PROPRIÉTAIRE d'un enregistrement (opportunité ou compte) et recalcule sa visibleTo.
+// Gouverné « pipeline » (comme les autres mutations d'opp/compte), audité. Pour un compte, propage la
+// visibilité à ses contacts (qui suivent le compte).
+exports.assignOwner = onCallG("assignOwner", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const coll = String(req.data?.collection || "");
+  if (!["opportunities", "accounts"].includes(coll)) throw new HttpsError("invalid-argument", "collection invalide");
+  const id = assertPlainId(req.data?.id, "id enregistrement");
+  const ownerUid = req.data?.ownerUid ? String(req.data.ownerUid) : null;
+  const ref = db.doc(`${coll}/${id}`);
+  if (!(await ref.get()).exists) throw new HttpsError("not-found", "enregistrement introuvable");
+  const usersMap = await loadUsersMap();
+  const visibleTo = await visibleToFor(ownerUid, usersMap);
+  await ref.set({ ownerUid, visibleTo, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (coll === "accounts") { // les contacts du compte héritent de la nouvelle visibilité
+    const cs = await db.collection("contacts").where("accountId", "==", id).get();
+    if (!cs.empty) { const b = db.batch(); cs.forEach((s) => b.set(s.ref, { visibleTo }, { merge: true })); await b.commit(); }
+  }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "assign_owner", module: "pipeline", entity: coll, entityId: id, detail: { ownerUid }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id, ownerUid };
+});
+
+// Pose le MANAGER d'un utilisateur (users/{uid}.managerUid) — brique de la hiérarchie de rôles.
+// Direction uniquement, MFA si exigé, audité. Refuse l'auto-management et tout CYCLE hiérarchique.
+// Ré-indexe la visibilité (la chaîne ascendante de tout subordonné a changé).
+exports.setManager = onCallG("setManager", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req);
+  const uid = assertPlainId(req.data?.uid, "uid");
+  const managerUid = req.data?.managerUid ? String(req.data.managerUid) : null;
+  if (managerUid && managerUid === uid) throw new HttpsError("invalid-argument", "un utilisateur ne peut pas être son propre manager");
+  if (managerUid) {
+    const { ownerChain } = require("./domain/hierarchy");
+    // Cycle : si le futur manager rapporte (transitivement) déjà à uid, le lien fermerait une boucle.
+    if (ownerChain(await loadUsersMap(), managerUid).includes(uid)) throw new HttpsError("failed-precondition", "cycle hiérarchique interdit");
+  }
+  await db.doc(`users/${uid}`).set({ managerUid }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_manager", module: "habilitations", entity: "user", entityId: uid, detail: { managerUid }, ts: FieldValue.serverTimestamp() });
+  const { updated } = await reindexAllVisibility(); // changement de hiérarchie → pas de dérivation d'owner
+  return { ok: true, uid, managerUid, reindexed: updated };
+});
+
+// OWD (Org-Wide Default) par objet : config/recordAccess = { opportunities, accounts } ∈ {public,private}.
+// Direction uniquement, MFA si exigé, audité. Bascule en « private » → seuls propriétaire + hiérarchie +
+// admins voient l'objet (les rules et le front filtrent sur visibleTo). Backfill recommandé (reindexVisibility).
+exports.setRecordAccess = onCallG("setRecordAccess", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req);
+  const norm = (v) => (v === "private" ? "private" : "public");
+  const cfg = { opportunities: norm(req.data?.opportunities), accounts: norm(req.data?.accounts) };
+  await db.doc("config/recordAccess").set(cfg, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_record_access", module: "habilitations", entity: "config", entityId: "recordAccess", detail: cfg, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...cfg };
+});
+
+// Politique d'authentification (config/security) : require2fa (MFA obligatoire pour les actions
+// sensibles). Direction uniquement, audité. Par défaut inactif.
+exports.setSecurityConfig = onCallG("setSecurityConfig", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req);
+  const require2fa = req.data?.require2fa === true;
+  await db.doc("config/security").set({ require2fa }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_security", module: "habilitations", entity: "config", entityId: "security", detail: { require2fa }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, require2fa };
+});
+
+// Backfill/rafraîchissement de visibleTo sur tous les enregistrements. Direction uniquement, MFA si
+// exigé, audité. À lancer avant de passer un objet en OWD « private » (sinon les enregistrements sans
+// visibleTo à jour seraient invisibles des non-admins).
+exports.reindexVisibility = onCallG("reindexVisibility", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req);
+  const { updated, derived } = await reindexAllVisibility({ deriveFromAm: req.data?.deriveFromAm === true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "reindex_visibility", module: "habilitations", entity: "config", entityId: "recordAccess", detail: { updated, derived }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, reindexed: updated, derived };
+});
+
 // === OBJET COMPTE (Account 360) — socle relationnel. Entité stable clé sur le nom client CANONIQUE
 // (jointure directe avec le champ `client` normalisé partout). Métadonnées éditables (secteur, pays,
 // hiérarchie parent, propriétaire → socle sécurité Lot 2, notes, tags). Gouverné « pipeline », audité.
@@ -992,13 +1166,20 @@ exports.upsertAccount = onCallG("upsertAccount", { memoryMiB: 256, timeoutSecond
   if (d.country !== undefined) patch.country = String(d.country || "").trim();
   if (d.notes !== undefined) patch.notes = String(d.notes || "").slice(0, 2000);
   if (d.tags !== undefined) patch.tags = Array.isArray(d.tags) ? d.tags.slice(0, 20).map((t) => String(t).trim()).filter(Boolean) : [];
-  if (d.ownerUid !== undefined) patch.ownerUid = d.ownerUid ? String(d.ownerUid) : null; // propriété (Lot 2 sécurité)
+  if (d.ownerUid !== undefined) { // propriété + visibleTo dénormalisée (Lot 2 sécurité par enregistrement)
+    patch.ownerUid = d.ownerUid ? String(d.ownerUid) : null;
+    patch.visibleTo = await visibleToFor(patch.ownerUid);
+  }
   if (d.parent !== undefined) {
     const p = d.parent ? accountId(resolve(d.parent)) : null;
     if (p && p === id) throw new HttpsError("invalid-argument", "un compte ne peut pas être son propre parent");
     patch.parentId = p;
   }
   await db.doc(`accounts/${id}`).set(patch, { merge: true });
+  if (patch.visibleTo !== undefined) { // la visibilité des contacts SUIT le compte
+    const cs = await db.collection("contacts").where("accountId", "==", id).get();
+    if (!cs.empty) { const b = db.batch(); cs.forEach((s) => b.set(s.ref, { visibleTo: patch.visibleTo }, { merge: true })); await b.commit(); }
+  }
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_account", module: "pipeline", entity: "account", entityId: id, detail: { name: canon }, ts: FieldValue.serverTimestamp() });
   return { ok: true, id, name: canon };
 });
@@ -1016,7 +1197,10 @@ exports.upsertContact = onCallG("upsertContact", { memoryMiB: 256, timeoutSecond
   if (!name) throw new HttpsError("invalid-argument", "nom du contact requis");
   const email = String(d.email || "").trim();
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpsError("invalid-argument", "email invalide");
-  const doc = { accountId: acc, name, role: String(d.role || "").trim(), email, phone: String(d.phone || "").trim(), primary: !!d.primary, updatedAt: FieldValue.serverTimestamp() };
+  // Visibilité : le contact SUIT le compte (même visibleTo que le propriétaire du compte, cf. Lot 2).
+  const accData = (await db.doc(`accounts/${acc}`).get()).data() || {};
+  const visibleTo = Array.isArray(accData.visibleTo) ? accData.visibleTo : await visibleToFor(accData.ownerUid || null);
+  const doc = { accountId: acc, name, role: String(d.role || "").trim(), email, phone: String(d.phone || "").trim(), primary: !!d.primary, visibleTo, updatedAt: FieldValue.serverTimestamp() };
   let id = d.id ? String(d.id) : null;
   if (id) { assertPlainId(id, "id contact"); await db.doc(`contacts/${id}`).set(doc, { merge: true }); }
   else { const ref = await db.collection("contacts").add({ ...doc, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
@@ -1055,6 +1239,13 @@ exports.accountView = onCallG("accountView", { memoryMiB: 256, timeoutSeconds: 6
     db.doc(`accounts/${id}`).get(),
     db.collection("contacts").where("accountId", "==", id).get(),
   ]);
+  // Sécurité par enregistrement : sous OWD « private » (comptes), l'appelant DOIT voir ce compte
+  // (propriétaire/hiérarchie via visibleTo). Sinon accountView exposerait la fiche à un rôle « overview »
+  // dépourvu de droit de vue sur cet enregistrement. Admins (direction / habilitations) voient tout.
+  if (accSnap.exists && (await recordAccessOwd("accounts")) === "private" && !(await isRecordAdmin(req))) {
+    const vis = accSnap.data().visibleTo || [];
+    if (!vis.includes(req.auth.uid)) throw new HttpsError("permission-denied", "accès refusé à ce compte");
+  }
   const contacts = cSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0) || String(a.name || "").localeCompare(String(b.name || "")));
   return { ok: true, id, name, account: accSnap.exists ? { id, ...accSnap.data() } : null, contacts };
@@ -1428,8 +1619,15 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   const pr = Number(d.probability);
   const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
   // Édition : id fourni préfixé « saisie_ » ; sinon nouvelle saisie. On ne touche QUE les saisies.
-  const id = (typeof d.id === "string" && d.id.startsWith("saisie_")) ? d.id
-    : ("saisie_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  const isNew = !(typeof d.id === "string" && d.id.startsWith("saisie_"));
+  const id = isNew
+    ? ("saisie_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8))
+    : d.id;
+  // Propriété (Lot 2 sécurité par enregistrement) : owner explicite si fourni ; sinon, à la CRÉATION,
+  // le créateur devient propriétaire (standard Salesforce). En édition sans owner fourni → inchangé.
+  let ownerUid;
+  if (d.ownerUid !== undefined) ownerUid = d.ownerUid ? String(d.ownerUid) : null;
+  else if (isNew) ownerUid = req.auth.uid;
   // MB prévisionnel : % de marge brute PRÉVISIONNELLE saisie (prévision commerciale, NON confidentielle
   // — distincte de la marge P&L réelle qui, elle, reste isolée dans projectSheetsMargin/rentabilité).
   // Clamp [0,100] ; vide/absent → null. Porté par l'opportunité (lisible au niveau pipeline, par choix).
@@ -1452,6 +1650,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     lostReason: String(d.lostReason || "").trim().slice(0, 200) || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
+  if (ownerUid !== undefined) { doc.ownerUid = ownerUid; doc.visibleTo = await visibleToFor(ownerUid); }
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
   if (prevStage != null && prevStage !== stage) {
     await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
@@ -1505,6 +1704,10 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   if (d.closingDate !== undefined) patch.closingDate = d.closingDate || null;
   if (d.am !== undefined) patch.am = String(d.am || "").trim();
   if (d.bu !== undefined) patch.bu = String(d.bu || "").trim().toUpperCase();
+  if (d.ownerUid !== undefined) { // réaffectation de propriété + visibleTo (Lot 2 sécurité)
+    patch.ownerUid = d.ownerUid ? String(d.ownerUid) : null;
+    patch.visibleTo = await visibleToFor(patch.ownerUid);
+  }
   // Suivi commercial (Lot B) : prochaine action + échéance + motif de perte — éditables sur toute opp.
   if (d.nextStep !== undefined) patch.nextStep = String(d.nextStep || "").trim().slice(0, 500) || null;
   if (d.nextStepDate !== undefined) { const { toISO } = require("./lib/sheets"); patch.nextStepDate = d.nextStepDate ? (toISO(d.nextStepDate) || null) : null; }

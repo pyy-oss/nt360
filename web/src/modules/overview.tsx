@@ -4,6 +4,7 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanExport, useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
+import { useRecordScope } from "../lib/scope";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
 import { MultiLine } from "../design/charts";
@@ -76,7 +77,8 @@ export const Overview: FC<Props> = ({ period }) => {
   // déclenchait une lecture permission-denied et fuitait hors de son périmètre. Cf. audit P0-C.
   const canPipe = useCan("pipeline") !== "none";
   const canFac = useCan("facturation") !== "none";
-  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe ? "opportunities" : null);
+  const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
+  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { rows: allInvoices } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
   // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).

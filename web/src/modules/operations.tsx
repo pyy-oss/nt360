@@ -4,6 +4,7 @@ import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
+import { useRecordScope } from "../lib/scope";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
@@ -538,7 +539,11 @@ export const Fp360: FC<Props> = () => {
   const sheetsMBy = new Map(sheetsMargin.map((m) => [m.fp, m]));
   const sheets = sheetsBase.map((s) => ({ ...s, ...(sheetsMBy.get(s.fp) || {}) }));
   const { rows: bc } = useCollectionData<BcLine>(fp ? "bcLines" : null, cons, fp);
-  const { rows: opps } = useCollectionData<Opportunity>(fp ? "opportunities" : null, cons, fp);
+  // Sécurité par enregistrement : sous OWD « private », les opps sont filtrées par visibleTo (array-contains,
+  // seule contrainte serveur possible sans index composite) puis re-filtrées par N° FP côté client.
+  const oppScope = useRecordScope("opportunities");
+  const { rows: oppsRaw } = useCollectionData<Opportunity>(fp ? "opportunities" : null, oppScope.scoped ? oppScope.constraints : cons, fp + (oppScope.scoped ? "|s" : ""));
+  const opps = oppScope.scoped ? oppsRaw.filter((x) => (x.fp || "").toUpperCase() === fp) : oppsRaw;
   const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;
   return (
     <div className="flex flex-col gap-4">

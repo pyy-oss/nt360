@@ -7,6 +7,7 @@
 accountView
 addBcLine
 alertDigest
+assignOwner
 attachUser
 clickupHealth
 clickupWebhook
@@ -45,6 +46,7 @@ recompute
 reconClient
 reconcileBcLinks
 reconcileClickupLinks
+reindexVisibility
 reingest
 scheduledBcPull
 scheduledClickupEnrich
@@ -60,11 +62,14 @@ setClientAliases
 setFpAlias
 setFxRates
 setInvoiceFp
+setManager
 setNotificationConfig
 setOrderPm
 setPermissions
 setProjectionConfig
+setRecordAccess
 setRefList
+setSecurityConfig
 setUserActive
 setUserRole
 setupClickupWebhook
