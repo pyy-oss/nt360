@@ -459,7 +459,12 @@ async function recomputeCore(db, only) {
   // Découpées en CHUNKS (commandesRows/{i}) pour ne PAS dépasser la limite Firestore ~1 Mio/doc :
   // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).
   let commandeChunks = null;
-  if (want("commandes") || want("overview")) {
+  // Découplé de "overview" : les lignes de commande matérialisées (commandesRows*) dérivent des ORDERS,
+  // pas de la chaîne overview. Un recompute ciblé "opps" (qui inclut "overview" pour rafraîchir
+  // certitudes/conversion) ne doit PAS réécrire tous les chunks de commandes (inchangés). Un recompute
+  // COMPLET (only falsy → want("commandes")=true) les régénère toujours. Aucun appelant ne demande
+  // "overview" sans "commandes" pour rafraîchir le carnet (vérifié).
+  if (want("commandes")) {
     // La MARGE par ligne (mb / costTotal / marginPct) est ISOLÉE dans commandesRowsMargin/{i}
     // (lecture réservée à « Rentabilité ») ; les chunks de base ne portent que des grandeurs non
     // sensibles → confidentialité opposable côté serveur (pas seulement masquage UI).

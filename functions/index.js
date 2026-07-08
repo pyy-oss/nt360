@@ -103,6 +103,14 @@ async function recomputeSummaries(only) {
   }
 }
 
+// Portée de recompute CIBLÉE pour une mutation d'OPPORTUNITÉ (saisie/board/import). Une opp n'écrit
+// JAMAIS dans orders/invoices/bcLines : le lien « au P&L » est une jointure d'AFFICHAGE (front, par N° FP),
+// pas une dépendance d'agrégat. On reconstruit donc uniquement les summaries réellement dérivés des opps —
+// pipeline (+ funnel), ams, atterrissage (le pondéré nourrit le projeté CAS), overview (certitudes/
+// conversion), news, alerts, dataQuality (compte + « gagnées sans FP/P&L ») — et on saute commandes/
+// backlog/facturation/rentabilité/clients/domaines/fournisseurs/cash (inchangés). ~2× moins d'écritures.
+const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality"];
+
 // Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
 // échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
 async function logOps(entry) {
@@ -1105,7 +1113,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // saisie occasionnelle → recalcul complet (l'opp peut devenir commande, etc.)
+  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; pas les commandes)
   return { ok: true, id };
 });
 
@@ -1122,7 +1130,7 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
     uid: req.auth.uid, action: "delete_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client: cur.client || null, am: cur.am || null, fp: cur.fp || null, stage: cur.stage ?? null, amount: cur.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // saisie occasionnelle → recalcul complet (l'opp peut devenir commande, etc.)
+  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps uniquement)
   return { ok: true };
 });
 
@@ -1184,7 +1192,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // l'opp peut devenir/réconcilier une commande → recalcul complet
+  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; la « réconciliation » commande est une jointure d'affichage, pas d'agrégat)
   return { ok: true, id };
 });
 
@@ -1290,7 +1298,7 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
     uid: req.auth.uid, action: "import_opps", module: "pipeline", entity: "opportunity", entityId: filename,
     detail: { ...counts }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (import/MAJ d'opps → agrégats pipeline uniquement)
   return { ok: true, applied: true, ...counts, samples };
 });
 
