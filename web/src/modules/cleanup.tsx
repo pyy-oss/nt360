@@ -11,7 +11,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx } from "../design/components";
 import { pct } from "../design/tokens";
-import { deleteRecords, callDedupe, type DedupeResult } from "../lib/writes";
+import { deleteRecords, callDedupe, setFpAlias, type DedupeResult } from "../lib/writes";
 import { Props, relTime, AnomaliesList } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
 
@@ -31,6 +31,7 @@ const ACTION_LABEL: Record<string, string> = {
   delete_records: "Suppression", patch_order: "Commande corrigée", patch_opp: "Opp. corrigée",
   patch_invoice: "Facture corrigée", patch_fiche: "Fiche corrigée", bc_patch: "BC corrigé",
   create_order: "Commande créée", set_invoice_fp: "Facture rattachée", client_aliases: "Alias clients",
+  set_fp_alias: "Réconciliation FP",
   upsert_opp: "Opp. saisie", add_bc: "BC ajouté", bc_status: "Statut BC",
   cancel_record: "Annulation", restore_record: "Rétablissement",
 };
@@ -107,6 +108,53 @@ function DedupeCard() {
   );
 }
 
+// RÉCONCILIATION FP — une même commande peut être déjà au P&L sous un N° FP différent de celui de
+// l'opp gagnée (le FP P&L, lié à la facturation, fait autorité). On déclare l'équivalence
+// `source → cible P&L` : à chaque recalcul, les lignes portant la source sont ré-étiquetées vers la
+// cible EN MÉMOIRE (overlay config/fpAliases, non destructif → survit aux ré-imports delta, comme les
+// alias clients). La cible reste seule au P&L ; la source cesse d'apparaître comme une commande à part.
+function FpReconcileCard() {
+  const { data } = useDocData<{ map?: Record<string, string> }>("config/fpAliases");
+  const map = data?.map || {};
+  const entries = Object.entries(map);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const ready = from.trim() && to.trim() && from.trim() !== to.trim();
+  return (
+    <Card title="Réconciliation N° FP (opp gagnée ↔ P&L)">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-end gap-2 flex-wrap text-[13px]">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted">N° FP source (à réconcilier)</span>
+            <input className="field w-40 !py-1" aria-label="N° FP source à réconcilier" placeholder="FP/2026/…" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <span className="text-faint pb-1.5">→</span>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted">N° FP cible (déjà au P&L)</span>
+            <input className="field w-40 !py-1" aria-label="N° FP cible déjà au P&L" placeholder="FP/2026/…" value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          {ready && (
+            <Busy variant="ghost" label="Réconcilier" okMsg="Réconciliation enregistrée (recalcul lancé)" errMsg="Réconciliation refusée"
+              fn={async () => { await setFpAlias(from.trim(), to.trim()); setFrom(""); setTo(""); }} />
+          )}
+        </div>
+        {entries.length > 0 && (
+          <Table columns={[
+            colText("N° FP source", (r: [string, string]) => <span className="tabnum text-faint">{r[0]}</span>, (r: [string, string]) => r[0]),
+            colText("réconcilié vers (P&L)", (r: [string, string]) => <span className="tabnum text-ink">{r[1]}</span>, (r: [string, string]) => r[1]),
+            colText("", (r: [string, string]) => (
+              <DangerBtn label="Retirer" okMsg="Réconciliation retirée (recalcul lancé)" errMsg="Retrait refusé"
+                confirm={`Retirer la réconciliation ${r[0]} → ${r[1]} ? Le N° FP source réapparaîtra comme une commande distincte s'il porte des lignes.`}
+                fn={() => setFpAlias(r[0], "")} />
+            )),
+          ]} rows={entries} />
+        )}
+        <Tip>Quand une commande est <b>déjà au P&L sous un autre N° FP</b> (le P&L, lié à la facturation, est la référence) : indiquez le N° FP de l'<b>opp/commande à réconcilier</b> puis le N° FP <b>P&L définitif</b>. Overlay non destructif (survit aux ré-imports) : à chaque recalcul, les lignes de la source sont rattachées à la cible ; on évite ainsi de compter deux fois la même affaire. Laissez le N° FP cible vide en retirant une réconciliation pour l'annuler.</Tip>
+      </div>
+    </Card>
+  );
+}
+
 export const Cleanup: FC<Props> = () => {
   const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const { data: qh } = useDocData<QualityHistory>("summaries/qualityHistory");
@@ -173,6 +221,8 @@ export const Cleanup: FC<Props> = () => {
           <Tip>Purges de MASSE des enregistrements clairement « déchet » (non rattachables / vides / morts). Chacune demande confirmation, ne touche que le lot indiqué, est auditée et gouvernée par les droits. Pour une facture <b>valide</b> non rattachée, préférez la <b>rattacher</b> (Factures → Rattacher) plutôt que la purger. Le delta reste prioritaire : une source ré-important un record le recrée.</Tip>
         </div>
       </Card>
+
+      {canImport && <FpReconcileCard />}
 
       {isDirection && <DedupeCard />}
 

@@ -64,6 +64,16 @@ export async function setInvoiceFp(id: string, fp: string) {
   await httpsCallable(functions, "setInvoiceFp")({ id, fp });
 }
 
+/** RÉCONCILIATION FP — déclare qu'un N° FP (souvent celui d'une opp gagnée) désigne en réalité la
+ *  même commande qu'un N° FP DÉJÀ au P&L. Le FP P&L (`to`, lié à la facturation) fait autorité : à
+ *  chaque recalcul, les lignes portant `from` sont ré-étiquetées `to` en mémoire (overlay
+ *  config/fpAliases, non destructif — survit aux ré-imports). `to` vide = supprime l'alias. Droit
+ *  « import ». onCall : recalcule. */
+export async function setFpAlias(from: string, to: string) {
+  const res = await httpsCallable(functions, "setFpAlias")({ from, to });
+  return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
+}
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {

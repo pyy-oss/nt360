@@ -70,4 +70,19 @@ const plausibleYear = (y) => {
   return n >= 2015 && n <= max ? n : 0;
 };
 
-module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear };
+/** Construit un résolveur de RÉCONCILIATION N° FP à partir de la table config/fpAliases (`map` :
+ *  clé canonique source → N° FP cible P&L). Le résolveur canonise le FP d'entrée (fpKey) pour la
+ *  recherche, puis renvoie la CIBLE si un alias existe, sinon le FP d'origine INCHANGÉ (pas de
+ *  fpKey imposé aux non-aliasés → on ne réécrit rien par surprise). Un FP illisible (fpKey null)
+ *  ou une map vide passe tout à travers. Miroir de buildClientResolver, testable isolément. */
+const buildFpAliasResolver = (map) => {
+  const m = map && typeof map === "object" ? map : {};
+  const hasAny = Object.keys(m).length > 0;
+  return (fp) => {
+    if (!hasAny || fp == null || fp === "") return fp;
+    const k = fpKey(fp);
+    return (k && m[k]) || fp;
+  };
+};
+
+module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear, buildFpAliasResolver };

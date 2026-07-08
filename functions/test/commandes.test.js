@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 const { mergeCommandes } = require("../domain/commandes");
+const { buildFpAliasResolver } = require("../lib/ids");
 
 describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réconcilient", () => {
   const orders = [
@@ -52,6 +53,36 @@ describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réco
   it("fiche affaire → pnlSource=fiche (provenance de la marge)", () => expect(byFp["FP/2026/1"].pnlSource).toBe("fiche"));
   it("commandes = uniquement les FP présents au P&L", () => {
     expect(cmd.map((c) => c.fp).sort()).toEqual(["FP/2026/1", "FP/2026/5", "FP/2026/9"]);
+  });
+});
+
+describe("réconciliation FP (config/fpAliases) : une opp gagnée sous un AUTRE N° FP se rattache au P&L", () => {
+  // Scénario réel : la commande est DÉJÀ au P&L sous FP/2026/500 (lié à la facturation), mais l'opp
+  // gagnée a été saisie sous FP/2026/13 (padding/numérotation différente). Sans réconciliation, l'opp
+  // est « gagnée sans P&L » → ignorée (P&L strict), et son CAS ne remonte pas. Avec l'alias
+  // 13 → 500 appliqué EN AMONT (comme dans aggregate.js), l'opp réconcilie la bonne ligne P&L.
+  const orders = [{ fp: "FP/2026/500", client: "PNL", bu: "ICT", cas: 500, raf: 200, yearPo: 2026, source: "pnl" }];
+  const opps = [{ fp: "FP/2026/13", client: "OPP", am: "AM1", bu: "ICT", amount: 800, stage: 6, closingDate: "2026-05-01" }];
+
+  it("SANS alias : l'opp (FP différent) n'a pas de P&L → aucune réconciliation (CAS P&L inchangé)", () => {
+    const cmd = mergeCommandes(orders, opps, [], []);
+    const byFp = Object.fromEntries(cmd.map((c) => [c.fp, c]));
+    expect(byFp["FP/2026/13"]).toBeUndefined(); // opp gagnée sans P&L → ignorée
+    expect(byFp["FP/2026/500"].source).toBe("pnl");
+    expect(byFp["FP/2026/500"].cas).toBe(500); // CAS reste celui du P&L
+  });
+
+  it("AVEC alias 13 → 500 : l'opp réconcilie la ligne P&L (CAS = montant opp gagnée)", () => {
+    const canonFp = buildFpAliasResolver({ "FP/2026/13": "FP/2026/500" });
+    const oppsAliased = opps.map((o) => ({ ...o, fp: canonFp(o.fp) }));
+    const cmd = mergeCommandes(orders, oppsAliased, [], []);
+    const byFp = Object.fromEntries(cmd.map((c) => [c.fp, c]));
+    // Toujours UNE seule commande (le P&L reste la colonne vertébrale) — pas de doublon.
+    expect(cmd.map((c) => c.fp)).toEqual(["FP/2026/500"]);
+    const c = byFp["FP/2026/500"];
+    expect(c.source).toBe("opp_won"); // réconciliée par l'opp gagnée
+    expect(c.cas).toBe(800); // CAS = montant de l'opp gagnée (elle remonte enfin)
+    expect(c.client).toBe("OPP");
   });
 });
 

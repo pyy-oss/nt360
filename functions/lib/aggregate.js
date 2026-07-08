@@ -23,7 +23,7 @@ const { isAgedLost } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
-const { fpKey, plausibleYear, num } = require("./ids");
+const { fpKey, plausibleYear, num, buildFpAliasResolver } = require("./ids");
 const { safeId } = require("./sheets");
 
 // Coercition numérique DÉFENSIVE : un import brut peut stocker un montant en CHAÎNE ("1 000 000",
@@ -148,6 +148,20 @@ async function recomputeCore(db, only) {
     for (const r of rows) if (r && r.client != null && r.client !== "") r.client = normClient(r.client);
   }
   for (const b of bcLines) if (b && b.customer != null && b.customer !== "") b.customer = normClient(b.customer);
+
+  // RÉCONCILIATION DE N° FP (overlay config/fpAliases) : parfois une même commande est au P&L sous un
+  // N° FP différent de celui saisi sur l'opportunité. Le FP P&L FAIT FOI (il porte la facturation). On
+  // redirige donc, EN MÉMOIRE, tout FP « source » (opp) vers le FP « cible » (P&L) avant la fusion du
+  // carnet → l'opp gagnée réconcilie alors la bonne ligne P&L (son CAS compte), et factures/BC/fiches
+  // saisis sous l'ancien FP se rattachent à la commande. NON DESTRUCTIF (les docs gardent leur FP ; seul
+  // le recompute canonise) et SURVIT aux ré-imports LIVE (overlay, comme l'annulation/le PM). Cf. clientAliases.
+  const fpAliasMap = ((await db.doc("config/fpAliases").get()).data() || {}).map || {};
+  if (Object.keys(fpAliasMap).length) {
+    const canonFp = buildFpAliasResolver(fpAliasMap);
+    for (const rows of [pnlOrders, invoices, oppsRaw, sheetsBase, bcLines]) {
+      for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
+    }
+  }
 
   // OVERLAY D'ANNULATION (statut « Annulée » persistant, hors delta) : les commandes/factures dont
   // l'id figure ici sont EXCLUES de tous les agrégats (carnet, CAS, backlog, facturation, cash,
