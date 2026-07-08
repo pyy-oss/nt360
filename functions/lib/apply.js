@@ -31,6 +31,35 @@ function stripLiveOpps(writes) {
   return { writes: kept, skipped };
 }
 
+// Applique les taux de change PARAMÉTRÉS (config/fxRates) aux lignes logistics « à saisir » (devise
+// étrangère hors EUR/XOF, non convertie par le parseur pur qui n'a pas accès aux taux). Convertit
+// amountXof = amount × taux et marque fxSource='taux'. NE TOUCHE PAS une ligne portant déjà une
+// correction MANUELLE (doc existant avec amountXof>0) → l'auto-conversion ne clobbe pas une saisie
+// (cf. audit P0-2). Renvoie le nombre de lignes converties. Best-effort : n'échoue jamais l'import.
+async function resolveLogisticsFx(db, writes) {
+  const targets = (writes || []).filter((w) =>
+    typeof w.path === "string" && w.path.startsWith("bcLines/") && w.data && w.data.source === "logistics" &&
+    w.data.fxSource === "a_saisir" && String(w.data.currency || "XOF").toUpperCase() !== "XOF" && (Number(w.data.amount) || 0) > 0);
+  if (!targets.length) return 0;
+  let rates = {};
+  try { rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {}; }
+  catch (_) { return 0; }
+  // Lecture des docs existants : ne pas écraser une correction manuelle (amountXof>0 déjà stocké).
+  const snaps = await Promise.all(targets.map((w) => db.doc(w.path).get().catch(() => null)));
+  let converted = 0;
+  targets.forEach((w, i) => {
+    const rate = Number(rates[String(w.data.currency).toUpperCase()]);
+    if (!(rate > 0)) return;
+    const existing = snaps[i] && snaps[i].exists ? (snaps[i].data() || {}) : {};
+    if ((Number(existing.amountXof) || 0) > 0) return; // correction manuelle préservée
+    w.data.amountXof = Math.round((Number(w.data.amount) || 0) * rate);
+    w.data.fxRate = rate;
+    w.data.fxSource = "taux";
+    converted++;
+  });
+  return converted;
+}
+
 const SWEEP_SOURCES = new Set(["fiche", "logistics"]);
 async function applyWrites(db, writes) {
   const byPath = new Map();
@@ -68,4 +97,4 @@ async function applyWrites(db, writes) {
   // vérification). Le marquage vit dans lib/sync.js (applySalesSync), seul chemin snapshot LIVE complet.
 }
 
-module.exports = { applyWrites, stripLiveOpps };
+module.exports = { applyWrites, stripLiveOpps, resolveLogisticsFx };

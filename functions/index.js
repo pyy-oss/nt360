@@ -12,7 +12,7 @@ const XLSX = require("xlsx");
 const { getApp } = require("firebase-admin/app");
 const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
-const { applyWrites, stripLiveOpps } = require("./lib/apply");
+const { applyWrites, stripLiveOpps, resolveLogisticsFx } = require("./lib/apply");
 const { parseBuffer, reingestBucket } = require("./lib/reingest");
 const { defineSecret } = require("firebase-functions/params");
 // Token API ClickUp (Secret Manager) — utilisé seulement par les fonctions d'intégration ClickUp.
@@ -64,7 +64,11 @@ async function ingestHandler(event) {
     // Sales_DATA (sync/sales_data.xlsx), seul écrivain LIVE.
     const { writes: deltaWrites, skipped: liveSkipped } = stripLiveOpps(writes);
     if (liveSkipped) report.liveSkipped = liveSkipped;
-    logger.info("ingest", { name, kinds, liveSkipped, ...report });
+    // Applique les taux paramétrés (config/fxRates) aux lignes logistics « à saisir » sans écraser une
+    // correction manuelle (cf. resolveLogisticsFx) — la conversion USD/GBP se fait à l'ingestion.
+    const fxConverted = await resolveLogisticsFx(db, deltaWrites);
+    if (fxConverted) report.fxConverted = fxConverted;
+    logger.info("ingest", { name, kinds, liveSkipped, fxConverted, ...report });
 
     await applyWrites(db, deltaWrites); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
@@ -763,9 +767,12 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   // LIVE écarté du canal delta (cf. stripLiveOpps) : les opportunités ne sont écrites QUE par la synchro
   // Sales_DATA (staling des fantômes) → un ré-import delta ne peut plus créer de doublon de pipeline.
   const { writes: deltaWrites, skipped: liveSkipped } = stripLiveOpps(writes);
+  // Taux paramétrés (config/fxRates) appliqués aux lignes logistics « à saisir » sans écraser de correction
+  // manuelle (cf. resolveLogisticsFx) — conversion USD/GBP à l'import.
+  const fxConverted = await resolveLogisticsFx(db, deltaWrites);
   await applyWrites(db, deltaWrites); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
-  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}) };
+  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}), ...(fxConverted ? { fxConverted } : {}) };
   await db.collection("imports").add({
     uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",
     rowsIn, rowsOk, rowsSkipped, report, ts: FieldValue.serverTimestamp(),

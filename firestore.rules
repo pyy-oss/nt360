@@ -21,6 +21,9 @@ service cloud.firestore {
       return id.matches('overviewMargin.*') ? 'rentabilite'
         // Marge reportée sur N+1 (isolée) → accès « Rentabilité » requis (avant atterrissage.*).
         : id.matches('atterrissageMargin.*') ? 'rentabilite'
+        // Objectifs annuels (cible CAS/CAF, écart, proba) ISOLÉS → accès « objectifs » requis (avant
+        // atterrissage.* qui est overview). Un rôle sans droit « objectifs » ne lit pas les cibles.
+        : id.matches('atterrissageObjectifs.*') ? 'objectifs'
         : id.matches('overview.*') ? 'overview'
         : id.matches('facturation.*') ? 'facturation'
         : id.matches('receivables.*') ? 'facturation'

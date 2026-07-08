@@ -122,7 +122,7 @@ export interface ClickupHealthSummary {
   orphanSample?: { id?: string; name?: string; fp?: string | null }[];
   listId?: string; at?: any;
 }
-export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; ar?: number; dso?: number; fy?: number };
+export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; fy?: number };
 export interface TrendsSummary { points?: TrendPoint[] }
 export interface ReceivablesSummary {
   totalAR?: number; overdue?: number; overdueCount?: number; openCount?: number; dso?: number;
