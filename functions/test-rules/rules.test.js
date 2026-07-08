@@ -148,6 +148,20 @@ describe("Sécurité par enregistrement (OWD privé : propriétaire + hiérarchi
   });
 });
 
+describe("Activités & tâches : accès callable-only (Lot 3)", () => {
+  it("lecture directe refusée même à qui a pipeline:read (passe par listActivities)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "activities/ACT1"), { type: "note", subject: "x", relatedId: "ORANGE", visibleTo: ["commercial"] });
+    });
+    await assertFails(getDoc(doc(as("commercial"), "activities/ACT1")));
+    await assertFails(getDoc(doc(as("direction"), "activities/ACT1")));
+  });
+  it("écriture directe refusée (passe par upsert/deleteActivity)", async () => {
+    await assertFails(setDoc(doc(as("commercial"), "activities/ACT_NEW"), { type: "note", subject: "y", relatedId: "X" }));
+    await assertFails(setDoc(doc(as("direction"), "activities/ACT_NEW"), { type: "note", subject: "y", relatedId: "X" }));
+  });
+});
+
 describe("Lignes BC : seul le statut est modifiable", () => {
   it("achats change le statut", async () => {
     await assertSucceeds(updateDoc(doc(as("achats"), "bcLines/FP_2026_1_0"), { status: "emis" }));

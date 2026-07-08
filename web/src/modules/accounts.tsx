@@ -8,6 +8,7 @@ import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, money, cx } from "../design/components";
 import { accountView, upsertAccount, upsertContact, deleteContact, type Account, type Contact, type AccountView } from "../lib/writes";
+import { ActivityTimeline } from "./activities";
 import type { Props } from "./_shared";
 import type { EntitySummary } from "../types";
 
@@ -129,7 +130,12 @@ export const Client360: FC<Props> = ({ period }) => {
               {!view.contacts.length && !canWrite && <div className="text-[13px] text-muted">Aucun contact.</div>}
             </div>
 
-            <Tip>Le <b>compte</b> est clé sur le nom client canonique (jointure directe avec toutes les vues). Renseignez secteur, pays, compte parent (hiérarchie) et les <b>contacts</b> (un principal). La propriété du compte (socle de la sécurité par enregistrement) arrive au lot suivant.</Tip>
+            {/* Timeline : activités & tâches rattachées au compte (Lot 3) */}
+            <div className="border-t border-hair pt-3">
+              <ActivityTimeline relatedType="account" relatedId={view.id} relatedName={view.name} />
+            </div>
+
+            <Tip>Le <b>compte</b> est clé sur le nom client canonique (jointure directe avec toutes les vues). Renseignez secteur, pays, compte parent (hiérarchie) et les <b>contacts</b> (un principal). Journalisez appels, e-mails et RDV, et créez des <b>tâches à échéance</b> dans la timeline — retrouvez vos tâches ouvertes dans le module <b>Activités</b>.</Tip>
           </div>
         )}
       </Card>
