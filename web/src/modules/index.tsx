@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -38,6 +38,7 @@ const Fournisseurs = from(() => import("./operations"), "Fournisseurs");
 const BC = from(() => import("./operations"), "BC");
 const EntityView = from(() => import("./operations"), "EntityView") as ComponentType<Props & { kind: "clients" | "domaines" }>;
 const Fp360 = from(() => import("./operations"), "Fp360");
+const Client360 = from(() => import("./accounts"), "Client360");
 const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
@@ -68,6 +69,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "pnlprojet", key: "pnlprojet", label: "P&L Projet", icon: FileText, Component: PnlProjet },
   { id: "fournisseurs", key: "fournisseurs", label: "Crédit Fournisseurs", icon: Truck, Component: Fournisseurs },
   { id: "bc", key: "bc", label: "Exécution BC", icon: ClipboardList, Component: BC },
+  { id: "client360", key: "overview", label: "Client 360", icon: Contact, Component: Client360 },
   { id: "clients", key: "clients", label: "Clients", icon: Users, Component: Clients },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
   { id: "dataquality", key: "overview", label: "Qualité données", icon: ShieldCheck, Component: DataQuality },
@@ -87,6 +89,6 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
-  { label: "Référentiels", ids: ["clients", "domaines", "dataquality"] },
+  { label: "Référentiels", ids: ["client360", "clients", "domaines", "dataquality"] },
   { label: "Admin", ids: ["cleanup", "habilitations"] },
 ];

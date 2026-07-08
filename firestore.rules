@@ -112,6 +112,12 @@ service cloud.firestore {
     // par les Cloud Functions (recordOppTransition, Admin SDK) → le funnel n'est pas falsifiable côté client.
     match /oppHistory/{id} { allow read: if canRead('pipeline'); allow write: if false; }
 
+    // Objet COMPTE (Account 360) + CONTACTS rattachés : entité relationnelle stable clé sur le nom
+    // client canonique. Lecture par qui voit le carnet (overview) ; écriture via callables (upsert/
+    // deleteAccount/Contact, Admin SDK, droit « pipeline », validés + audités) → write:false.
+    match /accounts/{id} { allow read: if canRead('overview'); allow write: if false; }
+    match /contacts/{id} { allow read: if canRead('overview'); allow write: if false; }
+
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
       allow read: if canRead('bc');

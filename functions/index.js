@@ -974,6 +974,92 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   return { ok: true, buckets, cap: CAP, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
+// === OBJET COMPTE (Account 360) — socle relationnel. Entité stable clé sur le nom client CANONIQUE
+// (jointure directe avec le champ `client` normalisé partout). Métadonnées éditables (secteur, pays,
+// hiérarchie parent, propriétaire → socle sécurité Lot 2, notes, tags). Gouverné « pipeline », audité.
+// Pas de recompute (métadonnée hors agrégats). Lecture via les rules (canRead('overview')). ===
+exports.upsertAccount = onCallG("upsertAccount", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { accountId } = require("./domain/accounts");
+  const { buildClientResolver } = require("./domain/clientName");
+  const d = req.data || {};
+  const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
+  const canon = resolve(d.name);
+  const id = accountId(canon);
+  if (!id) throw new HttpsError("invalid-argument", "nom de client requis");
+  const patch = { name: canon, updatedAt: FieldValue.serverTimestamp() };
+  if (d.sector !== undefined) patch.sector = String(d.sector || "").trim();
+  if (d.country !== undefined) patch.country = String(d.country || "").trim();
+  if (d.notes !== undefined) patch.notes = String(d.notes || "").slice(0, 2000);
+  if (d.tags !== undefined) patch.tags = Array.isArray(d.tags) ? d.tags.slice(0, 20).map((t) => String(t).trim()).filter(Boolean) : [];
+  if (d.ownerUid !== undefined) patch.ownerUid = d.ownerUid ? String(d.ownerUid) : null; // propriété (Lot 2 sécurité)
+  if (d.parent !== undefined) {
+    const p = d.parent ? accountId(resolve(d.parent)) : null;
+    if (p && p === id) throw new HttpsError("invalid-argument", "un compte ne peut pas être son propre parent");
+    patch.parentId = p;
+  }
+  await db.doc(`accounts/${id}`).set(patch, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_account", module: "pipeline", entity: "account", entityId: id, detail: { name: canon }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id, name: canon };
+});
+
+// Contacts rattachés à un compte (accountId = id du compte). Un seul contact « principal » par compte.
+exports.upsertContact = onCallG("upsertContact", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { accountId } = require("./domain/accounts");
+  const { buildClientResolver } = require("./domain/clientName");
+  const d = req.data || {};
+  const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
+  const acc = accountId(resolve(d.account));
+  if (!acc) throw new HttpsError("invalid-argument", "compte (client) requis");
+  const name = String(d.name || "").trim();
+  if (!name) throw new HttpsError("invalid-argument", "nom du contact requis");
+  const email = String(d.email || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpsError("invalid-argument", "email invalide");
+  const doc = { accountId: acc, name, role: String(d.role || "").trim(), email, phone: String(d.phone || "").trim(), primary: !!d.primary, updatedAt: FieldValue.serverTimestamp() };
+  let id = d.id ? String(d.id) : null;
+  if (id) { assertPlainId(id, "id contact"); await db.doc(`contacts/${id}`).set(doc, { merge: true }); }
+  else { const ref = await db.collection("contacts").add({ ...doc, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
+  if (doc.primary) { // un seul principal par compte
+    const others = await db.collection("contacts").where("accountId", "==", acc).get();
+    const b = db.batch(); let n = 0;
+    others.forEach((s) => { if (s.id !== id && s.data().primary) { b.update(s.ref, { primary: false }); n++; } });
+    if (n) await b.commit();
+  }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_contact", module: "pipeline", entity: "contact", entityId: id, detail: { account: acc, name }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id, accountId: acc };
+});
+
+exports.deleteContact = onCallG("deleteContact", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = String(req.data?.id || "");
+  assertPlainId(id, "id contact");
+  await db.doc(`contacts/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_contact", module: "pipeline", entity: "contact", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
+// Vue Compte (lecture, droit « overview ») : résout le nom client → id de compte canonique (côté
+// serveur, pas de duplication de la canonisation au front), renvoie la métadonnée du compte (ou un
+// squelette si non encore créé) + ses contacts triés (principal d'abord). Les rollups CA/backlog du
+// Client 360 viennent de summaries/clients (déjà agrégé, lu par le front).
+exports.accountView = onCallG("accountView", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { accountId } = require("./domain/accounts");
+  const { buildClientResolver } = require("./domain/clientName");
+  const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
+  const name = resolve(req.data?.client);
+  const id = accountId(name);
+  if (!id) throw new HttpsError("invalid-argument", "nom de client requis");
+  const [accSnap, cSnap] = await Promise.all([
+    db.doc(`accounts/${id}`).get(),
+    db.collection("contacts").where("accountId", "==", id).get(),
+  ]);
+  const contacts = cSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0) || String(a.name || "").localeCompare(String(b.name || "")));
+  return { ok: true, id, name, account: accSnap.exists ? { id, ...accSnap.data() } : null, contacts };
+});
+
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
 // imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
 // record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute
