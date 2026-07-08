@@ -154,8 +154,18 @@ secrets GitHub `SMOKE_MARGIN_EMAIL/PASSWORD` et `SMOKE_NOMARGIN_EMAIL/PASSWORD`,
 
 ## 9. Attribution des rôles aux utilisateurs
 
-Se fait **dans l'app** (Admin ▸ Habilitations, direction-only) : `Créer un compte` (email + mot de passe
-+ rôle) ou `Rattacher` un compte Firebase existant. Rappels :
+**Provisionnement initial en masse** : `seed/create-users.js` crée tous les comptes depuis un CSV
+(`email,role,name`) avec le claim namespacé `nt360Role` + la fiche `users/{uid}`, et peut générer un lien
+de définition de mot de passe (`--send-reset`). Idempotent (relance sûre).
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/chemin/sa.json
+node seed/create-users.js utilisateurs.csv --dry-run           # aperçu
+node seed/create-users.js utilisateurs.csv --send-reset        # crée + liens de mot de passe
+```
+
+En **régime courant**, se fait dans l'app (Admin ▸ Habilitations, direction-only) : `Créer un compte`
+(email + mot de passe + rôle) ou `Rattacher` un compte Firebase existant. Rappels :
 - Rôle = custom claim `nt360Role` → **reconnexion requise** après changement (ou bouton « Actualiser mes
   droits » de l'écran d'attente).
 - Grille recommandée : PDG + CFO → `direction` ; COO/DGA → `lecture` ; Directeur Commercial →

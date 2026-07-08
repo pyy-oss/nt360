@@ -5,8 +5,9 @@ site Hosting dédié `nt360`, bucket `gs://nt360`. Déploiement **scopé par nom
 
 Public : CODIR (PDG, COO, CFO, DGA), Directeur Commercial, Commerciaux, Project Managers, Assistantes
 Commerciales. Ce document consolide la remédiation de l'audit pré-production et la procédure de mise en
-production. Il complète `docs/app-check.md`, `docs/clickup-webhooks.md` et **`docs/ops-commands.md`**
-(commandes `gcloud` concrètes prêtes à copier-coller : bucket de sauvegarde, IAM, PITR, restauration, App Check, alerting).
+production. Il complète : `docs/app-check.md`, `docs/clickup-webhooks.md`, **`docs/ops-commands.md`**
+(commandes `gcloud` : bucket de sauvegarde, IAM, PITR, restauration, App Check), **`docs/monitoring-policies.md`**
+(policies d'alerting prêtes à l'emploi) et **`seed/create-users.js`** (création des comptes en masse depuis un CSV).
 
 ---
 
