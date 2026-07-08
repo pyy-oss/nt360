@@ -199,6 +199,20 @@ export async function listApprovals(box: "toDecide" | "mine" | "all" = "toDecide
   return res.data as { ok: boolean; approvals: Approval[]; total: number };
 }
 
+// AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles sans code qui génèrent des tâches. Direction.
+export type AutomationRuleType = "opp_no_nextstep" | "opp_stale";
+export type AutomationRule = { type: AutomationRuleType; enabled: boolean; dueInDays: number };
+/** Enregistre les règles d'automatisation (config/automations). Remplace l'ensemble. Direction. */
+export async function setAutomations(rules: AutomationRule[]) {
+  const res = await httpsCallable(functions, "setAutomations")({ rules });
+  return res.data as { ok: boolean; rules: AutomationRule[] };
+}
+/** Exécute maintenant les règles actives → crée les tâches manquantes (idempotent). Direction. */
+export async function runAutomations() {
+  const res = await httpsCallable(functions, "runAutomations", { timeout: 300_000 })({});
+  return res.data as { ok: boolean; created: number; evaluated: number };
+}
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {

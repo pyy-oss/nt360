@@ -718,6 +718,9 @@ exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", secrets: 
     const res = await recomputeAll(db);
     await logOps({ kind: "recompute", trigger: "planifié", status: "ok", ms: Date.now() - t0, detail: { summaries: res.written.length, currentFy: res.currentFy } });
     await maybeSyncCaf("scheduledRecompute"); // entretien CAF→ClickUp (best-effort)
+    // Automatisation déclarative (Lot 4b) : génère les tâches manquantes (best-effort, n'échoue pas le planifié).
+    try { const a = await runAutomationsCore(null); if (a.created) await logOps({ kind: "automations", trigger: "planifié", status: "ok", detail: a }); }
+    catch (e) { logger.warn("runAutomations (planifié) a échoué", { message: e && e.message }); }
   } catch (e) {
     logger.error("scheduledRecompute a échoué", { message: e && e.message, stack: e && e.stack });
     await logOps({ kind: "recompute", trigger: "planifié", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
@@ -1388,6 +1391,68 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
     return String(b.at || "").localeCompare(String(a.at || ""));
   });
   return { ok: true, approvals: rows.slice(0, 300), total: rows.length };
+});
+
+// === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
+// TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
+// `type:oppId`). setAutomations = config (direction) ; runAutomations = exécution (direction, + appelée
+// par le planifié quotidien). Réutilise la sécurité par enregistrement (visibleTo du propriétaire de l'opp).
+const AUTOMATION_RULE_TYPES = ["opp_no_nextstep", "opp_stale"];
+
+exports.setAutomations = onCallG("setAutomations", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const rulesIn = Array.isArray(req.data?.rules) ? req.data.rules : [];
+  const rules = rulesIn
+    .filter((r) => r && AUTOMATION_RULE_TYPES.includes(r.type))
+    .slice(0, 20)
+    .map((r) => ({ type: r.type, enabled: r.enabled === true, dueInDays: Math.min(90, Math.max(1, Math.trunc(Number(r.dueInDays)) || 7)) }));
+  await db.doc("config/automations").set({ rules }, { merge: false });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_automations", module: "habilitations", entity: "config", entityId: "automations", detail: { rules: rules.length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, rules };
+});
+
+// Exécute les règles actives → crée les tâches manquantes (idempotent). Best-effort, borné.
+async function runAutomationsCore(actorUid) {
+  const { evaluateAutomations } = require("./domain/automation");
+  const cfg = (await db.doc("config/automations").get()).data() || {};
+  const rules = Array.isArray(cfg.rules) ? cfg.rules.filter((r) => r.enabled) : [];
+  if (!rules.length) return { created: 0, evaluated: 0 };
+  const [oppSnap, existingSnap, usersMap] = await Promise.all([
+    db.collection("opportunities").select("client", "stage", "nextStep", "stale", "ownerUid").get(),
+    db.collection("activities").where("auto", "==", true).select("autoKey").get(),
+    loadUsersMap(),
+  ]);
+  const opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const existing = new Set(existingSnap.docs.map((d) => d.data().autoKey).filter(Boolean));
+  const tasks = evaluateAutomations(rules, opps, existing);
+  if (!tasks.length) return { created: 0, evaluated: opps.length };
+  const { ownerChain } = require("./domain/hierarchy");
+  const today = nowISO10();
+  const dueISO = (days) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+  let created = 0;
+  let batch = db.batch(); let n = 0;
+  for (const t of tasks.slice(0, 1000)) {
+    const ref = db.collection("activities").doc();
+    batch.set(ref, {
+      type: "task", subject: t.subject, body: "Tâche générée automatiquement (règle nt360).",
+      relatedType: "opportunity", relatedId: t.oppId, relatedName: t.relatedName,
+      at: today, dueDate: dueISO(t.dueInDays), done: false,
+      ownerUid: t.ownerUid, visibleTo: ownerChain(usersMap, t.ownerUid),
+      auto: true, autoKey: t.autoKey, ruleType: t.type,
+      createdBy: actorUid || null, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    created++; n++;
+    if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  return { created, evaluated: opps.length };
+}
+
+exports.runAutomations = onCallG("runAutomations", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const r = await runAutomationsCore(req.auth.uid);
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "run_automations", module: "habilitations", entity: "config", entityId: "automations", detail: r, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...r };
 });
 
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
