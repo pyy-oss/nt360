@@ -175,6 +175,30 @@ export async function callReindexVisibility(deriveFromAm = false) {
   return res.data as { ok: boolean; reindexed: number; derived: number };
 }
 
+// APPROBATIONS (Lot 4) — processus d'approbation gouvernable. Accès par callable (visibilité +
+// contrôle de l'approbateur appliqués serveur).
+export type ApprovalKind = "remise_opp" | "depassement_bc" | "commande_manuelle" | "autre";
+export type Approval = {
+  id?: string; kind: ApprovalKind; entityType: "opportunity" | "bcLine" | "order" | "other"; entityId: string;
+  entityLabel?: string; amount?: number | null; note?: string; status: "pending" | "approved" | "rejected";
+  requestedBy?: string; requestedByName?: string; approverUid?: string; decidedBy?: string; decisionNote?: string; at?: string;
+};
+/** Soumet une action sensible à approbation (routée vers le manager, sinon la direction). Droit « pipeline ». */
+export async function submitForApproval(data: { kind: ApprovalKind; entityType: "opportunity" | "bcLine" | "order" | "other"; entityId: string; entityLabel?: string; amount?: number | null; note?: string }) {
+  const res = await httpsCallable(functions, "submitForApproval")(data);
+  return res.data as { ok: boolean; id: string; approverUid: string };
+}
+/** Décide d'une demande (approbateur ou direction) : approuve ou rejette, avec note. Droit « pipeline ». */
+export async function decideApproval(id: string, decision: "approved" | "rejected", note?: string) {
+  const res = await httpsCallable(functions, "decideApproval")({ id, decision, note });
+  return res.data as { ok: boolean; id: string; status: string };
+}
+/** Liste des approbations : « toDecide » (à décider par moi), « mine » (mes demandes), « all » (admin). */
+export async function listApprovals(box: "toDecide" | "mine" | "all" = "toDecide") {
+  const res = await httpsCallable(functions, "listApprovals")({ box });
+  return res.data as { ok: boolean; approvals: Approval[]; total: number };
+}
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {

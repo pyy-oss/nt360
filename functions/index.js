@@ -1315,6 +1315,81 @@ exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeco
   return { ok: true, activities: rows.slice(0, cap).map((a) => ({ ...a, overdue: isOverdue(a, today) })), total: rows.length };
 });
 
+// === APPROBATIONS (Lot 4 « niveau Salesforce ») — processus d'approbation gouvernable : une action
+// sensible est SOUMISE, routée vers l'approbateur (manager du demandeur — hiérarchie Lot 2 — sinon
+// direction), puis approuvée/rejetée avec traçabilité. Comble l'écart #4 (aucun processus gouvernable).
+// ACCÈS PAR CALLABLE (approvals/* read:false+write:false) : visibilité appliquée serveur, cohérent
+// avec activities. Gouverné « pipeline », audité.
+async function anyDirectionUid(exceptUid) {
+  const snap = await db.collection("users").where("role", "==", "direction").limit(10).get();
+  const cand = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.active !== false && u.id !== exceptUid);
+  return cand.length ? cand[0].id : null;
+}
+
+exports.submitForApproval = onCallG("submitForApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { validateApprovalRequest, approverFor } = require("./domain/approval");
+  const { ownerChain } = require("./domain/hierarchy");
+  const v = validateApprovalRequest(req.data);
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const requester = req.auth.uid;
+  const usersMap = await loadUsersMap();
+  const approverUid = approverFor(usersMap, requester, await anyDirectionUid(requester));
+  if (!approverUid) throw new HttpsError("failed-precondition", "aucun approbateur disponible (définir un manager ou un compte direction)");
+  // visibleTo = ligne hiérarchique du demandeur + l'approbateur → la demande suit la sécurité par
+  // enregistrement (le demandeur, sa hiérarchie et l'approbateur la voient).
+  const visibleTo = Array.from(new Set([...ownerChain(usersMap, requester), approverUid]));
+  const doc = {
+    ...v.value, status: "pending", requestedBy: requester,
+    requestedByName: (usersMap[requester] && usersMap[requester].name) || null,
+    approverUid, visibleTo, at: nowISO10(), createdAt: FieldValue.serverTimestamp(),
+  };
+  const ref = await db.collection("approvals").add(doc);
+  await db.collection("auditLog").add({ uid: requester, action: "approval_submit", module: "pipeline", entity: "approval", entityId: ref.id, detail: { kind: v.value.kind, entityId: v.value.entityId, approverUid }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id: ref.id, approverUid };
+});
+
+exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = assertPlainId(req.data?.id, "id approbation");
+  const decision = String(req.data?.decision || "");
+  if (!["approved", "rejected"].includes(decision)) throw new HttpsError("invalid-argument", "décision invalide");
+  const ref = db.doc(`approvals/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "demande introuvable");
+  const cur = snap.data() || {};
+  if (cur.status !== "pending") throw new HttpsError("failed-precondition", "demande déjà traitée");
+  // Seul l'approbateur désigné OU la direction peut décider (pas d'auto-approbation par le demandeur).
+  const isDir = req.auth.token?.nt360Role === "direction";
+  if (cur.approverUid !== req.auth.uid && !isDir) throw new HttpsError("permission-denied", "réservé à l'approbateur ou à la direction");
+  if (cur.requestedBy === req.auth.uid && !isDir) throw new HttpsError("permission-denied", "un demandeur ne peut pas approuver sa propre demande");
+  await ref.set({ status: decision, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), decisionNote: String(req.data?.note || "").trim().slice(0, 1000) }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "approval_decide", module: "pipeline", entity: "approval", entityId: id, detail: { decision, entityId: cur.entityId }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id, status: decision };
+});
+
+// Liste des approbations — box : « toDecide » (à décider par moi), « mine » (mes demandes), « all »
+// (toutes, réservé admin). Visibilité par enregistrement appliquée serveur (comme listActivities).
+exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const box = String(req.data?.box || "toDecide");
+  let q = db.collection("approvals");
+  if (box === "toDecide") q = q.where("approverUid", "==", req.auth.uid).where("status", "==", "pending");
+  else if (box === "mine") q = q.where("requestedBy", "==", req.auth.uid);
+  const snap = await q.limit(500).get();
+  let rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
+  if (box === "all" && (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    rows = rows.filter((a) => Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
+  }
+  // Tri : en attente d'abord, puis par date décroissante.
+  rows.sort((a, b) => {
+    const ap = a.status === "pending", bp = b.status === "pending";
+    if (ap !== bp) return ap ? -1 : 1;
+    return String(b.at || "").localeCompare(String(a.at || ""));
+  });
+  return { ok: true, approvals: rows.slice(0, 300), total: rows.length };
+});
+
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
 // imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
 // record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute
