@@ -86,6 +86,32 @@ if (process.env.INGEST_REGION) {
   );
 }
 
+// --- Recompute DIFFÉRÉ : trigger Firestore sur config/recomputeRequest (déposé par requestRecompute).
+// Lance le recompute HORS du chemin de réponse des mutations, via le verrou/coalescing existant. Opt-in :
+// exporté SEULEMENT si RECOMPUTE_REGION est défini — un trigger Firestore doit être co-localisé à sa base
+// NOMMÉE (database: FIRESTORE_DB), la région ne peut donc pas être devinée ici. retry:false = pas de boucle
+// (le prochain recompute — mutation suivante ou planifié 05:00 — rattrape un échec). Aucune BOUCLE : le
+// recompute écrit summaries/* + config/periods + config/recomputeLock, JAMAIS config/recomputeRequest. ---
+if (process.env.RECOMPUTE_REGION) {
+  const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+  exports.onRecomputeRequest = onDocumentWritten(
+    { document: "config/recomputeRequest", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 512, timeoutSeconds: 540, retry: false },
+    async (event) => {
+      const after = event.data && event.data.after && event.data.after.data();
+      if (!after) return; // suppression du doc → rien à faire
+      const scope = Array.isArray(after.scope) ? after.scope : null; // null/absent = recompute complet
+      const t0 = Date.now();
+      try {
+        await recomputeSummaries(scope); // passe par runSerialized (verrou + coalescing)
+        await logOps({ kind: "recompute", trigger: "différé", status: "ok", ms: Date.now() - t0, detail: { scope: scope || "complet" } });
+      } catch (e) {
+        logger.error("onRecomputeRequest a échoué", { message: e && e.message, stack: e && e.stack });
+        await logOps({ kind: "recompute", trigger: "différé", status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
+      }
+    }
+  );
+}
+
 /** Recalcule config/fiscal.currentFy = max(yearPo) des commandes (§7). */
 async function updateFiscalYearFromOrders() {
   const snap = await db.collection("orders").select("yearPo").get();
@@ -110,6 +136,22 @@ async function recomputeSummaries(only) {
 // conversion), news, alerts, dataQuality (compte + « gagnées sans FP/P&L ») — et on saute commandes/
 // backlog/facturation/rentabilité/clients/domaines/fournisseurs/cash (inchangés). ~2× moins d'écritures.
 const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality"];
+
+// Recompute DIFFÉRÉ (opt-in) — au lieu d'attendre le recompute (plusieurs secondes) AVANT de répondre,
+// une mutation dépose une DEMANDE (config/recomputeRequest) et répond en ~ms ; le trigger Firestore
+// `onRecomputeRequest` (ci-dessous) lance le recompute HORS du chemin de réponse, via le même verrou/
+// coalescing. Le front lit les summaries en temps réel → rafraîchis quelques secondes plus tard
+// (cohérence différée, déjà assumée par le coalescing). ACTIVÉ UNIQUEMENT si `RECOMPUTE_REGION` est défini
+// (région alignée sur la base Firestore NOMMÉE — un trigger Firestore doit être co-localisé à sa base) :
+// sinon REPLI SYNCHRONE = comportement historique inchangé → jamais de recompute perdu. Même schéma opt-in
+// que le trigger Storage `ingest` (INGEST_REGION). L'activation (ops) : définir RECOMPUTE_REGION + déployer.
+async function requestRecompute(scope) {
+  if (process.env.RECOMPUTE_REGION) {
+    await db.doc("config/recomputeRequest").set({ scope: scope || null, ts: FieldValue.serverTimestamp() });
+  } else {
+    await recomputeSummaries(scope); // repli : recompute synchrone (comportement par défaut, inchangé)
+  }
+}
 
 // Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
 // échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
@@ -1113,7 +1155,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; pas les commandes)
+  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; pas les commandes)
   return { ok: true, id };
 });
 
@@ -1130,7 +1172,7 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
     uid: req.auth.uid, action: "delete_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client: cur.client || null, am: cur.am || null, fp: cur.fp || null, stage: cur.stage ?? null, amount: cur.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps uniquement)
+  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps uniquement)
   return { ok: true };
 });
 
@@ -1192,7 +1234,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; la « réconciliation » commande est une jointure d'affichage, pas d'agrégat)
+  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (opps → pipeline/atterrissage/… ; la « réconciliation » commande est une jointure d'affichage, pas d'agrégat)
   return { ok: true, id };
 });
 
@@ -1298,7 +1340,7 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
     uid: req.auth.uid, action: "import_opps", module: "pipeline", entity: "opportunity", entityId: filename,
     detail: { ...counts }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(OPP_RECOMPUTE); // recompute CIBLÉ (import/MAJ d'opps → agrégats pipeline uniquement)
+  await requestRecompute(OPP_RECOMPUTE); // recompute CIBLÉ (import/MAJ d'opps → agrégats pipeline uniquement)
   return { ok: true, applied: true, ...counts, samples };
 });
 
