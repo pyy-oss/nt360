@@ -767,6 +767,11 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   // LIVE écarté du canal delta (cf. stripLiveOpps) : les opportunités ne sont écrites QUE par la synchro
   // Sales_DATA (staling des fantômes) → un ré-import delta ne peut plus créer de doublon de pipeline.
   const { writes: deltaWrites, skipped: liveSkipped } = stripLiveOpps(writes);
+  // Fichier ne contenant QUE la feuille LIVE : après retrait des opps, il ne reste RIEN à écrire → au lieu
+  // d'un no-op silencieux (l'utilisateur croit avoir importé), on l'oriente explicitement vers le bon canal.
+  if (liveSkipped > 0 && deltaWrites.length === 0) {
+    throw new HttpsError("failed-precondition", "Ce fichier ne contient que la feuille LIVE (pipeline), qui ne s'importe pas ici : utilisez la synchro Sales_DATA (bouton « Forcer la synchro »). Les opportunités sont mises à jour par ce canal (avec retrait des affaires disparues).");
+  }
   // Taux paramétrés (config/fxRates) appliqués aux lignes logistics « à saisir » sans écraser de correction
   // manuelle (cf. resolveLogisticsFx) — conversion USD/GBP à l'import.
   const fxConverted = await resolveLogisticsFx(db, deltaWrites);

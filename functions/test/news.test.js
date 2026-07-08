@@ -30,6 +30,13 @@ describe("news — moteur d'actualité (bulletins + recommandations)", () => {
     expect(ids(r)).toContain("caf_sous_objectif");
     expect(r.recommendations.length).toBeGreaterThan(0);
     expect(r.recommendations[0].priority).toBe(1);
+    // Confidentialité (audit F2) : les bulletins vont dans des summaries gatés overview/facturation →
+    // ne DOIVENT PAS imprimer la cible ni l'écart (données « objectifs »). L'ancien format « vs objectif »
+    // est proscrit.
+    const cas = r.bulletins.find((b) => b.id === "cas_sous_objectif");
+    const caf = r.bulletins.find((b) => b.id === "caf_sous_objectif");
+    expect(cas.detail).not.toContain("vs objectif");
+    expect(caf.detail).not.toContain("vs objectif");
   });
 
   it("couverture pipeline insuffisante (< 1×) détectée", () => {

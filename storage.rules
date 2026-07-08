@@ -5,9 +5,11 @@ service firebase.storage {
     // direction / commercial_dir / pmo / achats). `commercial` en est EXCLU : sinon un dépôt Storage
     // direct déclencherait l'ingestion (trigger) sans passer le contrôle de rôle du callable →
     // contournement de la gouvernance d'import. Lecture réservée aux Functions (Admin SDK).
+    // Claim NAMESPACÉ nt360Role (projet Firebase PARTAGÉ — cohérent avec firestore.rules et les
+    // callables ; le legacy `role` est purgé partout, ne PAS le lire ici sinon la garde est cassée).
     match /imports/{allPaths=**} {
       allow write: if request.auth != null
-        && request.auth.token.role in ['direction','commercial_dir','pmo','achats'];
+        && request.auth.token.nt360Role in ['direction','commercial_dir','pmo','achats'];
       allow read: if false;
     }
     // Exports générés par les Functions : ils peuvent embarquer de la MARGE (rapport CODIR). La
