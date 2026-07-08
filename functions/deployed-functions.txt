@@ -4,6 +4,7 @@
 # Exclusions VOLONTAIRES (triggers env-gated, exportés seulement si INGEST_REGION/RECOMPUTE_REGION) :
 # ingest, onRecomputeRequest — activés manuellement par ops, cf. commentaires index.js.
 # Lignes # et vides ignorées. Régénérer la liste : grep -oP '^exports\.\K\w+' functions/index.js | sort -u
+accountView
 addBcLine
 alertDigest
 attachUser
@@ -16,6 +17,7 @@ curateNews
 curateNewsNow
 dedupe
 deleteClickupWebhook
+deleteContact
 deleteObjective
 deleteOpportunity
 deleteRecords
@@ -70,6 +72,8 @@ syncBcFromClickup
 syncClickupCaf
 syncFromClickup
 syncSalesData
+upsertAccount
+upsertContact
 upsertCreditLine
 upsertObjective
 upsertOpportunity

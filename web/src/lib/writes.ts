@@ -103,6 +103,27 @@ export async function correctionQueue(): Promise<CorrectionQueueResult> {
   return res.data as CorrectionQueueResult;
 }
 
+// OBJET COMPTE (Account 360) + CONTACTS. Métadonnée gouvernée « pipeline » ; lecture « overview ».
+export type Account = { id?: string; name?: string; sector?: string; country?: string; parentId?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] };
+export type Contact = { id?: string; accountId?: string; name?: string; role?: string; email?: string; phone?: string; primary?: boolean };
+export type AccountView = { ok: boolean; id: string; name: string; account: Account | null; contacts: Contact[] };
+/** Vue Compte : résout le client → id canonique côté serveur, renvoie métadonnée + contacts. */
+export async function accountView(client: string): Promise<AccountView> {
+  const res = await httpsCallable(functions, "accountView")({ client });
+  return res.data as AccountView;
+}
+/** Crée / met à jour la métadonnée d'un compte (clé sur le nom client canonique). */
+export async function upsertAccount(data: { name: string; sector?: string; country?: string; parent?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] }) {
+  const res = await httpsCallable(functions, "upsertAccount")(data);
+  return res.data as { ok: boolean; id: string; name: string };
+}
+/** Crée / met à jour un contact rattaché à un compte (par nom de client). */
+export async function upsertContact(data: { id?: string; account: string; name: string; role?: string; email?: string; phone?: string; primary?: boolean }) {
+  const res = await httpsCallable(functions, "upsertContact")(data);
+  return res.data as { ok: boolean; id: string; accountId: string };
+}
+export async function deleteContact(id: string) { await httpsCallable(functions, "deleteContact")({ id }); }
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {
