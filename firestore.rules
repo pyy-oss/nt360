@@ -204,7 +204,7 @@ service cloud.firestore {
     // le front en a besoin pour cadrer ses requêtes (scoping visibleTo) et proposer l'enrôlement MFA.
     // Non sensibles (des drapeaux public/private + un booléen), écrits via callables (setRecordAccess/
     // setSecurityConfig) — jamais en direct.
-    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup', 'recordAccess', 'security']; allow write: if false; }
+    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup', 'recordAccess', 'security', 'automations']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }

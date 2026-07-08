@@ -52,12 +52,14 @@ reconcileBcLinks
 reconcileClickupLinks
 reindexVisibility
 reingest
+runAutomations
 scheduledBcPull
 scheduledClickupEnrich
 scheduledClickupPull
 scheduledFirestoreExport
 scheduledRecompute
 setAlertThresholds
+setAutomations
 setBcStatus
 setBillingMilestones
 setCancellation

@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, type RecordAccess, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -36,6 +36,7 @@ export const Habilitations: FC<Props> = () => {
       {canImport && <DataImportCard />}
       <MfaEnrollCard />
       {isDirection && <SecurityCard users={users} />}
+      {isDirection && <AutomationCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
       {isDirection && <ProjectionConfigCard />}
@@ -853,6 +854,43 @@ function SecurityCard({ users: _users }: { users: UserRow[] }) {
         <Toggle checked={!!sec?.require2fa} onChange={(v) => { callSetSecurityConfig(v).catch(() => {}); }} ariaLabel="MFA obligatoire" />
       </div>
       <Tip>Passez un objet en <b>privé</b> APRÈS un ré-indexage (sinon les enregistrements sans propriétaire seraient invisibles des non-administrateurs). La direction et les administrateurs (droit « habilitations ») voient tout. Le SSO et le fournisseur MFA se configurent côté Identity Platform (console Firebase).</Tip>
+    </Card>
+  );
+}
+
+// Automatisation déclarative (direction) : règles sans code qui génèrent des tâches (objet Activité)
+// quand une opportunité entre dans un état à traiter. Idempotent côté serveur (clé type:oppId).
+const AUTOMATION_META: Record<AutomationRuleType, string> = {
+  opp_no_nextstep: "Opportunité ouverte sans prochaine action → tâche « Définir la prochaine action »",
+  opp_stale: "Opportunité dormante (fantôme) → tâche « Requalifier »",
+};
+function AutomationCard() {
+  const { data } = useDocData<{ rules?: AutomationRule[] }>("config/automations");
+  const toast = useToast();
+  const types = Object.keys(AUTOMATION_META) as AutomationRuleType[];
+  const [draft, setDraft] = useState<Record<AutomationRuleType, { enabled: boolean; dueInDays: number }> | null>(null);
+  const current: Record<string, { enabled: boolean; dueInDays: number }> = {};
+  types.forEach((t) => { const r = (data?.rules || []).find((x) => x.type === t); current[t] = { enabled: !!r?.enabled, dueInDays: r?.dueInDays || 7 }; });
+  const state = draft || (current as Record<AutomationRuleType, { enabled: boolean; dueInDays: number }>);
+  const setRule = (t: AutomationRuleType, patch: Partial<{ enabled: boolean; dueInDays: number }>) =>
+    setDraft({ ...(state as any), [t]: { ...state[t], ...patch } });
+  return (
+    <Card title="Automatisation déclarative (règles → tâches)" actions={
+      <div className="flex gap-2">
+        {draft && <Busy label="Enregistrer" okMsg="Règles enregistrées" fn={async () => { await setAutomations(types.map((t) => ({ type: t, enabled: state[t].enabled, dueInDays: state[t].dueInDays }))); setDraft(null); }} />}
+        <Busy variant="ghost" label="Exécuter maintenant" okMsg="Règles exécutées" fn={async () => { const r = await runAutomations(); toast(`${r.created} tâche(s) créée(s) sur ${r.evaluated} opportunité(s)`); }} />
+      </div>}>
+      <div className="flex flex-col gap-2">
+        {types.map((t) => (
+          <div key={t} className="flex items-center justify-between gap-3 border-t border-hair py-2 text-[13px]">
+            <div className="grow">{AUTOMATION_META[t]}</div>
+            <label className="flex items-center gap-1 text-[11px] text-muted">échéance
+              <input className="field !py-1 w-16" inputMode="numeric" value={String(state[t].dueInDays)} onChange={(e) => setRule(t, { dueInDays: Math.max(1, Number(e.target.value) || 7) })} aria-label={`Échéance (jours) — ${t}`} />j</label>
+            <Toggle checked={state[t].enabled} onChange={(v) => setRule(t, { enabled: v })} ariaLabel={`Activer la règle ${t}`} />
+          </div>
+        ))}
+      </div>
+      <Tip>Les règles actives sont évaluées au recalcul quotidien (05:00) et via « Exécuter maintenant ». Une tâche n'est <b>jamais recréée</b> pour la même opportunité (idempotence). Les tâches suivent la sécurité par enregistrement (propriétaire de l'opportunité).</Tip>
     </Card>
   );
 }
