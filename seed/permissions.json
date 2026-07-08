@@ -80,6 +80,22 @@
       "habilitations": "none",
       "import": "write"
     },
+    "assistante": {
+      "overview": "read",
+      "pipeline": "none",
+      "objectifs": "none",
+      "facturation": "write",
+      "backlog": "none",
+      "prevision": "none",
+      "rentabilite": "none",
+      "pnlprojet": "none",
+      "fournisseurs": "none",
+      "bc": "write",
+      "clients": "read",
+      "domaines": "none",
+      "habilitations": "none",
+      "import": "none"
+    },
     "lecture": {
       "overview": "read",
       "pipeline": "read",

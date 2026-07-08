@@ -8,7 +8,7 @@ import { auth, db, functions } from "./firebase";
 import { resolveLevel } from "./perm";
 
 export type Level = "none" | "read" | "write";
-export type Role = "direction" | "commercial_dir" | "commercial" | "pmo" | "achats" | "lecture";
+export type Role = "direction" | "commercial_dir" | "commercial" | "pmo" | "achats" | "assistante" | "lecture";
 export type PermMatrix = Record<string, Record<string, Level>>;
 
 type Ctx = {

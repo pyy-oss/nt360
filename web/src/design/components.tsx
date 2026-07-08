@@ -236,9 +236,9 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
         <table className="w-full text-sm rtable">
           <thead>
             <tr className="text-muted">
-              {hasDetail && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
+              {hasDetail && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
               {primary.map((c, i) => (
-                <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                <th key={i} scope="col" aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                   className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
                   {c.sort ? (
                     <button type="button" onClick={() => sortToggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
@@ -405,9 +405,9 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
           <table className="w-full text-sm rtable">
             <thead>
               <tr className="text-muted">
-                {hasDetail && <th className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
+                {hasDetail && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
                 {primary.map((c, i) => (
-                  <th key={i} aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                  <th key={i} scope="col" aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                     className={cx("px-3 py-2 font-medium text-xs sticky top-0 bg-panel select-none", c.align === "right" ? "text-right" : "text-left")}>
                     {c.sort ? (
                       <button type="button" onClick={() => toggle(i)} className={cx("inline-flex items-center gap-1 hover:text-ink", c.align === "right" && "flex-row-reverse")}>
