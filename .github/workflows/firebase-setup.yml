@@ -17,10 +17,14 @@ on:
         description: "Créer le 1er admin (direction) + matrice de droits"
         type: boolean
         default: true
+      run_migrate:
+        description: "Migrer les claims role → nt360Role sur TOUS les comptes (sans toucher aux mots de passe)"
+        type: boolean
+        default: false
       admin_email:
-        description: "Email du 1er administrateur"
+        description: "Email du 1er administrateur (requis seulement si « Créer le 1er admin »)"
         type: string
-        required: true
+        required: false
       data_files:
         description: "Fichiers de données à charger (URIs gs:// séparées par des espaces, optionnel)"
         type: string
@@ -96,6 +100,16 @@ jobs:
         run: |
           GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json" \
           node seed/seed.js "$ADMIN_EMAIL" "$SEED_ADMIN_PASSWORD"
+
+      # Migration one-shot du claim d'autorité role → nt360Role (projet Firebase PARTAGÉ). À lancer
+      # une fois après le déploiement des rules/functions namespacées : sans elle, les comptes portant
+      # l'ancien claim `role` perdent leur accès (« compte en attente d'habilitation »). Idempotent,
+      # ne réinitialise AUCUN mot de passe (contrairement au re-seed).
+      - name: Migrer les claims (role → nt360Role)
+        if: ${{ inputs.run_migrate }}
+        run: |
+          GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json" \
+          node seed/migrate-claims.js
 
       - name: Charger les données (gs://)
         if: ${{ inputs.data_files != '' }}
