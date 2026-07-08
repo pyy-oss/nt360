@@ -41,9 +41,12 @@ async function scoreSignals(apiKey, signals, opts = {}) {
     '{ "scores": [ { "key": "<clé fournie>", "relevance": <entier 0-100>, "note": "<justification très courte>" } ] } ' +
     "en couvrant CHAQUE clé fournie, sans aucune prose hors du JSON.";
 
+  // max_tokens généreux : ~27 types de signaux × { key, relevance, note } peut dépasser 2000 tokens de
+  // sortie. Un JSON tronqué ferait échouer parseJson → objet vide → TOUS les scores perdus (curation muette,
+  // no-op silencieux). 8000 laisse une marge confortable pour couvrir chaque clé du catalogue.
   const res = await client.messages.create({
     model,
-    max_tokens: 2000,
+    max_tokens: 8000,
     system,
     messages: [{ role: "user", content: user }],
   });
@@ -54,7 +57,11 @@ async function scoreSignals(apiKey, signals, opts = {}) {
   for (const s of (parsed.scores || [])) {
     const key = String((s && s.key) || "").trim();
     if (!key) continue;
-    const relevance = Math.max(0, Math.min(100, Math.round(Number(s.relevance) || 0)));
+    // Score illisible (absent / non numérique) → on SAUTE l'entrée (le signal garde le défaut du catalogue)
+    // plutôt que de le forcer à 0 → masqué à tort. On ne mute que sur un score bas EXPLICITE et valide.
+    const raw = Number(s && s.relevance);
+    if (!Number.isFinite(raw)) continue;
+    const relevance = Math.max(0, Math.min(100, Math.round(raw)));
     scores[key] = { relevance, keep: relevance >= threshold, note: String((s && s.note) || "").slice(0, 200) };
   }
   return { scores, model, usage: res.usage || null };

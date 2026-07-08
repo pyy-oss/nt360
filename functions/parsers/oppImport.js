@@ -34,7 +34,15 @@ function buildTemplateAoa(opps) {
 
 // ---- Coercitions par cellule : renvoient `undefined` si la cellule est VIDE (→ champ non fourni). ----
 const txt = (v) => { const s = (v == null ? "" : String(v)).trim(); return s === "" ? undefined : s; };
-function numPresent(v) { if (v == null || v === "") return undefined; const n = num(String(v).replace(/%/g, "")); return Number.isFinite(n) ? n : undefined; }
+// Présence numérique : `undefined` si vide OU si la cellule ne contient AUCUN chiffre (bruit texte comme
+// « N/A », « à revoir »). Sans le garde-chiffre, `num("N/A")` renvoie 0 → le montant serait mis à 0 (écrasement
+// silencieux) au lieu d'être laissé intact. Un vrai « 0 » (nombre ou chaîne « 0 ») contient un chiffre → conservé.
+function numPresent(v) {
+  if (v == null || v === "") return undefined;
+  if (!/[0-9]/.test(String(v))) return undefined;
+  const n = num(String(v).replace(/%/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
 function parseStage(v) { if (v == null || v === "") return undefined; const s = normalizeStage(v); return s >= 1 && s <= 9 ? s : undefined; }
 function parseProba(v) {
   if (v == null || v === "") return undefined;
@@ -45,7 +53,10 @@ function parseProba(v) {
 }
 function parsePct(v) { const n = numPresent(v); return n === undefined ? undefined : Math.min(100, Math.max(0, n)); }
 function parseDate(v) { if (v == null || v === "") return undefined; return toISO(v) || undefined; }
-function parseBu(v) { const s = cleanBu(v); return s || undefined; }
+// BU : `undefined` si la cellule est VIDE (champ non touché) — sinon canonicalise. `cleanBu` renvoyant
+// TOUJOURS une valeur non vide (« AUTRE » par défaut), il faut tester le vide AVANT, sans quoi une colonne
+// BU laissée vide écraserait la vraie BU en « AUTRE » (violation de la garantie « cellule vide = non touché »).
+function parseBu(v) { const s = txt(v); return s === undefined ? undefined : cleanBu(s); }
 const DR_TRUE = new Set(["oui", "o", "yes", "y", "true", "vrai", "1", "x", "✓"]);
 function parseDr(v) {
   if (v == null) return undefined;

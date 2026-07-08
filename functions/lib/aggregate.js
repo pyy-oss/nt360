@@ -460,10 +460,10 @@ async function recomputeCore(db, only) {
   // le doc unique summaries/commandes ne porte plus que la MÉTA (count + nombre de chunks).
   let commandeChunks = null;
   // Découplé de "overview" : les lignes de commande matérialisées (commandesRows*) dérivent des ORDERS,
-  // pas de la chaîne overview. Un recompute ciblé "opps" (qui inclut "overview" pour rafraîchir
-  // certitudes/conversion) ne doit PAS réécrire tous les chunks de commandes (inchangés). Un recompute
-  // COMPLET (only falsy → want("commandes")=true) les régénère toujours. Aucun appelant ne demande
-  // "overview" sans "commandes" pour rafraîchir le carnet (vérifié).
+  // pas de la chaîne overview. Un recompute ciblé d'opp NON gagnée (OPP_RECOMPUTE, qui inclut "overview"
+  // pour rafraîchir certitudes/conversion mais PAS "commandes") ne réécrit donc pas les chunks (inchangés :
+  // seule une opp GAGNÉE réconcilie un order via mergeCommandes). Ce cas-là passe OPP_RECOMPUTE_WON, qui
+  // inclut "commandes" → les chunks sont régénérés. Un recompute COMPLET (only falsy) les régénère toujours.
   if (want("commandes")) {
     // La MARGE par ligne (mb / costTotal / marginPct) est ISOLÉE dans commandesRowsMargin/{i}
     // (lecture réservée à « Rentabilité ») ; les chunks de base ne portent que des grandeurs non
