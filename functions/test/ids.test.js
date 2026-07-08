@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear } = require("../lib/ids");
+const { fpKey, num, cleanBu, noAcc, cleanName, plausibleYear, buildFpAliasResolver } = require("../lib/ids");
 
 describe("plausibleYear — fenêtre glissante (rejet sentinelles)", () => {
   const cur = new Date().getFullYear();
@@ -44,6 +44,33 @@ describe("fpKey — normalisation clé d'or N° FP", () => {
     expect(fpKey("FP/20244/13")).toBeNull();
     expect(fpKey("FP/20244/13")).not.toBe(fpKey("FP/2024/4"));
     expect(fpKey("FP/2024/4")).toBe("FP/2024/4"); // la vraie clé reste valide
+  });
+});
+
+describe("buildFpAliasResolver — réconciliation N° FP (FP P&L prioritaire)", () => {
+  it("redirige un FP source vers sa cible P&L (canonisation de la clé)", () => {
+    const r = buildFpAliasResolver({ "FP/2026/13": "FP/2026/99" });
+    expect(r("FP/2026/13")).toBe("FP/2026/99");
+    // La recherche canonise : zéros de tête / casse / bruit ne doivent pas manquer l'alias.
+    expect(r("fp/2026/013")).toBe("FP/2026/99");
+    expect(r("Réf FP/2026/13 — client")).toBe("FP/2026/99");
+  });
+  it("laisse INCHANGÉ un FP sans alias (pas de réécriture surprise, valeur d'origine préservée)", () => {
+    const r = buildFpAliasResolver({ "FP/2026/13": "FP/2026/99" });
+    // Aucun alias sur celui-ci → renvoyé tel quel (y compris son padding d'origine, on ne canonise pas).
+    expect(r("FP/2026/007")).toBe("FP/2026/007");
+    expect(r("bla bla")).toBe("bla bla");
+  });
+  it("map vide ou absente → identité (tout passe à travers)", () => {
+    expect(buildFpAliasResolver({})("FP/2026/13")).toBe("FP/2026/13");
+    expect(buildFpAliasResolver(null)("FP/2026/13")).toBe("FP/2026/13");
+    expect(buildFpAliasResolver(undefined)("x")).toBe("x");
+  });
+  it("préserve les entrées vides/nulles sans planter", () => {
+    const r = buildFpAliasResolver({ "FP/2026/13": "FP/2026/99" });
+    expect(r("")).toBe("");
+    expect(r(null)).toBe(null);
+    expect(r(undefined)).toBe(undefined);
   });
 });
 

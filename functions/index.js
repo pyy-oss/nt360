@@ -836,6 +836,43 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds:
   return { ok: true, id, fp };
 });
 
+// --- RÉCONCILIATION DE N° FP : déclare qu'un N° FP « source » (celui d'une opportunité) désigne la MÊME
+// commande qu'un N° FP « cible » au P&L. Le FP P&L FAIT FOI (il porte la facturation) → on redirige la
+// source vers la cible via un OVERLAY (config/fpAliases), NON destructif et qui SURVIT aux ré-imports LIVE
+// (contrairement à une réécriture du FP de l'opp, que la synchro écraserait). L'agrégat applique l'alias
+// avant la fusion du carnet (aggregate.js) : l'opp gagnée réconcilie alors la bonne ligne P&L, son CAS
+// compte, et factures/BC/fiches saisis sous l'ancien FP se rattachent. `to` vide = SUPPRIME l'alias.
+// Réservé au droit « import » (data-steward), audité, recompute complet (impacte tout le carnet). ---
+exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey } = require("./lib/ids");
+  const from = fpKey(req.data?.from);
+  const rawTo = req.data?.to;
+  const to = (rawTo === "" || rawTo == null) ? "" : fpKey(rawTo);
+  if (!from) throw new HttpsError("invalid-argument", "N° FP source invalide (attendu FP/AAAA/NNNNN)");
+  if (rawTo != null && rawTo !== "" && !to) throw new HttpsError("invalid-argument", "N° FP cible invalide (attendu FP/AAAA/NNNNN)");
+  const ref = db.doc("config/fpAliases");
+  const map = { ...(((await ref.get()).data() || {}).map || {}) };
+  if (!to) {
+    if (!(from in map)) throw new HttpsError("not-found", "aucun alias sur ce N° FP source");
+    delete map[from];
+  } else {
+    if (to === from) throw new HttpsError("invalid-argument", "N° FP source et cible identiques");
+    // Pas de CHAÎNE ni de cible ambiguë : la cible ne doit pas être elle-même redirigée, et la source ne
+    // doit pas être déjà une cible (sinon l'ordre de résolution deviendrait ambigu / non idempotent).
+    if (map[to]) throw new HttpsError("failed-precondition", `le N° FP cible ${to} est lui-même réconcilié vers ${map[to]} — indiquez le N° FP P&L définitif`);
+    if (Object.values(map).includes(from)) throw new HttpsError("failed-precondition", `le N° FP ${from} est déjà la cible d'une réconciliation — il ne peut pas devenir une source`);
+    map[from] = to;
+  }
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
+    detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
+  });
+  await recomputeSummaries();
+  return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
+});
+
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
 // imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
 // record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute

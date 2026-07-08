@@ -53,6 +53,7 @@ setBillingMilestones
 setCancellation
 setClickupConfig
 setClientAliases
+setFpAlias
 setFxRates
 setInvoiceFp
 setNotificationConfig
