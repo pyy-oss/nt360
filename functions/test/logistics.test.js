@@ -24,9 +24,13 @@ describe("parseLogistics — contre-valeur XOF robuste (cf. audit P0-B)", () => 
     expect(b.amountXof).toBe(Math.round(1000 * 655.957));
     expect(b.fxSource).toBe("peg");
   });
-  it("USD sans taux → 0 mais fxSource « a_saisir » (visible en qualité, pas silencieux)", () => {
+  it("USD sans taux → amountXof OMIS (fxSource « a_saisir ») pour ne pas écraser une correction manuelle au ré-import", () => {
     const b = byBc(rows, "BC-USD");
-    expect(b.amountXof).toBe(0);
+    // Audit P0-2 : quand la valeur n'est pas dérivable, on N'ÉCRIT PAS amountXof → le merge préserve une
+    // éventuelle correction manuelle (patchBcLine). Une ligne neuve reste à 0 (champ absent) → signalée en
+    // qualité (test amountXof ≤ 0). fxSource reste « a_saisir » pour la traçabilité.
+    expect(b).not.toHaveProperty("amountXof");
+    expect(b).not.toHaveProperty("fxRate");
     expect(b.fxSource).toBe("a_saisir");
   });
   it("alias « Devise » = XOF → montant repris (bug d'alias corrigé)", () => {

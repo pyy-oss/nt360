@@ -244,8 +244,14 @@ async function recomputeCore(db, only) {
   const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
   // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 (Σ des jalons après le 31/12
   // de l'exercice). Aucun mécanisme manuel concurrent. Keyé par le fpKey STOCKÉ (champ `fp`).
+  // Jalons RATTACHÉS À UNE COMMANDE ACTIVE uniquement : on écarte ceux dont le FP n'est plus dans `orders`
+  // (commande SUPPRIMÉE ou ANNULÉE — orders exclut déjà les annulées, cf. supra). Sans ce filtre, le doc
+  // billingMilestones survivait à l'annulation/suppression et gonflait le « planifié », le projeté N+1 et
+  // le plan de relances avec des jalons fantômes (cf. audit intégrité P1-6). Réversible : le doc n'est pas
+  // supprimé, il redevient actif si la commande est rétablie.
+  const orderFps = new Set(orders.map((o) => o.fp));
   const milestonesByFp = {};
-  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && orderFps.has(v.fp) && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -648,8 +654,13 @@ async function acquireOrEnqueue(db, only) {
       return { role: "enqueued" };
     }
     const holder = `${now}_${Math.floor(Math.random() * 1e9)}`;
+    // Reprise de bail : une demande laissée EN FILE par un holder MORT (timeout/OOM avant de la drainer)
+    // est ABSORBÉE dans la portée de ce nouvel holder — sinon le reset l'effacerait et l'agrégat concerné
+    // resterait périmé jusqu'au recompute complet nocturne (cf. audit intégrité P1-3).
+    const merged = d.queued ? mergeQueued({ queuedFull: d.queuedFull, queuedKeys: d.queuedKeys }, only) : null;
+    const runOnly = merged ? (merged.queuedFull ? null : merged.queuedKeys) : only;
     tx.set(ref, { holder, acquiredAtMs: now, expiresAtMs: now + RECOMPUTE_LEASE_MS, queued: false, queuedFull: false, queuedKeys: [] }, { merge: true });
-    return { role: "holder", holder };
+    return { role: "holder", holder, only: runOnly };
   });
 }
 
@@ -677,7 +688,9 @@ async function runSerialized(db, only, core) {
 
   const ref = db.doc(RECOMPUTE_LOCK_PATH);
   const release = () => ref.set({ holder: FieldValue.delete(), acquiredAtMs: FieldValue.delete(), expiresAtMs: FieldValue.delete() }, { merge: true });
-  let runOnly = only;
+  // Portée initiale = celle renvoyée par l'acquisition (peut inclure une file résiduelle absorbée à la
+  // reprise d'un bail expiré, cf. acquireOrEnqueue) ; repli sur `only` pour toute forme ancienne.
+  let runOnly = acq.only !== undefined ? acq.only : only;
   let result = { written: [] };
   try {
     // Boucle d'absorption : rejoue tant que des demandes se sont accumulées pendant la passe.

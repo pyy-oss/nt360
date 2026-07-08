@@ -73,4 +73,27 @@ describe("acquireOrEnqueue — verrou de bail + mise en file", () => {
     expect(d.holder).not.toBe("mort");
     expect(d.expiresAtMs).toBeGreaterThan(Date.now());
   });
+
+  it("reprise de bail : la file COMPLÈTE laissée par un holder mort est ABSORBÉE (portée = full) — audit P1-3", async () => {
+    const db = fakeDb({ [LOCK]: { holder: "mort", expiresAtMs: Date.now() - 1, queued: true, queuedFull: true, queuedKeys: [] } });
+    const r = await acquireOrEnqueue(db, ["alerts"]); // demande partielle, mais la file résiduelle est full
+    expect(r.role).toBe("holder");
+    expect(r.only).toBeNull(); // full absorbé → recompute complet (rien perdu)
+    expect(db.store.get(LOCK).queued).toBe(false); // file consommée
+  });
+
+  it("reprise de bail : la file PARTIELLE résiduelle est fusionnée à la portée du nouveau holder — audit P1-3", async () => {
+    const db = fakeDb({ [LOCK]: { holder: "mort", expiresAtMs: Date.now() - 1, queued: true, queuedFull: false, queuedKeys: ["suppliers"] } });
+    const r = await acquireOrEnqueue(db, ["alerts"]);
+    expect(r.role).toBe("holder");
+    expect([...r.only].sort()).toEqual(["alerts", "suppliers"]); // union, rien perdu
+    expect(db.store.get(LOCK).queued).toBe(false);
+  });
+
+  it("verrou libre sans file → portée initiale = celle demandée (inchangé)", async () => {
+    const db = fakeDb();
+    const r = await acquireOrEnqueue(db, ["news"]);
+    expect(r.role).toBe("holder");
+    expect(r.only).toEqual(["news"]);
+  });
 });

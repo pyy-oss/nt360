@@ -12,7 +12,7 @@ const XLSX = require("xlsx");
 const { getApp } = require("firebase-admin/app");
 const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
-const { applyWrites } = require("./lib/apply");
+const { applyWrites, stripLiveOpps } = require("./lib/apply");
 const { parseBuffer, reingestBucket } = require("./lib/reingest");
 const { defineSecret } = require("firebase-functions/params");
 // Token API ClickUp (Secret Manager) — utilisé seulement par les fonctions d'intégration ClickUp.
@@ -59,9 +59,14 @@ async function ingestHandler(event) {
     const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
 
     const { kinds, writes, report } = buildWrites(wb);
-    logger.info("ingest", { name, kinds, ...report });
+    // LIVE écarté du canal ingest (cf. stripLiveOpps) : les opps passent EXCLUSIVEMENT par la synchro
+    // snapshot (staling) → pas de doublon de pipeline. Le classeur d'inventaire doit alimenter la synchro
+    // Sales_DATA (sync/sales_data.xlsx), seul écrivain LIVE.
+    const { writes: deltaWrites, skipped: liveSkipped } = stripLiveOpps(writes);
+    if (liveSkipped) report.liveSkipped = liveSkipped;
+    logger.info("ingest", { name, kinds, liveSkipped, ...report });
 
-    await applyWrites(db, writes); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
+    await applyWrites(db, deltaWrites); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
     await db.collection("imports").add({
       uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
@@ -391,7 +396,7 @@ exports.setClientAliases = onCallG("setClientAliases", { memoryMiB: 512, timeout
 // (≤ 15 jalons {date, montant}), SOURCE UNIQUE du report N+1 (Σ jalons après le 31/12). Édité par
 // direction/PMO. La règle « Σ jalons = RAF » est validée à l'éditeur ; le serveur normalise (≤ 15,
 // dates ISO, montants > 0) et borne le report dérivé au RAF (aucune incohérence même en cas de dérive). ---
-exports.setBillingMilestones = onCallG("setBillingMilestones", async (req) => {
+exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "backlog"); // gouverné par la matrice (module « backlog »)
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
@@ -755,9 +760,12 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
   const { kinds, writes, files, rowsIn, rowsOk, rowsSkipped } = parsed;
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
 
-  await applyWrites(db, writes); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
+  // LIVE écarté du canal delta (cf. stripLiveOpps) : les opportunités ne sont écrites QUE par la synchro
+  // Sales_DATA (staling des fantômes) → un ré-import delta ne peut plus créer de doublon de pipeline.
+  const { writes: deltaWrites, skipped: liveSkipped } = stripLiveOpps(writes);
+  await applyWrites(db, deltaWrites); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
-  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped };
+  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}) };
   await db.collection("imports").add({
     uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",
     rowsIn, rowsOk, rowsSkipped, report, ts: FieldValue.serverTimestamp(),
@@ -797,7 +805,7 @@ exports.reingest = onCallG("reingest", { memoryMiB: 1024, timeoutSeconds: 540 },
 
 // --- Fiabilisation : rattacher une facture ORPHELINE à sa commande en corrigeant son N° FP.
 // Recalcule ensuite (rattachement, taux de facturation, RAF dérivé des commandes opp/fiche). ---
-exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const { fpKey } = require("./lib/ids");
   const id = String(req.data?.id || "");
@@ -898,7 +906,7 @@ exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSe
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
 // il reste piloté par la source). Recalcule l'échéancier cash + la qualité des données. ---
-exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const id = String(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id facture requis");
@@ -927,7 +935,7 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds:
 // vente »). Donnée de MARGE → droit « rentabilite » requis, et écriture dans projectSheetsMargin
 // (collection isolée, mêmes règles que le reste de la marge). Marge & %MB recalculés. Le prix de
 // vente d'une fiche pilote le CAS quand la commande est de source fiche → recalcul complet. ---
-exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "rentabilite");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
@@ -996,7 +1004,7 @@ async function migrateFpSatellites(oldFp, newFp) {
 
 // --- Fiabilisation : corriger une commande P&L — année de PO manquante et/ou N° FP erroné.
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
-exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
@@ -1079,7 +1087,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 256, timeoutSeconds: 120
 // « P&L STRICT / Excel curaté prioritaire » préservé : on REFUSE si un orders/{fp} existe déjà, et
 // au ré-import une ligne P&L du même FP écrase cette saisie (upsert par FP) — la saisie app ne
 // persiste que tant que le FP est absent de l'Excel. source='manuel' → visible comme telle. ---
-exports.createOrder = onCallG("createOrder", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const { fpKey, cleanBu } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
@@ -1127,7 +1135,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 256, timeoutSeconds: 1
 // config/orderPm { map: { <safeId(fp)>: pm } }, hors du doc commande → l'affectation SURVIT au
 // recompute ET à un ré-import delta (même logique que l'annulation). `pm` vide → désaffectation.
 // Gouverné par le module « import » (comme patchOrder/createOrder) — ajustable via la matrice. ---
-exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
@@ -2069,7 +2077,10 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   for (const w of writes) { batch.set(db.doc(w.path), w.data, { merge: true }); if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); } }
   if (n % 400 !== 0 || n === 0) await batch.commit();
   if (Object.keys(newLinks).length) await db.doc("config/clickupBcLinks").set({ map: newLinks }, { merge: true });
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+  // « alerts » AJOUTÉ (cf. audit P1-6) : importBcFromClickup CRÉE de vraies bcLines (statut/ETA) → les
+  // alertes BC (bc_en_attente / bc_en_retard) et les relances BC (bloc co-déclenché par alerts) doivent
+  // se rafraîchir immédiatement, sinon elles restaient périmées jusqu'au prochain recompute couvrant.
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts"]); }
   catch (e) { logger.warn("import BC: recompute partiel échoué", { msg: e && e.message }); }
   const res = { created, skippedKnown, skippedIncomplete, scanned: tasks.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_import", module: "bc", entity: "bcLines", entityId: "import", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });

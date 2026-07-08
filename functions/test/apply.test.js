@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { applyWrites } = require("../lib/apply");
+const { applyWrites, stripLiveOpps } = require("../lib/apply");
 
 // Faux Firestore minimal : un store `bcLines/{id} → data`, avec upsert (merge), delete et
 // requête `collection("bcLines").where("fp","==",v)`. Suffit à exercer le balayage anti-orphelins.
@@ -87,6 +87,25 @@ describe("applyWrites — balayage anti-orphelins par (source, fp)", () => {
     });
     await applyWrites(db, []); // rien à écrire → keepBySrcFp vide → aucune suppression
     expect(db.store.has("bcLines/FP_2026_5_0")).toBe(true);
+  });
+});
+
+describe("stripLiveOpps — LIVE écarté des canaux delta/ingest/reingest (audit P0-1)", () => {
+  it("retire toutes les écritures opportunities/ et compte les opps écartées", () => {
+    const writes = [
+      { path: "orders/o1", data: { fp: "FP/1" } },
+      { path: "opportunities/x1", data: { source: "salesData" } },
+      { path: "invoices/i1", data: { fp: "FP/1" } },
+      { path: "opportunities/x2", data: { source: "salesData" } },
+    ];
+    const { writes: kept, skipped } = stripLiveOpps(writes);
+    expect(skipped).toBe(2);
+    expect(kept.map((w) => w.path)).toEqual(["orders/o1", "invoices/i1"]);
+  });
+  it("sans opp → tout conservé, skipped=0", () => {
+    const { writes: kept, skipped } = stripLiveOpps([{ path: "orders/o1", data: {} }]);
+    expect(skipped).toBe(0);
+    expect(kept).toHaveLength(1);
   });
 });
 
