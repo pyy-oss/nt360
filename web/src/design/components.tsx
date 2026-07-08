@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download } from "lucide-react";
 import { fmt, pct } from "./tokens";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
+import { trackWrite, useWriteActivity } from "../lib/activity";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -584,10 +585,26 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
     <button
       className={variant === "gold" ? "btn-gold" : "btn-ghost"}
       disabled={s === "busy"}
-      onClick={async () => { setS("busy"); try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
+      onClick={async () => { setS("busy"); try { await trackWrite(fn()); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
     >
       {s === "busy" ? "…" : label}
     </button>
+  );
+}
+
+/** Indicateur GLOBAL d'activité serveur : bandeau discret « traitement en cours » tant qu'une opération
+ *  (écriture + recompute, export…) est en vol. Rend les écritures lentes « parlantes » — l'utilisateur
+ *  sait que l'app travaille et que les listes vont se rafraîchir. Monté une fois au niveau App. */
+export function WriteActivityBar() {
+  const active = useWriteActivity();
+  if (!active) return null;
+  return (
+    <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[60] pointer-events-none" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 rounded-full border border-gold/40 bg-panel2 px-3 py-1 text-[11px] text-ink shadow-lg">
+        <span className="w-2 h-2 rounded-full bg-gold animate-pulse" aria-hidden="true" />
+        Traitement en cours… <span className="text-faint hidden sm:inline">recalcul des agrégats</span>
+      </div>
+    </div>
   );
 }
 
@@ -602,7 +619,7 @@ export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "S
   const confirmBtnCls = tone === "clay" ? "btn bg-clay text-bg hover:bg-clay/90" : tone === "steel" ? "btn bg-steel text-bg hover:bg-steel/90" : "btn-gold";
   const run = async () => {
     setOpen(false); setS("busy");
-    try { await fn(); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
+    try { await trackWrite(fn()); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
   };
   return (
     <>
