@@ -898,7 +898,7 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const { buildClientResolver } = require("./domain/clientName");
   // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits.
   const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
-    db.collection("orders").select("fp", "client", "cas", "raf", "source").get(),
+    db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").get(),
     db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am").get(),
     db.doc("config/fpAliases").get(),
