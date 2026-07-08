@@ -227,6 +227,22 @@ describe("parseFiche — montants : priorité XOF sur devise, ignore une cellule
   });
 });
 
+describe("parseFiche — %MB calculé (marge/vente), pas la colonne % (anti-inversion faible marge, audit)", () => {
+  // Fiche à FAIBLE marge (1 %). L'ancienne heuristique base-100 gardait « 1 » → 100 % (affiché « sain »).
+  const aoa = [
+    [null, "N° DE FP :", "FP/2026/1"],
+    [null, "CLIENT :", "X"],
+    [null, "PRIX DE REVIENT NEURONES TECHNOLOGIES HT (XOF)", 990000],
+    [null, "PRIX DE VENTE NEURONES TECHNOLOGIES HT (XOF)", 1000000],
+    [null, "MARGE BRUTE NEURONES TECHNOLOGIES (XOF)", 10000],
+    [null, "% DE MARGE BRUTE NEURONES TECHNOLOGIES", 1], // colonne base-100 trompeuse
+  ];
+  const { sheet } = parseFiche(wbFromAoa("Fiche", aoa));
+  it("%MB = marge/vente = 1 %, PAS 100 %", () => {
+    expect(sheet.marginPct).toBeCloseTo(0.01, 5);
+  });
+});
+
 describe("parseFicheAll — deux onglets de MÊME FP ne perdent plus de lignes (cf. audit intégral I3)", () => {
   // Fabrique une fiche cellulaire à une ligne BC (fournisseur/description/montant paramétrables).
   const fiche = (frn, desc, xof) => [

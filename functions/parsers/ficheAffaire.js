@@ -87,16 +87,21 @@ function parseFicheSheet(ws) {
 
   const fp = fpKey(rightOf("N° DE FP"));
   const sid = safeId(fp); // FP contient des '/' → sanitisé pour les IDs Firestore
+  const costTotal = num(amount("prix de revient"));
+  const saleTotal = num(amount("prix de vente"));
+  const margin = num(amount("marge brute"));
+  // %MB CALCULÉ (marge / vente) plutôt que lu dans la colonne « % » de la fiche. L'ancienne heuristique
+  // base-100 (v>1.5 ? v/100 : v) inversait le signal des faibles marges : une marge réelle de 1 %
+  // stockée « 1 » n'était pas divisée → affichée 100 % (donc « saine »), masquant l'affaire à faible
+  // marge. marge/vente est non ambigu (les deux montants sont extraits en XOF, fiables). Cf. audit.
+  const marginPct = saleTotal > 0 ? margin / saleTotal : 0;
   const sheet = {
     _id: sid,
     fp,
     client: String(rightOf("CLIENT") || "").trim(),
     affaire: String(rightOf("AFFAIRE") || "").trim(),
     commercial: String(rightOf("COMMERCIAL") || "").trim(),
-    costTotal: num(amount("prix de revient")),
-    saleTotal: num(amount("prix de vente")),
-    margin: num(amount("marge brute")),
-    marginPct: ((v) => (Math.abs(v) > 1.5 ? v / 100 : v))(num(lastOf("% DE MARGE BRUTE"))), // base 100→1 sur |v| (gère marges négatives / faibles)
+    costTotal, saleTotal, margin, marginPct,
     source: "fiche",
   };
 
