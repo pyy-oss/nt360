@@ -7,6 +7,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult } from "../lib/writes";
+import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
@@ -696,9 +697,13 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today }: {
       </div>
       {col.slice(0, shown).map((o) => {
         const overdue = !!(o.closingDate && o.closingDate.slice(0, 10) < today);
+        const saving = movingId === (o.oppId || o.id); // enregistrement en cours (recompute serveur)
         return (
-          <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel", overdue ? "border-clay/40" : "border-line")}>
-            <div className="text-[12px] font-semibold text-ink truncate" title={o.client || ""}>{o.client || "—"}</div>
+          <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel transition-opacity", overdue ? "border-clay/40" : "border-line", saving && "opacity-60")}>
+            <div className="flex items-center gap-1.5">
+              <div className="text-[12px] font-semibold text-ink truncate flex-1" title={o.client || ""}>{o.client || "—"}</div>
+              {saving && <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse shrink-0" title="Enregistrement…" aria-label="Enregistrement en cours" />}
+            </div>
             {o.designation && <div className="text-[11px] text-muted truncate" title={o.designation}>{o.designation}</div>}
             <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
               <span className="font-display tabnum text-ink">{fmt(o.amount)}</span>
@@ -731,24 +736,51 @@ export const PipelineBoard: FC<Props> = () => {
   const canWrite = useCan("pipeline") === "write";
   const toast = useToast();
   const [movingId, setMovingId] = useState<string | null>(null); // carte en cours de changement d'étape (verrou in-flight)
+  // Étape OPTIMISTE par opp (id → étape) : la carte change de colonne IMMÉDIATEMENT, sans attendre le
+  // recompute serveur (plusieurs secondes). Revert en cas d'erreur ; nettoyée quand le snapshot rattrape.
+  const [optim, setOptim] = useState<Record<string, number>>({});
   const today = new Date().toISOString().slice(0, 10);
+  // Retire l'étape optimiste dès que la collection en temps réel reflète la nouvelle étape (évite le
+  // « clignotement » : on ne garde l'override que le temps que le snapshot rattrape).
+  useEffect(() => {
+    setOptim((m) => {
+      if (!Object.keys(m).length) return m;
+      let changed = false; const n: Record<string, number> = {};
+      for (const [id, st] of Object.entries(m)) {
+        const real = allRows.find((r) => (r.oppId || r.id) === id);
+        if (real && (real.stage || 0) === st) { changed = true; continue; }
+        n[id] = st;
+      }
+      return changed ? n : m;
+    });
+  }, [allRows]);
   const move = async (o: Opportunity, v: string) => {
     const id = o.oppId || o.id || "";
     const to = Number(v);
-    setMovingId(id); // désactive le select pendant l'appel → pas de double-changement (from périmé)
+    setMovingId(id);                                  // signal « enregistrement » sur la carte
+    setOptim((m) => ({ ...m, [id]: to }));            // OPTIMISTE : la carte bouge tout de suite
     try {
-      await patchOpportunity({ id, stage: to });
+      await trackWrite(patchOpportunity({ id, stage: to }));
       // Passage en Gagné (6) sans N° FP : la carte quitte le board ET ne deviendra jamais commande (CAS) →
       // on AVERTIT au lieu d'un succès muet (cf. audit ; parité avec l'avertissement de la fiche).
       if (to === 6 && !o.fp) toast("Gagnée sans N° FP — ne deviendra pas commande. Renseignez le FP dans Opportunités.", "err");
       else toast("Étape mise à jour", "ok");
-    } catch { toast("Changement d'étape refusé", "err"); }
-    finally { setMovingId(null); }
+    } catch {
+      setOptim((m) => { const n = { ...m }; delete n[id]; return n; }); // revert : la carte revient à sa colonne
+      toast("Changement d'étape refusé", "err");
+    } finally { setMovingId(null); }
   };
   if (loading && !allRows.length) return <CardSkeleton />;
   // Exclut les opps FANTÔMES (stale : retirées de LIVE, cf. audit intégral I2) → le board reste cohérent
-  // avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
-  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5);
+  // avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données. On applique
+  // d'abord l'étape OPTIMISTE (override local) avant de filtrer/répartir par colonne.
+  const rows = allRows.reduce<Opportunity[]>((acc, r0) => {
+    if (r0.stale) return acc;
+    const eff = optim[r0.oppId || r0.id || ""];
+    const r = (eff != null && eff !== (r0.stage || 0)) ? { ...r0, stage: eff } : r0;
+    if (!isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5) acc.push(r);
+    return acc;
+  }, []);
   const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
   return (
     <div className="flex flex-col gap-3">
