@@ -1,0 +1,96 @@
+# Policies de monitoring & alerting — nt360
+
+Alertes GCP à provisionner avant le go-live (cf. `RUNBOOK-GOLIVE.md` §5). Aucune n'est automatisée par
+l'app — à créer une fois par un opérateur. Les Cloud Functions gen2 s'exécutent sur **Cloud Run**
+(`resource.type="cloud_run_revision"`).
+
+```bash
+PROJECT=propulse-business-87f7a
+gcloud config set project "$PROJECT"
+```
+
+## 1. Canal de notification (email)
+
+```bash
+gcloud beta monitoring channels create \
+  --display-name="Ops nt360" \
+  --type=email \
+  --channel-labels=email_address=ops@neurones.example
+# Récupérer son id pour les policies :
+CHANNEL=$(gcloud beta monitoring channels list --filter='displayName="Ops nt360"' --format='value(name)')
+echo "$CHANNEL"
+```
+
+## 2. Alerte — toute erreur (severity=ERROR) des Cloud Functions nt360
+
+Couvre les échecs de callables ET de jobs planifiés (recompute 05:00, syncSalesData 06:00, export
+dominical, pulls ClickUp) qui, sinon, ne notifient personne (seul `opsLog` en garde trace).
+
+`policy-functions-errors.json` :
+
+```json
+{
+  "displayName": "nt360 — erreurs Cloud Functions",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Logs severity=ERROR (cloud_run_revision)",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND severity>=ERROR"
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "300s" }
+  },
+  "notificationChannels": ["CHANNEL_ID_ICI"]
+}
+```
+
+```bash
+sed "s#CHANNEL_ID_ICI#${CHANNEL}#" policy-functions-errors.json > /tmp/pol1.json
+gcloud alpha monitoring policies create --policy-from-file=/tmp/pol1.json
+```
+
+> Affiner si trop bruyant : restreindre aux fonctions critiques via
+> `resource.labels.service_name=("scheduledrecompute" OR "syncsalesdata" OR "scheduledfirestoreexport" OR "clickupwebhook")`
+> (noms de service Cloud Run en minuscules).
+
+## 3. Alerte — échec spécifique du recompute nocturne (log-based metric ciblée)
+
+Le recompute 05:00 (`scheduledRecompute`) est le cœur : s'il échoue, tous les chiffres du matin sont
+périmés. Alerte dédiée sur son log d'échec (l'app journalise `opsLog { action:"scheduledRecompute",
+status:"error" }` mais Cloud Logging voit aussi le `logger.error`).
+
+```bash
+gcloud logging metrics create nt360_recompute_fail \
+  --description="Échecs du recompute planifié nt360" \
+  --log-filter='resource.type="cloud_run_revision" AND resource.labels.service_name="scheduledrecompute" AND severity>=ERROR'
+# Puis créer une policy « > 0 sur 1 h » sur la métrique logging.googleapis.com/user/nt360_recompute_fail
+# (console Monitoring ▸ Alerting, condition « Cloud Run Revision > user/nt360_recompute_fail »).
+```
+
+## 4. Alerte — absence de sauvegarde (l'export dominical n'a pas tourné)
+
+L'export Firestore tourne dimanche 03:00. Détecter son ABSENCE (pas seulement son échec) via une métrique
+d'absence de log de succès :
+
+```bash
+gcloud logging metrics create nt360_backup_ok \
+  --description="Succès de l'export Firestore nt360" \
+  --log-filter='resource.type="cloud_run_revision" AND resource.labels.service_name="scheduledfirestoreexport" AND textPayload:"status\":\"ok"'
+# Policy « absence de données pendant 8 j » (metric-absence) sur user/nt360_backup_ok → alerte si aucun
+# succès depuis plus d'une semaine.
+```
+
+## 5. Alerte budget de facturation
+
+À créer dans **Billing ▸ Budgets & alerts** (hors `gcloud monitoring`) : un budget mensuel avec seuils
+50 % / 90 % / 100 %, notifié au même canal. Garde-fou contre une dérive de coût (recompute en boucle,
+flood errorLog, etc.).
+
+## 6. Complément applicatif (déjà en place)
+
+Le webhook Slack/Teams applicatif (`setNotificationConfig`, UI Habilitations) pousse **les crashs de
+callables** et le **digest d'alertes métier 07:00**. Il ne couvre PAS les jobs planifiés ni les quotas —
+d'où les policies GCP ci-dessus. Les deux sont complémentaires.
