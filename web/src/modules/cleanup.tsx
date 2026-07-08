@@ -163,6 +163,12 @@ const RECON_REASON: Record<string, string> = {
   opp_gagnee_sans_pnl: "opp gagnée sans commande P&L",
   facture_sous_autre_fp: "facturée sous un autre N° FP",
 };
+// Niveau de confiance de la proposition (signal ayant déclenché le rapprochement).
+const RECON_CONF: Record<string, { label: string; tone: "emerald" | "gold" | "clay" }> = {
+  montant: { label: "montant concordant", tone: "emerald" },
+  designation: { label: "même affaire", tone: "gold" },
+  partielle: { label: "facture partielle", tone: "clay" },
+};
 
 // État d'un cluster (une affaire sous un N° FP) pour la colonne de synthèse.
 function clusterState(c: ReconCluster): { label: string; tone: "clay" | "gold" | "emerald" | "neutral" } {
@@ -229,6 +235,7 @@ function ClientReconcileCard() {
                     <span className="text-faint">→</span>
                     <span className="tabnum text-ink">{s.to}</span>
                     <Badge tone={s.targetHasInvoice ? "emerald" : "steel"}>{s.targetHasInvoice ? "FP facture" : "FP commande"}</Badge>
+                    {RECON_CONF[s.confidence] && <Badge tone={RECON_CONF[s.confidence].tone}>{RECON_CONF[s.confidence].label}</Badge>}
                     <span className="text-muted">{RECON_REASON[s.reason] || s.reason}</span>
                     <Busy variant="ghost" label="Réconcilier" okMsg="Réconciliation enregistrée (recalcul lancé)" errMsg="Réconciliation refusée"
                       fn={async () => { await setFpAlias(s.from, s.to); await openClient(dossier.client); await refreshList(); }} />
@@ -249,7 +256,7 @@ function ClientReconcileCard() {
           </div>
         )}
 
-        <Tip>Vue par <b>client</b> alignant <b>opportunités, commandes P&amp;L et factures</b> sur le même N° FP. Le <b>FP de la facture fait foi</b> (facturation) devant le FP commande, lui-même devant le FP opp. « <b>Clients à rapprocher</b> » liste ceux dont un flux est sous un N° FP divergent ; ouvrez un dossier puis cliquez « <b>Réconcilier</b> » sur une proposition (overlay non destructif, recalcul immédiat). Un rapprochement n'est proposé que lorsqu'un jumeau de <b>même montant</b> existe sous un autre N° FP.</Tip>
+        <Tip>Vue par <b>client</b> alignant <b>opportunités, commandes P&amp;L et factures</b> sur le même N° FP. Le <b>FP de la facture fait foi</b> (facturation) devant le FP commande, lui-même devant le FP opp. « <b>Clients à rapprocher</b> » liste ceux dont un flux est sous un N° FP divergent ; ouvrez un dossier puis cliquez « <b>Réconcilier</b> » sur une proposition (overlay non destructif, recalcul immédiat). Chaque proposition indique son signal : <b>montant concordant</b>, <b>même affaire</b> (désignation) ou <b>facture partielle</b> (acompte, appariement unique) — toujours à confirmer d'un clic.</Tip>
       </div>
     </Card>
   );

@@ -37,7 +37,7 @@ describe("reconcileClients — dossier client & propositions de rapprochement FP
     const d = find(out, "ACME");
     expect(d.wonNoPnl).toBe(1);
     expect(d.suggestions).toHaveLength(1);
-    expect(d.suggestions[0]).toMatchObject({ from: "FP/2026/13", to: "FP/2026/500", reason: "opp_gagnee_sans_pnl", targetHasInvoice: true });
+    expect(d.suggestions[0]).toMatchObject({ from: "FP/2026/13", to: "FP/2026/500", reason: "opp_gagnee_sans_pnl", targetHasInvoice: true, confidence: "montant" });
   });
 
   it("A bis. opp gagnée sans jumeau de même montant → AUCUNE proposition (conservateur), mais comptée wonNoPnl", () => {
@@ -59,14 +59,59 @@ describe("reconcileClients — dossier client & propositions de rapprochement FP
     });
     const d = find(out, "ACME");
     expect(d.suggestions).toHaveLength(1);
-    expect(d.suggestions[0]).toMatchObject({ from: "FP/2026/500", to: "FP/2026/777", reason: "facture_sous_autre_fp", targetHasInvoice: true });
+    expect(d.suggestions[0]).toMatchObject({ from: "FP/2026/500", to: "FP/2026/777", reason: "facture_sous_autre_fp", targetHasInvoice: true, confidence: "montant" });
   });
 
-  it("commande partiellement facturée (facture < CAS) sous un autre FP → PAS de proposition (montants non concordants)", () => {
+  it("B partielle. commande partiellement facturée (facture < CAS) + paire UNIQUE → proposition « partielle » (acompte)", () => {
     const out = reconcileClients({
       orders: [{ fp: "FP/2026/500", client: "ACME", cas: 1000 }],
-      invoices: [{ fp: "FP/2026/777", client: "ACME", amountHt: 300 }], // acompte : 300 ≠ 1000
+      invoices: [{ fp: "FP/2026/777", client: "ACME", amountHt: 300 }], // acompte : 300 < 1000, seule paire
       opps: [], fpKeyOf: keyOf(), normClient: nc,
+    });
+    const s = find(out, "ACME").suggestions;
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ from: "FP/2026/500", to: "FP/2026/777", reason: "facture_sous_autre_fp", confidence: "partielle" });
+  });
+
+  it("B partielle bis. appariement AMBIGU (2 factures orphelines) sans concordance de montant → aucune proposition partielle", () => {
+    const out = reconcileClients({
+      orders: [{ fp: "FP/2026/500", client: "ACME", cas: 1000 }],
+      invoices: [ // deux factures orphelines de montants différents → paire non unique → prudence
+        { fp: "FP/2026/777", client: "ACME", amountHt: 300 },
+        { fp: "FP/2026/888", client: "ACME", amountHt: 250 },
+      ],
+      opps: [], fpKeyOf: keyOf(), normClient: nc,
+    });
+    expect(find(out, "ACME").suggestions).toHaveLength(0);
+  });
+
+  it("facture DÉPASSANT le CAS sous un autre FP → pas de proposition partielle (surfacturation, hors périmètre)", () => {
+    const out = reconcileClients({
+      orders: [{ fp: "FP/2026/500", client: "ACME", cas: 1000 }],
+      invoices: [{ fp: "FP/2026/777", client: "ACME", amountHt: 1500 }], // > CAS → suspect, pas un acompte
+      opps: [], fpKeyOf: keyOf(), normClient: nc,
+    });
+    expect(find(out, "ACME").suggestions).toHaveLength(0);
+  });
+
+  it("A désignation. opp gagnée sans P&L, montant DIVERGENT mais MÊME AFFAIRE → propose (confiance « designation »)", () => {
+    const out = reconcileClients({
+      orders: [{ fp: "FP/2026/500", client: "ACME", cas: 1200, affaire: "DEPLOIEMENT RESEAU LAN SIEGE" }],
+      invoices: [],
+      opps: [{ fp: "FP/2026/13", client: "ACME", amount: 900, stage: 6, designation: "Reseau LAN siege" }], // montant révisé
+      fpKeyOf: keyOf(), normClient: nc,
+    });
+    const s = find(out, "ACME").suggestions;
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ from: "FP/2026/13", to: "FP/2026/500", reason: "opp_gagnee_sans_pnl", confidence: "designation" });
+  });
+
+  it("A désignation bis. montant divergent ET affaires sans rapport → aucune proposition", () => {
+    const out = reconcileClients({
+      orders: [{ fp: "FP/2026/500", client: "ACME", cas: 1200, affaire: "MAINTENANCE PARC IMPRIMANTES" }],
+      invoices: [],
+      opps: [{ fp: "FP/2026/13", client: "ACME", amount: 900, stage: 6, designation: "Formation cybersecurite" }],
+      fpKeyOf: keyOf(), normClient: nc,
     });
     expect(find(out, "ACME").suggestions).toHaveLength(0);
   });

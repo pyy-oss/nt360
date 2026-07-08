@@ -77,7 +77,7 @@ export async function setFpAlias(from: string, to: string) {
 // DOSSIER CLIENT (rapprochement Opp/Commande/Facture). Lecture seule, gouverné « import ».
 export type ReconRow = { fp?: string; client?: string; amount?: number; cas?: number; raf?: number; amountHt?: number; stage?: number; stageLabel?: string; designation?: string; am?: string; date?: string; numero?: string; source?: string; linked?: boolean };
 export type ReconCluster = { fp: string; opps: ReconRow[]; orders: ReconRow[]; invoices: ReconRow[]; oppAmount: number; orderCas: number; invoiceTotal: number; hasOrder: boolean; hasInvoice: boolean; won: boolean };
-export type ReconSuggestion = { from: string; to: string; reason: "opp_gagnee_sans_pnl" | "facture_sous_autre_fp"; targetHasInvoice: boolean };
+export type ReconSuggestion = { from: string; to: string; reason: "opp_gagnee_sans_pnl" | "facture_sous_autre_fp"; targetHasInvoice: boolean; confidence: "montant" | "designation" | "partielle" };
 export type ReconDossier = { client: string; clusters: ReconCluster[]; authoritativeFps: string[]; suggestions: ReconSuggestion[]; wonNoPnl: number; counts: { opps: number; orders: number; invoices: number } };
 export type ReconListItem = { client: string; counts: { opps: number; orders: number; invoices: number }; suggestions: number; wonNoPnl: number };
 export type ReconResult = { ok: boolean; mode: "list" | "detail"; clients?: ReconListItem[]; totalSuggestions?: number; scanned?: { orders: number; invoices: number; opps: number }; dossier?: ReconDossier | null };
