@@ -44,6 +44,9 @@ jobs:
       - name: Tests de règles Firestore (rules-unit-testing via émulateur)
         run: pnpm test:rules
 
+      - name: Cohérence du déploiement (exports index.js ⇔ deployed-functions.txt)
+        run: node functions/scripts/check-deploy-targets.mjs
+
       - name: Build web
         run: pnpm --filter web build
 

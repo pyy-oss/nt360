@@ -57,10 +57,16 @@ jobs:
           # gaté par des rules côté app (accès serveur via Admin SDK). Réintégrer « storage » ci-dessous
           # uniquement après avoir créé le bucket + accordé le droit au SA.
           export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          # Cibles functions construites depuis la SOURCE UNIQUE functions/deployed-functions.txt
+          # (une fonction/ligne ; lignes # et vides ignorées). Le même fichier est vérifié en CI contre
+          # les exports de index.js (functions/scripts/check-deploy-targets.mjs) → plus de dérive possible :
+          # une nouvelle fonction non listée fait échouer le check AVANT le merge, pas silencieusement en prod.
+          FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
+          if [ -z "$FN_TARGETS" ]; then echo "::error::liste de fonctions vide"; exit 1; fi
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,firestore:indexes,functions:setUserRole,functions:logLogin,functions:recompute,functions:exportReport,functions:importLegacyBackup,functions:importDelta,functions:addBcLine,functions:parseBcPdf,functions:setBcStatus,functions:upsertCreditLine,functions:dedupe,functions:syncSalesData,functions:scheduledFirestoreExport,functions:upsertOpportunity,functions:deleteOpportunity,functions:setInvoiceFp,functions:patchOrder,functions:patchBcLine,functions:scheduledRecompute,functions:setAlertThresholds,functions:setNotificationConfig,functions:alertDigest,functions:setProjectionConfig,functions:setBillingMilestones,functions:logClientError,functions:setPermissions,functions:createUser,functions:attachUser,functions:setUserActive,functions:createOrder,functions:patchOpportunity,functions:patchInvoice,functions:patchProjectSheet,functions:setClientAliases,functions:deleteRecords,functions:setCancellation,functions:reingest,functions:setOrderPm,functions:setFxRates,functions:setRefList,functions:setClickupConfig,functions:pushOrderToClickup,functions:listClickupMembers,functions:syncClickupCaf,functions:syncFromClickup,functions:scheduledClickupPull,functions:pushAllOrdersToClickup,functions:reconcileClickupLinks,functions:clickupHealth,functions:pushBcToClickup,functions:pushAllBcToClickup,functions:reconcileBcLinks,functions:importBcFromClickup,functions:syncBcFromClickup,functions:scheduledBcPull,functions:clickupWebhook,functions:setupClickupWebhook,functions:deleteClickupWebhook,functions:enrichClickup,functions:scheduledClickupEnrich" \
+              --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
               --project propulse-business-87f7a --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi
