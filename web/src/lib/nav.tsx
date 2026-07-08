@@ -14,6 +14,8 @@ export type NavIntent = {
   fp?: string;
   /** Recherche à pré-remplir sur la liste cible (remédiation guidée : pré-filtre sur la ligne à corriger). */
   search?: string;
+  /** Nom de client à ouvrir directement (Client 360 : rebond depuis une activité / un rapprochement). */
+  client?: string;
 };
 export type NavFn = (moduleId: string, intent?: NavIntent) => void;
 export const NavContext = createContext<{ go: NavFn; canGo: (id: string) => boolean; intent: NavIntent | null }>({

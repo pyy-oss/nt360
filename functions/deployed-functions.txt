@@ -17,6 +17,7 @@ createUser
 curateNews
 curateNewsNow
 dedupe
+deleteActivity
 deleteClickupWebhook
 deleteContact
 deleteObjective
@@ -29,6 +30,7 @@ importBcFromClickup
 importDelta
 importLegacyBackup
 importOpportunities
+listActivities
 listClickupMembers
 logClientError
 logLogin
@@ -78,6 +80,7 @@ syncClickupCaf
 syncFromClickup
 syncSalesData
 upsertAccount
+upsertActivity
 upsertContact
 upsertCreditLine
 upsertObjective

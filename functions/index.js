@@ -1251,6 +1251,70 @@ exports.accountView = onCallG("accountView", { memoryMiB: 256, timeoutSeconds: 6
   return { ok: true, id, name, account: accSnap.exists ? { id, ...accSnap.data() } : null, contacts };
 });
 
+// === ACTIVITÉS & TÂCHES (Lot 3 « niveau Salesforce ») — journal d'actions (appel/e-mail/RDV/note) et
+// TÂCHES à échéance, rattachées à un compte ou une opportunité. Comble l'écart #3 de l'audit (aucun
+// objet Activité/Tâche : ni timeline, ni relances d'actions). ACCÈS 100% PAR CALLABLE (Admin SDK) :
+// activities/* est read:false+write:false côté rules → la visibilité par enregistrement (Lot 2) est
+// appliquée ICI côté serveur, sans index composite ni cadrage client. Gouverné « pipeline », audité.
+function nowISO10() { return new Date().toISOString().slice(0, 10); }
+
+exports.upsertActivity = onCallG("upsertActivity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { validateActivity } = require("./domain/activity");
+  const v = validateActivity(req.data, nowISO10());
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const d = req.data || {};
+  // Propriétaire : explicite si fourni, sinon le créateur (défaut Salesforce). visibleTo = chaîne
+  // ascendante → la timeline suit la sécurité par enregistrement (Lot 2) sous OWD « private ».
+  const ownerUid = d.ownerUid !== undefined ? (d.ownerUid ? String(d.ownerUid) : req.auth.uid) : req.auth.uid;
+  const visibleTo = await visibleToFor(ownerUid);
+  const doc = { ...v.value, ownerUid, visibleTo, updatedAt: FieldValue.serverTimestamp() };
+  let id = d.id ? String(d.id) : null;
+  if (id) { assertPlainId(id, "id activité"); await db.doc(`activities/${id}`).set(doc, { merge: true }); }
+  else { const ref = await db.collection("activities").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_activity", module: "pipeline", entity: "activity", entityId: id, detail: { type: v.value.type, relatedId: v.value.relatedId }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id };
+});
+
+exports.deleteActivity = onCallG("deleteActivity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = assertPlainId(req.data?.id, "id activité");
+  await db.doc(`activities/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_activity", module: "pipeline", entity: "activity", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
+// Liste des activités — lecture gouvernée « pipeline », visibilité par enregistrement appliquée ICI.
+// args : { relatedId? (timeline d'un enregistrement), mine? (mes activités/tâches), openTasksOnly?,
+// limit? }. Sans relatedId ni mine : flux global (plafonné). Tri : tâches ouvertes d'abord (par
+// échéance croissante), puis reste par date d'activité décroissante.
+exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const d = req.data || {};
+  let q = db.collection("activities");
+  if (d.relatedId) q = q.where("relatedId", "==", String(d.relatedId));
+  else if (d.mine) q = q.where("ownerUid", "==", req.auth.uid);
+  const cap = Math.min(500, Math.max(1, Number(d.limit) || 300));
+  const snap = await q.limit(1000).get();
+  let rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
+  // Visibilité par enregistrement : sous OWD « private » (opportunités), un non-admin ne voit que les
+  // activités de sa ligne hiérarchique (visibleTo). Public/admin → tout.
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    rows = rows.filter((a) => Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
+  }
+  if (d.openTasksOnly) rows = rows.filter((a) => a.type === "task" && a.done !== true);
+  const { isOverdue } = require("./domain/activity");
+  const today = nowISO10();
+  const openTask = (a) => a.type === "task" && a.done !== true;
+  rows.sort((a, b) => {
+    const ao = openTask(a), bo = openTask(b);
+    if (ao !== bo) return ao ? -1 : 1;                       // tâches ouvertes d'abord
+    if (ao && bo) return String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")); // par échéance
+    return String(b.at || "").localeCompare(String(a.at || "")); // sinon par date d'activité desc
+  });
+  return { ok: true, activities: rows.slice(0, cap).map((a) => ({ ...a, overdue: isOverdue(a, today) })), total: rows.length };
+});
+
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
 // imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
 // record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute

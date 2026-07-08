@@ -124,6 +124,28 @@ export async function upsertContact(data: { id?: string; account: string; name: 
 }
 export async function deleteContact(id: string) { await httpsCallable(functions, "deleteContact")({ id }); }
 
+// ACTIVITÉS & TÂCHES (Lot 3) — journal d'actions + tâches à échéance, rattachées à un compte/opp.
+// Accès 100% par callable (la visibilité par enregistrement est appliquée côté serveur).
+export type ActivityType = "call" | "email" | "meeting" | "note" | "task";
+export type Activity = {
+  id?: string; type: ActivityType; subject: string; body?: string;
+  relatedType: "account" | "opportunity"; relatedId: string; relatedName?: string;
+  at?: string | null; dueDate?: string | null; done?: boolean; ownerUid?: string | null; overdue?: boolean;
+};
+/** Crée / met à jour une activité ou tâche (propriétaire = créateur par défaut). Droit « pipeline ». */
+export async function upsertActivity(data: Partial<Activity> & { type: ActivityType; subject: string; relatedType: "account" | "opportunity"; relatedId: string }) {
+  const res = await httpsCallable(functions, "upsertActivity")(data);
+  return res.data as { ok: boolean; id: string };
+}
+/** Supprime une activité/tâche. Droit « pipeline ». */
+export async function deleteActivity(id: string) { await httpsCallable(functions, "deleteActivity")({ id }); }
+/** Liste des activités : timeline d'un enregistrement (relatedId), les miennes (mine), ou le flux
+ *  global ; openTasksOnly = seulement les tâches ouvertes. La visibilité est appliquée côté serveur. */
+export async function listActivities(opts?: { relatedId?: string; mine?: boolean; openTasksOnly?: boolean; limit?: number }) {
+  const res = await httpsCallable(functions, "listActivities")(opts || {});
+  return res.data as { ok: boolean; activities: Activity[]; total: number };
+}
+
 // SÉCURITÉ PAR ENREGISTREMENT (Lot 2) — propriété + hiérarchie + OWD + MFA.
 /** Réaffecte le propriétaire d'un enregistrement (opportunité/compte) — recalcule visibleTo. Droit « pipeline ». */
 export async function assignOwner(collection: "opportunities" | "accounts", id: string, ownerUid: string | null) {

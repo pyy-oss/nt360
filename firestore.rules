@@ -140,6 +140,11 @@ service cloud.firestore {
     match /accounts/{id} { allow read: if canSeeRecord('overview', 'accounts'); allow write: if false; }
     match /contacts/{id} { allow read: if canSeeRecord('overview', 'accounts'); allow write: if false; }
 
+    // Activités & tâches (Lot 3) : ACCÈS 100% PAR CALLABLE (Admin SDK). La lecture directe est fermée —
+    // listActivities applique la visibilité par enregistrement côté serveur (évite index composite +
+    // cadrage client). L'écriture passe par upsert/deleteActivity (validés, audités). Donc read/write:false.
+    match /activities/{id} { allow read: if false; allow write: if false; }
+
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
       allow read: if canRead('bc');
