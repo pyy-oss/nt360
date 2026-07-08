@@ -31,7 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(u);
       if (u) {
         const token = await u.getIdTokenResult();
-        setRole((token.claims.role as Role) ?? null);
+        // Claim NAMESPACÉ nt360Role (projet Firebase partagé — cf. firestore.rules / setUserRole).
+        setRole((token.claims.nt360Role as Role) ?? null);
         // Matrice lue une fois (cache mémoire) — les summaries et le reste passent par onSnapshot.
         if (!matrix) {
           try {

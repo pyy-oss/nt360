@@ -4,7 +4,9 @@ service cloud.firestore {
     // --- RBAC opposable : la matrice de droits est lue côté serveur ---
     // Le front ne fait jamais autorité (BUILD_KIT §8).
     function signedIn() { return request.auth != null; }
-    function role() { return request.auth.token.role; }
+    // Claim NAMESPACÉ (nt360Role) : projet Firebase PARTAGÉ avec une autre app → un claim générique
+    // `role` serait commun aux deux (un `role:direction` de l'app sœur escaladerait ici). On ne lit que nt360Role.
+    function role() { return request.auth.token.nt360Role; }
     function matrix() { return get(/databases/$(db)/documents/config/permissions).data.matrix; }
     function level(m) { return role() == 'direction' ? 'write' : matrix()[role()][m]; }
     function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
@@ -90,15 +92,14 @@ service cloud.firestore {
     // Marge des fiches affaire (coût/vente/marge/%MB) → accès « Rentabilité » requis.
     match /projectSheetsMargin/{id} { allow read: if canRead('rentabilite'); allow write: if false; }
 
-    // Opportunités : seules les saisies (source == 'saisie') sont modifiables par le client.
+    // Opportunités : LECTURE seule côté client ; toute écriture passe par les callables
+    // (upsert/patch/deleteOpportunity, Admin SDK) qui VALIDENT (stage/amount/probabilité bornés),
+    // AUDITENT (auditLog) et JOURNALISENT les transitions (oppHistory → funnel). Une écriture SDK
+    // directe contournerait tout cela et pourrait, via une opp gagnée (stage 6) réconciliée au carnet
+    // (mergeCommandes), corrompre le CAS/client d'une commande sans aucune trace. Donc write:false.
     match /opportunities/{id} {
       allow read: if canRead('pipeline');
-      // Création d'une saisie manuelle uniquement.
-      allow create: if canWrite('pipeline') && request.resource.data.source == 'saisie';
-      // Modif/suppression réservées aux opps DÉJÀ saisies (resource.data) : on ne peut pas
-      // « détourner » une opp importée en basculant sa source vers 'saisie' côté client.
-      allow update: if canWrite('pipeline') && resource.data.source == 'saisie' && request.resource.data.source == 'saisie';
-      allow delete: if canWrite('pipeline') && resource.data.source == 'saisie';
+      allow write: if false;
     }
     // Historique des transitions d'étape (Lot C) : lisible par qui voit le pipeline ; écrit UNIQUEMENT
     // par les Cloud Functions (recordOppTransition, Admin SDK) → le funnel n'est pas falsifiable côté client.

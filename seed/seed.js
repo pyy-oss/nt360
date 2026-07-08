@@ -51,7 +51,10 @@ async function main() {
     console.log(`✓ Utilisateur créé : ${email} (${user.uid})`);
   }
 
-  await auth.setCustomUserClaims(user.uid, { role: "direction" });
+  // Claim NAMESPACÉ nt360Role (projet Firebase partagé — cf. firestore.rules). On purge un éventuel
+  // legacy `role` du compte pour ne pas laisser traîner un claim exploitable.
+  const { role: _legacy, ...keep } = user.customClaims || {};
+  await auth.setCustomUserClaims(user.uid, { ...keep, nt360Role: "direction" });
   await db.collection("users").doc(user.uid).set(
     { email, name: email.split("@")[0], active: true },
     { merge: true }

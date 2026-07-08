@@ -176,14 +176,51 @@ async function logOps(entry) {
   }
 }
 
+// Rejette un id destiné à un chemin de document s'il est vide ou contient « / » (segments imbriqués
+// inattendus). Défense en profondeur sur les callables construisant db.doc(`collection/${id}`) à partir
+// d'une entrée client (Firestore traite déjà les segments littéralement, mais on refuse tôt et clair).
+function assertPlainId(id, label = "id") {
+  const s = String(id == null ? "" : id);
+  if (!s || s.includes("/")) throw new HttpsError("invalid-argument", `${label} invalide`);
+  return s;
+}
+
+// Limiteur de débit par (uid, type) — best-effort, transactionnel sur rateLimits/{kind}_{uid} avec une
+// fenêtre glissante. Renvoie true si l'action est AUTORISÉE, false si le quota est dépassé (l'appelant
+// abandonne alors silencieusement). Anti-flood des journaux écrits par tout compte authentifié (errorLog).
+async function rateLimit(uid, kind, maxPerWindow, windowMs) {
+  if (!uid) return false;
+  const ref = db.doc(`rateLimits/${kind}_${uid}`);
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const now = Date.now();
+      const d = snap.exists ? snap.data() : null;
+      const within = d && typeof d.windowStartMs === "number" && (now - d.windowStartMs) < windowMs;
+      const count = within ? (Number(d.count) || 0) : 0;
+      if (count >= maxPerWindow) return false;
+      tx.set(ref, { windowStartMs: within ? d.windowStartMs : now, count: count + 1, updatedMs: now }, { merge: true });
+      return true;
+    });
+  } catch (e) {
+    logger.warn("rateLimit: transaction échouée (fail-open)", { kind, message: e && e.message });
+    return true; // en cas d'erreur d'infra, ne pas bloquer l'action légitime
+  }
+}
+
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
 const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
 
 exports.setUserRole = onCallG("setUserRole", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { uid, role } = req.data || {};
   if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (∈ 6 profils) requis");
-  await getAuth().setCustomUserClaims(uid, { role });
+  // Claim NAMESPACÉ (nt360Role) : le projet Firebase est PARTAGÉ avec une autre app → un claim
+  // générique `role` serait commun aux deux (un `role:direction` posé par l'app sœur escaladerait ici).
+  // On lit/écrit exclusivement nt360Role et on purge un éventuel legacy `role` du même compte.
+  const existing = (await getAuth().getUser(uid).catch(() => null))?.customClaims || {};
+  const { role: _legacy, ...keep } = existing;
+  await getAuth().setCustomUserClaims(uid, { ...keep, nt360Role: role });
   // Reflète le rôle courant dans l'annuaire users/ (le rôle « source de vérité » reste le custom
   // claim ; ce miroir sert l'affichage de l'écran Habilitations et évite un rôle invisible).
   await db.collection("users").doc(uid).set({ role }, { merge: true });
@@ -202,7 +239,7 @@ exports.setUserRole = onCallG("setUserRole", async (req) => {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 exports.createUser = onCallG("createUser", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const email = String(d.email || "").trim().toLowerCase();
   const role = d.role;
@@ -216,7 +253,7 @@ exports.createUser = onCallG("createUser", async (req) => {
   try { existing = await auth.getUserByEmail(email); } catch (e) { if (e.code !== "auth/user-not-found") throw e; }
   if (existing) throw new HttpsError("already-exists", "un compte existe déjà pour cet email");
   const user = await auth.createUser({ email, password, displayName: name, emailVerified: true });
-  await auth.setCustomUserClaims(user.uid, { role });
+  await auth.setCustomUserClaims(user.uid, { nt360Role: role }); // claim NAMESPACÉ (projet Firebase partagé)
   await db.collection("users").doc(user.uid).set(
     { email, name, active: true, role, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() },
     { merge: true },
@@ -233,7 +270,7 @@ exports.createUser = onCallG("createUser", async (req) => {
 // (custom claim, FUSIONNÉ pour ne pas écraser les claims d'une autre app) + crée/actualise la fiche
 // users/{uid}. Ne recrée PAS le compte et NE TOUCHE PAS au mot de passe. Direction uniquement, audité. ---
 exports.attachUser = onCallG("attachUser", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const email = String(d.email || "").trim().toLowerCase();
   const role = d.role;
@@ -244,8 +281,10 @@ exports.attachUser = onCallG("attachUser", async (req) => {
   try { user = await auth.getUserByEmail(email); }
   catch (e) { if (e.code === "auth/user-not-found") throw new HttpsError("not-found", "aucun compte Firebase pour cet email (ni dans ce projet, ni dans ses autres apps)"); throw e; }
   const name = String(d.name || "").trim() || user.displayName || email.split("@")[0];
-  // FUSION des claims : préserve d'éventuels claims d'une autre app du projet, ajoute/écrase `role`.
-  await auth.setCustomUserClaims(user.uid, { ...(user.customClaims || {}), role });
+  // FUSION des claims : préserve d'éventuels claims d'une autre app du projet, pose nt360Role (namespacé)
+  // et purge un éventuel legacy `role` du même compte (sinon il resterait exploitable côté nt360).
+  const { role: _legacy, ...keep } = user.customClaims || {};
+  await auth.setCustomUserClaims(user.uid, { ...keep, nt360Role: role });
   await db.collection("users").doc(user.uid).set(
     { email, name, active: true, role, attachedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() },
     { merge: true },
@@ -262,7 +301,7 @@ exports.attachUser = onCallG("attachUser", async (req) => {
 // uniquement. Un compte désactivé ne peut plus se connecter (ses jetons existants cessent d'être
 // rafraîchis, expiration ≤ 1 h). On interdit de désactiver son PROPRE compte (verrouillage). ---
 exports.setUserActive = onCallG("setUserActive", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { uid, active } = req.data || {};
   if (!uid || typeof active !== "boolean") throw new HttpsError("invalid-argument", "uid et active (booléen) requis");
   if (uid === req.auth.uid && active === false) throw new HttpsError("failed-precondition", "impossible de désactiver son propre compte");
@@ -278,7 +317,7 @@ exports.setUserActive = onCallG("setUserActive", async (req) => {
 // --- Seuils d'alerte configurables (config/alerts) : édités par la direction, recompute des
 // alertes + qualité des données pour appliquer immédiatement. Bornés pour éviter les valeurs absurdes. ---
 exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const pct = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
   const years = (v, def) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 10 ? n : def; };
@@ -304,7 +343,7 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
 // TOUS les summaries — le défaut 256 MiB / 60 s provoquait timeout/OOM à l'échelle (cf. audit intégral
 // O1), et un kill sur timeout bypasse la libération du verrou → agrégats figés ~10 min (lease).
 exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const w = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
   const tier = (k, dw) => ({ active: d?.[k]?.active === undefined ? true : !!d[k].active, weight: w(d?.[k]?.weight, dw) });
@@ -331,7 +370,7 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, t
 // intégralement (merge:false) → retirer une paire la supprime réellement. Bornée à 500 paires. ---
 // Budget 512 MiB / 300 s comme setProjectionConfig : recomputeSummaries() complet (cf. audit intégral O1).
 exports.setClientAliases = onCallG("setClientAliases", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const raw = Array.isArray(req.data && req.data.pairs) ? req.data.pairs : [];
   const pairs = [];
   for (const p of raw.slice(0, 500)) {
@@ -412,6 +451,7 @@ exports.deleteObjective = onCallG("deleteObjective", { memoryMiB: 256, timeoutSe
   await requireWrite(req, "objectifs");
   const id = String(req.data?.id || "").trim();
   if (!id) throw new HttpsError("invalid-argument", "id objectif requis");
+  assertPlainId(id, "id objectif");
   await db.doc(`objectives/${id}`).delete();
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "delete_objective", module: "objectifs", entity: "objective", entityId: id,
@@ -472,7 +512,7 @@ function onCallG(action, opts, handler) {
 // effet RÉEL sur les mutations serveur. `direction` = superviseur (write partout). Lève sinon.
 async function requireWrite(req, module) {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  const role = req.auth.token?.role;
+  const role = req.auth.token?.nt360Role;
   if (role === "direction") return;
   const { canWrite } = require("./domain/authz");
   const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
@@ -485,7 +525,7 @@ async function requireWrite(req, module) {
 // sont toutes direction-only — plutôt que sur requireWrite('habilitations') qui l'ouvrirait à un
 // délégataire. Valide le schéma avant écriture (une matrice malformée casserait level() pour tous). ---
 exports.setPermissions = onCallG("setPermissions", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { validateMatrix } = require("./domain/authz");
   const matrix = req.data?.matrix;
   const v = validateMatrix(matrix);
@@ -499,7 +539,7 @@ exports.setPermissions = onCallG("setPermissions", async (req) => {
 });
 
 exports.setNotificationConfig = onCallG("setNotificationConfig", { timeoutSeconds: 30 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const url = String(d.webhookUrl || "").trim();
   if (url && !/^https:\/\//i.test(url)) throw new HttpsError("invalid-argument", "URL webhook invalide (https requis)");
@@ -580,7 +620,7 @@ exports.curateNews = onSchedule({ schedule: "every day 05:30", secrets: [ANTHROP
 // À la demande (Direction) : recalcule la curation immédiatement (test / rafraîchissement). Remonte
 // une erreur explicite si le secret n'est pas configuré, pour guider le provisionnement.
 exports.curateNewsNow = onCallG("curateNewsNow", { secrets: [ANTHROPIC_API_KEY], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const r = await runNewsCuration(req.auth.uid);
   if (r.skipped) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — curation indisponible.");
   return r;
@@ -591,7 +631,7 @@ exports.logLogin = onCallG("logLogin", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "login", module: "auth", entity: "session", entityId: req.auth.uid,
-    detail: { role: req.auth.token.role || null, email: req.auth.token.email || null },
+    detail: { role: req.auth.token.nt360Role || null, email: req.auth.token.email || null },
     ts: FieldValue.serverTimestamp(),
   });
   return { ok: true };
@@ -603,11 +643,14 @@ exports.logLogin = onCallG("logLogin", async (req) => {
 // (anti-abus). Champs bornés (garde-fou de taille / coût). N'échoue jamais côté client (best-effort). ---
 exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  // Anti-flood SERVEUR (le plafond client d'errorReporter est contournable) : au-delà de 30 erreurs/min
+  // par compte, on abandonne silencieusement (l'appel reste best-effort côté front, jamais bloquant).
+  if (!(await rateLimit(req.auth.uid, "clientError", 30, 60_000))) return { ok: true, throttled: true };
   const d = req.data || {};
   const s = (v, n) => (v == null ? null : String(v).slice(0, n));
   await db.collection("errorLog").add({
     uid: req.auth.uid,
-    role: req.auth.token.role || null,
+    role: req.auth.token.nt360Role || null,
     message: s(d.message, 1000) || "(sans message)",
     stack: s(d.stack, 4000),
     url: s(d.url, 500),
@@ -624,7 +667,7 @@ exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeco
 // timeout/OOM sur un gros volume, surfacé en « Action refusée » côté UI, alors que le même
 // recompute lancé APRÈS un import (512 MiB / 300 s) réussissait.
 exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { recomputeAll } = require("./lib/aggregate");
   const t0 = Date.now();
   try {
@@ -738,7 +781,7 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 512, timeoutSeconds: 3
 // des functions a déjà accès au bucket (indépendant du 403 constaté au DÉPLOIEMENT des Storage
 // rules). `prefix` optionnel restreint le balayage à un sous-dossier. ---
 exports.reingest = onCallG("reingest", { memoryMiB: 1024, timeoutSeconds: 540 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const prefix = req.data?.prefix ? String(req.data.prefix) : undefined;
   const r = await reingestBucket({ db, storage: getStorage(), bucketName: IMPORTS_BUCKET, prefix });
   await db.collection("imports").add({
@@ -759,6 +802,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 256, timeoutSeconds:
   const { fpKey } = require("./lib/ids");
   const id = String(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id facture requis");
+  assertPlainId(id, "id facture");
   const fp = fpKey(req.data?.fp) || null;
   if (!fp) throw new HttpsError("invalid-argument", "N° FP invalide (attendu FP/AAAA/NNNNN)");
   const ref = db.doc(`invoices/${id}`);
@@ -785,7 +829,9 @@ exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSecond
   const module = DELETABLE[collection];
   if (!module) throw new HttpsError("invalid-argument", "collection non assainissable");
   await requireWrite(req, module);
-  const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter(Boolean).slice(0, 1000);
+  // Rejette les id vides OU contenant « / » (segments de chemin imbriqués inattendus) avant de bâtir
+  // db.doc(`${collection}/${id}`) — défense en profondeur (cf. assertPlainId).
+  const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter((x) => x && !x.includes("/")).slice(0, 1000);
   if (!ids.length) throw new HttpsError("invalid-argument", "aucun identifiant fourni");
   // Taille de fenêtre en fonction du NOMBRE D'OPÉRATIONS par id, pas du nombre d'ids : projectSheets
   // enfile 2 suppressions par id (fiche + doc marge isolé projectSheetsMargin) → 200×2 = 400 ≤ 500
@@ -827,6 +873,7 @@ exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSe
   await requireWrite(req, spec.module);
   const id = String(d.id || "");
   if (!id) throw new HttpsError("invalid-argument", "identifiant requis");
+  assertPlainId(id, "identifiant");
   const cancelled = d.cancelled !== false; // défaut = annuler
   const ref = db.doc(spec.doc);
   // ATOMIQUE (runTransaction) : le read-modify-write de la liste d'annulations doit être sérialisé —
@@ -855,6 +902,7 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 256, timeoutSeconds:
   await requireWrite(req, "import");
   const id = String(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id facture requis");
+  assertPlainId(id, "id facture");
   const ref = db.doc(`invoices/${id}`);
   if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
   const d = req.data || {};
@@ -1203,6 +1251,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   const d = req.data || {};
   const id = String(d.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id opportunité requis");
+  assertPlainId(id, "id opportunité");
   const ref = db.doc(`opportunities/${id}`);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("not-found", "opportunité introuvable");
@@ -1430,7 +1479,7 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
 // Remplace l'ensemble des taux (l'UI envoie la table complète). N'affecte que les BC créés ENSUITE
 // (la conversion est figée à l'écriture) — un BC existant se recorrige via sa contre-valeur XOF. ---
 exports.setFxRates = onCallG("setFxRates", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const raw = (req.data && req.data.rates) || {};
   const rates = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -1451,7 +1500,7 @@ exports.setFxRates = onCallG("setFxRates", { memoryMiB: 256, timeoutSeconds: 60 
 // (nettoyage : trim, dédup insensible à la casse, MAJUSCULES pour les BU, plafonds). ---
 const REF_LISTS = { projectManagers: { doc: "config/projectManagers", upper: false }, businessUnits: { doc: "config/businessUnits", upper: true } };
 exports.setRefList = onCallG("setRefList", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const kind = String(req.data?.kind || "");
   const spec = REF_LISTS[kind];
   if (!spec) throw new HttpsError("invalid-argument", "référentiel inconnu");
@@ -1479,7 +1528,7 @@ exports.setRefList = onCallG("setRefList", { memoryMiB: 256, timeoutSeconds: 60 
 // setClickupConfig : active/désactive et choisit la liste cible (direction). teamId/liste par défaut
 // pré-remplis (workspace + liste « Côte d'Ivoire »).
 exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const d = req.data || {};
   const cfg = {
     enabled: d.enabled !== false,
@@ -1567,7 +1616,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
 // + CAF). Membres/champs résolus une seule fois. Direction. Peut être long → le client peut voir un
 // timeout pendant que le traitement se poursuit côté serveur (le journal d'audit enregistre la fin).
 exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const clickup = require("./lib/clickup");
   const cf = require("./lib/clickupFields");
   const { fpKey } = require("./lib/ids");
@@ -1620,7 +1669,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
 // sans rien créer ni modifier dans ClickUp — à lancer AVANT tout push en masse pour éviter les
 // doublons des tâches créées via l'ancien formulaire. Direction.
 exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -1651,7 +1700,7 @@ exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLI
 // synchro). Scanne la liste une fois, croise avec les commandes + overlays, écrit summaries/clickupHealth
 // (lu par la carte de monitoring). Direction.
 exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -1675,7 +1724,7 @@ exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], mem
 // listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM
 // avec des noms EXACTS (évite les fautes de saisie qui casseraient l'assignation). Direction.
 exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const clickup = require("./lib/clickup");
@@ -1747,7 +1796,7 @@ async function maybeSyncCaf(trigger) {
 
 // syncClickupCaf : force la synchro du CAF de TOUTES les tâches liées (bouton Habilitations). Direction.
 exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
@@ -1812,7 +1861,7 @@ async function runClickupPull() {
 
 // syncFromClickup : bouton « Synchroniser depuis ClickUp » (statut projet + dates). Direction.
 exports.syncFromClickup = onCallG("syncFromClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
@@ -1903,7 +1952,7 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
 // pushAllBcToClickup : crée/synchronise EN MASSE les tâches de tous les BC. force=false : seuls les BC
 // NON encore liés sont créés/adoptés ; force=true resynchronise aussi les tâches existantes. Direction.
 exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const clickup = require("./lib/clickup");
   const bc = require("./lib/clickupBc");
   const { safeId } = require("./lib/sheets");
@@ -1944,7 +1993,7 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
 // reconcileBcLinks : RATTACHE les BC aux tâches ClickUp DÉJÀ existantes (par N° de Commande) sans rien
 // créer ni modifier — à lancer AVANT un push en masse. Direction.
 exports.reconcileBcLinks = onCallG("reconcileBcLinks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const bc = require("./lib/clickupBc");
   const { safeId } = require("./lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
@@ -1976,7 +2025,7 @@ exports.reconcileBcLinks = onCallG("reconcileBcLinks", { secrets: [CLICKUP_TOKEN
 // alimente l'engagement fournisseur, JAMAIS le solde SOA (seule une facture bouge le solde) ; (3) montant
 // converti en XOF via config/fxRates ; (4) id stable → ré-import idempotent. Direction.
 exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -2061,7 +2110,7 @@ async function runBcPull() {
 
 // syncBcFromClickup : bouton « Synchroniser les BC depuis ClickUp » (avancement achat + ETA). Direction.
 exports.syncBcFromClickup = onCallG("syncBcFromClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
@@ -2176,7 +2225,7 @@ exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, t
 // L'endpoint (URL déployée de la fonction) est fourni par l'admin. Le secret HMAC renvoyé À LA CRÉATION
 // est persisté dans config/clickupWebhook (serveur uniquement). Direction.
 exports.setupClickupWebhook = onCallG("setupClickupWebhook", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const endpoint = String(req.data?.endpoint || "").trim();
@@ -2213,7 +2262,7 @@ exports.setupClickupWebhook = onCallG("setupClickupWebhook", { secrets: [CLICKUP
 
 // deleteClickupWebhook : supprime le webhook enregistré (côté ClickUp + config). Direction.
 exports.deleteClickupWebhook = onCallG("deleteClickupWebhook", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const stored = (await db.doc("config/clickupWebhook").get()).data() || {};
@@ -2315,7 +2364,7 @@ async function runClickupEnrich() {
 
 // enrichClickup : bouton « Enrichir les tâches ClickUp » (synthèse + tag). Direction.
 exports.enrichClickup = onCallG("enrichClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
@@ -2344,6 +2393,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
   await requireWrite(req, "bc");
   const { id, status } = req.data || {};
   if (!id || !BC_STAGES.includes(status)) throw new HttpsError("invalid-argument", "id + statut (∈ cycle BC) requis");
+  assertPlainId(id, "id BC");
   await db.doc(`bcLines/${id}`).set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "bc_status", module: "bc", entity: "bcLine", entityId: id,
@@ -2363,6 +2413,7 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
   const d = req.data || {};
   const { id, fp, amountXof } = d;
   if (!id) throw new HttpsError("invalid-argument", "id requis");
+  assertPlainId(id, "id BC");
   const patch = { updatedAt: FieldValue.serverTimestamp() };
   // On n'écrit le FP que s'il donne une clé canonique NON vide : un fp vide/blanc n'est pas un
   // « détachement » utile mais un no-op qui déclencherait un recompute complet pour rien.
@@ -2393,6 +2444,7 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
   // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
   const id = String(req.data?.id || "").trim().toUpperCase();
   if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
+  assertPlainId(id, "id fournisseur");
   // SOA : plafond autorisé + solde d'OUVERTURE (posé à date, « à jour maintenant »). Seule une FACTURE
   // fournisseur (BC au statut « facturé ») bouge ensuite le solde ; l'ouverture est la base d'antériorité.
   const d = req.data || {};
@@ -2430,7 +2482,7 @@ exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 12
 // --- Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Regroupe par clé
 // métier, garde le meilleur représentant, supprime les autres. `apply:false` = analyse seule. ---
 exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
   const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
   const only = (Array.isArray(req.data?.collections) ? req.data.collections : Object.keys(KEYS)).filter((c) => KEYS[c]);
@@ -2473,7 +2525,7 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   const ExcelJS = require("exceljs");
   const { canRead } = require("./domain/authz");
-  const role = req.auth.token?.role;
+  const role = req.auth.token?.nt360Role;
   const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
   if (!canRead(matrix, role, "overview")) throw new HttpsError("permission-denied", "droit « vue d'ensemble » requis pour le rapport");
   const canMargin = canRead(matrix, role, "rentabilite");
@@ -2523,7 +2575,7 @@ exports.exportReport = onCallG("exportReport", async (req) => {
 
 // --- Migration prototype → Firestore (BUILD_KIT §13) ---
 exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
-  if (req.auth?.token?.role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const b = req.data?.backup || {};
   const { safeId } = require("./lib/sheets");
   const writes = [];
