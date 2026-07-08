@@ -15,6 +15,22 @@
 // supprimer les lignes `logistics` de ce FP (et inversement). Sans cette séparation, une source
 // absente du lot ferait tout supprimer côté autre source. Fail-safe conservé : une source qui ne
 // produit AUCUNE ligne pour un FP n'a pas d'entrée (source,fp) → aucune suppression pour ce couple.
+// LIVE (opportunités) : EXCLU des canaux delta / ingest / reingest. Les opps de la feuille LIVE doivent
+// passer par la synchro SNAPSHOT (applySalesSync, canal syncSalesData) qui marque les FANTÔMES (stale) —
+// sinon une opp SANS N° FP dont la « D Prev » a bougé se DUPLIQUE (son id est dérivé de la date de clôture,
+// mutable) et surévalue durablement le pipeline pondéré. On retire donc toute écriture `opportunities/` de
+// ces lots ; la synchro quotidienne 06:00 (ou le bouton « Forcer la synchro ») est le SEUL écrivain LIVE.
+// Renvoie les écritures conservées + le nombre d'opps écartées (surfacé dans le rapport d'import).
+function stripLiveOpps(writes) {
+  const kept = [];
+  let skipped = 0;
+  for (const w of writes || []) {
+    if (typeof w.path === "string" && w.path.startsWith("opportunities/")) skipped++;
+    else kept.push(w);
+  }
+  return { writes: kept, skipped };
+}
+
 const SWEEP_SOURCES = new Set(["fiche", "logistics"]);
 async function applyWrites(db, writes) {
   const byPath = new Map();
@@ -52,4 +68,4 @@ async function applyWrites(db, writes) {
   // vérification). Le marquage vit dans lib/sync.js (applySalesSync), seul chemin snapshot LIVE complet.
 }
 
-module.exports = { applyWrites };
+module.exports = { applyWrites, stripLiveOpps };

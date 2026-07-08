@@ -81,11 +81,12 @@ function parseLogistics(wb) {
       currency,
       amount,
       // Contre-valeur XOF : montant XOF saisi prioritaire, sinon conversion via taux (parité EUR fixe en
-      // repli), sinon 0 EXPLICITEMENT marqué « à saisir » (fxSource) → visible en qualité de données. Cf.
-      // audit P0-B : ne JAMAIS laisser un BC en devise étrangère silencieusement à 0 (dette/décaissement
-      // effacés). L'alias « devise » est désormais respecté (variable `currency` calculée ci-dessus).
-      amountXof: conv.amountXof,
-      fxRate: conv.fxRate,
+      // repli), sinon « à saisir » (fxSource) → visible en qualité de données. Cf. audit P0-B/P0-2 :
+      // ne JAMAIS laisser un BC en devise étrangère silencieusement à 0. Quand la valeur n'est PAS
+      // dérivable (a_saisir), on N'ÉCRIT PAS amountXof/fxRate → le merge au ré-import PRÉSERVE une
+      // éventuelle correction manuelle (patchBcLine) au lieu de la remettre à 0 (une ligne neuve sans
+      // valeur reste à 0 → signalée par le cockpit Qualité qui teste amountXof ≤ 0, pas fxSource).
+      ...(conv.fxSource === "a_saisir" ? {} : { amountXof: conv.amountXof, fxRate: conv.fxRate }),
       fxSource: conv.fxSource,
       statusRaw,
       status: mapBcStatus(statusRaw),

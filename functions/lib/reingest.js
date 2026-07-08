@@ -5,7 +5,7 @@
 // enregistrements existants. Partagé par le callable `reingest` et le script GHA.
 const XLSX = require("xlsx");
 const { buildWrites, fiscalYearFromOrders } = require("./ingest");
-const { applyWrites } = require("./apply");
+const { applyWrites, stripLiveOpps } = require("./apply");
 
 // Gardes anti-abus (mêmes valeurs que l'import delta) — bornent le travail par classeur/ZIP.
 const MAX_SHEETS = 60;                     // onglets par classeur
@@ -100,7 +100,14 @@ function isSourceObject(name) {
  */
 async function reingestBucket({ db, storage, bucketName, prefix }) {
   const [objs] = await storage.bucket(bucketName).getFiles(prefix ? { prefix } : {});
-  const targets = objs.filter((o) => isSourceObject(o.name));
+  // Tri par date de mise à jour CROISSANTE (le plus récent traité en DERNIER) : `applyWrites` étant
+  // « dernier gagne » par chemin, sans ce tri l'ordre LEXICOGRAPHIQUE de GCS décidait du gagnant — un
+  // ancien classeur (« archive_P&L_2025.xlsx ») pouvait ressusciter des CAS/RAF périmés sur tout le
+  // carnet (cf. audit intégrité P1-7). Repli sur le nom si la métadonnée de date est absente.
+  const mtime = (o) => Date.parse((o.metadata && (o.metadata.updated || o.metadata.timeCreated)) || "") || 0;
+  const targets = objs
+    .filter((o) => isSourceObject(o.name))
+    .sort((a, b) => mtime(a) - mtime(b) || String(a.name).localeCompare(String(b.name)));
 
   const allWrites = [];
   const kindsSet = new Set();
@@ -123,7 +130,11 @@ async function reingestBucket({ db, storage, bucketName, prefix }) {
     }
   }
 
-  if (allWrites.length) await applyWrites(db, allWrites);
+  // LIVE écarté de la ré-ingestion (cf. stripLiveOpps) : le staling snapshot ne peut se faire de façon
+  // fiable sur un balayage MULTI-FICHIERS (ordre) ; les opportunités sont restaurées au prochain passage
+  // de la synchro Sales_DATA. On retire les écritures opportunities/ du lot.
+  const { writes: nonLive } = stripLiveOpps(allWrites);
+  if (nonLive.length) await applyWrites(db, nonLive);
 
   const kinds = [...kindsSet];
   // Réancre config/fiscal.currentFy = max(yearPo) des commandes (comme le trigger d'ingestion).
