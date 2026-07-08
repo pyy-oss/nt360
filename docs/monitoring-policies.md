@@ -28,15 +28,22 @@ dominical, pulls ClickUp) qui, sinon, ne notifient personne (seul `opsLog` en ga
 
 `policy-functions-errors.json` :
 
+Le filtre est **scopé d'emblée aux services nt360** (le projet est PARTAGÉ — un filtre projet-large
+capterait aussi l'app sœur et mal-attribuerait les alertes). On vise les fonctions non surveillées (jobs
+planifiés + webhook) dont l'échec doit remonter ; les erreurs de callables sont déjà notifiées par le
+webhook applicatif (§6). Noms de service Cloud Run = noms de fonction **en minuscules**.
+
+`policy-functions-errors.json` :
+
 ```json
 {
-  "displayName": "nt360 — erreurs Cloud Functions",
+  "displayName": "nt360 — erreurs Cloud Functions (jobs & webhook)",
   "combiner": "OR",
   "conditions": [
     {
-      "displayName": "Logs severity=ERROR (cloud_run_revision)",
+      "displayName": "Logs severity=ERROR (services nt360 non surveillés)",
       "conditionMatchedLog": {
-        "filter": "resource.type=\"cloud_run_revision\" AND severity>=ERROR"
+        "filter": "resource.type=\"cloud_run_revision\" AND severity>=ERROR AND resource.labels.service_name=~\"^(scheduledrecompute|syncsalesdata|scheduledfirestoreexport|scheduledclickuppull|scheduledbcpull|scheduledclickupenrich|curatenews|alertdigest|clickupwebhook)$\""
       }
     }
   ],
@@ -52,9 +59,8 @@ sed "s#CHANNEL_ID_ICI#${CHANNEL}#" policy-functions-errors.json > /tmp/pol1.json
 gcloud alpha monitoring policies create --policy-from-file=/tmp/pol1.json
 ```
 
-> Affiner si trop bruyant : restreindre aux fonctions critiques via
-> `resource.labels.service_name=("scheduledrecompute" OR "syncsalesdata" OR "scheduledfirestoreexport" OR "clickupwebhook")`
-> (noms de service Cloud Run en minuscules).
+> Élargir si besoin : ajouter des `service_name` à la liste. Ne **PAS** passer à un filtre projet-large
+> (`severity>=ERROR` sans `service_name`) tant qu'une autre app partage le projet — bruit + mauvaise attribution.
 
 ## 3. Alerte — échec spécifique du recompute nocturne (log-based metric ciblée)
 
@@ -73,12 +79,14 @@ gcloud logging metrics create nt360_recompute_fail \
 ## 4. Alerte — absence de sauvegarde (l'export dominical n'a pas tourné)
 
 L'export Firestore tourne dimanche 03:00. Détecter son ABSENCE (pas seulement son échec) via une métrique
-d'absence de log de succès :
+d'absence de log de succès. La fonction journalise à la réussite `logger.info("scheduledFirestoreExport
+terminé", …)` → sortie **jsonPayload** (pas `textPayload`) ; on matche donc le champ `jsonPayload.message`
+(et NON `status:"ok"`, qui n'existe que dans le doc Firestore `opsLog`, jamais dans Cloud Logging) :
 
 ```bash
 gcloud logging metrics create nt360_backup_ok \
   --description="Succès de l'export Firestore nt360" \
-  --log-filter='resource.type="cloud_run_revision" AND resource.labels.service_name="scheduledfirestoreexport" AND textPayload:"status\":\"ok"'
+  --log-filter='resource.type="cloud_run_revision" AND resource.labels.service_name="scheduledfirestoreexport" AND jsonPayload.message="scheduledFirestoreExport terminé"'
 # Policy « absence de données pendant 8 j » (metric-absence) sur user/nt360_backup_ok → alerte si aucun
 # succès depuis plus d'une semaine.
 ```

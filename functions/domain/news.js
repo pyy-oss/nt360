@@ -56,7 +56,10 @@ function buildNews(x) {
   pushIf(B, objCas > 0 && num(att.ecart) < -thr.ecartObjectifPct * objCas, {
     id: "cas_sous_objectif", domain: "commandes", severity: "high", module: "prevision",
     title: "Atterrissage CAS sous l'objectif",
-    detail: `Projeté ${fmt(att.projete)} vs objectif ${fmt(objCas)} — écart ${fmt(att.ecart)} (${pctTxt(PCT(att.projete, objCas))} de l'objectif).`,
+    // La cible CAS et l'écart (données « objectifs ») NE sont PAS imprimés : ce bulletin est écrit dans
+    // summaries/news (gaté « overview »), lisible par des rôles sans droit « objectifs ». On garde le
+    // signal + le projeté (public) ; le chiffre exact vit dans l'écran Atterrissage/Objectifs gaté. (Audit F2)
+    detail: `Projeté ${fmt(att.projete)} — sous la cible CAS de l'exercice (écart significatif).`,
     action: "Prioriser les affaires du pipeline qui comblent l'écart à l'objectif CAS.",
   });
   // Objectif annuel non défini : l'atterrissage ne peut être mesuré contre une cible.
@@ -83,7 +86,9 @@ function buildNews(x) {
   pushIf(B, objCaf > 0 && num(att.ecartCaf) < -thr.ecartObjectifPct * objCaf, {
     id: "caf_sous_objectif", domain: "facturation", severity: "high", module: "prevision",
     title: "Atterrissage CAF (facturation) sous l'objectif",
-    detail: `Projeté ${fmt(att.cafProjete)} vs objectif ${fmt(objCaf)} — écart ${fmt(att.ecartCaf)}.`,
+    // Cible CAF / écart NON imprimés (données « objectifs » ; ce bulletin va dans newsFacturation, gaté
+    // « facturation » → lisible sans droit « objectifs »). Signal + projeté public conservés. (Audit F2)
+    detail: `Projeté ${fmt(att.cafProjete)} — sous la cible CAF de l'exercice (écart significatif).`,
     action: "Accélérer la facturation du backlog et sécuriser le pipeline facturable.",
   });
   pushIf(B, num(att.factureN1) > 0 && num(att.croissanceFacture) < 0, {
@@ -99,7 +104,10 @@ function buildNews(x) {
   pushIf(B, objCas > 0 && gap > 0 && coverage != null && coverage < thr.coverageMin, {
     id: "pipeline_couverture", domain: "pipeline", severity: "high", module: "pipeline",
     title: "Pipeline insuffisant pour couvrir l'écart à l'objectif",
-    detail: `Le pipeline pondéré (${fmt(weighted)}) ne couvre que ${Number(coverage || 0).toFixed(2)}× l'écart restant (${fmt(gap)}).`,
+    // Ni l'écart-à-l'objectif (gap = objectif − réalisé) ni le ratio de couverture (= pondéré/gap, d'où le
+    // gap est déductible) ne sont imprimés : ce bulletin va dans summaries/news (gaté « overview »).
+    // Le pondéré (public, summaries/pipeline) est conservé, le signal reste actionnable. (Audit F2)
+    detail: `Le pipeline pondéré (${fmt(weighted)}) est insuffisant pour couvrir l'écart restant à l'objectif CAS.`,
     action: "Renforcer la génération d'opportunités ou requalifier le pipeline existant.",
   });
   const closing = pl.closing || {};
@@ -224,7 +232,8 @@ function buildNews(x) {
   pushIf(B, num(trend.projeteDec) > 0 && objCaf > 0 && num(trend.projeteDec) < objCaf * (1 - thr.ecartObjectifPct), {
     id: "trajectoire_dec_sous_objectif", domain: "facturation", severity: "medium", module: "prevision",
     title: "Trajectoire de facturation au 31/12 sous l'objectif",
-    detail: `Projeté au 31/12 ${fmt(trend.projeteDec)} vs objectif CAF ${fmt(objCaf)}.`,
+    // Cible CAF NON imprimée (donnée « objectifs » ; bulletin gaté « facturation »). (Audit F2)
+    detail: `Projeté au 31/12 ${fmt(trend.projeteDec)} — sous la cible CAF de l'exercice.`,
   });
   const totalAR = num(rec.totalAR), overdue = num(rec.overdue);
   pushIf(B, totalAR > 0 && PCT(overdue, totalAR) > thr.overdueArPct, {
