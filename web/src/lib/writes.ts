@@ -232,7 +232,7 @@ export async function setBcStatus(id: string, status: string) {
 
 /** Fiabilise une ligne BC : N° FP, montant XOF, fournisseur, type de dépense, description, date
  *  d'entrée (onCall : recalcule exposition + alertes + décaissements). */
-export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number; supplier?: string; expenseType?: string; description?: string; dateIn?: string | null }) {
+export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number; fxRate?: number; supplier?: string; expenseType?: string; description?: string; dateIn?: string | null }) {
   await httpsCallable(functions, "patchBcLine")(data);
 }
 

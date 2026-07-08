@@ -341,7 +341,7 @@ export const BC: FC<Props> = () => {
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
             colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
             ...(cuOn ? [colText("ClickUp", (r: BcLine) => <BcClickupBtn bcNumber={r.bcNumber} linked={!!(r.bcNumber && bcLinks?.map?.[fpDocId(r.bcNumber)])} />, () => 0)] : []),
-            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} />, () => 0)] : []),
+            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} currency={r.currency} amount={r.amount} />, () => 0)] : []),
             ...(canWrite ? [colText("Assainir", (r: BcLine) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la ligne BC ${r.bcNumber || r.supplier || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("bcLines", r.id!)} /> : null), () => 0)] : []),
           ]}
         />
@@ -364,9 +364,8 @@ function BcClickupBtn({ bcNumber, linked }: { bcNumber?: string; linked: boolean
 
 // Fiabilisation inline d'une ligne BC : rattacher un N° FP et/ou saisir la contre-valeur XOF
 // (ex. BC en devise étrangère → montant XOF nul). Pré-remplit les champs à corriger.
-function BcFixer({ id, fp, amountXof, supplier }: { id: string; fp?: string; amountXof?: number; supplier?: string }) {
+function BcFixer({ id, fp, amountXof, supplier, currency, amount }: { id: string; fp?: string; amountXof?: number; supplier?: string; currency?: string; amount?: number }) {
   const [nf, setNf] = useState("");
-  const [amt, setAmt] = useState("");
   const [sup, setSup] = useState("");
   const noFp = !fp;
   const noAmt = !((amountXof || 0) > 0);
@@ -383,13 +382,45 @@ function BcFixer({ id, fp, amountXof, supplier }: { id: string; fp?: string; amo
         <Busy variant="ghost" label="Frns" okMsg="Fournisseur corrigé" errMsg="Fournisseur invalide"
           fn={() => { if (!sup.trim()) throw new Error("saisir un fournisseur"); return patchBcLine({ id, supplier: sup }); }} />
       </>}
-      {noAmt && <>
-        <input className="field w-24 !py-1 text-xs" inputMode="numeric" aria-label="Montant XOF" placeholder="XOF" value={amt} onChange={(e) => setAmt(e.target.value)} />
-        {/* Parse tolérant : « 5 000 000 », « 5.000.000 » → 5000000 (XOF entier). Refuse une saisie
-            vide/invalide au lieu d'écrire 0 en silence avec un faux « corrigé ». */}
-        <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" errMsg="Montant invalide"
-          fn={() => { const v = Number(String(amt).replace(/[^\d]/g, "")); if (!(v > 0)) throw new Error("saisir un montant XOF > 0"); return patchBcLine({ id, amountXof: v }); }} />
-      </>}
+      {noAmt && <BcAmountFixer id={id} currency={currency} amount={amount} />}
+    </span>
+  );
+}
+
+// Fiabilisation du MONTANT d'une ligne BC. Pour une devise étrangère (le montant d'origine est connu,
+// ex. 35 765,18 USD) : conversion GUIDÉE — taux pré-rempli depuis config/fxRates, aperçu XOF en direct,
+// un clic « Convertir » (fige le taux, traçable). Plus de calcul manuel « brutal » de la contre-valeur.
+// Pour une ligne en XOF sans montant (rare) : saisie directe. Raccourci vers le réglage des taux.
+function BcAmountFixer({ id, currency, amount }: { id: string; currency?: string; amount?: number }) {
+  const { data: fx } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
+  const { go, canGo } = useNav();
+  const [rate, setRate] = useState("");
+  const [xof, setXof] = useState("");
+  const cur = (currency || "XOF").toUpperCase();
+  const foreign = cur !== "XOF" && (amount || 0) > 0;
+  if (foreign) {
+    const cfgRate = Number(fx?.rates?.[cur] || 0);
+    const r = rate.trim() !== "" ? (Number(rate.replace(",", ".")) || 0) : cfgRate;
+    const preview = r > 0 ? Math.round((amount || 0) * r) : 0;
+    return (
+      <span className="inline-flex gap-1 items-center flex-wrap text-xs">
+        <span className="text-faint">{(amount || 0).toLocaleString("fr-FR")} {cur} ×</span>
+        <input className="field w-16 !py-1 text-xs text-right" inputMode="decimal" aria-label={`Taux ${cur} → XOF`} placeholder={cfgRate ? String(cfgRate) : "taux"} value={rate} onChange={(e) => setRate(e.target.value)} />
+        {preview > 0 && <span className="text-ink">= {preview.toLocaleString("fr-FR")} XOF</span>}
+        <Busy variant="ghost" label="Convertir" okMsg="Montant converti au taux (recalcul lancé)" errMsg="Conversion refusée"
+          fn={() => { if (!(r > 0)) throw new Error("saisir un taux > 0"); return patchBcLine({ id, amountXof: Math.round((amount || 0) * r), fxRate: r }); }} />
+        {!cfgRate && canGo("habilitations") && (
+          <button type="button" onClick={() => go("habilitations")} className="text-gold hover:underline text-[11px]" title="Définir le taux de cette devise pour tous les BC">définir le taux</button>
+        )}
+      </span>
+    );
+  }
+  // Ligne en XOF sans montant : saisie directe (parse tolérant « 5 000 000 » → 5000000).
+  return (
+    <span className="inline-flex gap-1 items-center">
+      <input className="field w-24 !py-1 text-xs" inputMode="numeric" aria-label="Montant XOF" placeholder="XOF" value={xof} onChange={(e) => setXof(e.target.value)} />
+      <Busy variant="ghost" label="Montant" okMsg="Montant corrigé" errMsg="Montant invalide"
+        fn={() => { const v = Number(String(xof).replace(/[^\d]/g, "")); if (!(v > 0)) throw new Error("saisir un montant XOF > 0"); return patchBcLine({ id, amountXof: v }); }} />
     </span>
   );
 }

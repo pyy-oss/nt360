@@ -2541,6 +2541,15 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
     if (!Number.isFinite(n) || n < 0) throw new HttpsError("invalid-argument", "montant XOF invalide");
     patch.amountXof = n;
   }
+  // Taux de change appliqué lors d'une conversion GUIDÉE (contre-valeur XOF calculée depuis le montant
+  // en devise). On fige le taux sur la ligne (traçabilité, affichage « @ taux ») et on marque la source
+  // « manuel » — prioritaire, non ré-écrasée par resolveLogisticsFx au recompute.
+  if (d.fxRate !== undefined && d.fxRate !== null && d.fxRate !== "") {
+    const rt = Number(d.fxRate);
+    if (!Number.isFinite(rt) || rt <= 0) throw new HttpsError("invalid-argument", "taux de change invalide");
+    patch.fxRate = rt;
+    patch.fxSource = "manuel";
+  }
   // Champs descriptifs éditables (fournisseur mal mappé, type de dépense, description, date d'entrée).
   if (d.supplier !== undefined) patch.supplier = String(d.supplier || "").replace(/\s+/g, " ").trim().toUpperCase();
   if (d.expenseType !== undefined) patch.expenseType = String(d.expenseType || "").trim();
