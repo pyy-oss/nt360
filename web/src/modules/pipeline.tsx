@@ -24,7 +24,11 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // Taux de conversion vente (règle de gestion) : calculé une seule fois côté Vue d'ensemble.
   const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
-  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  // Objectifs isolés (doc gaté « objectifs ») re-fusionnés : un commercial (objectifs:none) reçoit null
+  // → objectif undefined → les KPI de couverture d'objectif s'effacent (« — »). Un commercial_dir les voit.
+  const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
+  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   // Pipeline de l'EXERCICE (indépendant du sélecteur de période) pour une couverture cohérente
   // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
@@ -601,7 +605,10 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const { data: ov } = useDocData<OverviewSummary>(`summaries/overview_${period}`);
   const { data: ams } = useDocData<AmsSummary>("summaries/ams");
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
-  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  // Objectifs isolés (doc gaté « objectifs ») re-fusionnés pour l'affichage ; null si pas d'accès → « — ».
+  const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
+  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
   const { go, canGo } = useNav();
   if (!data) return <EmptyState label="Cockpit indisponible — importer le pipeline puis recalculer (Vue d'ensemble)." />;

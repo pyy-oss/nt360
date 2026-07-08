@@ -279,7 +279,11 @@ export const Prevision: FC<Props> = () => {
   const { data: bl } = useDocData<BacklogSummary>("summaries/backlog_fy");
   const { data: pl } = useDocData<PipelineSummary>("summaries/pipeline");
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
-  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  // Objectifs annuels isolés (doc gaté « objectifs », cf. audit RBAC) : re-fusionnés pour l'affichage ;
+  // null si le rôle n'a pas « objectifs » → cible/écart « — ». Fusion profonde de `next`.
+  const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
+  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   const canMargin = useCanSeeMargin();
   // Marge reportée sur N+1 (isolée, gatée « rentabilite ») — pour le caveat de l'atterrissage CAF.
   const { data: attMargin } = useDocData<{ reporteMarge?: number }>(canMargin && cfg?.currentFy ? `summaries/atterrissageMargin_${cfg.currentFy}` : null);
@@ -480,7 +484,10 @@ export const Prevision: FC<Props> = () => {
 const M = 1_000_000;
 export const Simulateur: FC<Props> = () => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
-  const { data: att } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  // Objectifs isolés (doc gaté « objectifs ») re-fusionnés pour le simulateur ; null si pas d'accès.
+  const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
+  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   const [addPipe, setAddPipe] = useState(0);   // pipeline pondéré additionnel (FCFA)
   const [realiz, setRealiz] = useState(100);   // taux de réalisation du pipeline (%)
   const [objOverride, setObjOverride] = useState<string>(""); // objectif CAS simulé (M FCFA), vide = réel

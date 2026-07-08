@@ -327,11 +327,19 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/cashScenario", data: { ...scen, ...stamp } });
   }
   const att = atterrissage(orders, invoices, opps, objectives, currentFy, asOf, tiers, milestonesByFp);
-  // La marge reportée est de la DONNÉE MARGE → isolée dans un doc gaté « rentabilite » (jamais dans
-  // le summary atterrissage public, lu au niveau « overview »).
-  const { reporteMarge, ...attPublic } = att;
+  // ISOLATION par confidentialité (cf. audit RBAC) :
+  //  • marge reportée → doc gaté « rentabilite » (donnée marge, jamais overview) ;
+  //  • OBJECTIFS annuels (cible CAS/CAF, écart, proba d'atteinte) → doc gaté « objectifs » : un rôle sans
+  //    droit « objectifs » (ex. commercial) ne doit PAS lire les cibles de l'entreprise via le summary
+  //    atterrissage (lu au niveau « overview »). Le doc public ne garde que l'OPÉRATIONNEL (réalisé/projeté).
+  const { reporteMarge, objectif, ecart, probaAtteinte, objectifCaf, ecartCaf, probaAtteinteCaf, next, ...attOps } = att;
+  const { objectif: nObj, ecart: nEcart, objectifCaf: nObjCaf, ecartCaf: nEcartCaf, ...nextOps } = next || {};
+  const attPublic = { ...attOps, next: nextOps };                                      // opérationnel (overview)
+  const attObjectifs = { fy: currentFy, objectif, ecart, probaAtteinte, objectifCaf, ecartCaf, probaAtteinteCaf,
+    next: { objectif: nObj, ecart: nEcart, objectifCaf: nObjCaf, ecartCaf: nEcartCaf } }; // cibles (objectifs)
   if (want("atterrissage")) {
     w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
+    w.push({ path: `summaries/atterrissageObjectifs_${currentFy}`, data: { ...attObjectifs, ...stamp } });
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
   }
   // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
@@ -443,7 +451,7 @@ async function recomputeCore(db, only) {
       const since = new Date(Date.now() - 24 * 3600 * 1000);
       clientErrors24h = (await db.collection("errorLog").where("ts", ">=", since).count().get()).data().count || 0;
     } catch (e) { /* index/permission absent → pas de déclencheur, sans casser le recompute */ }
-    const news = buildNews({ att: attPublic, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, clickupBlocked: cuBlockedRefs.length, clickupBlockedRefs: cuBlockedRefs, fy: currentFy, asOf, thr: alertThr });
+    const news = buildNews({ att, pipeline: plSummary, backlog: bf, receivables: rec, suppliers: sup, billingTrend: trendForNews, dataQuality: dqSummary, opps, bcLines, clientErrors24h, clickupOverdue: cuSignals.overdueCount, clickupOverdueRefs: cuSignals.overdueRefs, bcClickupOverdue: bcCu.overdueCount, bcClickupOverdueRefs: bcCu.overdueRefs, clickupBlocked: cuBlockedRefs.length, clickupBlockedRefs: cuBlockedRefs, fy: currentFy, asOf, thr: alertThr });
     // CLOISONNEMENT PAR MODULE (cf. audit P0-C) : l'Actualité fuyait créances/DSO (facturation), noms de
     // fournisseurs saturés, concentration backlog vers tout rôle « overview ». Bulletins ET recommandations
     // sont routés par leur `domain` (donnée) vers des summaries gatés au bon niveau ; summaries/news ne
@@ -524,7 +532,10 @@ async function recomputeCore(db, only) {
       date: asOf,
       casReel: att.realiseCas || 0, caf: att.factureN || 0, backlog: bf.total || 0,
       pipeline: att.pipelinePondere || 0, projeteCas: att.projete || 0, projeteCaf: att.cafProjete || 0,
-      ar: rec.totalAR || 0, dso: rec.dso || 0, fy: currentFy,
+      // AR/DSO (encours créances / délai de paiement) RETIRÉS du point de tendance : `summaries/trends`
+      // est lu au niveau « overview », or ce sont des données de facturation → un rôle sans droit
+      // « facturation » ne doit pas reconstituer l'historique d'encours/DSO. Non affichés (cf. audit RBAC).
+      fy: currentFy,
     };
     const prev = (await db.doc("summaries/trends").get()).data();
     const points = (prev?.points || []).filter((p) => p.date !== asOf);

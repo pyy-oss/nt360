@@ -47,6 +47,7 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/suppliers"), { totalExpo: 1 });
     await setDoc(doc(db, "summaries/facturation_2026"), { total: 1 });
     await setDoc(doc(db, "summaries/qualityHistory"), { days: [] });
+    await setDoc(doc(db, "summaries/atterrissageObjectifs_2026"), { objectif: 1 });
     await setDoc(doc(db, "config/cancelOrders"), { items: [] });
     await setDoc(doc(db, "config/cancelInvoices"), { items: [] });
     await setDoc(doc(db, "summaries/cashScenario"), { horizon: 0 });
@@ -183,6 +184,18 @@ describe("Agrégats & audit", () => {
   });
   it("achats (fournisseurs=write) lit summaries/suppliers", async () => {
     await assertSucceeds(getDoc(doc(as("achats"), "summaries/suppliers")));
+  });
+  it("summaries/atterrissageObjectifs (objectifs) : commercial (objectifs=none) NE lit PAS les cibles", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "summaries/atterrissageObjectifs_2026")));
+  });
+  it("summaries/atterrissageObjectifs (objectifs) : lecture (objectifs=read) lit les cibles", async () => {
+    await assertSucceeds(getDoc(doc(as("lecture"), "summaries/atterrissageObjectifs_2026")));
+  });
+  it("summaries/atterrissage_ (overview) reste lisible par commercial (opérationnel, sans cibles)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "summaries/atterrissage_2026"), { realiseCas: 1 });
+    });
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/atterrissage_2026")));
   });
   it("summaries/trends (mappé overview) lisible par lecture", async () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "summaries/trends")));

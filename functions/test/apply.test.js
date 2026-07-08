@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { applyWrites, stripLiveOpps } = require("../lib/apply");
+const { applyWrites, stripLiveOpps, resolveLogisticsFx } = require("../lib/apply");
 
 // Faux Firestore minimal : un store `bcLines/{id} → data`, avec upsert (merge), delete et
 // requête `collection("bcLines").where("fp","==",v)`. Suffit à exercer le balayage anti-orphelins.
@@ -106,6 +106,38 @@ describe("stripLiveOpps — LIVE écarté des canaux delta/ingest/reingest (audi
     const { writes: kept, skipped } = stripLiveOpps([{ path: "orders/o1", data: {} }]);
     expect(skipped).toBe(0);
     expect(kept).toHaveLength(1);
+  });
+});
+
+describe("resolveLogisticsFx — taux paramétrés appliqués sans écraser une correction manuelle (audit B7)", () => {
+  // fakeDb minimal avec doc().get() : config/fxRates + docs bcLines existants.
+  const fxDb = (seed) => ({
+    doc: (path) => ({
+      async get() { return { exists: path in seed, data: () => seed[path] }; },
+    }),
+  });
+  const lg = (id, data) => ({ path: `bcLines/${id}`, data: { source: "logistics", fxSource: "a_saisir", ...data } });
+
+  it("convertit une ligne USD « a_saisir » via config/fxRates (nouvelle ligne)", async () => {
+    const db = fxDb({ "config/fxRates": { rates: { USD: 600 } } });
+    const writes = [lg("bc_usd", { currency: "USD", amount: 1000 })];
+    const n = await resolveLogisticsFx(db, writes);
+    expect(n).toBe(1);
+    expect(writes[0].data.amountXof).toBe(600000);
+    expect(writes[0].data.fxSource).toBe("taux");
+  });
+  it("PRÉSERVE une correction manuelle existante (amountXof>0) — ne convertit pas", async () => {
+    const db = fxDb({ "config/fxRates": { rates: { USD: 600 } }, "bcLines/bc_usd": { amountXof: 90000000, fxSource: "manuel" } });
+    const writes = [lg("bc_usd", { currency: "USD", amount: 1000 })];
+    const n = await resolveLogisticsFx(db, writes);
+    expect(n).toBe(0);
+    expect(writes[0].data).not.toHaveProperty("amountXof"); // laissé tel quel → merge garde le manuel
+  });
+  it("sans taux configuré → aucune conversion", async () => {
+    const db = fxDb({ "config/fxRates": { rates: {} } });
+    const writes = [lg("bc_gbp", { currency: "GBP", amount: 500 })];
+    expect(await resolveLogisticsFx(db, writes)).toBe(0);
+    expect(writes[0].data).not.toHaveProperty("amountXof");
   });
 });
 
