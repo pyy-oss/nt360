@@ -74,6 +74,20 @@ export async function setFpAlias(from: string, to: string) {
   return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
 }
 
+// DOSSIER CLIENT (rapprochement Opp/Commande/Facture). Lecture seule, gouverné « import ».
+export type ReconRow = { fp?: string; client?: string; amount?: number; cas?: number; raf?: number; amountHt?: number; stage?: number; stageLabel?: string; designation?: string; am?: string; date?: string; numero?: string; source?: string; linked?: boolean };
+export type ReconCluster = { fp: string; opps: ReconRow[]; orders: ReconRow[]; invoices: ReconRow[]; oppAmount: number; orderCas: number; invoiceTotal: number; hasOrder: boolean; hasInvoice: boolean; won: boolean };
+export type ReconSuggestion = { from: string; to: string; reason: "opp_gagnee_sans_pnl" | "facture_sous_autre_fp"; targetHasInvoice: boolean };
+export type ReconDossier = { client: string; clusters: ReconCluster[]; authoritativeFps: string[]; suggestions: ReconSuggestion[]; wonNoPnl: number; counts: { opps: number; orders: number; invoices: number } };
+export type ReconListItem = { client: string; counts: { opps: number; orders: number; invoices: number }; suggestions: number; wonNoPnl: number };
+export type ReconResult = { ok: boolean; mode: "list" | "detail"; clients?: ReconListItem[]; totalSuggestions?: number; scanned?: { orders: number; invoices: number; opps: number }; dossier?: ReconDossier | null };
+/** Dossier de rapprochement. Sans `client` : liste de triage (clients à rapprocher). Avec `client` :
+ *  détail aligné (clusters par N° FP) + propositions de réconciliation. */
+export async function reconClient(client?: string): Promise<ReconResult> {
+  const res = await httpsCallable(functions, "reconClient", { timeout: 120_000 })(client ? { client } : {});
+  return res.data as ReconResult;
+}
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {

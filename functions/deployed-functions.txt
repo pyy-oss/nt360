@@ -39,6 +39,7 @@ pushAllOrdersToClickup
 pushBcToClickup
 pushOrderToClickup
 recompute
+reconClient
 reconcileBcLinks
 reconcileClickupLinks
 reingest
