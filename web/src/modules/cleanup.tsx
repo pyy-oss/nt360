@@ -9,9 +9,9 @@ import { useState, type FC, type ReactNode } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast } from "../design/components";
 import { pct } from "../design/tokens";
-import { deleteRecords, callDedupe, setFpAlias, type DedupeResult } from "../lib/writes";
+import { deleteRecords, callDedupe, setFpAlias, reconClient, type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster } from "../lib/writes";
 import { Props, relTime, AnomaliesList } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
 
@@ -155,6 +155,106 @@ function FpReconcileCard() {
   );
 }
 
+// DOSSIER CLIENT — rapprochement Opportunité / Commande P&L / Facture par client, pour repérer et
+// corriger d'un clic les N° FP divergents. S'appuie sur le callable reconClient (lecture seule,
+// gouverné « import ») qui aligne les trois flux par N° FP canonique et propose les réconciliations
+// (FP FACTURE prioritaire). L'action « Réconcilier » appelle setFpAlias (overlay non destructif).
+const RECON_REASON: Record<string, string> = {
+  opp_gagnee_sans_pnl: "opp gagnée sans commande P&L",
+  facture_sous_autre_fp: "facturée sous un autre N° FP",
+};
+
+// État d'un cluster (une affaire sous un N° FP) pour la colonne de synthèse.
+function clusterState(c: ReconCluster): { label: string; tone: "clay" | "gold" | "emerald" | "neutral" } {
+  if (c.won && !c.hasOrder) return { label: "opp gagnée orpheline", tone: "clay" };
+  if (c.hasInvoice && !c.hasOrder) return { label: "facturé sans commande", tone: "clay" };
+  if (c.hasOrder && !c.hasInvoice) return { label: "non facturé", tone: "gold" };
+  if (c.hasOrder && c.hasInvoice) return { label: "rapproché", tone: "emerald" };
+  return { label: "—", tone: "neutral" };
+}
+
+function ClientReconcileCard() {
+  const [list, setList] = useState<ReconListItem[] | null>(null);
+  const [scanned, setScanned] = useState<{ orders: number; invoices: number; opps: number } | null>(null);
+  const [dossier, setDossier] = useState<ReconDossier | null>(null);
+  const [q, setQ] = useState("");
+  const toast = useToast();
+
+  const refreshList = async () => { const r = await reconClient(); setList(r.clients || []); setScanned(r.scanned || null); };
+  const openClient = async (client: string) => { const r = await reconClient(client); setDossier(r.dossier || null); if (!r.dossier) toast(`Aucun dossier pour « ${client} »`, "err"); };
+
+  return (
+    <Card title="Dossier client — rapprochement Opp / Commande / Facture" actions={
+      <div className="flex items-center gap-2 flex-wrap">
+        <input className="field w-44 !py-1 text-xs" aria-label="Ouvrir le dossier d'un client" placeholder="Nom du client…"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+        {q.trim() && <Busy variant="ghost" label="Ouvrir" okMsg="Dossier chargé" errMsg="Chargement refusé" fn={() => openClient(q.trim())} />}
+        <Busy variant="ghost" label="Clients à rapprocher" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={refreshList} />
+      </div>
+    }>
+      <div className="flex flex-col gap-3">
+        {/* Triage : clients porteurs d'un écart, du plus au moins prioritaire. */}
+        {list && (
+          list.length ? (
+            <Table columns={[
+              colText("Client", (r: ReconListItem) => (
+                <button type="button" className="text-ink hover:text-gold underline decoration-dotted underline-offset-2"
+                  onClick={() => openClient(r.client)} title="Ouvrir le dossier">{r.client}</button>
+              ), (r: ReconListItem) => r.client),
+              colNum("Opp.", (r: ReconListItem) => r.counts.opps),
+              colNum("Cmd.", (r: ReconListItem) => r.counts.orders),
+              colNum("Fact.", (r: ReconListItem) => r.counts.invoices),
+              colText("À rapprocher", (r: ReconListItem) => (
+                <div className="flex gap-1">
+                  {r.suggestions > 0 && <Badge tone="emerald">{r.suggestions} proposée{r.suggestions > 1 ? "s" : ""}</Badge>}
+                  {r.wonNoPnl > 0 && <Badge tone="clay">{r.wonNoPnl} opp orpheline{r.wonNoPnl > 1 ? "s" : ""}</Badge>}
+                </div>
+              ), (r: ReconListItem) => r.suggestions),
+            ]} rows={list} />
+          ) : <div className="text-[13px] text-muted">Aucun client à rapprocher — tous les N° FP concordent. 🎉</div>
+        )}
+        {scanned && <div className="text-[11px] text-faint">Analyse : {scanned.orders} commandes · {scanned.invoices} factures · {scanned.opps} opportunités.</div>}
+
+        {/* Détail d'un client : propositions actionnables + vue alignée par N° FP. */}
+        {dossier && (
+          <div className="flex flex-col gap-3 border-t border-hair pt-3">
+            <div className="text-sm font-medium text-ink">{dossier.client}</div>
+
+            {dossier.suggestions.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="text-[11px] text-muted uppercase tracking-wide">Réconciliations proposées</div>
+                {dossier.suggestions.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 flex-wrap text-[13px]">
+                    <span className="tabnum text-faint">{s.from}</span>
+                    <span className="text-faint">→</span>
+                    <span className="tabnum text-ink">{s.to}</span>
+                    <Badge tone={s.targetHasInvoice ? "emerald" : "steel"}>{s.targetHasInvoice ? "FP facture" : "FP commande"}</Badge>
+                    <span className="text-muted">{RECON_REASON[s.reason] || s.reason}</span>
+                    <Busy variant="ghost" label="Réconcilier" okMsg="Réconciliation enregistrée (recalcul lancé)" errMsg="Réconciliation refusée"
+                      fn={async () => { await setFpAlias(s.from, s.to); await openClient(dossier.client); await refreshList(); }} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Table columns={[
+              colText("N° FP", (c: ReconCluster) => <span className="tabnum">{c.fp}</span>, (c: ReconCluster) => c.fp),
+              colText("Opportunité", (c: ReconCluster) => c.opps.length
+                ? <span className="inline-flex items-center gap-1">{money(c.oppAmount)}{c.won && <Badge tone="gold">gagnée</Badge>}</span> : <span className="text-faint">—</span>,
+                (c: ReconCluster) => c.oppAmount),
+              colNum("Commande (CAS)", (c: ReconCluster) => c.hasOrder ? money(c.orderCas) : <span className="text-faint">—</span>, (c: ReconCluster) => c.orderCas),
+              colNum("Facturé", (c: ReconCluster) => c.hasInvoice ? money(c.invoiceTotal) : <span className="text-faint">—</span>, (c: ReconCluster) => c.invoiceTotal),
+              colText("État", (c: ReconCluster) => { const st = clusterState(c); return <Badge tone={st.tone as any}>{st.label}</Badge>; }),
+            ]} rows={dossier.clusters} />
+          </div>
+        )}
+
+        <Tip>Vue par <b>client</b> alignant <b>opportunités, commandes P&amp;L et factures</b> sur le même N° FP. Le <b>FP de la facture fait foi</b> (facturation) devant le FP commande, lui-même devant le FP opp. « <b>Clients à rapprocher</b> » liste ceux dont un flux est sous un N° FP divergent ; ouvrez un dossier puis cliquez « <b>Réconcilier</b> » sur une proposition (overlay non destructif, recalcul immédiat). Un rapprochement n'est proposé que lorsqu'un jumeau de <b>même montant</b> existe sous un autre N° FP.</Tip>
+      </div>
+    </Card>
+  );
+}
+
 export const Cleanup: FC<Props> = () => {
   const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const { data: qh } = useDocData<QualityHistory>("summaries/qualityHistory");
@@ -221,6 +321,8 @@ export const Cleanup: FC<Props> = () => {
           <Tip>Purges de MASSE des enregistrements clairement « déchet » (non rattachables / vides / morts). Chacune demande confirmation, ne touche que le lot indiqué, est auditée et gouvernée par les droits. Pour une facture <b>valide</b> non rattachée, préférez la <b>rattacher</b> (Factures → Rattacher) plutôt que la purger. Le delta reste prioritaire : une source ré-important un record le recrée.</Tip>
         </div>
       </Card>
+
+      {canImport && <ClientReconcileCard />}
 
       {canImport && <FpReconcileCard />}
 

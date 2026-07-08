@@ -528,6 +528,17 @@ async function requireWrite(req, module) {
   if (!canWrite(matrix, role, module)) throw new HttpsError("permission-denied", `droit d'écriture « ${module} » requis`);
 }
 
+// Autorisation de LECTURE d'un callable (même matrice opposable) : pour les callables qui ne mutent
+// rien mais exposent des données gouvernées par un module (ex. dossier de rapprochement client).
+async function requireRead(req, module) {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  const role = req.auth.token?.nt360Role;
+  if (role === "direction") return;
+  const { canRead } = require("./domain/authz");
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  if (!canRead(matrix, role, module)) throw new HttpsError("permission-denied", `droit de lecture « ${module} » requis`);
+}
+
 // --- Matrice de droits : édition via CALLABLE validé + audité (jamais en écriture directe). RÉSERVÉ
 // À LA DIRECTION : réécrire la matrice = pouvoir s'auto-accorder « write » partout (escalade). On
 // aligne donc sa garde sur les autres actions Habilitations (création de compte, rôle, configs), qui
@@ -871,6 +882,52 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
   });
   await recomputeSummaries();
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
+});
+
+// --- DOSSIER CLIENT (rapprochement) : regroupe Opportunités / Commandes P&L / Factures par CLIENT
+// canonique puis par N° FP (alias appliqués), et propose des rapprochements (FP facture prioritaire).
+// LECTURE SEULE (aucune mutation) — gouverné par le module « import » (data-steward). Sans `client`,
+// renvoie la liste de triage (clients ayant un écart, tri par nb de propositions). Avec `client`,
+// renvoie le détail (clusters + propositions). Calcul À LA DEMANDE (pas de recompute) : n'impacte
+// pas les agrégats et ne tourne que quand un data-steward ouvre l'écran. ---
+exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireRead(req, "import");
+  const { reconcileClients } = require("./domain/reconcile");
+  const { fpKey } = require("./lib/ids");
+  const { buildFpAliasResolver } = require("./lib/ids");
+  const { buildClientResolver } = require("./domain/clientName");
+  // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits.
+  const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
+    db.collection("orders").select("fp", "client", "cas", "raf", "source").get(),
+    db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").get(),
+    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am").get(),
+    db.doc("config/fpAliases").get(),
+    db.doc("config/clientAliases").get(),
+  ]);
+  const orders = ordSnap.docs.map((d) => d.data());
+  const invoices = invSnap.docs.map((d) => d.data());
+  const opps = oppSnap.docs.map((d) => d.data());
+  const aliasResolver = buildFpAliasResolver((aliasDoc.data() || {}).map || {});
+  const fpKeyOf = (fp) => fpKey(aliasResolver(fp)); // clé FP canonique, alias de réconciliation appliqués
+  const normClient = buildClientResolver((clientDoc.data() || {}).pairs || []);
+  const dossiers = reconcileClients({ orders, invoices, opps, fpKeyOf, normClient });
+
+  const wanted = String(req.data?.client || "").trim();
+  if (wanted) {
+    const target = normClient(wanted);
+    const d = dossiers.find((x) => x.client === target) || dossiers.find((x) => x.client === wanted) || null;
+    return { ok: true, mode: "detail", dossier: d };
+  }
+  // Triage : uniquement les clients porteurs d'un écart (proposition ou opp gagnée orpheline), plafonné.
+  const clients = dossiers
+    .filter((d) => d.suggestions.length || d.wonNoPnl)
+    .slice(0, 300)
+    .map((d) => ({ client: d.client, counts: d.counts, suggestions: d.suggestions.length, wonNoPnl: d.wonNoPnl }));
+  return {
+    ok: true, mode: "list", clients,
+    totalSuggestions: dossiers.reduce((s, d) => s + d.suggestions.length, 0),
+    scanned: { orders: orders.length, invoices: invoices.length, opps: opps.length },
+  };
 });
 
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
