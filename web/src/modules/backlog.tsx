@@ -29,6 +29,7 @@ const Sel = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: 
 // 5 — Suivi Backlog
 export const Backlog: FC<Props> = () => {
   const { data, loading, error } = useDocData<BacklogSummary>("summaries/backlog_fy");
+  const canImport = useCanImport(); // avant tout retour anticipé (règle des hooks)
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
@@ -73,8 +74,11 @@ export const Backlog: FC<Props> = () => {
             colNum("CAS", (t) => money(t.cas)),
             colNum("Facturé", (t) => money(t.facture)),
             colNum("RAF dérivé", (t) => money(t.raf)),
+            ...(canImport ? [colText("Intégration", (t) => <RafValidator row={t} />)] : []),
           ]} rows={deriveRows} />
-          <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code>. Vérifie si elles devraient déjà être soldées, ou si des factures leur manquent un rattachement N° FP.</Tip>
+          <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code> (potentiellement surévalué). {canImport
+            ? <>Après vérification, cliquez « <b>intégrer</b> » pour <b>valider le RAF</b> (le figer comme curaté → la commande rejoint le backlog fiable et quitte ce lot), ou « <b>Solder</b> » (RAF = 0) si l'affaire est livrée/facturée.</>
+            : <>Vérifiez si elles devraient déjà être soldées, ou s'il manque un rattachement N° FP à des factures.</>}</Tip>
         </Card>
       )}
 
@@ -688,6 +692,32 @@ function OrderCasFixer({ row }: { row: Order }) {
       <Busy variant="ghost" label="OK" okMsg="Montant corrigé (recalcul lancé)" errMsg="Correction refusée"
         fn={async () => { const v = parseNum(cas); if (!(v > 0)) throw new Error("saisir un montant > 0"); await patchOrder({ fp: row.fp!, cas: v }); setEditing(false); }} />
       <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler la correction">✕</button>
+    </span>
+  );
+}
+
+// Fait SORTIR une commande du lot « RAF dérivé (suspect) » → backlog FIABLE. Le RAF de ces lignes est
+// calculé CAS − facturé (ligne P&L sans RAF curaté dans l'Excel) et peut être surévalué. Le data-steward
+// VALIDE le RAF (le fige comme curaté, défaut = valeur dérivée, éditable) ou SOLDE (RAF = 0, affaire
+// livrée). patchOrder écrit le RAF sur la commande P&L (une opp gagnée a toujours une ligne P&L sous-
+// jacente) → au recompute, rafSource passe « derive » → « excel » et la ligne quitte le lot suspect.
+function RafValidator({ row }: { row: { fp?: string; raf?: number } }) {
+  const [editing, setEditing] = useState(false);
+  const [raf, setRaf] = useState("");
+  if (!editing) {
+    return (
+      <button type="button" onClick={() => { setRaf(String(row.raf ?? "")); setEditing(true); }}
+        className="text-gold hover:underline text-[11px]" title="Valider le RAF et intégrer au backlog fiable">intégrer</button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 justify-end flex-wrap">
+      <input className="field w-24 !py-1 text-xs text-right" inputMode="decimal" autoFocus aria-label={`RAF validé de ${row.fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
+      <Busy variant="ghost" label="Valider" okMsg="RAF validé — intégré au backlog fiable (recalcul lancé)" errMsg="Validation refusée"
+        fn={async () => { const v = parseNum(raf); if (!(v >= 0)) throw new Error("saisir un RAF ≥ 0"); await patchOrder({ fp: row.fp!, raf: v }); setEditing(false); }} />
+      <Busy variant="ghost" label="Solder (0)" okMsg="Commande soldée (recalcul lancé)" errMsg="Solde refusé"
+        fn={async () => { await patchOrder({ fp: row.fp!, raf: 0 }); setEditing(false); }} />
+      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler la validation">✕</button>
     </span>
   );
 }
