@@ -25,3 +25,11 @@ export function relTime(ts: any): string {
   if (h < 24) return `il y a ${h} h`;
   return `il y a ${Math.floor(h / 24)} j`;
 }
+
+/** « AAAA-MM-JJ » (ou ISO) → « JJ/MM/AAAA » pour l'affichage FR. Repli sur la valeur brute si non ISO,
+ *  « — » si vide. À utiliser pour L'AFFICHAGE uniquement (garder la chaîne ISO comme clé de tri). */
+export function frDate(v: any): string {
+  const s = String(v || "").slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : (v ? String(v) : "—");
+}

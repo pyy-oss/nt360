@@ -10,6 +10,7 @@ import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { frDate } from "../lib/format";
 import { MARGIN } from "../lib/thresholds";
 import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
 
@@ -202,8 +203,8 @@ export const InvoiceList: FC<Props> = () => {
             colText("Client", (r) => r.client, (r) => r.client),
             colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
             colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1)),
-            colText("Date", (r) => r.date || "—", (r) => r.date || ""),
-            colText("Échéance", (r) => r.dueDate || "—", (r) => r.dueDate || ""),
+            colText("Date", (r) => frDate(r.date), (r) => r.date || ""),
+            colText("Échéance", (r) => frDate(r.dueDate), (r) => r.dueDate || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
             colText("Statut", (r) => (cancelled.has(r.id!) ? <Badge tone="clay">Annulée</Badge> : (r.paymentStatus || "—")), (r) => (cancelled.has(r.id!) ? "zzz" : r.paymentStatus || "")),
             ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id && !cancelled.has(r.id) ? <FpFixer id={r.id} /> : null), () => 0)] : []),

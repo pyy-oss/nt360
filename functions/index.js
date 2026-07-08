@@ -214,12 +214,12 @@ async function rateLimit(uid, kind, maxPerWindow, windowMs) {
 }
 
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
-const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "lecture"];
+const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
 
 exports.setUserRole = onCallG("setUserRole", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { uid, role } = req.data || {};
-  if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (∈ 6 profils) requis");
+  if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (profil valide) requis");
   // Claim NAMESPACÉ (nt360Role) : le projet Firebase est PARTAGÉ avec une autre app → un claim
   // générique `role` serait commun aux deux (un `role:direction` posé par l'app sœur escaladerait ici).
   // On lit/écrit exclusivement nt360Role et on purge un éventuel legacy `role` du même compte.
@@ -251,7 +251,7 @@ exports.createUser = onCallG("createUser", async (req) => {
   const password = String(d.password || "");
   const name = String(d.name || "").trim() || email.split("@")[0];
   if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "email invalide");
-  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (∈ 6 profils) requis");
+  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (profil valide) requis");
   if (password.length < 8) throw new HttpsError("invalid-argument", "mot de passe : 8 caractères minimum");
   const auth = getAuth();
   let existing = null;
@@ -280,7 +280,7 @@ exports.attachUser = onCallG("attachUser", async (req) => {
   const email = String(d.email || "").trim().toLowerCase();
   const role = d.role;
   if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "email invalide");
-  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (∈ 6 profils) requis");
+  if (!ROLES.includes(role)) throw new HttpsError("invalid-argument", "rôle (profil valide) requis");
   const auth = getAuth();
   let user;
   try { user = await auth.getUserByEmail(email); }

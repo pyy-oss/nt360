@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../lib/firebase";
 
 // Écran de connexion (BUILD_KIT §8/§12). MFA profils sensibles en F8.
@@ -7,17 +7,41 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
       const code = String(err?.code || "");
-      setError(code.includes("too-many") ? "Trop de tentatives — réessaie plus tard." : "Identifiants invalides.");
+      setError(code.includes("too-many") ? "Trop de tentatives — réessayez plus tard." : "Identifiants invalides.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Réinitialisation par email (Firebase Auth) : pour les profils non techniques (assistantes,
+  // commerciaux) qui n'ont pas d'autre issue en cas d'oubli. Message NEUTRE (ne révèle pas si le compte
+  // existe) — Firebase envoie le mail si le compte existe. On exige juste un email saisi.
+  async function onReset() {
+    const addr = email.trim();
+    if (!addr) { setError("Saisissez votre email ci-dessus, puis « Mot de passe oublié »."); return; }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await sendPasswordResetEmail(auth, addr);
+      setNotice("Si un compte existe pour cet email, un lien de réinitialisation vient d'être envoyé.");
+    } catch (err: any) {
+      const code = String(err?.code || "");
+      // On reste neutre sauf sur un email mal formé (erreur de saisie utile à corriger).
+      if (code.includes("invalid-email")) setError("Email invalide.");
+      else setNotice("Si un compte existe pour cet email, un lien de réinitialisation vient d'être envoyé.");
     } finally {
       setBusy(false);
     }
@@ -38,7 +62,9 @@ export default function Login() {
         <label className="text-xs text-muted" htmlFor="login-pwd">Mot de passe</label>
         <input id="login-pwd" className="field -mt-1" type="password" autoComplete="current-password" placeholder="Mot de passe" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {error && <div className="text-clay text-[13px]" role="alert">{error}</div>}
+        {notice && <div className="text-emerald text-[13px]" role="status">{notice}</div>}
         <button type="submit" className="btn-gold mt-1" disabled={busy}>{busy ? "Connexion…" : "Se connecter"}</button>
+        <button type="button" onClick={onReset} disabled={busy} className="text-[12px] text-muted hover:text-gold underline underline-offset-2 self-center mt-0.5 disabled:opacity-50">Mot de passe oublié ?</button>
       </form>
     </div>
   );

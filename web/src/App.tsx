@@ -95,6 +95,23 @@ export default function App() {
     return <div className="min-h-screen grid place-items-center text-muted">Chargement…</div>;
   }
   if (!user) return <Login />;
+  // Compte authentifié mais SANS rôle : écran explicite et ACTIONNABLE (au lieu du shell « aucun module »).
+  // Le rôle est un custom claim → il n'apparaît qu'après re-délivrance du jeton ; le bouton force le
+  // rafraîchissement (getIdToken(true)) puis recharge, sinon l'utilisateur resterait bloqué même une fois
+  // le rôle posé par la Direction.
+  if (!role) {
+    return (
+      <div className="min-h-screen grid place-items-center p-6">
+        <div className="card max-w-[420px] w-full p-6 sm:p-8 flex flex-col gap-3 text-center">
+          <div className="mx-auto grid place-items-center w-10 h-10 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
+          <h1 className="font-display font-bold text-lg">Compte en attente d'habilitation</h1>
+          <p className="text-sm text-muted">Votre compte <span className="text-ink">{user.email}</span> est créé, mais aucun rôle ne vous a encore été attribué. Contactez la Direction pour obtenir vos accès, puis actualisez ci-dessous.</p>
+          <button onClick={async () => { try { await user.getIdToken(true); } catch { /* ignore */ } window.location.reload(); }} className="btn-gold mt-1">Actualiser mes droits</button>
+          <button onClick={() => signOut(auth)} className="btn-ghost text-[13px]">Se déconnecter</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <NavContext.Provider value={nav}>
