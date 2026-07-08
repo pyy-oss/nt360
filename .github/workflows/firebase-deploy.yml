@@ -36,11 +36,20 @@ jobs:
       # sauvegardes Firestore ; vide = même bucket que les imports (repli du code sur IMPORTS_BUCKET).
       # Garde-fou App Check : enforce=true SANS clé de site déployée au client = tous les callables
       # rejetés → app inutilisable, alors que le déploiement resterait VERT. On échoue tôt, explicitement.
+      # Garde-fou App Check : enforce=true SANS clé de site déployée au client = tous les callables
+      # rejetés → app inutilisable, alors que le déploiement resterait VERT. On échoue tôt.
+      # NB : le contexte `secrets` est INTERDIT dans un `if:` d'étape (erreur de compilation du workflow) →
+      # on le lit via `env:` et on teste dans le `run:`. Le `if:` ne référence que `vars` (autorisé).
       - name: Garde-fou App Check (enforce ⇒ clé requise)
-        if: ${{ vars.APPCHECK_ENFORCE == 'true' && secrets.APPCHECK_SITE_KEY == '' }}
+        if: ${{ vars.APPCHECK_ENFORCE == 'true' }}
+        env:
+          APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY }}
         run: |
-          echo "::error::APPCHECK_ENFORCE=true mais APPCHECK_SITE_KEY absent — le client ne pourrait pas produire de jeton App Check et TOUS les callables seraient rejetés. Renseignez le secret APPCHECK_SITE_KEY ou repassez la variable APPCHECK_ENFORCE à false."
-          exit 1
+          if [ -z "$APPCHECK_SITE_KEY" ]; then
+            echo "::error::APPCHECK_ENFORCE=true mais APPCHECK_SITE_KEY absent — le client ne pourrait pas produire de jeton App Check et TOUS les callables seraient rejetés. Renseignez le secret APPCHECK_SITE_KEY ou repassez la variable APPCHECK_ENFORCE à false."
+            exit 1
+          fi
+          echo "App Check : enforce=true + clé présente — OK"
 
       - name: Configurer l'env des functions
         run: |
