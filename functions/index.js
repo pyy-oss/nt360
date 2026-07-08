@@ -930,6 +930,37 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   };
 });
 
+// --- CENTRE DE CORRECTION : renvoie, PAR TYPE d'anomalie, les enregistrements CONCRETS à corriger
+// (pas seulement un compte + 10 réfs comme summaries/dataQuality). Réutilise `issueDefs` — la SOURCE
+// UNIQUE des prédicats de qualité — pour garantir l'alignement avec le score/les bulletins. Lecture
+// seule, gouvernée « import » (l'action de correction, elle, reste gouvernée par le module de chaque
+// donnée via son callable dédié : setInvoiceFp, patchOrder, patchOpportunity, patchBcLine…). Plafonné
+// par type pour borner le payload ; `count` reste le total réel. ---
+exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireRead(req, "import");
+  const { issueDefs } = require("./domain/dataQuality");
+  const { isAgedLost } = require("./domain/oppLifecycle");
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc] = await Promise.all([
+    db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").get(),
+    db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
+    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale").get(),
+    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "status").get(),
+    db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
+    db.doc("config/alerts").get(),
+  ]);
+  const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const orders = withId(ordSnap), invoices = withId(invSnap), opps = withId(oppSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
+  const thr = thrDoc.data() || {};
+  const staleOpps = opps.filter((o) => o.stale === true);
+  const agedOpps = opps.filter((o) => o.stale !== true && isAgedLost(o));
+  const defs = issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps);
+  const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
+  const buckets = defs.filter((d) => d.records.length).map((d) => ({
+    type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),
+  }));
+  return { ok: true, buckets, cap: CAP, total: buckets.reduce((s, b) => s + b.count, 0) };
+});
+
 // --- ASSAINISSEMENT : suppression d'un/plusieurs enregistrement(s) erroné(s) ou fantôme(s). Les
 // imports delta n'effacent JAMAIS (ajout / mise à jour uniquement) → seul l'app peut retirer un
 // record qui ne doit plus exister. Gouverné par le module RBAC de la donnée, audité, recompute

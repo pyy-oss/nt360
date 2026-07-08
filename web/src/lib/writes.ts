@@ -88,6 +88,21 @@ export async function reconClient(client?: string): Promise<ReconResult> {
   return res.data as ReconResult;
 }
 
+// CENTRE DE CORRECTION (Assainissement). Lecture seule, gouverné « import ».
+export type CorrectionItem = {
+  id?: string; fp?: string; client?: string; am?: string; numero?: string; amountHt?: number; amount?: number;
+  cas?: number; yearPo?: number; date?: string; dueDate?: string; stage?: number; stageLabel?: string;
+  designation?: string; supplier?: string; bcNumber?: string; currency?: string; amountXof?: number;
+  saleTotal?: number; affaire?: string; source?: string;
+};
+export type CorrectionBucket = { type: string; severity: "high" | "medium" | "low"; label: string; count: number; items: CorrectionItem[] };
+export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; cap: number; total: number };
+/** File de correction : par type d'anomalie, les enregistrements concrets à corriger (plafonnés). */
+export async function correctionQueue(): Promise<CorrectionQueueResult> {
+  const res = await httpsCallable(functions, "correctionQueue", { timeout: 120_000 })({});
+  return res.data as CorrectionQueueResult;
+}
+
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {

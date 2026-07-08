@@ -9,9 +9,14 @@ import { useState, type FC, type ReactNode } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
+import { useNav } from "../lib/nav";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast } from "../design/components";
 import { pct } from "../design/tokens";
-import { deleteRecords, callDedupe, setFpAlias, reconClient, type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster } from "../lib/writes";
+import {
+  deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
+  setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder,
+  type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem,
+} from "../lib/writes";
 import { Props, relTime, AnomaliesList } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
 
@@ -104,6 +109,167 @@ function DedupeCard() {
       ) : (
         <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement de chaque groupe.</Tip>
       )}
+    </Card>
+  );
+}
+
+// CENTRE DE CORRECTION — point unique pour corriger, anomalie par anomalie, TOUS les enregistrements
+// concernés (pas seulement rebondir vers un écran). Le callable correctionQueue (lecture, gouverné
+// « import ») réutilise les prédicats de dataQuality.js ; chaque type route vers l'éditeur inline
+// idoine, qui appelle le callable de correction gouverné par le MODULE de la donnée (setInvoiceFp,
+// patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder). Après correction on
+// rescanne (l'anomalie se résorbe en direct).
+const CORR_SEV: Record<string, "clay" | "gold" | "steel"> = { high: "clay", medium: "gold", low: "steel" };
+// Cartographie type d'anomalie → mode de correction + droit requis (module de la donnée).
+const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "rentabilite"; module?: string }> = {
+  factures_orphelines: { kind: "fp-invoice", cap: "import" },
+  factures_sans_date: { kind: "date-invoice", cap: "import" },
+  factures_sans_echeance: { kind: "date-invoice-due", cap: "import" },
+  surfacturation: { kind: "nav", module: "invoicelist" },
+  commandes_sans_annee: { kind: "num-order-year", cap: "import" },
+  commandes_sans_client: { kind: "text-order-client", cap: "import" },
+  commandes_sans_am: { kind: "text-order-am", cap: "import" },
+  am_invalide: { kind: "text-order-am", cap: "import" },
+  opps_sans_dprev: { kind: "date-opp", cap: "pipeline" },
+  opps_sans_montant: { kind: "num-opp-amount", cap: "pipeline" },
+  opps_gagnees_sans_fp: { kind: "fp-opp", cap: "pipeline" },
+  opps_gagnees_sans_pnl: { kind: "reconcile-pnl", cap: "import" },
+  opps_fantomes: { kind: "nav", module: "opplist" },
+  opps_agees: { kind: "nav", module: "opplist" },
+  bc_sans_fp: { kind: "fp-bc", cap: "bc" },
+  bc_sans_fournisseur: { kind: "text-bc-supplier", cap: "bc" },
+  bc_montant_zero: { kind: "amount-bc", cap: "bc" },
+  fiches_sans_vente: { kind: "num-sheet-sale", cap: "rentabilite" },
+  opps_doublons: { kind: "dedupe" },
+  bc_doublons: { kind: "dedupe" },
+};
+
+// Éditeur générique une valeur → un bouton (texte / nombre).
+function FieldFix({ label, placeholder, kind = "text", save }: { label: string; placeholder?: string; kind?: "text" | "number"; save: (v: string) => Promise<void> }) {
+  const [v, setV] = useState("");
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input className="field w-32 !py-1 text-xs" inputMode={kind === "number" ? "decimal" : undefined} aria-label={label} placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />
+      <Busy variant="ghost" label="OK" okMsg="Corrigé (recalcul lancé)" errMsg="Correction refusée" fn={() => save(v)} />
+    </span>
+  );
+}
+function DateFix({ save }: { save: (v: string) => Promise<void> }) {
+  const [v, setV] = useState("");
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input type="date" className="field !py-1 text-xs" aria-label="Date" value={v} onChange={(e) => setV(e.target.value)} />
+      <Busy variant="ghost" label="OK" okMsg="Date corrigée (recalcul lancé)" errMsg="Correction refusée" fn={() => { if (!v) throw new Error("date requise"); return save(v); }} />
+    </span>
+  );
+}
+const parseAmt = (s: string) => Number(String(s).replace(/\s/g, "").replace(",", "."));
+// Conversion devise guidée (BC XOF nul) : taux pré-rempli depuis fxRates, aperçu live, un clic.
+function BcConvertFix({ item, onDone }: { item: CorrectionItem; onDone: () => Promise<void> }) {
+  const { data: fx } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
+  const [rate, setRate] = useState("");
+  const cur = (item.currency || "XOF").toUpperCase();
+  const foreign = cur !== "XOF" && (item.amount || 0) > 0;
+  if (!foreign) {
+    return <FieldFix label="Montant XOF" kind="number" placeholder="XOF" save={async (v) => { const n = Number(String(v).replace(/[^\d]/g, "")); if (!(n > 0)) throw new Error("XOF > 0"); await patchBcLine({ id: item.id!, amountXof: n }); await onDone(); }} />;
+  }
+  const cfg = Number(fx?.rates?.[cur] || 0);
+  const r = rate.trim() !== "" ? (Number(rate.replace(",", ".")) || 0) : cfg;
+  const preview = r > 0 ? Math.round((item.amount || 0) * r) : 0;
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap text-xs">
+      <span className="text-faint">{(item.amount || 0).toLocaleString("fr-FR")} {cur} ×</span>
+      <input className="field w-16 !py-1 text-xs text-right" inputMode="decimal" aria-label={`Taux ${cur} → XOF`} placeholder={cfg ? String(cfg) : "taux"} value={rate} onChange={(e) => setRate(e.target.value)} />
+      {preview > 0 && <span className="text-ink">= {preview.toLocaleString("fr-FR")} XOF</span>}
+      <Busy variant="ghost" label="Convertir" okMsg="Converti (recalcul lancé)" errMsg="Conversion refusée"
+        fn={async () => { if (!(r > 0)) throw new Error("taux > 0"); await patchBcLine({ id: item.id!, amountXof: Math.round((item.amount || 0) * r), fxRate: r }); await onDone(); }} />
+    </span>
+  );
+}
+
+// Une ligne à corriger : réf + client + le contrôle idoine selon le type. `canFix` = droit d'écriture
+// sur le module de la donnée (sinon la ligne reste visible, mais en lecture avec une note).
+function ItemFix({ item, kind, module, canFix, onDone }: { item: CorrectionItem; kind: string; module?: string; canFix: boolean; onDone: () => Promise<void> }) {
+  const { go, canGo } = useNav();
+  const ref = item.numero || item.fp || item.bcNumber || item.client || "—";
+  const done = () => onDone();
+  const row = (control: ReactNode) => (
+    <div className="flex items-center gap-2 flex-wrap text-[13px]">
+      <span className="tabnum text-faint">{ref}</span>
+      {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
+      {control}
+    </div>
+  );
+  // Renvois (drill) — pas d'écriture, gouvernés par canGo.
+  if (kind === "nav") return row(canGo(module!) ? <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => go(module!, { search: ref })} title="Ouvrir l'écran pré-filtré">ouvrir</button> : <span className="text-faint text-[11px]">accès requis</span>);
+  if (kind === "dedupe") return row(<span className="text-faint text-[11px]">→ carte « Doublons » (direction)</span>);
+  if (!canFix) return row(<span className="text-faint text-[11px]">correction hors de vos droits</span>);
+  switch (kind) {
+    case "fp-invoice": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await setInvoiceFp(item.id!, v.trim()); await done(); }} />);
+    case "date-invoice": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, date: v }); await done(); }} />);
+    case "date-invoice-due": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, dueDate: v }); await done(); }} />);
+    case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="2026" save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
+    case "text-order-client": return row(<FieldFix label="Client" placeholder="Client" save={async (v) => { if (!v.trim()) throw new Error("client requis"); await patchOrder({ fp: item.fp!, client: v.trim() }); await done(); }} />);
+    case "text-order-am": return row(<FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />);
+    case "fp-opp": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchOpportunity({ id: item.id!, fp: v.trim() }); await done(); }} />);
+    case "date-opp": return row(<DateFix save={async (v) => { await patchOpportunity({ id: item.id!, closingDate: v }); await done(); }} />);
+    case "num-opp-amount": return row(<FieldFix label="Montant" kind="number" placeholder="montant" save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchOpportunity({ id: item.id!, amount: n }); await done(); }} />);
+    case "fp-bc": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchBcLine({ id: item.id!, fp: v.trim() }); await done(); }} />);
+    case "text-bc-supplier": return row(<FieldFix label="Fournisseur" placeholder="Fournisseur" save={async (v) => { if (!v.trim()) throw new Error("fournisseur requis"); await patchBcLine({ id: item.id!, supplier: v.trim() }); await done(); }} />);
+    case "amount-bc": return row(<BcConvertFix item={item} onDone={done} />);
+    case "num-sheet-sale": return row(<FieldFix label="Prix de vente" kind="number" placeholder="vente HT" save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchProjectSheet({ fp: item.fp!, saleTotal: n }); await done(); }} />);
+    case "reconcile-pnl": return row(
+      <span className="inline-flex items-center gap-2">
+        <Busy variant="ghost" label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée"
+          fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); if (!((item.amount || 0) > 0)) throw new Error("montant de l'opp manquant"); await createOrder({ fp: item.fp, cas: item.amount!, client: item.client, am: item.am, designation: item.designation }); await done(); }} />
+        <span className="text-faint text-[11px]">ou « Dossier client » pour réconcilier vers un FP existant</span>
+      </span>);
+    default: return row(<span className="text-faint text-[11px]">correction à la source</span>);
+  }
+}
+
+// Bloc d'un type d'anomalie : entête (sévérité, libellé, compte) repliable → lignes corrigeables.
+function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; onDone: () => Promise<void> }) {
+  const cfg = FIX[bucket.type] || { kind: "" };
+  return (
+    <div className="border-t border-hair pt-2">
+      <button type="button" onClick={onToggle} className="w-full flex items-center gap-2 text-left text-[13px] py-0.5">
+        <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
+        <span className="text-ink">{bucket.label}</span>
+        <span className="text-faint ml-auto text-[11px]">{open ? "▾ masquer" : "▸ corriger"}</span>
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-col gap-1.5 pl-1">
+          {bucket.items.map((it, i) => (
+            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} canFix={canFix} onDone={onDone} />
+          ))}
+          {bucket.count > bucket.items.length && (
+            <div className="text-[11px] text-faint">… {bucket.count - bucket.items.length} de plus — corrigez ceux-ci puis « Rafraîchir ».</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CorrectionCenter() {
+  const [buckets, setBuckets] = useState<CorrectionBucket[] | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" } as const;
+  const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); };
+  const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
+  return (
+    <Card title="Centre de correction" actions={
+      <Busy variant="ghost" label={buckets ? "Rafraîchir" : "Analyser"} okMsg="Analyse terminée" errMsg="Analyse refusée" fn={load} />
+    }>
+      <div className="flex flex-col gap-2">
+        {buckets == null && <Tip>Liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…). Cliquez <b>Analyser</b>.</Tip>}
+        {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine. 🎉</div>}
+        {buckets && buckets.map((b) => (
+          <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} onDone={load} />
+        ))}
+        {buckets && buckets.length > 0 && <Tip>Chaque correction appelle le service gouverné par le <b>module de la donnée</b> (droits respectés) et relance le recalcul ; l'anomalie se résorbe après « Rafraîchir ». Les <b>doublons</b> se traitent via la carte dédiée ; « <b>ouvrir</b> » renvoie à l'écran pré-filtré pour les cas non corrigeables en une valeur.</Tip>}
+      </div>
     </Card>
   );
 }
@@ -328,6 +494,8 @@ export const Cleanup: FC<Props> = () => {
           <Tip>Purges de MASSE des enregistrements clairement « déchet » (non rattachables / vides / morts). Chacune demande confirmation, ne touche que le lot indiqué, est auditée et gouvernée par les droits. Pour une facture <b>valide</b> non rattachée, préférez la <b>rattacher</b> (Factures → Rattacher) plutôt que la purger. Le delta reste prioritaire : une source ré-important un record le recrée.</Tip>
         </div>
       </Card>
+
+      {canImport && <CorrectionCenter />}
 
       {canImport && <ClientReconcileCard />}
 

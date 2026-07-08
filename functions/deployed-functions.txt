@@ -9,6 +9,7 @@ alertDigest
 attachUser
 clickupHealth
 clickupWebhook
+correctionQueue
 createOrder
 createUser
 curateNews
