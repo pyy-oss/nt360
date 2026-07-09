@@ -1121,6 +1121,35 @@ exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, months, canCost, ...kpi };
 });
 
+// CAPACITÉ ⇄ PIPELINE (Lot 14 « 20/10 DirOps ») — ai-je la capacité de délivrance pour honorer le pipeline
+// qui va se signer ? Compare capacité disponible (jours-homme non staffés des actifs) et demande pipeline
+// pondérée (Σ montant×proba ÷ TJM moyen). Le GAP = besoin de recrutement (négatif) ou banc à risque
+// (positif). Les opportunités sont lues via scopedOpps (sécurité par enregistrement respectée).
+exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { monthsRange, buildLoad } = require("./domain/assignment");
+  const { capacityVsPipeline } = require("./domain/capacity");
+  const now = new Date();
+  const curYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth)
+    ? req.data.fromMonth : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const span = Math.min(18, Math.max(1, Number(req.data?.months) || 6));
+  let [ey, em] = curYm.split("-").map(Number); em += span - 1; while (em > 12) { em -= 12; ey += 1; }
+  const months = monthsRange(curYm, `${ey}-${String(em).padStart(2, "0")}`);
+  const [cSnap, aSnap] = await Promise.all([
+    db.collection("consultants").select("name", "status", "bu", "tjmTarget").limit(MAX_SCAN + 1).get(),
+    db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct").limit(MAX_SCAN + 1).get(),
+  ]);
+  const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const activeIds = consultants.filter((c) => (c.status || "active") === "active").map((c) => c.id);
+  const { byConsultant } = buildLoad(assignments, months, activeIds);
+  // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps.
+  const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage"]);
+  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; });
+  const plan = capacityVsPipeline({ consultants, loadByConsultant: byConsultant, months, opps });
+  return { ok: true, months, openOppCount: opps.length, ...plan };
+});
+
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
 // `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).

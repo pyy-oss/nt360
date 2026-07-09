@@ -20,6 +20,7 @@ curateNews
 curateNewsNow
 decideApproval
 activityKpis
+capacityPlan
 dedupe
 deleteActivity
 deleteAssignment

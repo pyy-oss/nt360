@@ -106,6 +106,17 @@ export async function activityKpis(fromMonth?: string, months?: number) {
   return res.data as ActivityKpis;
 }
 
+// CAPACITÉ ⇄ PIPELINE (Lot 14) — capacité de délivrance disponible vs demande pipeline pondérée.
+export type CapacityBu = { bu: string; capacityDays: number; demandDays: number; gapDays: number; fteGap: number };
+export type CapacityPlan = {
+  ok: boolean; months: string[]; openOppCount: number; tjm: number;
+  capacityDays: number; demandDays: number; gapDays: number; fteGap: number; byBu: CapacityBu[];
+};
+export async function capacityPlan(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "capacityPlan")({ fromMonth, months });
+  return res.data as CapacityPlan;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };
