@@ -60,6 +60,7 @@ reconcileBcLinks
 reconcileClickupLinks
 reindexVisibility
 reingest
+retryOutbound
 runAutomations
 runReport
 scheduledBcPull

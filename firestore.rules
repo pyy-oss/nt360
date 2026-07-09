@@ -216,6 +216,9 @@ service cloud.firestore {
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }
+    // File de rejeu des webhooks sortants (R7) : lisible par les administrateurs (supervision de la
+    // livraison / dead-letter) ; écrite uniquement par les Cloud Functions (fireOutbound/retryOutbound).
+    match /outboundQueue/{id} { allow read: if canWrite('habilitations'); allow write: if false; }
     // Erreurs client (observabilité front) : lisibles par les administrateurs ; écrites uniquement
     // par la Cloud Function logClientError (jamais en direct).
     match /errorLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
