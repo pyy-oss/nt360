@@ -1420,6 +1420,28 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   };
 });
 
+// === SCORING IA EXPLICABLE (Lot 5b) — classe les opportunités OUVERTES par probabilité de gain
+// (modèle additif transparent, domain/scoring.js) sur le périmètre visible de l'appelant. Comble
+// l'écart #5 (aucune IA prédictive). Callable, gouverné « pipeline ».
+exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const { scoreOpportunity, isOpen } = require("./domain/scoring");
+  const snap = await db.collection("opportunities")
+    .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "visibleTo")
+    .get();
+  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isOpen);
+  const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
+  if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  const today = nowISO10();
+  const rows = opps.map((o) => {
+    const s = scoreOpportunity(o, today);
+    return { id: o.id, client: o.client || null, am: o.am || null, amount: Number(o.amount) || 0, stage: Number(o.stage) || 0, score: s.score, band: s.band, factors: s.factors.slice(0, 3) };
+  }).sort((a, b) => b.score - a.score || b.amount - a.amount);
+  const bands = { hot: 0, warm: 0, cold: 0 };
+  rows.forEach((r) => { if (bands[r.band] != null) bands[r.band]++; });
+  return { ok: true, scoped, rows: rows.slice(0, 500), bands, total: rows.length };
+});
+
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
 // `type:oppId`). setAutomations = config (direction) ; runAutomations = exécution (direction, + appelée

@@ -59,6 +59,7 @@ scheduledClickupEnrich
 scheduledClickupPull
 scheduledFirestoreExport
 scheduledRecompute
+scoreOpportunities
 setAlertThresholds
 setAutomations
 setBcStatus
