@@ -1747,14 +1747,54 @@ async function postJson(url, obj) {
   if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
 }
 // Diffuse un événement métier vers le webhook sortant si configuré/souscrit. Best-effort (n'échoue
-// JAMAIS l'action appelante) — un SI tiers indisponible ne doit pas bloquer une mutation nt360.
+// JAMAIS l'action appelante) — un SI tiers indisponible ne doit pas bloquer une mutation nt360. LIVRAISON
+// DURABLE (R7) : sur échec, l'événement est MIS EN FILE (outboundQueue) et re-tenté par retryOutbound
+// avec backoff → plus aucune perte silencieuse (contrairement au simple fire-and-forget précédent).
 async function fireOutbound(event, data) {
+  let cfg;
   try {
-    const cfg = (await db.doc("config/outboundWebhooks").get()).data();
+    cfg = (await db.doc("config/outboundWebhooks").get()).data();
     if (!cfg || !cfg.enabled || !cfg.url || !Array.isArray(cfg.events) || !cfg.events.includes(event)) return;
-    await postJson(cfg.url, { event, data, ts: new Date().toISOString() });
-  } catch (e) { logger.warn("fireOutbound: échec", { event, message: e && e.message }); }
+  } catch (e) { logger.warn("fireOutbound: config illisible", { event, message: e && e.message }); return; }
+  const payload = { event, data, ts: new Date().toISOString() };
+  try {
+    await postJson(cfg.url, payload);
+  } catch (e) {
+    // Échec de 1re livraison → on met en file pour rejeu durable (jamais perdu).
+    logger.warn("fireOutbound: échec, mise en file de rejeu", { event, message: e && e.message });
+    try {
+      const { nextBackoffMs } = require("./domain/outboundRetry");
+      await db.collection("outboundQueue").add({
+        event, url: cfg.url, payload, status: "pending", attempts: 1,
+        nextAttemptMs: Date.now() + nextBackoffMs(1), lastError: String((e && e.message) || e).slice(0, 500),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (qe) { logger.error("fireOutbound: mise en file impossible", { event, message: qe && qe.message }); }
+  }
 }
+
+// REJEU DURABLE des webhooks sortants en échec (R7 « #29 → 10 ») — planifié toutes les 10 min : reprend
+// les événements en file dont l'échéance de rejeu est atteinte, les re-poste, et met à jour leur état
+// (livré / reprogrammé avec backoff / abandonné en dead-letter après MAX_ATTEMPTS). Scan borné.
+exports.retryOutbound = onSchedule({ schedule: "every 10 minutes", timeoutSeconds: 120 }, async () => {
+  const { isDue, nextState } = require("./domain/outboundRetry");
+  const now = Date.now();
+  const snap = await db.collection("outboundQueue").where("status", "==", "pending").limit(200).get();
+  const due = snap.docs.filter((d) => isDue(d.data(), now));
+  let delivered = 0, requeued = 0, dead = 0;
+  for (const d of due) {
+    const item = d.data();
+    let ok = false, err = null;
+    try { await postJson(item.url, item.payload); ok = true; }
+    catch (e) { err = (e && e.message) || String(e); }
+    const patch = nextState(item, ok, Date.now(), err);
+    if (patch.status === "delivered") delivered++;
+    else if (patch.status === "failed") dead++;
+    else requeued++;
+    try { await d.ref.set(patch, { merge: true }); } catch (_) { /* best-effort */ }
+  }
+  if (due.length) logger.info("retryOutbound", { due: due.length, delivered, requeued, dead });
+});
 
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
