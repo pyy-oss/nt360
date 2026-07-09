@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -98,6 +98,64 @@ function ActivityCockpit() {
         ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
       </div>
       <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// CRA / temps constaté (Lot 15) : TACE et occupation RÉELS (mesurés), comparés au prévisionnel du plan.
+// Sort du « tout prévisionnel » — le DirOps pilote sur des faits, pas seulement des plans.
+function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canWrite: boolean }) {
+  const [k, setK] = useState<TimesheetKpis | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" });
+  const load = useCallback(async () => { setLoading(true); try { setK(await timesheetKpis()); } catch { setK(null); } finally { setLoading(false); } }, []);
+  useEffect(() => { load().catch(() => {}); }, [load]);
+  if (loading) return <Card title="CRA — activité constatée (6 mois)"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
+  const g = k?.global;
+  const delta = g ? g.occupancyPct - (k!.plannedOccupancyPct || 0) : 0;
+  return (
+    <Card title="CRA — activité constatée (6 mois)" actions={canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Saisie CRA"}</button>}>
+      {canWrite && adding && (
+        <div className="flex flex-wrap items-end gap-2 text-[13px] border-b border-hair pb-3 mb-3">
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Consultant</span>
+            <Select ariaLabel="Consultant CRA" className="!py-1 w-44" value={f.consultantId} onChange={(v) => setF({ ...f, consultantId: v })} options={[{ value: "", label: "—" }, ...consultants.map((c) => ({ value: c.id!, label: c.name }))]} /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Mois</span>
+            <input className="field !py-1 w-28" type="month" value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })} aria-label="Mois du CRA" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">J. facturés</span>
+            <input className="field !py-1 w-20" type="number" value={f.billedDays} onChange={(e) => setF({ ...f, billedDays: e.target.value })} aria-label="Jours facturés" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">J. congés</span>
+            <input className="field !py-1 w-20" type="number" value={f.leaveDays} onChange={(e) => setF({ ...f, leaveDays: e.target.value })} aria-label="Jours de congé" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">J. internes</span>
+            <input className="field !py-1 w-20" type="number" value={f.internalDays} onChange={(e) => setF({ ...f, internalDays: e.target.value })} aria-label="Jours internes" /></label>
+          <Busy variant="ghost" label="Enregistrer" okMsg="CRA enregistré" errMsg="Enregistrement refusé"
+            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.month) throw new Error("mois requis"); await upsertTimesheet({ consultantId: f.consultantId, month: f.month, billedDays: Number(f.billedDays) || 0, leaveDays: Number(f.leaveDays) || 0, internalDays: Number(f.internalDays) || 0 }); setF({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" }); setAdding(false); load(); }} />
+        </div>
+      )}
+      {!g || !g.reportedConsultants ? (
+        <Tip>Aucun CRA saisi sur la période. Saisissez les jours <b>facturés / congés / internes</b> par consultant et par mois pour obtenir le <b>TACE constaté</b> et le comparer au prévisionnel du plan de charge.</Tip>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-8 gap-y-3">
+            {stat("TACE constaté", `${g.tacePct}%`, g.tacePct >= 85 ? "text-emerald" : g.tacePct >= 70 ? "text-gold" : "text-clay")}
+            {stat("Occupation constatée", `${g.occupancyPct}%`)}
+            {stat("Occupation prévue", `${k!.plannedOccupancyPct}%`)}
+            {stat("Écart réel − prévu", `${delta > 0 ? "+" : ""}${delta} pts`, delta >= 0 ? "text-emerald" : "text-clay")}
+            {stat("Consultants renseignés", String(g.reportedConsultants))}
+          </div>
+          <div className="mt-3 border-t border-hair pt-2">
+            <Table columns={[
+              colText("Consultant", (r) => r.name),
+              colNum("J. facturés", (r) => String(r.billedDays), (r) => r.billedDays),
+              colNum("J. congés", (r) => String(r.leaveDays), (r) => r.leaveDays),
+              colNum("J. internes", (r) => String(r.internalDays), (r) => r.internalDays),
+              colNum("TACE", (r) => `${r.tacePct}%`, (r) => r.tacePct),
+              colNum("Occupation", (r) => `${r.occupancyPct}%`, (r) => r.occupancyPct),
+            ]} rows={k!.rows} />
+          </div>
+        </>
+      )}
+      <Tip>TACE = jours <b>facturés</b> ÷ jours ouvrables (congés exclus). Le constaté (mesuré) est comparé à l'occupation <b>prévue</b> du plan de charge → un écart négatif signale une dérive à corriger (avant-vente, repositionnement).</Tip>
     </Card>
   );
 }
@@ -241,6 +299,7 @@ export const Staffing: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
       <CapacityPipeline />
+      <ConstatCra consultants={rows} canWrite={canWrite} />
       <Card title="Staffing — ressources" actions={
         <div className="flex items-center gap-1.5">
           {counts.map((c) => <Badge key={c.value} tone={c.tone}>{c.label} · {c.n}</Badge>)}

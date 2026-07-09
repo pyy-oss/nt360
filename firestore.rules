@@ -158,6 +158,8 @@ service cloud.firestore {
     match /consultants/{id} { allow read: if false; allow write: if false; }
     // Affectations / plan de charge (Lot 12 DirOps) : accès 100% par callable (upsert/delete/staffingPlan).
     match /assignments/{id} { allow read: if false; allow write: if false; }
+    // CRA / temps constaté (Lot 15 DirOps) : accès 100% par callable (upsert/delete/timesheetKpis).
+    match /timesheets/{id} { allow read: if false; allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
