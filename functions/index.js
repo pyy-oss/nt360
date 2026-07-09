@@ -910,13 +910,18 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").get(),
-    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am").get(),
+    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").get(),
     db.doc("config/fpAliases").get(),
     db.doc("config/clientAliases").get(),
   ]);
   const orders = ordSnap.docs.map((d) => d.data());
   const invoices = invSnap.docs.map((d) => d.data());
-  const opps = oppSnap.docs.map((d) => d.data());
+  let opps = oppSnap.docs.map((d) => d.data());
+  // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne rapproche
+  // que les opps de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit).
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  }
   const aliasResolver = buildFpAliasResolver((aliasDoc.data() || {}).map || {});
   const fpKeyOf = (fp) => fpKey(aliasResolver(fp)); // clé FP canonique, alias de réconciliation appliqués
   const normClient = buildClientResolver((clientDoc.data() || {}).pairs || []);
@@ -955,13 +960,19 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
-    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability").get(),
+    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").get(),
     db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").get(),
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
     db.doc("config/alerts").get(),
   ]);
   const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const orders = withId(ordSnap), invoices = withId(invSnap), allOpps = withId(oppSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
+  const orders = withId(ordSnap), invoices = withId(invSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
+  let allOpps = withId(oppSnap);
+  // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
+  // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    allOpps = allOpps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  }
   const thr = thrDoc.data() || {};
   // MÊME préparation des opportunités que le recompute (aggregate.js) → les compteurs du Centre de
   // correction collent au score/aux bulletins : fantômes (stale) et périmées (aged) sont sortis de
@@ -985,9 +996,9 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
 // défaut « public » (comportement historique inchangé, aucune régression) ; passé à « private » par la
 // direction, seuls le propriétaire, sa ligne hiérarchique et les administrateurs voient l'enregistrement.
 async function loadUsersMap() {
-  const snap = await db.collection("users").select("managerUid").get();
+  const snap = await db.collection("users").select("managerUid", "name").get();
   const map = {};
-  snap.forEach((d) => { map[d.id] = { managerUid: d.data().managerUid || null }; });
+  snap.forEach((d) => { map[d.id] = { managerUid: d.data().managerUid || null, name: d.data().name || null }; });
   return map;
 }
 // visibleTo d'un propriétaire (charge la hiérarchie si non fournie). ownerUid vide → [] (sans propriétaire).
@@ -1282,7 +1293,14 @@ exports.upsertActivity = onCallG("upsertActivity", { memoryMiB: 256, timeoutSeco
   // Propriétaire : explicite si fourni, sinon le créateur (défaut Salesforce). visibleTo = chaîne
   // ascendante → la timeline suit la sécurité par enregistrement (Lot 2) sous OWD « private ».
   const ownerUid = d.ownerUid !== undefined ? (d.ownerUid ? String(d.ownerUid) : req.auth.uid) : req.auth.uid;
-  const visibleTo = await visibleToFor(ownerUid);
+  // visibleTo = UNION de la chaîne du propriétaire de l'activité ET de celle du propriétaire de
+  // l'enregistrement rattaché (compte/opp) → le propriétaire du record voit les activités qu'un tiers
+  // journalise sur SON enregistrement (sinon, sous OWD « private », il en serait exclu — re-audit).
+  const relColl = v.value.relatedType === "account" ? "accounts" : "opportunities";
+  const relSnap = await db.doc(`${relColl}/${v.value.relatedId}`).get();
+  const relOwner = relSnap.exists ? relSnap.data().ownerUid : null;
+  const chains = await Promise.all([visibleToFor(ownerUid), relOwner ? visibleToFor(relOwner) : Promise.resolve([])]);
+  const visibleTo = Array.from(new Set([].concat(...chains)));
   const doc = { ...v.value, ownerUid, visibleTo, updatedAt: FieldValue.serverTimestamp() };
   let id = d.id ? String(d.id) : null;
   if (id) { assertPlainId(id, "id activité"); await db.doc(`activities/${id}`).set(doc, { merge: true }); }
@@ -1312,10 +1330,16 @@ exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeco
   const cap = Math.min(500, Math.max(1, Number(d.limit) || 300));
   const snap = await q.limit(1000).get();
   let rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
-  // Visibilité par enregistrement : sous OWD « private » (opportunités), un non-admin ne voit que les
+  // Visibilité par enregistrement : chaque activité est filtrée par l'OWD de SON type de rattachement
+  // (compte OU opportunité — OWD indépendants). Sous OWD « private », un non-admin ne voit que les
   // activités de sa ligne hiérarchique (visibleTo). Public/admin → tout.
-  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
-    rows = rows.filter((a) => Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
+  const oppPrivate = (await recordAccessOwd("opportunities")) === "private";
+  const accPrivate = (await recordAccessOwd("accounts")) === "private";
+  if ((oppPrivate || accPrivate) && !(await isRecordAdmin(req))) {
+    rows = rows.filter((a) => {
+      const priv = a.relatedType === "account" ? accPrivate : oppPrivate;
+      return !priv || (Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
+    });
   }
   if (d.openTasksOnly) rows = rows.filter((a) => a.type === "task" && a.done !== true);
   const { isOverdue } = require("./domain/activity");
@@ -1389,14 +1413,14 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeco
 exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const box = String(req.data?.box || "toDecide");
+  // box « all » = RÉSERVÉ ADMIN (garde-fou dur, indépendant de l'OWD) — sinon fuite org-wide sous OWD
+  // public (re-audit). Les non-admins n'ont accès qu'à « toDecide » (à décider par moi) / « mine ».
+  if (box === "all" && !(await isRecordAdmin(req))) throw new HttpsError("permission-denied", "réservé aux administrateurs");
   let q = db.collection("approvals");
   if (box === "toDecide") q = q.where("approverUid", "==", req.auth.uid).where("status", "==", "pending");
   else if (box === "mine") q = q.where("requestedBy", "==", req.auth.uid);
   const snap = await q.limit(500).get();
-  let rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
-  if (box === "all" && (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
-    rows = rows.filter((a) => Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
-  }
+  const rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
   // Tri : en attente d'abord, puis par date décroissante.
   rows.sort((a, b) => {
     const ap = a.status === "pending", bp = b.status === "pending";
@@ -1599,6 +1623,8 @@ async function apiHandler(req, res) {
     if (!(await rateLimit(keyDoc.id, "api", 600, 60_000))) return send(429, { error: "quota dépassé (600 req/min)" });
     const route = matchRoute(req.method, (req.path || req.url || "").split("?")[0]);
     if (!route) return send(404, { error: "route inconnue" });
+    // Scope de LECTURE requis pour GET (list/get) — une clé « write-only » ne doit pas lire (re-audit).
+    if ((route.action === "list" || route.action === "get") && !scopes.includes("read")) return send(403, { error: "scope 'read' requis" });
     // Sélection des champs exposés (pas de fuite de champs internes comme visibleTo).
     const OPP_FIELDS = ["oppId", "client", "am", "bu", "fp", "amount", "stage", "stageLabel", "probability", "weighted", "closingDate", "forecastCategory", "source"];
     const pick = (o, fields) => { const r = { id: o.id }; for (const k of fields) if (o[k] !== undefined) r[k] = o[k]; return r; };
@@ -2180,11 +2206,13 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     if (q.lines.length) { doc.amount = q.total; doc.weighted = oppWeighted(q.total, probability); }
   }
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
+  // On propage le montant RÉELLEMENT stocké (doc.amount = total dérivé des lignes si fournies, sinon le
+  // montant saisi) au journal funnel et au webhook — sinon amount=0 quand seules des lignes sont posées.
   if (prevStage != null && prevStage !== stage) {
-    await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
+    await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount: doc.amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
   }
   // Webhook sortant (Lot 7b) : opportunité GAGNÉE (transition vers l'étape 6), best-effort.
-  if (stage === 6 && prevStage !== 6) await fireOutbound("opp_won", { oppId: id, client, amount, fp: doc.fp, am: doc.am, bu: doc.bu });
+  if (stage === 6 && prevStage !== 6) await fireOutbound("opp_won", { oppId: id, client, amount: doc.amount, fp: doc.fp, am: doc.am, bu: doc.bu });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
@@ -2303,7 +2331,12 @@ exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, t
   const XLSX = require("xlsx");
   const { buildTemplateAoa } = require("./parsers/oppImport");
   const snap = await db.collection("opportunities").get();
-  const opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Sécurité par enregistrement : sous OWD « private », un rédacteur non-administrateur n'exporte que
+  // les opportunités de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit).
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  }
   // Tri lisible : client puis étape (regroupe les lignes à compléter — ex. perdues sans motif).
   opps.sort((a, b) => String(a.client || "").localeCompare(String(b.client || "")) || (Number(a.stage) || 0) - (Number(b.stage) || 0));
   const ws = XLSX.utils.aoa_to_sheet(buildTemplateAoa(opps));
@@ -2383,9 +2416,15 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
   }
   let seq = 0;
   const mkId = () => "saisie_" + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 6);
+  // Sécurité par enregistrement (Lot 2) : les opps créées en masse appartiennent au créateur, comme la
+  // saisie interactive (upsertOpportunity). Sans ça, sous OWD « private », elles seraient invisibles à
+  // leur propre créateur jusqu'à un réindex direction (re-audit). Chaîne calculée une fois.
+  const creatorVisible = await visibleToFor(req.auth.uid);
   for (const c of toCreate) {
     const id = mkId();
     const doc = buildCreateDoc(c.values, c.fp, id);
+    doc.ownerUid = req.auth.uid;
+    doc.visibleTo = creatorVisible;
     doc.updatedAt = FieldValue.serverTimestamp();
     if ((doc.stage || 0) === 6) wonTouched = true;
     batch.set(db.doc(`opportunities/${id}`), doc, { merge: true });

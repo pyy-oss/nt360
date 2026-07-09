@@ -854,7 +854,7 @@ function OrderPmFixer({ row }: { row: Order }) {
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
 function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
   const oppScope = useRecordScope("opportunities");
-  const { rows: opps, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: opps, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const won = opps.filter((o) => o.stage === 6 && o.fp && !commandeFps.has(o.fp));
   if (loading || !won.length) return null;
   return (

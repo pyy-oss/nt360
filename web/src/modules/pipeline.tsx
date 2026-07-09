@@ -372,7 +372,9 @@ function OppBulkExcel() {
 
 export const OppList: FC<Props> = () => {
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
-  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
+  // On DIFFÈRE l'abonnement tant que l'OWD n'est pas résolu (ready) — sinon requête sans `visibleTo`
+  // refusée sous OWD « private » (re-audit).
+  const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { data: cfDoc } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields"); // champs custom (Lot 7b)
   const customDefs = cfDoc?.fields || [];
   const { match } = useFilters();
@@ -809,7 +811,8 @@ function VelocityStrip({ refreshKey }: { refreshKey: number }) {
 
 export const PipelineBoard: FC<Props> = () => {
   const oppScope = useRecordScope("opportunities");
-  const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
+  // Abonnement différé jusqu'à résolution de l'OWD (ready) — cf. OppList (re-audit).
+  const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { match, f } = useFilters();
   const filterKey = `${f.bu}|${f.am}|${f.client}|${f.pm}`; // identité du filtre → réinitialise la pagination des colonnes
   const canWrite = useCan("pipeline") === "write";

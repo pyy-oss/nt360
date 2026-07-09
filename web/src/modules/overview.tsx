@@ -78,7 +78,7 @@ export const Overview: FC<Props> = ({ period }) => {
   const canPipe = useCan("pipeline") !== "none";
   const canFac = useCan("facturation") !== "none";
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
-  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { rows: allInvoices } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
   // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
