@@ -17,6 +17,8 @@ Cloud Scheduler. **RBAC opposable** via custom claims + Security Rules.
 
 ```
 docs/BUILD_KIT.md          Spécification autoportante (métier + Firebase)
+docs/ARCHITECTURE.md       Architecture de référence (code, données, sécurité, CI)
+docs/DISASTER-RECOVERY.md  Runbook reprise après sinistre (RTO/RPO, restauration)
 firebase.json .firebaserc  Config Firebase (projet propulse-business-87f7a)
 firestore.rules            RBAC opposable (matrice lue côté serveur)
 firestore.indexes.json     Index composites
