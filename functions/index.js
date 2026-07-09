@@ -1456,6 +1456,24 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   return { ok: true, ...salesVelocity(opps) };
 });
 
+// === FUZZY MATCHING QUALITÉ (Lot 9) — repère les QUASI-DOUBLONS de noms clients (typos, mot en plus)
+// que la normalisation exacte n'a pas fusionnés, sur l'ensemble commandes + factures + opportunités.
+// Lecture gouvernée « import ». La correction (alias) reste manuelle via setClientAliases.
+exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireRead(req, "import");
+  const { findFuzzyDuplicates } = require("./domain/fuzzy");
+  const [ord, inv, opp] = await Promise.all([
+    db.collection("orders").select("client").get(),
+    db.collection("invoices").select("client").get(),
+    db.collection("opportunities").select("client").get(),
+  ]);
+  const names = new Set();
+  for (const snap of [ord, inv, opp]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  const threshold = Math.min(0.95, Math.max(0.7, Number(req.data?.threshold) || 0.84));
+  const pairs = findFuzzyDuplicates([...names], threshold);
+  return { ok: true, pairs, scanned: names.size, threshold };
+});
+
 // === REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités (filtres + regroupement +
 // mesure, domain/report.js) exécuté sur le périmètre VISIBLE de l'appelant, + définitions de rapport
 // sauvegardées/partagées (reports/*, callable-only). Comble l'écart #6 (aucun reporting self-service).

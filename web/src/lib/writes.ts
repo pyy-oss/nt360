@@ -544,6 +544,14 @@ export async function callSetNotificationConfig(cfg: NotificationConfig & { test
   await httpsCallable(functions, "setNotificationConfig")(cfg);
 }
 
+// FUZZY MATCHING QUALITÉ (Lot 9) — quasi-doublons de noms clients (à corriger via un alias).
+export type FuzzyPair = { a: string; b: string; score: number };
+/** Détecte les quasi-doublons de noms clients (typos, mot en plus). Droit « import ». */
+export async function fuzzyDuplicateClients(threshold?: number) {
+  const res = await httpsCallable(functions, "fuzzyDuplicateClients", { timeout: 120_000 })({ threshold });
+  return res.data as { ok: boolean; pairs: FuzzyPair[]; scanned: number; threshold: number };
+}
+
 /** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
  *  entière ; recalcule tous les agrégats client. */
 export async function setClientAliases(pairs: { from: string; to: string }[]) {
