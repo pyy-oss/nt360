@@ -20,11 +20,12 @@ export const Scoring: FC<Props> = () => {
   const [rows, setRows] = useState<ScoredOpp[]>([]);
   const [bands, setBands] = useState<{ hot: number; warm: number; cold: number }>({ hot: 0, warm: 0, cold: 0 });
   const [scoped, setScoped] = useState(false);
+  const [calib, setCalib] = useState<{ calibrated: boolean; sample?: number; baseWinRate?: number } | undefined>();
   const [filter, setFilter] = useState<"all" | "hot" | "warm" | "cold">("all");
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await scoreOpportunities(); setRows(r.rows); setBands(r.bands); setScoped(r.scoped); }
+    try { const r = await scoreOpportunities(); setRows(r.rows); setBands(r.bands); setScoped(r.scoped); setCalib(r.calib); }
     catch { setRows([]); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load().catch(() => {}); }, [load]);
@@ -38,6 +39,9 @@ export const Scoring: FC<Props> = () => {
         <div className="flex items-center gap-1.5">
           {chip("all", "Tout", rows.length)}{chip("hot", "Chaud", bands.hot)}{chip("warm", "Tiède", bands.warm)}{chip("cold", "Froid", bands.cold)}
           {scoped && <Badge tone="steel">mon périmètre</Badge>}
+          {calib?.calibrated
+            ? <span title={`Base = taux de gain observé (${calib.baseWinRate}%) sur ${calib.sample} opportunités fermées`}><Badge tone="emerald">calibré · {calib.baseWinRate}% · n={calib.sample}</Badge></span>
+            : calib && <span title="Historique insuffisant pour calibrer — modèle heuristique"><Badge tone="steel">heuristique</Badge></span>}
         </div>}>
         {loading ? <div className="text-[13px] text-muted py-2">Calcul du score…</div> : !rows.length ? (
           <Tip>Aucune opportunité ouverte à scorer dans votre périmètre.</Tip>
