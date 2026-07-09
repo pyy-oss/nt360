@@ -1006,6 +1006,46 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   return { ok: true, buckets, cap: CAP, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
+// === CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes de l'ESN,
+// fondation du plan de charge (Lot 12) et des KPI d'activité (Lot 13). ACCÈS 100% PAR CALLABLE (Admin
+// SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps
+// et les managers voient l'annuaire) ; le COÛT (CJM) est CONFIDENTIEL → masqué sauf droit « rentabilite »
+// (même règle que la marge). Écriture (gestion du staffing) gouvernée « pipeline ». Audité.
+exports.upsertConsultant = onCallG("upsertConsultant", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { validateConsultant } = require("./domain/consultant");
+  const v = validateConsultant(req.data);
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
+  let id = req.data?.id ? assertPlainId(req.data.id, "id consultant") : null;
+  if (id) { await db.doc(`consultants/${id}`).set(doc, { merge: true }); }
+  else { const ref = await db.collection("consultants").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_consultant", module: "pipeline", entity: "consultant", entityId: id, detail: { name: v.value.name, status: v.value.status }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id };
+});
+
+exports.deleteConsultant = onCallG("deleteConsultant", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = assertPlainId(req.data?.id, "id consultant");
+  await db.doc(`consultants/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_consultant", module: "pipeline", entity: "consultant", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
+exports.listConsultants = onCallG("listConsultants", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { stripConfidential } = require("./domain/consultant");
+  const { canRead } = require("./domain/authz");
+  const role = req.auth.token?.nt360Role;
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  const canCost = canRead(matrix, role, "rentabilite"); // le coût (CJM) suit la confidentialité de marge
+  const snap = await db.collection("consultants").limit(MAX_SCAN + 1).get(); // scan borné (R1)
+  const rows = sliceCapped(snap.docs).docs
+    .map((d) => stripConfidential({ id: d.id, ...d.data() }, canCost))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return { ok: true, rows, canCost };
+});
+
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
 // `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).

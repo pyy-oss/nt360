@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -43,6 +43,7 @@ const Activites = from(() => import("./activities"), "Activites");
 const Approvals = from(() => import("./approvals"), "Approvals");
 const SalesForecast = from(() => import("./salesforecast"), "SalesForecast");
 const Scoring = from(() => import("./scoring"), "Scoring");
+const Staffing = from(() => import("./staffing"), "Staffing");
 const Reports = from(() => import("./reports"), "Reports");
 const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
@@ -73,6 +74,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "relances", key: "overview", label: "Relances", icon: BellRing, Component: Relances },
   { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
   { id: "orderlist", key: "overview", label: "Commandes", icon: ShoppingCart, Component: OrderList },
+  { id: "staffing", key: "overview", label: "Staffing", icon: UsersRound, Component: Staffing },
   { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
   { id: "simulator", key: "prevision", label: "Simulateur", icon: SlidersHorizontal, Component: Simulateur },
   { id: "rentabilite", key: "rentabilite", label: "Rentabilité (P&L)", icon: Percent, Component: Rentabilite },
@@ -97,7 +99,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   // → Opportunités (saisie/édition en modale) → Board (Kanban par étape) → Pipeline (analyse) → AM 360°.
   { label: "Commercial", ids: ["commercial", "opplist", "board", "pipeline", "am360", "salesforecast", "scoring", "reports", "activites", "approvals"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
-  { label: "Exécution", ids: ["orderlist", "backlog", "prevision", "simulator", "fp360"] },
+  { label: "Exécution", ids: ["orderlist", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "domaines", "dataquality"] },
   { label: "Admin", ids: ["cleanup", "habilitations"] },
