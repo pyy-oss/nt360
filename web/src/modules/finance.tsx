@@ -4,13 +4,14 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { frDate } from "../lib/format";
+import { marginWaterfall } from "../lib/waterfall";
 import { MARGIN } from "../lib/thresholds";
 import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
 
@@ -224,6 +225,32 @@ export const InvoiceList: FC<Props> = () => {
 };
 
 // 7 — Rentabilité : deux perspectives de marge — Commande (assiette CAS) ou Facturé (assiette CAF).
+// Waterfall de marge (Lot 9b) : cascade des contributions de marge par domaine (BU) jusqu'au total.
+// Chaque barre « flotte » entre son cumul de départ et d'arrivée ; vert = contribution positive, rouge =
+// négative, or = total. Rend visible la formation de la marge (quel domaine porte / pèse sur le résultat).
+function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
+  const { steps } = marginWaterfall(byBu);
+  if (steps.length <= 1) return null;
+  const scale = Math.max(1, ...steps.map((s) => s.end));
+  const color = (k: string) => (k === "total" ? T.gold : k === "neg" ? T.clay : T.emerald);
+  return (
+    <Card title="Waterfall de marge — contribution par domaine">
+      <div className="flex flex-col gap-1.5">
+        {steps.map((s) => (
+          <div key={s.label} className="flex items-center gap-2 text-[12px]">
+            <div className="w-28 truncate text-right text-muted" title={s.label}>{s.label}</div>
+            <div className="relative grow h-4 rounded bg-panel2 overflow-hidden">
+              <div className="absolute top-0 bottom-0 rounded" style={{ left: `${(s.start / scale) * 100}%`, width: `${Math.max(0.5, ((s.end - s.start) / scale) * 100)}%`, backgroundColor: color(s.kind) }} />
+            </div>
+            <div className={cx("w-28 text-right tabnum", s.value < 0 && "text-clay", s.kind === "total" && "font-semibold")}>{money(s.value)}</div>
+          </div>
+        ))}
+      </div>
+      <Tip>Cascade de formation de la <b>marge totale</b> : chaque domaine (BU) ajoute (vert) ou retranche (rouge) sa contribution, du plus fort au plus faible, jusqu'au <b>total</b> (or). Un domaine à marge négative tire le résultat vers le bas.</Tip>
+    </Card>
+  );
+}
+
 export const Rentabilite: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<RentabiliteSummary>(`summaries/rentabilite_${period}`);
   const { active } = useFilters();
@@ -270,6 +297,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
             : <EmptyState label="Pas de commercial renseigné." />}
         </Card>
       </div>
+      <MarginWaterfall byBu={p.byBu || []} />
       <Card title="Affaires à faible marge (à surveiller)">
         <Table columns={[
           colText("FP", (a) => <FpLink fp={a.fp} />, (a) => a.fp || ""),
