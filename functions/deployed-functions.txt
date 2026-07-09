@@ -24,6 +24,7 @@ deleteContact
 deleteObjective
 deleteOpportunity
 deleteRecords
+deleteReport
 enrichClickup
 exportOpportunities
 exportReport
@@ -34,6 +35,7 @@ importLegacyBackup
 importOpportunities
 listActivities
 listApprovals
+listReports
 listClickupMembers
 logClientError
 logLogin
@@ -54,6 +56,7 @@ reconcileClickupLinks
 reindexVisibility
 reingest
 runAutomations
+runReport
 scheduledBcPull
 scheduledClickupEnrich
 scheduledClickupPull
@@ -79,6 +82,7 @@ setRecordAccess
 setRefList
 setSecurityConfig
 setUserActive
+saveReport
 setUserRole
 setupClickupWebhook
 submitForApproval

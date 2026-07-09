@@ -1442,6 +1442,65 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   return { ok: true, scoped, rows: rows.slice(0, 500), bands, total: rows.length };
 });
 
+// === REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités (filtres + regroupement +
+// mesure, domain/report.js) exécuté sur le périmètre VISIBLE de l'appelant, + définitions de rapport
+// sauvegardées/partagées (reports/*, callable-only). Comble l'écart #6 (aucun reporting self-service).
+async function scopedOpps(req, fields) {
+  const snap = await db.collection("opportunities").select(...fields, "visibleTo").get();
+  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  }
+  return opps;
+}
+
+exports.runReport = onCallG("runReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const { applyReport } = require("./domain/report");
+  const opps = await scopedOpps(req, ["bu", "am", "client", "stage", "amount", "probability", "weighted", "forecastCategory"]);
+  return { ok: true, ...applyReport(req.data?.def || req.data || {}, opps) };
+});
+
+exports.saveReport = onCallG("saveReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { validateReportDef } = require("./domain/report");
+  const name = String(req.data?.name || "").trim().slice(0, 120);
+  if (!name) throw new HttpsError("invalid-argument", "nom du rapport requis");
+  const v = validateReportDef(req.data?.def);
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const usersMap = await loadUsersMap();
+  const doc = { name, def: v.value, ownerUid: req.auth.uid, ownerName: (usersMap[req.auth.uid] && usersMap[req.auth.uid].name) || null, updatedAt: FieldValue.serverTimestamp() };
+  let id = req.data?.id ? String(req.data.id) : null;
+  if (id) { assertPlainId(id, "id rapport"); await db.doc(`reports/${id}`).set(doc, { merge: true }); }
+  else { const ref = await db.collection("reports").add({ ...doc, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "save_report", module: "pipeline", entity: "report", entityId: id, detail: { name }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id };
+});
+
+// Définitions de rapport : PARTAGÉES entre les utilisateurs « pipeline » (ce sont des définitions, pas
+// des données d'enregistrement — l'exécution, elle, reste cadrée par la visibilité de chacun).
+exports.listReports = onCallG("listReports", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const snap = await db.collection("reports").limit(500).get();
+  const reports = snap.docs.map((s) => ({ id: s.id, ...s.data() }))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return { ok: true, reports };
+});
+
+exports.deleteReport = onCallG("deleteReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = assertPlainId(req.data?.id, "id rapport");
+  const snap = await db.doc(`reports/${id}`).get();
+  if (!snap.exists) throw new HttpsError("not-found", "rapport introuvable");
+  // Seul le propriétaire ou la direction supprime un rapport partagé.
+  if (snap.data().ownerUid !== req.auth.uid && req.auth.token?.nt360Role !== "direction") {
+    throw new HttpsError("permission-denied", "réservé au propriétaire ou à la direction");
+  }
+  await db.doc(`reports/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_report", module: "pipeline", entity: "report", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
 // `type:oppId`). setAutomations = config (direction) ; runAutomations = exécution (direction, + appelée

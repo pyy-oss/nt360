@@ -52,6 +52,32 @@ export async function scoreOpportunities() {
   return res.data as ScoringResult;
 }
 
+// REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités + définitions sauvegardées.
+export type ReportGroupBy = "bu" | "am" | "stage" | "client" | "forecastCategory";
+export type ReportMeasure = "count" | "amount" | "weighted";
+export type ReportFilters = { bu?: string | null; am?: string | null; client?: string | null; stage?: number | null; forecastCategory?: string | null; minAmount?: number | null; openOnly?: boolean };
+export type ReportDef = { groupBy: ReportGroupBy; measure: ReportMeasure; filters?: ReportFilters };
+export type ReportRow = { key: string; count: number; amount: number; weighted: number };
+export type ReportResult = { ok: boolean; groupBy: ReportGroupBy; measure: ReportMeasure; rows: ReportRow[]; totals: { count: number; amount: number; weighted: number } };
+export type SavedReport = { id: string; name: string; def: ReportDef; ownerUid?: string; ownerName?: string | null };
+/** Exécute un rapport (filtres + regroupement + mesure) sur le périmètre visible de l'appelant. */
+export async function runReport(def: ReportDef) {
+  const res = await httpsCallable(functions, "runReport")({ def });
+  return res.data as ReportResult;
+}
+/** Sauvegarde (ou met à jour) une définition de rapport partagée. Droit « pipeline ». */
+export async function saveReport(name: string, def: ReportDef, id?: string) {
+  const res = await httpsCallable(functions, "saveReport")({ name, def, id });
+  return res.data as { ok: boolean; id: string };
+}
+/** Liste les définitions de rapport sauvegardées (partagées). */
+export async function listReports() {
+  const res = await httpsCallable(functions, "listReports")({});
+  return res.data as { ok: boolean; reports: SavedReport[] };
+}
+/** Supprime une définition de rapport (propriétaire ou direction). */
+export async function deleteReport(id: string) { await httpsCallable(functions, "deleteReport")({ id }); }
+
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
  *  base64 (à télécharger via downloadBase64). Réservé au droit « pipeline ». */
 export async function exportOpportunities() {

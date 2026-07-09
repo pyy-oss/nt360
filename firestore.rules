@@ -147,6 +147,9 @@ service cloud.firestore {
     // Approbations (Lot 4) : idem, accès 100% par callable (submit/decide/listApprovals) — la visibilité
     // et le contrôle de l'approbateur sont appliqués serveur. Lecture/écriture directes fermées.
     match /approvals/{id} { allow read: if false; allow write: if false; }
+    // Rapports self-service (Lot 6) : définitions de rapport, accès 100% par callable (run/save/list/
+    // deleteReport). L'exécution reste cadrée par la visibilité de chacun. Lecture/écriture directes fermées.
+    match /reports/{id} { allow read: if false; allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
