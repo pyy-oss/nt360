@@ -1018,7 +1018,7 @@ function CustomFieldsCard() {
           {rows.map((r, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 border-t border-hair py-2 text-[13px]">
               <input className="field !py-1 w-44" value={r.label} onChange={(e) => set(i, { label: e.target.value })} aria-label="Libellé du champ" placeholder="Libellé (ex. Concurrent)" />
-              <Select ariaLabel="Type" className="!py-1 w-28" value={r.type} onChange={(v) => set(i, { type: v as CustomFieldDef["type"] })} options={[{ value: "text", label: "Texte" }, { value: "number", label: "Nombre" }, { value: "select", label: "Liste" }]} />
+              <Select ariaLabel="Type" className="!py-1 w-28" value={r.type} onChange={(v) => set(i, { type: v as CustomFieldDef["type"] })} options={[{ value: "text", label: "Texte" }, { value: "number", label: "Nombre" }, { value: "select", label: "Liste" }, { value: "date", label: "Date" }, { value: "checkbox", label: "Case à cocher" }]} />
               {r.type === "select" && <input className="field !py-1 grow" value={(r.options || []).join(", ")} onChange={(e) => set(i, { options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} aria-label="Options (séparées par des virgules)" placeholder="Option A, Option B…" />}
               <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} />actif</label>
               <button type="button" className="text-clay hover:underline text-[11px]" onClick={() => del(i)}>suppr.</button>

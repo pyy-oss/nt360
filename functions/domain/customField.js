@@ -4,7 +4,7 @@
 //
 // Fonctions PURES (aucun I/O) → testables.
 
-const FIELD_TYPES = ["text", "number", "select"];
+const FIELD_TYPES = ["text", "number", "select", "date", "checkbox"];
 
 // Slug de clé : minuscules, alphanumérique + underscore (identifiant stable, sûr en clé Firestore/map).
 function slugKey(s) {
@@ -41,6 +41,13 @@ function sanitizeCustom(defs, input) {
     } else if (def.type === "select") {
       const s = String(v == null ? "" : v);
       out[k] = def.options.includes(s) ? s : null;
+    } else if (def.type === "date") {
+      // Date ISO (YYYY-MM-DD) uniquement ; toute autre forme → null (pas de date « douteuse » stockée).
+      const s = String(v == null ? "" : v).trim();
+      out[k] = /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    } else if (def.type === "checkbox") {
+      // Booléen strict : true seulement pour true / "true" / 1 / "1" ; tout le reste → false.
+      out[k] = v === true || v === "true" || v === 1 || v === "1";
     } else {
       out[k] = String(v == null ? "" : v).slice(0, 500);
     }

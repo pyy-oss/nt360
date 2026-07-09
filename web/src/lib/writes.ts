@@ -13,7 +13,7 @@ export type OppInput = {
 export type OppLine = { product: string; qty: number; unitPrice: number; discountPct: number; lineTotal?: number };
 export type ForecastCategory = "omitted" | "pipeline" | "best_case" | "commit";
 // CHAMPS CUSTOM (Lot 7b) — définitions éditées par la direction, valeurs stockées dans opp.custom.
-export type CustomFieldDef = { key: string; label: string; type: "text" | "number" | "select"; options: string[]; active: boolean };
+export type CustomFieldDef = { key: string; label: string; type: "text" | "number" | "select" | "date" | "checkbox"; options: string[]; active: boolean };
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
  *  pondéré + l'étiquette d'étape, puis RECALCULE les agrégats — sinon l'opp reste invisible). */

@@ -19,9 +19,13 @@ describe("normalizeDefs", () => {
     expect(defs[1].options).toEqual(["Direct", "Partenaire"]);
   });
   it("type inconnu → text ; active par défaut true", () => {
-    const d = normalizeDefs([{ label: "X", type: "date" }])[0];
+    const d = normalizeDefs([{ label: "X", type: "wysiwyg" }])[0]; // type non supporté → repli text
     expect(d.type).toBe("text");
     expect(d.active).toBe(true);
+  });
+  it("accepte les types date et checkbox (R9)", () => {
+    const defs = normalizeDefs([{ label: "Échéance", type: "date" }, { label: "Prioritaire", type: "checkbox" }]);
+    expect(defs.map((d) => d.type)).toEqual(["date", "checkbox"]);
   });
 });
 
@@ -30,6 +34,8 @@ describe("sanitizeCustom — coercition + filtrage contre les définitions activ
     { key: "concurrent", type: "text", active: true },
     { key: "score", type: "number", active: true },
     { key: "canal", type: "select", options: ["Direct", "Partenaire"], active: true },
+    { key: "echeance", type: "date", active: true },
+    { key: "prioritaire", type: "checkbox", active: true },
     { key: "vieux", type: "text", active: false },
   ];
   it("ignore les clés inconnues ou inactives", () => {
@@ -47,5 +53,17 @@ describe("sanitizeCustom — coercition + filtrage contre les définitions activ
   });
   it("borne le texte à 500", () => {
     expect(sanitizeCustom(defs, { concurrent: "a".repeat(999) }).concurrent).toHaveLength(500);
+  });
+  it("date : ISO valide conservée, sinon null (R9)", () => {
+    expect(sanitizeCustom(defs, { echeance: "2026-07-09" }).echeance).toBe("2026-07-09");
+    expect(sanitizeCustom(defs, { echeance: "09/07/2026" }).echeance).toBeNull();
+    expect(sanitizeCustom(defs, { echeance: "" }).echeance).toBeNull();
+  });
+  it("checkbox : booléen strict (R9)", () => {
+    expect(sanitizeCustom(defs, { prioritaire: true }).prioritaire).toBe(true);
+    expect(sanitizeCustom(defs, { prioritaire: "true" }).prioritaire).toBe(true);
+    expect(sanitizeCustom(defs, { prioritaire: "1" }).prioritaire).toBe(true);
+    expect(sanitizeCustom(defs, { prioritaire: false }).prioritaire).toBe(false);
+    expect(sanitizeCustom(defs, { prioritaire: "non" }).prioritaire).toBe(false);
   });
 });

@@ -504,12 +504,17 @@ export const OppList: FC<Props> = () => {
               <Select ariaLabel="Catégorie de prévision" value={f.forecastCategory} onChange={(v) => setF({ ...f, forecastCategory: v })} options={FORECAST_OPTIONS} /></label>
             {/* Champs custom (Lot 7b) : définis par la direction, rendus dynamiquement. */}
             {customDefs.filter((d) => d.active).map((d) => (
-              <label key={d.key} className="flex flex-col gap-1 text-[11px] text-muted">{d.label}
-                {d.type === "select" ? (
-                  <Select ariaLabel={d.label} value={String(f.custom[d.key] ?? "")} onChange={(v) => setF({ ...f, custom: { ...f.custom, [d.key]: v } })} options={[{ value: "", label: "—" }, ...d.options.map((o) => ({ value: o, label: o }))]} />
-                ) : (
-                  <input className="field" type={d.type === "number" ? "number" : "text"} aria-label={d.label} value={String(f.custom[d.key] ?? "")} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.value } })} />
-                )}</label>
+              d.type === "checkbox" ? (
+                <label key={d.key} className="flex items-center gap-2 text-[12px] text-ink self-end">
+                  <input type="checkbox" aria-label={d.label} checked={f.custom[d.key] === true} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.checked } })} />{d.label}</label>
+              ) : (
+                <label key={d.key} className="flex flex-col gap-1 text-[11px] text-muted">{d.label}
+                  {d.type === "select" ? (
+                    <Select ariaLabel={d.label} value={String(f.custom[d.key] ?? "")} onChange={(v) => setF({ ...f, custom: { ...f.custom, [d.key]: v } })} options={[{ value: "", label: "—" }, ...d.options.map((o) => ({ value: o, label: o }))]} />
+                  ) : (
+                    <input className="field" type={d.type === "number" ? "number" : d.type === "date" ? "date" : "text"} aria-label={d.label} value={String(f.custom[d.key] ?? "")} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.value } })} />
+                  )}</label>
+              )
             ))}
             {/* Lignes produit / CPQ-lite (Lot 8) : détail chiffrable ; le montant est dérivé de la somme. */}
             <div className="sm:col-span-2 flex flex-col gap-1.5 border-t border-hair pt-2">
