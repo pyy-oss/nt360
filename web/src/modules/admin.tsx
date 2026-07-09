@@ -1,11 +1,11 @@
 // 13 — Habilitations : matrice profil × module + attribution de rôle.
-import { useState, type FC } from "react";
+import { useState, useEffect, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, type ApiKeyInfo, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -37,6 +37,7 @@ export const Habilitations: FC<Props> = () => {
       <MfaEnrollCard />
       {isDirection && <SecurityCard users={users} />}
       {isDirection && <AutomationCard />}
+      {isDirection && <ApiKeysCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
       {isDirection && <ProjectionConfigCard />}
@@ -891,6 +892,50 @@ function AutomationCard() {
         ))}
       </div>
       <Tip>Les règles actives sont évaluées au recalcul quotidien (05:00) et via « Exécuter maintenant ». Une tâche n'est <b>jamais recréée</b> pour la même opportunité (idempotence). Les tâches suivent la sécurité par enregistrement (propriétaire de l'opportunité).</Tip>
+    </Card>
+  );
+}
+
+// Clés API (direction) : gestion des clés d'accès à l'API REST publique (/v1). La clé brute n'est
+// affichée QU'UNE fois à la création (le serveur n'en garde que le hash). Scopes read/write.
+function ApiKeysCard() {
+  const toast = useToast();
+  const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [label, setLabel] = useState("");
+  const [canRead, setCanRead] = useState(true);
+  const [canWriteScope, setCanWriteScope] = useState(false);
+  const [fresh, setFresh] = useState<string | null>(null);
+  const load = async () => { try { const r = await listApiKeys(); setKeys(r.keys); } catch { setKeys([]); } };
+  useEffect(() => { load().catch(() => {}); }, []);
+  return (
+    <Card title="Clés API (API REST /v1)" actions={
+      <div className="flex items-center gap-2">
+        <input className="field !py-1 w-40 text-xs" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Libellé de la clé" placeholder="Libellé (ex. CRM externe)" />
+        <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={canRead} onChange={(e) => setCanRead(e.target.checked)} />read</label>
+        <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={canWriteScope} onChange={(e) => setCanWriteScope(e.target.checked)} />write</label>
+        <Busy variant="ghost" label="Créer" okMsg="Clé créée" errMsg="Échec" fn={async () => {
+          const scopes = [...(canRead ? ["read"] : []), ...(canWriteScope ? ["write"] : [])]; if (!scopes.length) throw new Error("au moins un scope");
+          const r = await createApiKey(label.trim() || "clé API", scopes); setFresh(r.key); setLabel(""); await load();
+        }} />
+      </div>}>
+      {fresh && (
+        <div className="mb-3 rounded border border-gold/40 bg-gold/10 p-2">
+          <div className="text-[12px] text-muted mb-1">Copiez cette clé maintenant — elle ne sera plus affichée :</div>
+          <div className="flex items-center gap-2"><code className="text-[12px] break-all">{fresh}</code>
+            <button type="button" className="btn-ghost !py-1 text-xs" onClick={() => { navigator.clipboard?.writeText(fresh).then(() => toast("Clé copiée")); }}>Copier</button>
+            <button type="button" className="btn-ghost !py-1 text-xs" onClick={() => setFresh(null)}>Masquer</button></div>
+        </div>
+      )}
+      {keys.length ? (
+        <div className="flex flex-col">
+          {keys.map((k) => (
+            <div key={k.id} className="flex items-center justify-between gap-2 border-t border-hair py-2 text-[13px]">
+              <span className="inline-flex items-center gap-2">{!k.active && <Badge tone="clay">révoquée</Badge>}<span className="font-medium">{k.label}</span><code className="text-[11px] text-muted">{k.prefix}…</code>{k.scopes.map((s) => <Badge key={s} tone="steel">{s}</Badge>)}</span>
+              {k.active && <button type="button" className="text-clay hover:underline text-[11px]" onClick={async () => { await revokeApiKey(k.id); await load(); }}>Révoquer</button>}
+            </div>
+          ))}
+        </div>
+      ) : <Tip>Aucune clé. Créez une clé pour permettre à un système tiers d'appeler l'API REST : <code>GET /v1/opportunities</code>, <code>POST /v1/opportunities</code>, <code>GET /v1/accounts</code> — en-tête <code>Authorization: Bearer nt360_…</code>.</Tip>}
     </Card>
   );
 }

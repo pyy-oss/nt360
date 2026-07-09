@@ -1501,6 +1501,122 @@ exports.deleteReport = onCallG("deleteReport", { memoryMiB: 256, timeoutSeconds:
   return { ok: true };
 });
 
+// === API REST PUBLIQUE (Lot 7) — endpoint HTTP versionné (/v1) authentifié par CLÉ API (Bearer), pour
+// intégrer nt360 à un SI tiers. Comble l'écart #7 (aucune API/webhooks). Les clés (hachées SHA-256,
+// jamais stockées en clair) sont gérées par la direction ; scopes read/write ; rate-limitées. L'API est
+// un compte de SERVICE au niveau organisation (voit tout) — distinct des utilisateurs. apiKeys/* est
+// read:false+write:false (accès par callables + vérification serveur dans l'endpoint).
+exports.createApiKey = onCallG("createApiKey", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { hashApiKey } = require("./domain/apiKey");
+  const label = String(req.data?.label || "").trim().slice(0, 120) || "clé API";
+  const scopesIn = Array.isArray(req.data?.scopes) ? req.data.scopes : ["read"];
+  const scopes = scopesIn.filter((s) => ["read", "write"].includes(s));
+  if (!scopes.length) scopes.push("read");
+  const raw = "nt360_" + require("crypto").randomBytes(24).toString("hex"); // clé brute — affichée UNE fois
+  const ref = await db.collection("apiKeys").add({
+    hash: hashApiKey(raw), prefix: raw.slice(0, 14), label, scopes, active: true,
+    createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp(),
+  });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "api_key_create", module: "habilitations", entity: "apiKey", entityId: ref.id, detail: { label, scopes }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id: ref.id, key: raw, prefix: raw.slice(0, 14), scopes, note: "Copiez cette clé maintenant : elle ne sera plus affichée." };
+});
+
+exports.revokeApiKey = onCallG("revokeApiKey", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const id = assertPlainId(req.data?.id, "id clé");
+  await db.doc(`apiKeys/${id}`).set({ active: false, revokedAt: FieldValue.serverTimestamp(), revokedBy: req.auth.uid }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "api_key_revoke", module: "habilitations", entity: "apiKey", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
+exports.listApiKeys = onCallG("listApiKeys", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const snap = await db.collection("apiKeys").get();
+  const keys = snap.docs.map((s) => { const d = s.data(); return { id: s.id, prefix: d.prefix, label: d.label, scopes: d.scopes || [], active: d.active !== false }; })
+    .sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
+  return { ok: true, keys };
+});
+
+// Handler HTTP de l'API REST. Authentifie la clé, applique le rate-limit, route et répond en JSON.
+async function apiHandler(req, res) {
+  const { hashApiKey, parseBearer, matchRoute } = require("./domain/apiKey");
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const send = (code, body) => res.status(code).json(body);
+  try {
+    const token = parseBearer(req.get("Authorization"));
+    if (!token) return send(401, { error: "clé API requise (Authorization: Bearer nt360_…)" });
+    const keySnap = await db.collection("apiKeys").where("hash", "==", hashApiKey(token)).limit(1).get();
+    if (keySnap.empty || keySnap.docs[0].data().active === false) return send(401, { error: "clé API invalide ou révoquée" });
+    const keyDoc = keySnap.docs[0]; const scopes = keyDoc.data().scopes || [];
+    if (!(await rateLimit(keyDoc.id, "api", 600, 60_000))) return send(429, { error: "quota dépassé (600 req/min)" });
+    const route = matchRoute(req.method, (req.path || req.url || "").split("?")[0]);
+    if (!route) return send(404, { error: "route inconnue" });
+    // Sélection des champs exposés (pas de fuite de champs internes comme visibleTo).
+    const OPP_FIELDS = ["oppId", "client", "am", "bu", "fp", "amount", "stage", "stageLabel", "probability", "weighted", "closingDate", "forecastCategory", "source"];
+    const pick = (o, fields) => { const r = { id: o.id }; for (const k of fields) if (o[k] !== undefined) r[k] = o[k]; return r; };
+    if (route.resource === "opportunities") {
+      if (route.action === "list") {
+        let q = db.collection("opportunities");
+        if (req.query.bu) q = q.where("bu", "==", String(req.query.bu).toUpperCase());
+        if (req.query.stage) q = q.where("stage", "==", Number(req.query.stage));
+        const lim = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+        const snap = await q.limit(lim).get();
+        return send(200, { data: snap.docs.map((d) => pick({ id: d.id, ...d.data() }, OPP_FIELDS)), count: snap.size });
+      }
+      if (route.action === "get") {
+        const snap = await db.doc(`opportunities/${route.id}`).get();
+        if (!snap.exists) return send(404, { error: "opportunité introuvable" });
+        return send(200, { data: pick({ id: snap.id, ...snap.data() }, OPP_FIELDS) });
+      }
+      if (route.action === "create") {
+        if (!scopes.includes("write")) return send(403, { error: "scope 'write' requis" });
+        const b = req.body || {};
+        const client = String(b.client || "").trim();
+        if (!client) return send(400, { error: "champ 'client' requis" });
+        const { clampStage, oppWeighted } = require("./domain/mutations");
+        const { DEFAULT_PROBA, STAGE_LABEL } = require("./parsers/salesData");
+        const { fpKey } = require("./lib/ids");
+        const stage = clampStage(b.stage);
+        const amount = Number(b.amount) || 0;
+        const pr = Number(b.probability);
+        const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
+        const id = "saisie_" + Date.now().toString(36) + require("crypto").randomBytes(4).toString("hex");
+        const doc = {
+          oppId: id, source: "api", client, am: String(b.am || "").trim(), bu: String(b.bu || "AUTRE").trim().toUpperCase(),
+          fp: fpKey(b.fp) || null, amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
+          probability, weighted: oppWeighted(amount, probability), closingDate: b.closingDate || null,
+          ownerUid: null, visibleTo: [], updatedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+        };
+        await db.doc(`opportunities/${id}`).set(doc);
+        await db.collection("auditLog").add({ uid: `apiKey:${keyDoc.id}`, action: "api_create_opp", module: "pipeline", entity: "opportunity", entityId: id, detail: { client, stage }, ts: FieldValue.serverTimestamp() });
+        await requestRecompute(oppScope(null, stage));
+        return send(201, { data: pick({ id, ...doc }, OPP_FIELDS) });
+      }
+    }
+    if (route.resource === "accounts") {
+      const ACC_FIELDS = ["name", "sector", "country", "parentId", "tags"];
+      if (route.action === "list") {
+        const snap = await db.collection("accounts").limit(Math.min(500, Math.max(1, Number(req.query.limit) || 100))).get();
+        return send(200, { data: snap.docs.map((d) => pick({ id: d.id, ...d.data() }, ACC_FIELDS)), count: snap.size });
+      }
+      if (route.action === "get") {
+        const snap = await db.doc(`accounts/${route.id}`).get();
+        if (!snap.exists) return send(404, { error: "compte introuvable" });
+        return send(200, { data: pick({ id: snap.id, ...snap.data() }, ACC_FIELDS) });
+      }
+    }
+    return send(404, { error: "route inconnue" });
+  } catch (e) {
+    logger.error("api a échoué", { message: e && e.message, stack: e && e.stack });
+    return res.status(500).json({ error: "erreur interne" });
+  }
+}
+exports.api = onRequest({ memoryMiB: 512, timeoutSeconds: 60, cors: false }, apiHandler);
+
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
 // `type:oppId`). setAutomations = config (direction) ; runAutomations = exécution (direction, + appelée

@@ -183,6 +183,16 @@ describe("Rapports self-service : accès callable-only (Lot 6)", () => {
   });
 });
 
+describe("Clés API : secret jamais exposé au client (Lot 7)", () => {
+  it("lecture/écriture directes de apiKeys refusées (même direction)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "apiKeys/K1"), { hash: "deadbeef", label: "x", active: true, scopes: ["read"] });
+    });
+    await assertFails(getDoc(doc(as("direction"), "apiKeys/K1")));
+    await assertFails(setDoc(doc(as("direction"), "apiKeys/K2"), { hash: "x" }));
+  });
+});
+
 describe("Lignes BC : seul le statut est modifiable", () => {
   it("achats change le statut", async () => {
     await assertSucceeds(updateDoc(doc(as("achats"), "bcLines/FP_2026_1_0"), { status: "emis" }));

@@ -8,10 +8,12 @@ accountView
 addBcLine
 alertDigest
 assignOwner
+api
 attachUser
 clickupHealth
 clickupWebhook
 correctionQueue
+createApiKey
 createOrder
 createUser
 curateNews
@@ -34,6 +36,7 @@ importDelta
 importLegacyBackup
 importOpportunities
 listActivities
+listApiKeys
 listApprovals
 listReports
 listClickupMembers
@@ -51,6 +54,7 @@ pushBcToClickup
 pushOrderToClickup
 recompute
 reconClient
+revokeApiKey
 reconcileBcLinks
 reconcileClickupLinks
 reindexVisibility
