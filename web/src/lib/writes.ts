@@ -94,16 +94,23 @@ export async function staffingPlan(fromMonth?: string, months?: number) {
 }
 
 // KPI D'ACTIVITÉ (Lot 13) — occupation, intercontrat, CA/marge staffés prévisionnels.
-export type ActivityConsultant = { id: string; name: string | null; bu: string | null; status: string; occupancyPct: number; idleMonths: number; billableDays: number; revenueForecast: number; marginForecast: number | null };
+// + objectifs d'occupation (Lot 18) : cible par ressource + détection de dérive.
+export type ActivityConsultant = { id: string; name: string | null; bu: string | null; status: string; occupancyPct: number; idleMonths: number; billableDays: number; revenueForecast: number; marginForecast: number | null; targetPct?: number; belowBy?: number; isBelow?: boolean };
 export type ActivityBu = { bu: string; headcount: number; active: number; occupancyPct: number; revenueForecast: number; marginForecast: number | null };
+export type StaffingTargets = { occupancy: number; tace: number; byGrade: Record<string, number>; byBu: Record<string, number> };
 export type ActivityKpis = {
   ok: boolean; months: string[]; canCost: boolean;
   global: { headcount: number; active: number; occupancyPct: number; intercontratPct: number; revenueForecast: number; marginForecast: number | null };
   byBu: ActivityBu[]; rows: ActivityConsultant[];
+  targets?: StaffingTargets; occupancyTargetPct?: number; belowTargetCount?: number;
 };
 export async function activityKpis(fromMonth?: string, months?: number) {
   const res = await httpsCallable(functions, "activityKpis")({ fromMonth, months });
   return res.data as ActivityKpis;
+}
+export async function setStaffingTargets(t: Partial<StaffingTargets>) {
+  const res = await httpsCallable(functions, "setStaffingTargets")(t);
+  return res.data as { ok: boolean } & StaffingTargets;
 }
 
 // CAPACITÉ ⇄ PIPELINE (Lot 14) — capacité de délivrance disponible vs demande pipeline pondérée.

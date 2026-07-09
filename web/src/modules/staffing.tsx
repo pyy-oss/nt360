@@ -70,11 +70,13 @@ function ActivityCockpit() {
     <Card title="Activité — pilotage (6 mois)">
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         {stat("Taux d'occupation", `${g.occupancyPct}%`, occTone)}
+        {k.occupancyTargetPct != null && stat("Objectif", `${k.occupancyTargetPct}%`, g.occupancyPct >= k.occupancyTargetPct ? "text-emerald" : "text-clay")}
         {stat("Intercontrat", `${g.intercontratPct}%`, icTone)}
         {stat("Effectif actif", `${g.active}/${g.headcount}`)}
         {stat("CA staffé prév.", money(g.revenueForecast))}
         {k.canCost && g.marginForecast != null && stat("Marge prév.", money(g.marginForecast), g.marginForecast >= 0 ? "text-emerald" : "text-clay")}
       </div>
+      {!!k.belowTargetCount && <div className="mt-3 text-[13px] rounded px-3 py-2 bg-clay/15 text-clay">⚠️ <b>{k.belowTargetCount}</b> ressource(s) active(s) <b>sous l'objectif</b> d'occupation → repositionner / avant-vente. Objectifs paramétrables dans Habilitations.</div>}
       {k.byBu.length > 1 && (
         <div className="mt-4 border-t border-hair pt-3">
           <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par business unit</div>
@@ -90,10 +92,11 @@ function ActivityCockpit() {
       <div className="mt-3 border-t border-hair pt-2">
         <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Ressources les moins occupées (à repositionner)</div>
         <Table columns={[
-          colText("Consultant", (r) => r.name || r.id),
+          colText("Consultant", (r) => <span className={cx(r.isBelow && "text-clay")}>{r.name || r.id}</span>, (r) => r.name || ""),
           colText("BU", (r) => r.bu || "—"),
           colText("Statut", (r) => r.status),
           colNum("Occupation", (r) => `${r.occupancyPct}%`, (r) => r.occupancyPct),
+          colNum("Objectif", (r) => (r.targetPct != null ? `${r.targetPct}%` : "—"), (r) => r.targetPct ?? 0),
           colNum("Mois IC", (r) => String(r.idleMonths), (r) => r.idleMonths),
         ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
       </div>

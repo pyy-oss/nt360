@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -39,6 +39,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <AutomationCard />}
       {isDirection && <ApiKeysCard />}
       {isDirection && <CustomFieldsCard />}
+      {isDirection && <StaffingTargetsCard />}
       {isDirection && <OutboundWebhookCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
@@ -1026,6 +1027,39 @@ function CustomFieldsCard() {
           ))}
         </div>
       ) : <Tip>Aucun champ personnalisé. Ajoutez des champs (texte / nombre / liste) qui apparaîtront dans la fiche opportunité — utile pour étendre le modèle sans code.</Tip>}
+    </Card>
+  );
+}
+
+// Objectifs d'occupation / TACE (direction, Lot 18 DirOps) : cibles globales (%) affinables par grade
+// et par BU. Le cockpit Staffing compare le constaté à ces cibles et signale la dérive.
+function StaffingTargetsCard() {
+  const { data } = useDocData<StaffingTargets>("config/staffingTargets");
+  const [occ, setOcc] = useState<string | null>(null);
+  const [tace, setTace] = useState<string | null>(null);
+  const [grade, setGrade] = useState<string | null>(null); // saisie "junior:70, senior:90"
+  const [bu, setBu] = useState<string | null>(null);
+  const fmt = (m?: Record<string, number>) => Object.entries(m || {}).map(([k, v]) => `${k}:${v}`).join(", ");
+  const parse = (s: string) => { const o: Record<string, number> = {}; for (const p of s.split(",")) { const [k, v] = p.split(":"); const n = Number(v); if (k && k.trim() && Number.isFinite(n)) o[k.trim()] = n; } return o; };
+  const curOcc = occ ?? String(data?.occupancy ?? 85);
+  const curTace = tace ?? String(data?.tace ?? 85);
+  const curGrade = grade ?? fmt(data?.byGrade);
+  const curBu = bu ?? fmt(data?.byBu);
+  return (
+    <Card title="Objectifs d'occupation (staffing)">
+      <div className="flex flex-wrap items-end gap-3 text-[13px]">
+        <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Occupation cible (%)</span>
+          <input className="field !py-1 w-24" type="number" value={curOcc} onChange={(e) => setOcc(e.target.value)} aria-label="Occupation cible" /></label>
+        <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TACE cible (%)</span>
+          <input className="field !py-1 w-24" type="number" value={curTace} onChange={(e) => setTace(e.target.value)} aria-label="TACE cible" /></label>
+        <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Par grade (ex. junior:70, senior:90)</span>
+          <input className="field !py-1 w-full" value={curGrade} onChange={(e) => setGrade(e.target.value)} aria-label="Cibles par grade" /></label>
+        <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Par BU (ex. DATA:88, CLOUD:80)</span>
+          <input className="field !py-1 w-full" value={curBu} onChange={(e) => setBu(e.target.value)} aria-label="Cibles par BU" /></label>
+        <Busy label="Enregistrer" okMsg="Objectifs enregistrés" errMsg="Refusé"
+          fn={async () => { await setStaffingTargets({ occupancy: Number(curOcc) || 85, tace: Number(curTace) || 85, byGrade: parse(curGrade), byBu: parse(curBu) }); setOcc(null); setTace(null); setGrade(null); setBu(null); }} />
+      </div>
+      <Tip>Priorité des cibles : <b>grade</b> &gt; <b>BU</b> &gt; global. Le cockpit « Activité » du Staffing marque en rouge les ressources <b>sous l'objectif</b> et compte la dérive.</Tip>
     </Card>
   );
 }
