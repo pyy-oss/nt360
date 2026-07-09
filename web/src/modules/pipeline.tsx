@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult, type ForecastCategory, type CustomFieldDef } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
@@ -212,7 +212,10 @@ export const Am360: FC<Props> = () => {
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", forecastCategory: "", custom: {} as Record<string, unknown>, patch: false };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
+// Total dérivé des lignes produit (CPQ-lite, Lot 8) — miroir client de domain/quote.computeLines.
+const lineTot = (l: OppLine) => Math.round((Number(l.qty) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100));
+const linesTotal = (ls: OppLine[]) => ls.reduce((s, l) => s + lineTot(l), 0);
 // Catégories de prévision gouvernée (Lot 5) — « — » = défaut dérivé de l'étape côté serveur.
 const FORECAST_OPTIONS = [{ value: "", label: "— (auto)" }, { value: "pipeline", label: "Pipeline" }, { value: "best_case", label: "Best Case" }, { value: "commit", label: "Commit" }, { value: "omitted", label: "Omitted" }];
 
@@ -398,6 +401,7 @@ export const OppList: FC<Props> = () => {
     mbPrev: o.mbPrev != null ? String(o.mbPrev) : "", dr: o.dr ? "oui" : "non",
     forecastCategory: (o as { forecastCategory?: string }).forecastCategory || "",
     custom: ((o as { custom?: Record<string, unknown> }).custom) || {},
+    lines: ((o as { lines?: OppLine[] }).lines) || [],
     nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", patch,
   }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
@@ -462,9 +466,9 @@ export const OppList: FC<Props> = () => {
               <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
                 fn={async () => {
                   if (f.patch) {
-                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom });
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   } else {
-                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom });
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   }
                   setOpen(false); setF({ ...EMPTY_OPP });
                 }} />
@@ -480,8 +484,8 @@ export const OppList: FC<Props> = () => {
               <input className="field" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">Business Unit
               <Select ariaLabel="Business Unit" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Montant
-              <input className="field" aria-label="Montant" placeholder="Montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Montant{f.lines.length ? " (dérivé des lignes)" : ""}
+              <input className="field" aria-label="Montant" placeholder="Montant" value={f.lines.length ? String(linesTotal(f.lines)) : f.amount} disabled={f.lines.length > 0} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">Étape
               <Select ariaLabel="Étape du pipeline" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} /></label>
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
@@ -505,6 +509,22 @@ export const OppList: FC<Props> = () => {
                   <input className="field" type={d.type === "number" ? "number" : "text"} aria-label={d.label} value={String(f.custom[d.key] ?? "")} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.value } })} />
                 )}</label>
             ))}
+            {/* Lignes produit / CPQ-lite (Lot 8) : détail chiffrable ; le montant est dérivé de la somme. */}
+            <div className="sm:col-span-2 flex flex-col gap-1.5 border-t border-hair pt-2">
+              <div className="flex items-center justify-between"><span className="text-[11px] text-muted uppercase tracking-wide">Lignes produit (devis)</span>
+                <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setF({ ...f, lines: [...f.lines, { product: "", qty: 1, unitPrice: 0, discountPct: 0 }] })}>+ ligne</button></div>
+              {f.lines.map((l, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <input className="field !py-1 grow min-w-[8rem]" aria-label="Produit" placeholder="Désignation" value={l.product} onChange={(e) => setF({ ...f, lines: f.lines.map((x, j) => (j === i ? { ...x, product: e.target.value } : x)) })} />
+                  <input className="field !py-1 w-16" type="number" aria-label="Quantité" placeholder="Qté" value={String(l.qty)} onChange={(e) => setF({ ...f, lines: f.lines.map((x, j) => (j === i ? { ...x, qty: Number(e.target.value) || 0 } : x)) })} />
+                  <input className="field !py-1 w-24" type="number" aria-label="Prix unitaire" placeholder="PU" value={String(l.unitPrice)} onChange={(e) => setF({ ...f, lines: f.lines.map((x, j) => (j === i ? { ...x, unitPrice: Number(e.target.value) || 0 } : x)) })} />
+                  <input className="field !py-1 w-16" type="number" aria-label="Remise %" placeholder="%" value={String(l.discountPct)} onChange={(e) => setF({ ...f, lines: f.lines.map((x, j) => (j === i ? { ...x, discountPct: Number(e.target.value) || 0 } : x)) })} />
+                  <span className="w-24 text-right tabnum text-muted">{money(lineTot(l))}</span>
+                  <button type="button" className="text-clay hover:underline" onClick={() => setF({ ...f, lines: f.lines.filter((_, j) => j !== i) })} aria-label="Supprimer la ligne">×</button>
+                </div>
+              ))}
+              {f.lines.length > 0 && <div className="text-right text-[12px] font-semibold tabnum">Total : {money(linesTotal(f.lines))}</div>}
+            </div>
             <label className="flex flex-col gap-1 text-[11px] text-muted">D Prev
               <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></label>
             {/* Suivi commercial (Lot B) : prochaine action + échéance (date maîtrisée → relances honnêtes). */}
