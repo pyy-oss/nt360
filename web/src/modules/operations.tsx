@@ -542,7 +542,7 @@ export const Fp360: FC<Props> = () => {
   // Sécurité par enregistrement : sous OWD « private », les opps sont filtrées par visibleTo (array-contains,
   // seule contrainte serveur possible sans index composite) puis re-filtrées par N° FP côté client.
   const oppScope = useRecordScope("opportunities");
-  const { rows: oppsRaw } = useCollectionData<Opportunity>(fp ? "opportunities" : null, oppScope.scoped ? oppScope.constraints : cons, fp + (oppScope.scoped ? "|s" : ""));
+  const { rows: oppsRaw } = useCollectionData<Opportunity>(fp && oppScope.ready ? "opportunities" : null, oppScope.scoped ? oppScope.constraints : cons, fp + (oppScope.scoped ? "|s" : ""));
   const opps = oppScope.scoped ? oppsRaw.filter((x) => (x.fp || "").toUpperCase() === fp) : oppsRaw;
   const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;
   return (

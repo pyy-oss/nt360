@@ -440,7 +440,7 @@ export const Cleanup: FC<Props> = () => {
   const { rows: invoices } = useCollectionData<Invoice>(canImport ? "invoices" : null);
   const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
-  const { rows: opps } = useCollectionData<Opportunity>(canPipe ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: opps } = useCollectionData<Opportunity>(canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
 
   const orphanIds = invoices.filter((r) => r.linked !== true && r.id).map((r) => r.id!) as string[];
   const orphanAmt = invoices.filter((r) => r.linked !== true).reduce((s, r) => s + (r.amountHt || 0), 0);

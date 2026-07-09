@@ -12,12 +12,16 @@ import { useClaims, useCan } from "./rbac";
 
 export type RecordObj = "opportunities" | "accounts";
 
-export function useRecordScope(obj: RecordObj): { constraints: QueryConstraint[]; scoped: boolean } {
-  const { data } = useDocData<Partial<Record<RecordObj, string>>>("config/recordAccess");
+export function useRecordScope(obj: RecordObj): { constraints: QueryConstraint[]; scoped: boolean; ready: boolean } {
+  const { data, loading } = useDocData<Partial<Record<RecordObj, string>>>("config/recordAccess");
   const { user, role } = useClaims();
   const habil = useCan("habilitations"); // appelé inconditionnellement (règles des hooks)
   const admin = role === "direction" || habil === "write";
+  // `ready` = OWD connu ET utilisateur authentifié. TANT que l'OWD n'est pas résolu, on NE connaît pas
+  // encore la contrainte : émettre la requête sans `visibleTo` la ferait refuser (permission-denied) sous
+  // OWD « private ». Les appelants diffèrent donc l'abonnement (nom de collection null) jusqu'à `ready`.
+  const ready = !loading && !!user?.uid;
   const priv = data?.[obj] === "private";
-  if (priv && !admin && user?.uid) return { constraints: [where("visibleTo", "array-contains", user.uid)], scoped: true };
-  return { constraints: [], scoped: false };
+  if (priv && !admin && user?.uid) return { constraints: [where("visibleTo", "array-contains", user.uid)], scoped: true, ready };
+  return { constraints: [], scoped: false, ready };
 }
