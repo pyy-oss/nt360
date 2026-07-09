@@ -488,15 +488,28 @@ const EXPECTED_ERR = new Set(["invalid-argument", "permission-denied", "unauthen
 
 // Enveloppe un handler onCall : capture les échecs INATTENDUS (observabilité), les trace dans
 // opsLog et, si un webhook est configuré, envoie une alerte de crash — puis re-propage l'erreur.
+// Seuil de LATENCE au-delà duquel un callable est jugé « lent » et tracé (observabilité SLA — R5). Un
+// Directeur des Opérations a besoin de voir les appels qui dérivent avant qu'ils ne deviennent des pannes.
+const SLOW_CALLABLE_MS = 8_000;
 function guarded(action, handler) {
   return async (req) => {
+    const t0 = Date.now();
     try {
-      return await handler(req);
+      const out = await handler(req);
+      // Succès : on ne journalise QUE les appels anormalement lents (pas de bruit sur le chemin nominal),
+      // avec leur durée → signal de latence exploitable dans Cloud Logging + collection ops.
+      const ms = Date.now() - t0;
+      if (ms >= SLOW_CALLABLE_MS) {
+        logger.warn(`${action} lent`, { action, durationMs: ms, uid: (req.auth && req.auth.uid) || null });
+        await logOps({ kind: "callable", action, status: "slow", uid: (req.auth && req.auth.uid) || null, durationMs: ms });
+      }
+      return out;
     } catch (e) {
       if (e && e.code && EXPECTED_ERR.has(e.code)) throw e; // rejet métier normal → pas un incident
       const msg = (e && e.message) || String(e);
-      logger.error(`${action} a échoué`, { message: msg, stack: e && e.stack });
-      await logOps({ kind: "callable", action, status: "error", uid: (req.auth && req.auth.uid) || null, error: msg });
+      const durationMs = Date.now() - t0;
+      logger.error(`${action} a échoué`, { action, message: msg, durationMs, stack: e && e.stack });
+      await logOps({ kind: "callable", action, status: "error", uid: (req.auth && req.auth.uid) || null, error: msg, durationMs });
       try {
         const cfg = (await db.doc("config/notifications").get()).data();
         if (cfg && cfg.enabled && cfg.webhookUrl) await postWebhook(cfg.webhookUrl, `⚠️ nt360 — échec de « ${action} » : ${msg}`);
