@@ -67,6 +67,32 @@ export async function listConsultants() {
   return res.data as { ok: boolean; rows: Consultant[]; canCost: boolean };
 }
 
+// PLAN DE CHARGE / STAFFING (Lot 12) — affectations consultant × mission × période + charge calculée.
+export type Assignment = {
+  id?: string; consultantId: string; projectFp?: string | null; label?: string;
+  startMonth: string; endMonth: string; allocationPct: number; tjmBilled?: number | null;
+  status?: "planned" | "confirmed";
+};
+export type StaffingPlan = {
+  ok: boolean; months: string[];
+  consultants: { id: string; name: string | null; status: string; bu: string | null }[];
+  assignments: Assignment[];
+  byConsultant: Record<string, Record<string, number>>;
+  flags: { over: { id: string; month: string; pct: number }[]; idle: { id: string; month: string }[] };
+};
+export async function upsertAssignment(a: Assignment) {
+  const res = await httpsCallable(functions, "upsertAssignment")(a);
+  return res.data as { ok: boolean; id: string };
+}
+export async function deleteAssignment(id: string) {
+  const res = await httpsCallable(functions, "deleteAssignment")({ id });
+  return res.data as { ok: boolean };
+}
+export async function staffingPlan(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "staffingPlan")({ fromMonth, months });
+  return res.data as StaffingPlan;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

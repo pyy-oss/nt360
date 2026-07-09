@@ -6,8 +6,11 @@ import { useState, useEffect, useCallback, type FC } from "react";
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, type Consultant, type ConsultantGrade, type ConsultantStatus } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment } from "../lib/writes";
 import type { Props } from "./_shared";
+
+const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
+const loadTone = (pct: number, active: boolean) => pct > 100 ? "bg-clay/25 text-clay" : pct >= 80 ? "bg-emerald/20 text-emerald" : pct > 0 ? "bg-panel2 text-ink" : active ? "bg-gold/15 text-gold" : "text-muted";
 
 const GRADES: { value: ConsultantGrade; label: string }[] = [
   { value: "junior", label: "Junior" }, { value: "confirme", label: "Confirmé" },
@@ -46,6 +49,84 @@ function ConsultantForm({ initial, canCost, onDone }: { initial: Consultant; can
       <Busy variant="ghost" label={initial.id ? "Enregistrer" : "Ajouter"} okMsg="Consultant enregistré" errMsg="Enregistrement refusé"
         fn={async () => { if (!f.name.trim()) throw new Error("nom requis"); await upsertConsultant({ ...f, id: initial.id }); onDone(); }} />
     </div>
+  );
+}
+
+// Plan de charge : grille consultant × mois (allocation cumulée %), + saisie d'affectation. Détecte la
+// sur-charge (>100 %) et l'intercontrat (actif non staffé) — le pilotage d'activité du DirOps.
+function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
+  const [plan, setPlan] = useState<StaffingPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState<Assignment>({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null });
+  const load = useCallback(async () => { setLoading(true); try { setPlan(await staffingPlan()); } catch { setPlan(null); } finally { setLoading(false); } }, []);
+  useEffect(() => { load().catch(() => {}); }, [load]);
+  const set = (k: keyof Assignment, v: unknown) => setF((p) => ({ ...p, [k]: v }));
+  if (loading) return <Card title="Plan de charge"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
+  if (!plan || !plan.consultants.length) return <Card title="Plan de charge"><Tip>Ajoutez des consultants puis affectez-les à des missions pour visualiser le plan de charge (charge par mois, sur-charge, intercontrat).</Tip></Card>;
+  const consuls = plan.consultants;
+  const nameById = (id: string) => consuls.find((c) => c.id === id)?.name || id;
+  const overN = plan.flags.over.length, idleN = new Set(plan.flags.idle.map((x) => x.id)).size;
+  return (
+    <Card title="Plan de charge" actions={
+      <div className="flex items-center gap-1.5">
+        {overN > 0 && <Badge tone="clay">{overN} sur-charge(s)</Badge>}
+        {idleN > 0 && <Badge tone="gold">{idleN} en intercontrat</Badge>}
+        {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Affectation"}</button>}
+      </div>}>
+      {canWrite && adding && (
+        <div className="flex flex-wrap items-end gap-2 text-[13px] border-b border-hair pb-3 mb-3">
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Consultant</span>
+            <Select ariaLabel="Consultant" className="!py-1 w-44" value={f.consultantId} onChange={(v) => set("consultantId", v)} options={[{ value: "", label: "—" }, ...consuls.map((c) => ({ value: c.id, label: c.name || c.id }))]} /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Projet (FP)</span>
+            <input className="field !py-1 w-28" value={f.projectFp || ""} onChange={(e) => set("projectFp", e.target.value)} aria-label="Projet FP" placeholder="FP/26/…" /></label>
+          <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Mission</span>
+            <input className="field !py-1 w-full" value={f.label || ""} onChange={(e) => set("label", e.target.value)} aria-label="Libellé mission" placeholder="client / mission" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Début</span>
+            <input className="field !py-1 w-28" type="month" value={f.startMonth} onChange={(e) => set("startMonth", e.target.value)} aria-label="Mois de début" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Fin</span>
+            <input className="field !py-1 w-28" type="month" value={f.endMonth} onChange={(e) => set("endMonth", e.target.value)} aria-label="Mois de fin" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Alloc. %</span>
+            <input className="field !py-1 w-20" type="number" value={f.allocationPct} onChange={(e) => set("allocationPct", Number(e.target.value))} aria-label="Allocation %" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TJM facturé</span>
+            <input className="field !py-1 w-24" type="number" value={f.tjmBilled ?? ""} onChange={(e) => set("tjmBilled", e.target.value === "" ? null : Number(e.target.value))} aria-label="TJM facturé" /></label>
+          <Busy variant="ghost" label="Affecter" okMsg="Affectation enregistrée" errMsg="Enregistrement refusé"
+            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.startMonth || !f.endMonth) throw new Error("période requise"); await upsertAssignment(f); setF({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null }); setAdding(false); load(); }} />
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="text-[12px] border-collapse">
+          <thead><tr><th className="text-left px-2 py-1 sticky left-0 bg-bg">Consultant</th>{plan.months.map((m) => <th key={m} className="px-2 py-1 text-center tabnum whitespace-nowrap">{monthLabel(m)}</th>)}</tr></thead>
+          <tbody>
+            {consuls.map((c) => {
+              const active = (c.status || "active") === "active";
+              return (
+                <tr key={c.id} className="border-t border-hair">
+                  <td className="px-2 py-1 sticky left-0 bg-bg whitespace-nowrap">{c.name || c.id}{c.bu ? <span className="text-[10px] text-muted"> · {c.bu}</span> : null}</td>
+                  {plan.months.map((m) => { const pct = (plan.byConsultant[c.id] && plan.byConsultant[c.id][m]) || 0; return (
+                    <td key={m} className={cx("px-2 py-1 text-center tabnum rounded", loadTone(pct, active))}>{pct > 0 ? `${pct}%` : (active ? "IC" : "—")}</td>
+                  ); })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {plan.assignments.length > 0 && (
+        <div className="mt-3 border-t border-hair pt-2">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Affectations</div>
+          <Table columns={[
+            colText("Consultant", (a: Assignment) => nameById(a.consultantId)),
+            colText("Mission", (a: Assignment) => a.label || a.projectFp || "—"),
+            colText("Période", (a: Assignment) => `${monthLabel(a.startMonth)} → ${monthLabel(a.endMonth)}`),
+            colNum("Alloc.", (a: Assignment) => `${a.allocationPct}%`, (a: Assignment) => a.allocationPct),
+            colNum("TJM", (a: Assignment) => (a.tjmBilled != null ? money(a.tjmBilled) : "—"), (a: Assignment) => a.tjmBilled ?? 0),
+            ...(canWrite ? [colText("", (a: Assignment) => <DangerBtn label="Suppr." okMsg="Affectation supprimée" errMsg="Suppression refusée" confirm="Supprimer cette affectation ?" fn={async () => { await deleteAssignment(a.id!); await load(); }} />)] : []),
+          ]} rows={plan.assignments} />
+        </div>
+      )}
+      <Tip>Vert = staffé (≥80 %), rouge = <b>sur-charge</b> (&gt;100 %), <b>IC</b> = intercontrat (actif non staffé). Le plan de charge alimentera les KPI d'activité (TACE) et le rapprochement capacité ⇄ pipeline (lots suivants).</Tip>
+    </Card>
   );
 }
 
@@ -102,6 +183,7 @@ export const Staffing: FC<Props> = () => {
           </>
         )}
       </Card>
+      <PlanDeCharge canWrite={canWrite} />
     </div>
   );
 };
