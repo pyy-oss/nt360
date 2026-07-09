@@ -1368,6 +1368,7 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeco
   if (cur.requestedBy === req.auth.uid && !isDir) throw new HttpsError("permission-denied", "un demandeur ne peut pas approuver sa propre demande");
   await ref.set({ status: decision, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), decisionNote: String(req.data?.note || "").trim().slice(0, 1000) }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "approval_decide", module: "pipeline", entity: "approval", entityId: id, detail: { decision, entityId: cur.entityId }, ts: FieldValue.serverTimestamp() });
+  await fireOutbound("approval_decided", { approvalId: id, decision, kind: cur.kind, entityId: cur.entityId, amount: cur.amount ?? null }); // Lot 7b
   return { ok: true, id, status: decision };
 });
 
@@ -1616,6 +1617,48 @@ async function apiHandler(req, res) {
   }
 }
 exports.api = onRequest({ memoryMiB: 512, timeoutSeconds: 60, cors: false }, apiHandler);
+
+// === CHAMPS CUSTOM + WEBHOOKS SORTANTS (Lot 7b) — extensibilité du modèle (champs personnalisés
+// d'opportunité, définis par la direction) et diffusion d'événements vers un SI tiers (webhooks
+// sortants sur opp gagnée / approbation décidée). Complète la dimension #7 à 10/10.
+exports.setCustomFields = onCallG("setCustomFields", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { normalizeDefs } = require("./domain/customField");
+  const fields = normalizeDefs(req.data?.fields);
+  await db.doc("config/customFields").set({ fields }, { merge: false });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_custom_fields", module: "habilitations", entity: "config", entityId: "customFields", detail: { fields: fields.length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, fields };
+});
+
+// Webhook sortant (config/outboundWebhooks) : URL + événements souscrits + activation. Direction.
+const OUTBOUND_EVENTS = ["opp_won", "approval_decided"];
+exports.setOutboundWebhook = onCallG("setOutboundWebhook", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const d = req.data || {};
+  const url = String(d.url || "").trim();
+  if (url && !/^https:\/\//i.test(url)) throw new HttpsError("invalid-argument", "URL https requise");
+  const events = (Array.isArray(d.events) ? d.events : []).filter((e) => OUTBOUND_EVENTS.includes(e));
+  const cfg = { url, events, enabled: d.enabled === true && !!url };
+  await db.doc("config/outboundWebhooks").set(cfg, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_outbound_webhook", module: "habilitations", entity: "config", entityId: "outboundWebhooks", detail: { events, enabled: cfg.enabled }, ts: FieldValue.serverTimestamp() });
+  // test=true : ping immédiat de vérification.
+  if (d.test && cfg.enabled) { try { await postJson(url, { event: "test", data: { ok: true }, ts: new Date().toISOString() }); } catch (_) { /* best-effort */ } }
+  return { ok: true, ...cfg };
+});
+
+async function postJson(url, obj) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+  if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
+}
+// Diffuse un événement métier vers le webhook sortant si configuré/souscrit. Best-effort (n'échoue
+// JAMAIS l'action appelante) — un SI tiers indisponible ne doit pas bloquer une mutation nt360.
+async function fireOutbound(event, data) {
+  try {
+    const cfg = (await db.doc("config/outboundWebhooks").get()).data();
+    if (!cfg || !cfg.enabled || !cfg.url || !Array.isArray(cfg.events) || !cfg.events.includes(event)) return;
+    await postJson(cfg.url, { event, data, ts: new Date().toISOString() });
+  } catch (e) { logger.warn("fireOutbound: échec", { event, message: e && e.message }); }
+}
 
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
@@ -2082,10 +2125,17 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (ownerUid !== undefined) { doc.ownerUid = ownerUid; doc.visibleTo = await visibleToFor(ownerUid); }
+  if (d.custom !== undefined) { // champs custom (Lot 7b) : validés contre les définitions actives
+    const { sanitizeCustom } = require("./domain/customField");
+    const defs = ((await db.doc("config/customFields").get()).data() || {}).fields || [];
+    doc.custom = sanitizeCustom(defs, d.custom);
+  }
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
   if (prevStage != null && prevStage !== stage) {
     await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
   }
+  // Webhook sortant (Lot 7b) : opportunité GAGNÉE (transition vers l'étape 6), best-effort.
+  if (stage === 6 && prevStage !== 6) await fireOutbound("opp_won", { oppId: id, client, amount, fp: doc.fp, am: doc.am, bu: doc.bu });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "upsert_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { client, stage, fp: doc.fp }, ts: FieldValue.serverTimestamp(),
@@ -2168,12 +2218,19 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   if (patch.amount !== undefined || patch.probability !== undefined) {
     patch.weighted = oppWeighted(patch.amount !== undefined ? patch.amount : cur.amount, patch.probability !== undefined ? patch.probability : cur.probability);
   }
+  if (d.custom !== undefined) { // champs custom (Lot 7b) : validés contre les définitions actives
+    const { sanitizeCustom } = require("./domain/customField");
+    const defs = ((await db.doc("config/customFields").get()).data() || {}).fields || [];
+    patch.custom = sanitizeCustom(defs, d.custom);
+  }
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger");
   await ref.set(patch, { merge: true });
   // Transition d'étape (inclut le board Kanban qui passe par ici) → journal du funnel (Lot C).
   if (patch.stage !== undefined && patch.stage !== (Number(cur.stage) || 0)) {
     await recordOppTransition({ oppId: id, from: Number(cur.stage) || 0, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
   }
+  // Webhook sortant (Lot 7b) : transition vers Gagné (étape 6), best-effort.
+  if (patch.stage === 6 && (Number(cur.stage) || 0) !== 6) await fireOutbound("opp_won", { oppId: id, client: cur.client, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), fp: patch.fp !== undefined ? patch.fp : cur.fp, am: patch.am !== undefined ? patch.am : cur.am });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_opp", module: "pipeline", entity: "opportunity", entityId: id,
     detail: { fp: patch.fp ?? null, stage: patch.stage ?? null, amount: patch.amount ?? null }, ts: FieldValue.serverTimestamp(),

@@ -7,9 +7,11 @@ export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
-  forecastCategory?: ForecastCategory | null;
+  forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>;
 };
 export type ForecastCategory = "omitted" | "pipeline" | "best_case" | "commit";
+// CHAMPS CUSTOM (Lot 7b) — définitions éditées par la direction, valeurs stockées dans opp.custom.
+export type CustomFieldDef = { key: string; label: string; type: "text" | "number" | "select"; options: string[]; active: boolean };
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
  *  pondéré + l'étiquette d'étape, puis RECALCULE les agrégats — sinon l'opp reste invisible). */
@@ -25,7 +27,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown> }) {
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 
@@ -91,6 +93,18 @@ export async function revokeApiKey(id: string) { await httpsCallable(functions, 
 export async function listApiKeys() {
   const res = await httpsCallable(functions, "listApiKeys")({});
   return res.data as { ok: boolean; keys: ApiKeyInfo[] };
+}
+
+/** Enregistre les définitions de champs custom d'opportunité (config/customFields). Direction. */
+export async function setCustomFields(fields: Partial<CustomFieldDef>[]) {
+  const res = await httpsCallable(functions, "setCustomFields")({ fields });
+  return res.data as { ok: boolean; fields: CustomFieldDef[] };
+}
+export type OutboundWebhookConfig = { url: string; events: string[]; enabled: boolean };
+/** Configure le webhook sortant (config/outboundWebhooks) ; test=true envoie un ping. Direction. */
+export async function setOutboundWebhook(cfg: OutboundWebhookConfig & { test?: boolean }) {
+  const res = await httpsCallable(functions, "setOutboundWebhook")(cfg);
+  return res.data as OutboundWebhookConfig & { ok: boolean };
 }
 
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en

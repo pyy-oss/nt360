@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, type ApiKeyInfo, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -38,6 +38,8 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <SecurityCard users={users} />}
       {isDirection && <AutomationCard />}
       {isDirection && <ApiKeysCard />}
+      {isDirection && <CustomFieldsCard />}
+      {isDirection && <OutboundWebhookCard />}
       {canWrite && <OpsHealthCard />}
       {canWrite && <ClientErrorsCard />}
       {isDirection && <ProjectionConfigCard />}
@@ -936,6 +938,66 @@ function ApiKeysCard() {
           ))}
         </div>
       ) : <Tip>Aucune clé. Créez une clé pour permettre à un système tiers d'appeler l'API REST : <code>GET /v1/opportunities</code>, <code>POST /v1/opportunities</code>, <code>GET /v1/accounts</code> — en-tête <code>Authorization: Bearer nt360_…</code>.</Tip>}
+    </Card>
+  );
+}
+
+// Champs custom d'opportunité (direction) : définitions sans code (clé dérivée du libellé, type
+// text/number/select). Rendues dans la fiche opportunité. Le serveur valide les valeurs saisies.
+function CustomFieldsCard() {
+  const { data } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields");
+  const [draft, setDraft] = useState<CustomFieldDef[] | null>(null);
+  const rows = draft || data?.fields || [];
+  const set = (i: number, patch: Partial<CustomFieldDef>) => { const b = rows.map((r, j) => (j === i ? { ...r, ...patch } : r)); setDraft(b); };
+  const add = () => setDraft([...(rows as CustomFieldDef[]), { key: "", label: "", type: "text", options: [], active: true }]);
+  const del = (i: number) => setDraft(rows.filter((_, j) => j !== i));
+  return (
+    <Card title="Champs personnalisés (opportunité)" actions={
+      <div className="flex gap-2">
+        <button type="button" className="btn-ghost !py-1 text-xs" onClick={add}>+ champ</button>
+        {draft && <Busy label="Enregistrer" okMsg="Champs enregistrés" fn={async () => { await setCustomFields(draft.map((r) => ({ key: r.label, label: r.label, type: r.type, options: r.options, active: r.active }))); setDraft(null); }} />}
+      </div>}>
+      {rows.length ? (
+        <div className="flex flex-col gap-2">
+          {rows.map((r, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 border-t border-hair py-2 text-[13px]">
+              <input className="field !py-1 w-44" value={r.label} onChange={(e) => set(i, { label: e.target.value })} aria-label="Libellé du champ" placeholder="Libellé (ex. Concurrent)" />
+              <Select ariaLabel="Type" className="!py-1 w-28" value={r.type} onChange={(v) => set(i, { type: v as CustomFieldDef["type"] })} options={[{ value: "text", label: "Texte" }, { value: "number", label: "Nombre" }, { value: "select", label: "Liste" }]} />
+              {r.type === "select" && <input className="field !py-1 grow" value={(r.options || []).join(", ")} onChange={(e) => set(i, { options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} aria-label="Options (séparées par des virgules)" placeholder="Option A, Option B…" />}
+              <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} />actif</label>
+              <button type="button" className="text-clay hover:underline text-[11px]" onClick={() => del(i)}>suppr.</button>
+            </div>
+          ))}
+        </div>
+      ) : <Tip>Aucun champ personnalisé. Ajoutez des champs (texte / nombre / liste) qui apparaîtront dans la fiche opportunité — utile pour étendre le modèle sans code.</Tip>}
+    </Card>
+  );
+}
+
+// Webhook sortant (direction) : diffuse les événements métier (opp gagnée, approbation décidée) vers
+// un endpoint tiers. L'URL est sensible (lecture réservée aux habilitations côté rules).
+function OutboundWebhookCard() {
+  const { data } = useDocData<{ url?: string; events?: string[]; enabled?: boolean }>("config/outboundWebhooks");
+  const [url, setUrl] = useState<string | null>(null);
+  const [ev, setEv] = useState<string[] | null>(null);
+  const curUrl = url ?? data?.url ?? "";
+  const curEv = ev ?? data?.events ?? [];
+  const toggleEv = (e: string) => setEv((curEv.includes(e) ? curEv.filter((x) => x !== e) : [...curEv, e]));
+  const EVENTS = [{ key: "opp_won", label: "Opportunité gagnée" }, { key: "approval_decided", label: "Approbation décidée" }];
+  return (
+    <Card title="Webhook sortant (événements)" actions={
+      <div className="flex gap-2">
+        <Busy variant="ghost" label="Tester" okMsg="Ping envoyé" errMsg="Échec" fn={() => setOutboundWebhook({ url: curUrl, events: curEv, enabled: true, test: true })} />
+        <Busy label="Enregistrer" okMsg="Webhook enregistré" fn={async () => { await setOutboundWebhook({ url: curUrl, events: curEv, enabled: !!curUrl }); setUrl(null); setEv(null); }} />
+      </div>}>
+      <div className="flex flex-col gap-2 text-[13px]">
+        <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">URL (https)</span>
+          <input className="field !py-1" value={curUrl} onChange={(e) => setUrl(e.target.value)} aria-label="URL du webhook" placeholder="https://exemple.com/hooks/nt360" /></label>
+        <div className="flex flex-wrap gap-3">
+          {EVENTS.map((e) => <label key={e.key} className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={curEv.includes(e.key)} onChange={() => toggleEv(e.key)} />{e.label}</label>)}
+        </div>
+        <Tip>nt360 enverra un POST JSON <code>{'{ event, data, ts }'}</code> à l'URL à chaque événement souscrit. {data?.enabled ? "Actif." : "Inactif (URL vide)."}</Tip>
+      </div>
     </Card>
   );
 }

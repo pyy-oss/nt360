@@ -187,6 +187,8 @@ service cloud.firestore {
     match /config/permissions { allow read: if isNt360();               allow write: if false; }
     // config/notifications contient l'URL de webhook (sensible) → lecture réservée aux habilitations.
     match /config/notifications { allow read: if canWrite('habilitations'); allow write: if false; }
+    // config/outboundWebhooks (Lot 7b) contient l'URL du webhook sortant (sensible) → habilitations.
+    match /config/outboundWebhooks { allow read: if canWrite('habilitations'); allow write: if false; }
     // Table d'alias de normalisation clients : éditée via setClientAliases, lue par l'écran Admin.
     match /config/clientAliases { allow read: if canWrite('habilitations'); allow write: if false; }
     // Overlays d'annulation (statut « Annulée » persistant, hors delta) : ids exclus des agrégats,
@@ -210,7 +212,7 @@ service cloud.firestore {
     // le front en a besoin pour cadrer ses requêtes (scoping visibleTo) et proposer l'enrôlement MFA.
     // Non sensibles (des drapeaux public/private + un booléen), écrits via callables (setRecordAccess/
     // setSecurityConfig) — jamais en direct.
-    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup', 'recordAccess', 'security', 'automations']; allow write: if false; }
+    match /config/{id}        { allow read: if isNt360() && id in ['alerts', 'projection', 'periods', 'fiscal', 'projectManagers', 'businessUnits', 'fxRates', 'clickup', 'recordAccess', 'security', 'automations', 'customFields']; allow write: if false; }
 
     match /auditLog/{id}      { allow read: if canWrite('habilitations'); allow write: if false; }
     match /opsLog/{id}        { allow read: if canWrite('habilitations'); allow write: if false; }
