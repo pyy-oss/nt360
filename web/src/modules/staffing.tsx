@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -98,6 +98,47 @@ function ActivityCockpit() {
         ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
       </div>
       <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// Capacité ⇄ pipeline (Lot 14) : ai-je la capacité de délivrance pour honorer le pipeline qui va closer ?
+// Gap négatif = besoin de recrutement ; positif = banc à risque. En jours-homme et équivalents ETP.
+function CapacityPipeline() {
+  const [c, setC] = useState<CapacityPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { capacityPlan().then(setC).catch(() => setC(null)).finally(() => setLoading(false)); }, []);
+  if (loading) return <Card title="Capacité ⇄ pipeline (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
+  if (!c) return <Card title="Capacité ⇄ pipeline (6 mois)"><Tip>Renseignez consultants, affectations et opportunités ouvertes pour rapprocher la capacité de délivrance du pipeline à venir.</Tip></Card>;
+  const under = c.gapDays < 0;
+  const gapTone = under ? "text-clay" : c.gapDays === 0 ? "text-ink" : "text-emerald";
+  return (
+    <Card title="Capacité ⇄ pipeline (6 mois)">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {stat("Capacité dispo.", `${c.capacityDays} j`)}
+        {stat("Demande pipeline", `${c.demandDays} j`)}
+        {stat("Écart", `${c.gapDays > 0 ? "+" : ""}${c.gapDays} j`, gapTone)}
+        {stat("Équivalent ETP", `${c.fteGap > 0 ? "+" : ""}${c.fteGap}`, gapTone)}
+        {stat("Opps ouvertes", String(c.openOppCount))}
+      </div>
+      <div className={cx("mt-3 text-[13px] rounded px-3 py-2", under ? "bg-clay/15 text-clay" : "bg-emerald/15 text-emerald")}>
+        {under
+          ? <>⚠️ <b>Sous-capacité</b> : ~{Math.abs(c.fteGap)} ETP manquant(s) pour délivrer le pipeline pondéré → anticiper le <b>recrutement</b> / la sous-traitance.</>
+          : <>✓ <b>Capacité suffisante</b> : ~{c.fteGap} ETP disponible(s) au-delà du pipeline pondéré → risque de <b>banc</b>, pousser l'avant-vente.</>}
+      </div>
+      {c.byBu.length > 1 && (
+        <div className="mt-3 border-t border-hair pt-2">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par business unit (jours-homme)</div>
+          <Table columns={[
+            colText("BU", (b) => b.bu),
+            colNum("Capacité", (b) => `${b.capacityDays} j`, (b) => b.capacityDays),
+            colNum("Demande", (b) => `${b.demandDays} j`, (b) => b.demandDays),
+            colNum("Écart", (b) => `${b.gapDays > 0 ? "+" : ""}${b.gapDays} j`, (b) => b.gapDays),
+            colNum("ETP", (b) => `${b.fteGap > 0 ? "+" : ""}${b.fteGap}`, (b) => b.fteGap),
+          ]} rows={c.byBu} />
+        </div>
+      )}
+      <Tip>Demande = Σ (montant × probabilité) des opportunités ouvertes ÷ TJM moyen ({money(c.tjm)}). Capacité = jours-homme <b>non staffés</b> des actifs. Rapprochement <b>prévisionnel</b> — respecte votre périmètre de visibilité sur le pipeline.</Tip>
     </Card>
   );
 }
@@ -199,6 +240,7 @@ export const Staffing: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
+      <CapacityPipeline />
       <Card title="Staffing — ressources" actions={
         <div className="flex items-center gap-1.5">
           {counts.map((c) => <Badge key={c.value} tone={c.tone}>{c.label} · {c.n}</Badge>)}
