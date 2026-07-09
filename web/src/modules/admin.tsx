@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -51,6 +51,8 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <FxRatesCard />}
       {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" clickupImport tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). Pour une assignation ClickUp fiable, utilisez « Importer depuis ClickUp » (noms exacts) puis retirez les non-PM. L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
       {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
+      {isDirection && <RefListCard kind="territories" title="Référentiel — Territoires" placeholder="Abidjan Nord" tip="Liste des territoires (zones/segments commerciaux) proposée à l'affectation d'un compte (Client 360). Un territoire regroupe des comptes pour l'organisation commerciale." />}
+      {isDirection && <RefListCard kind="teams" title="Référentiel — Équipes" placeholder="Équipe ICT" tip="Liste des équipes proposée à l'affectation des utilisateurs (Utilisateurs & rôles). Une équipe regroupe des commerciaux ; complète la hiérarchie manager de la sécurité par enregistrement." />}
       {isDirection && <ClickupCard />}
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
@@ -80,6 +82,7 @@ export const Habilitations: FC<Props> = () => {
             : colText("Actif", (u) => u.active ? <Badge tone="emerald">oui</Badge> : <Badge tone="clay">non</Badge>),
           ...(isDirection ? [colNum("Rôle", (u: UserRow) => <RoleSetter uid={u.id!} current={u.role} />)] : []),
           ...(isDirection ? [colText("Manager (hiérarchie)", (u: UserRow) => <ManagerSetter uid={u.id!} current={u.managerUid} users={users} />)] : []),
+          ...(isDirection ? [colText("Équipe", (u: UserRow) => <TeamSetter uid={u.id!} current={u.team} />)] : []),
         ]} rows={users} />
         <Tip>Le rôle est un custom claim posé via la Cloud Function setUserRole (auditée). Après un changement de rôle ou une désactivation, l'utilisateur concerné doit rafraîchir sa session (reconnexion) pour que l'effet soit immédiat. Le <b>manager</b> définit la ligne hiérarchique de la sécurité par enregistrement (un manager voit les enregistrements de ses collaborateurs).</Tip>
       </Card>
@@ -507,7 +510,7 @@ function FxRatesCard() {
 }
 
 // Référentiel éditable (liste simple) — Project Managers / Business Units. Remplace la liste en base.
-function RefListCard({ kind, title, placeholder, tip, upper, clickupImport }: { kind: "projectManagers" | "businessUnits"; title: string; placeholder: string; tip: string; upper?: boolean; clickupImport?: boolean }) {
+function RefListCard({ kind, title, placeholder, tip, upper, clickupImport }: { kind: "projectManagers" | "businessUnits" | "territories" | "teams"; title: string; placeholder: string; tip: string; upper?: boolean; clickupImport?: boolean }) {
   const { data } = useDocData<{ list?: string[] }>(`config/${kind}`);
   const [draft, setDraft] = useState<string[] | null>(null);
   const toast = useToast();
@@ -845,6 +848,19 @@ function RoleSetter({ uid, current }: { uid: string; current?: string }) {
       <Select ariaLabel="Rôle de l'utilisateur" className="!py-1" value={role} onChange={setRole}
         options={ROLE_LIST.map((r) => ({ value: r, label: r }))} />
       <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
+    </span>
+  );
+}
+
+// Affecte un utilisateur à une ÉQUIPE (Lot 10b) — choix dans le référentiel config/teams.
+function TeamSetter({ uid, current }: { uid: string; current?: string | null }) {
+  const { data } = useDocData<{ list?: string[] }>("config/teams");
+  const [team, setTeam] = useState(current || "");
+  const options = [{ value: "", label: "— aucune —" }, ...(data?.list || []).map((t) => ({ value: t, label: t }))];
+  return (
+    <span className="inline-flex gap-1.5">
+      <Select ariaLabel="Équipe de l'utilisateur" className="!py-1" value={team} onChange={setTeam} options={options} />
+      <Busy label="Poser" okMsg="Équipe posée" errMsg="Refusé" fn={() => callSetUserTeam(uid, team || null)} />
     </span>
   );
 }

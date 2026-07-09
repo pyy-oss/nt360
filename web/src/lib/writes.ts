@@ -193,7 +193,7 @@ export async function correctionQueue(): Promise<CorrectionQueueResult> {
 }
 
 // OBJET COMPTE (Account 360) + CONTACTS. Métadonnée gouvernée « pipeline » ; lecture « overview ».
-export type Account = { id?: string; name?: string; sector?: string; country?: string; parentId?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] };
+export type Account = { id?: string; name?: string; sector?: string; country?: string; territory?: string; parentId?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] };
 export type Contact = { id?: string; accountId?: string; name?: string; role?: string; email?: string; phone?: string; primary?: boolean };
 export type AccountView = { ok: boolean; id: string; name: string; account: Account | null; contacts: Contact[] };
 /** Vue Compte : résout le client → id canonique côté serveur, renvoie métadonnée + contacts. */
@@ -202,7 +202,7 @@ export async function accountView(client: string): Promise<AccountView> {
   return res.data as AccountView;
 }
 /** Crée / met à jour la métadonnée d'un compte (clé sur le nom client canonique). */
-export async function upsertAccount(data: { name: string; sector?: string; country?: string; parent?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] }) {
+export async function upsertAccount(data: { name: string; sector?: string; country?: string; territory?: string; parent?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] }) {
   const res = await httpsCallable(functions, "upsertAccount")(data);
   return res.data as { ok: boolean; id: string; name: string };
 }
@@ -324,10 +324,15 @@ export async function setFxRates(rates: Record<string, number>) {
   return res.data as { ok: boolean; rates: Record<string, number> };
 }
 
-/** Enregistre un référentiel éditable (liste des Project Managers / des BU) — admin. Remplace la liste. */
-export async function setRefList(kind: "projectManagers" | "businessUnits", list: string[]) {
+/** Enregistre un référentiel éditable (PM / BU / territoires / équipes) — admin. Remplace la liste. */
+export async function setRefList(kind: "projectManagers" | "businessUnits" | "territories" | "teams", list: string[]) {
   const res = await httpsCallable(functions, "setRefList")({ kind, list });
   return res.data as { ok: boolean; kind: string; list: string[] };
+}
+/** Affecte un utilisateur à une équipe (regroupement organisationnel, Lot 10b) — direction. */
+export async function callSetUserTeam(uid: string, team: string | null) {
+  const res = await httpsCallable(functions, "setUserTeam")({ uid, team });
+  return res.data as { ok: boolean; uid: string; team: string };
 }
 
 /** Config intégration ClickUp (activation + liste cible) — admin. */
