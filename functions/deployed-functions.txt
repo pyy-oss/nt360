@@ -29,6 +29,7 @@ deleteRecords
 deleteReport
 enrichClickup
 exportOpportunities
+fuzzyDuplicateClients
 exportReport
 forecastRollup
 importBcFromClickup
