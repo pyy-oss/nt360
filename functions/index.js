@@ -1116,6 +1116,17 @@ exports.setManager = onCallG("setManager", { memoryMiB: 512, timeoutSeconds: 300
   return { ok: true, uid, managerUid, reindexed: updated };
 });
 
+// Affecte un utilisateur à une ÉQUIPE (users/{uid}.team) — regroupement organisationnel (Lot 10b).
+// Direction uniquement, audité. La valeur libre (issue du référentiel config/teams) est bornée.
+exports.setUserTeam = onCallG("setUserTeam", async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const uid = assertPlainId(req.data?.uid, "uid");
+  const team = String(req.data?.team || "").trim().slice(0, 60);
+  await db.doc(`users/${uid}`).set({ team: team || null }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_team", module: "habilitations", entity: "user", entityId: uid, detail: { team }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, uid, team };
+});
+
 // OWD (Org-Wide Default) par objet : config/recordAccess = { opportunities, accounts } ∈ {public,private}.
 // Direction uniquement, MFA si exigé, audité. Bascule en « private » → seuls propriétaire + hiérarchie +
 // admins voient l'objet (les rules et le front filtrent sur visibleTo). Backfill recommandé (reindexVisibility).
@@ -1167,6 +1178,7 @@ exports.upsertAccount = onCallG("upsertAccount", { memoryMiB: 256, timeoutSecond
   const patch = { name: canon, updatedAt: FieldValue.serverTimestamp() };
   if (d.sector !== undefined) patch.sector = String(d.sector || "").trim();
   if (d.country !== undefined) patch.country = String(d.country || "").trim();
+  if (d.territory !== undefined) patch.territory = String(d.territory || "").trim().slice(0, 60); // territoire (Lot 10b)
   if (d.notes !== undefined) patch.notes = String(d.notes || "").slice(0, 2000);
   if (d.tags !== undefined) patch.tags = Array.isArray(d.tags) ? d.tags.slice(0, 20).map((t) => String(t).trim()).filter(Boolean) : [];
   if (d.ownerUid !== undefined) { // propriété + visibleTo dénormalisée (Lot 2 sécurité par enregistrement)
@@ -2480,7 +2492,7 @@ exports.setFxRates = onCallG("setFxRates", { memoryMiB: 256, timeoutSeconds: 60 
 // --- setRefList : référentiels ÉDITABLES (Project Managers, Business Units) alimentant les
 // sélecteurs et filtres de l'app. config/<kind> { list: [...] }. Direction. Remplace la liste
 // (nettoyage : trim, dédup insensible à la casse, MAJUSCULES pour les BU, plafonds). ---
-const REF_LISTS = { projectManagers: { doc: "config/projectManagers", upper: false }, businessUnits: { doc: "config/businessUnits", upper: true } };
+const REF_LISTS = { projectManagers: { doc: "config/projectManagers", upper: false }, businessUnits: { doc: "config/businessUnits", upper: true }, territories: { doc: "config/territories", upper: false }, teams: { doc: "config/teams", upper: false } };
 exports.setRefList = onCallG("setRefList", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const kind = String(req.data?.kind || "");

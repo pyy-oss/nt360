@@ -89,12 +89,14 @@ export const Client360: FC<Props> = ({ period }) => {
                     <input className="field !py-1 w-40" value={meta.sector || ""} onChange={(e) => setMeta({ ...meta, sector: e.target.value })} aria-label="Secteur" /></label>
                   <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Pays</span>
                     <input className="field !py-1 w-32" value={meta.country || ""} onChange={(e) => setMeta({ ...meta, country: e.target.value })} aria-label="Pays" /></label>
+                  <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Territoire</span>
+                    <input className="field !py-1 w-40" value={meta.territory || ""} onChange={(e) => setMeta({ ...meta, territory: e.target.value })} aria-label="Territoire" placeholder="zone / segment" /></label>
                   <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Compte parent</span>
                     <input className="field !py-1 w-40" value={meta.parentId || ""} onChange={(e) => setMeta({ ...meta, parentId: e.target.value })} aria-label="Compte parent (client)" placeholder="nom du groupe" /></label>
                   <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Notes</span>
                     <input className="field !py-1 w-full" value={meta.notes || ""} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} aria-label="Notes" /></label>
                   <Busy variant="ghost" label="Enregistrer la fiche" okMsg="Fiche compte enregistrée" errMsg="Enregistrement refusé"
-                    fn={async () => { await upsertAccount({ name: view.name, sector: meta.sector, country: meta.country, parent: meta.parentId || null, notes: meta.notes }); await open(view.name); }} />
+                    fn={async () => { await upsertAccount({ name: view.name, sector: meta.sector, country: meta.country, territory: meta.territory, parent: meta.parentId || null, notes: meta.notes }); await open(view.name); }} />
                 </div>
               ) : (
                 <div className="text-[13px] text-muted">{[meta.sector, meta.country].filter(Boolean).join(" · ") || "—"}{meta.notes ? ` — ${meta.notes}` : ""}</div>

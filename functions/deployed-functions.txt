@@ -92,6 +92,7 @@ setUserActive
 salesVelocity
 saveReport
 setUserRole
+setUserTeam
 setupClickupWebhook
 submitForApproval
 syncBcFromClickup
