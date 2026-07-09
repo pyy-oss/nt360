@@ -24,6 +24,14 @@ window.addEventListener("vite:preloadError", () => {
   }
 });
 
+// PWA (Lot 10) : enregistre le service worker (shell installable + ouverture hors-ligne) UNIQUEMENT en
+// PRODUCTION — en dev, un SW interfère avec le HMR de Vite. Best-effort (jamais bloquant).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => { /* PWA best-effort */ });
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ToastProvider>
