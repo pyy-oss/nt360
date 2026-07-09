@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, listCandidates, upsertCandidate, deleteCandidate, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -98,6 +98,80 @@ function ActivityCockpit() {
         ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
       </div>
       <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// Vivier / recrutement (Lot 16) : pipeline de candidats rattaché au gap de capacité (Lot 14). Ferme la
+// boucle « capacité ⇄ pipeline ⇄ recrutement » — le DirOps voit si le vivier couvre le besoin par BU.
+const CAND_STATUS: { value: CandidateStatus; label: string; tone: "steel" | "gold" | "emerald" | "clay" }[] = [
+  { value: "sourced", label: "Sourcé", tone: "steel" }, { value: "interview", label: "Entretien", tone: "gold" },
+  { value: "offer", label: "Offre", tone: "emerald" }, { value: "hired", label: "Recruté", tone: "emerald" }, { value: "rejected", label: "Écarté", tone: "clay" },
+];
+const candMeta = (s?: string) => CAND_STATUS.find((x) => x.value === s) || CAND_STATUS[0];
+function Vivier({ canWrite }: { canWrite: boolean }) {
+  const [r, setR] = useState<Recruitment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState<Candidate>({ name: "", gradeTarget: "confirme", bu: "", status: "sourced", skills: [], tjmTarget: null, expectedStartMonth: null, source: "" });
+  const load = useCallback(async () => { setLoading(true); try { setR(await listCandidates()); } catch { setR(null); } finally { setLoading(false); } }, []);
+  useEffect(() => { load().catch(() => {}); }, [load]);
+  const setk = (k: keyof Candidate, v: unknown) => setF((p) => ({ ...p, [k]: v }));
+  if (loading) return <Card title="Vivier — recrutement"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
+  return (
+    <Card title="Vivier — recrutement" actions={
+      <div className="flex items-center gap-1.5">
+        {r && CAND_STATUS.slice(0, 3).map((s) => <Badge key={s.value} tone={s.tone}>{s.label} · {r.counts[s.value]}</Badge>)}
+        {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Candidat"}</button>}
+      </div>}>
+      {canWrite && adding && (
+        <div className="flex flex-wrap items-end gap-2 text-[13px] border-b border-hair pb-3 mb-3">
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Nom</span>
+            <input className="field !py-1 w-40" value={f.name} onChange={(e) => setk("name", e.target.value)} aria-label="Nom du candidat" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Grade visé</span>
+            <Select ariaLabel="Grade visé" className="!py-1 w-32" value={f.gradeTarget || "confirme"} onChange={(v) => setk("gradeTarget", v)} options={GRADES} /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">BU</span>
+            <input className="field !py-1 w-24" value={f.bu || ""} onChange={(e) => setk("bu", e.target.value)} aria-label="BU visée" /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Statut</span>
+            <Select ariaLabel="Statut candidat" className="!py-1 w-32" value={f.status || "sourced"} onChange={(v) => setk("status", v)} options={CAND_STATUS} /></label>
+          <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TJM visé</span>
+            <input className="field !py-1 w-24" type="number" value={f.tjmTarget ?? ""} onChange={(e) => setk("tjmTarget", e.target.value === "" ? null : Number(e.target.value))} aria-label="TJM visé" /></label>
+          <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Compétences</span>
+            <input className="field !py-1 w-full" value={(f.skills || []).join(", ")} onChange={(e) => setk("skills", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} aria-label="Compétences" placeholder="Java, AWS…" /></label>
+          <Busy variant="ghost" label="Ajouter" okMsg="Candidat enregistré" errMsg="Enregistrement refusé"
+            fn={async () => { if (!f.name.trim()) throw new Error("nom requis"); await upsertCandidate(f); setF({ name: "", gradeTarget: "confirme", bu: "", status: "sourced", skills: [], tjmTarget: null, expectedStartMonth: null, source: "" }); setAdding(false); load(); }} />
+        </div>
+      )}
+      {!r || !r.rows.length ? (
+        <Tip>Aucun candidat. Alimentez le vivier quand une BU est en <b>sous-capacité</b> (cf. « Capacité ⇄ pipeline ») : chaque candidat contribue à la <b>capacité future attendue</b> (pondérée par l'avancement : offre &gt; entretien &gt; sourcé).</Tip>
+      ) : (
+        <>
+          {r.byBu.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Capacité future attendue par BU (embauches pondérées)</div>
+              <Table columns={[
+                colText("BU", (b) => b.bu),
+                colNum("En cours", (b) => String(b.active), (b) => b.active),
+                colNum("Embauches attendues", (b) => b.expectedHires.toFixed(1), (b) => b.expectedHires),
+              ]} rows={r.byBu} />
+            </div>
+          )}
+          <Table columns={[
+            colText("Candidat", (c: Candidate) => c.name, (c: Candidate) => c.name || ""),
+            colText("Grade visé", (c: Candidate) => c.gradeTarget || "—"),
+            colText("BU", (c: Candidate) => c.bu || "—"),
+            colText("Statut", (c: Candidate) => { const m = candMeta(c.status); return <Badge tone={m.tone}>{m.label}</Badge>; }, (c: Candidate) => c.status || ""),
+            colText("Compétences", (c: Candidate) => (c.skills && c.skills.length ? c.skills.join(", ") : "—")),
+            ...(canWrite ? [colText("", (c: Candidate) => (
+              <span className="inline-flex gap-2">
+                {c.status !== "hired" && c.status !== "rejected" && <Busy variant="ghost" label="→ suivant" okMsg="Statut avancé" errMsg="Refusé" fn={async () => { const order: CandidateStatus[] = ["sourced", "interview", "offer", "hired"]; const next = order[Math.min(order.length - 1, order.indexOf((c.status as CandidateStatus) || "sourced") + 1)]; await upsertCandidate({ ...c, status: next }); await load(); }} />}
+                <DangerBtn label="Suppr." okMsg="Candidat supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteCandidate(c.id!); await load(); }} />
+              </span>
+            ))] : []),
+          ]} rows={r.rows} />
+        </>
+      )}
+      <Tip>Le vivier ferme la boucle : une BU en <b>sous-capacité</b> (Lot 14) se traite ici. La <b>capacité future attendue</b> = Σ candidats pondérés par leur avancement (offre 0,7 · entretien 0,3 · sourcé 0,1) → à rapprocher du gap en ETP.</Tip>
     </Card>
   );
 }
@@ -299,6 +373,7 @@ export const Staffing: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
       <CapacityPipeline />
+      <Vivier canWrite={canWrite} />
       <ConstatCra consultants={rows} canWrite={canWrite} />
       <Card title="Staffing — ressources" actions={
         <div className="flex items-center gap-1.5">

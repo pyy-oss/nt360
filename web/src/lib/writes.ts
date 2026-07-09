@@ -138,6 +138,27 @@ export async function timesheetKpis(fromMonth?: string, months?: number) {
   return res.data as TimesheetKpis;
 }
 
+// VIVIER / RECRUTEMENT (Lot 16) — pipeline de candidats + capacité future attendue par BU.
+export type CandidateStatus = "sourced" | "interview" | "offer" | "hired" | "rejected";
+export type Candidate = { id?: string; name: string; gradeTarget?: ConsultantGrade; bu?: string; skills?: string[]; tjmTarget?: number | null; status?: CandidateStatus; expectedStartMonth?: string | null; source?: string; notes?: string };
+export type Recruitment = {
+  ok: boolean; rows: Candidate[]; inPipeline: number;
+  counts: Record<CandidateStatus, number>;
+  byBu: { bu: string; active: number; expectedHires: number }[];
+};
+export async function upsertCandidate(c: Candidate) {
+  const res = await httpsCallable(functions, "upsertCandidate")(c);
+  return res.data as { ok: boolean; id: string };
+}
+export async function deleteCandidate(id: string) {
+  const res = await httpsCallable(functions, "deleteCandidate")({ id });
+  return res.data as { ok: boolean };
+}
+export async function listCandidates() {
+  const res = await httpsCallable(functions, "listCandidates")({});
+  return res.data as Recruitment;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };
