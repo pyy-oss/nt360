@@ -1481,20 +1481,29 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
 exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { scoreOpportunity, isOpen } = require("./domain/scoring");
+  const { calibrate } = require("./domain/scoreCalib");
   const snap = await db.collection("opportunities")
     .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "visibleTo")
-    .get();
-  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isOpen);
+    .limit(MAX_SCAN + 1).get(); // scan borné (R1)
+  const all = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Calibration EMPIRIQUE (R6) : on dérive base + poids de catégorie du taux de gain HISTORIQUE réel
+  // (opps fermées : gagné=6 / perdu=7). Sous échantillon insuffisant → calib=null → heuristique.
+  const closed = all.filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7)
+    .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: o.forecastCategory }));
+  const calib = calibrate(closed);
+  let opps = all.filter(isOpen);
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   const today = nowISO10();
   const rows = opps.map((o) => {
-    const s = scoreOpportunity(o, today);
+    const s = scoreOpportunity(o, today, calib);
     return { id: o.id, client: o.client || null, am: o.am || null, amount: Number(o.amount) || 0, stage: Number(o.stage) || 0, score: s.score, band: s.band, factors: s.factors.slice(0, 3) };
   }).sort((a, b) => b.score - a.score || b.amount - a.amount);
   const bands = { hot: 0, warm: 0, cold: 0 };
   rows.forEach((r) => { if (bands[r.band] != null) bands[r.band]++; });
-  return { ok: true, scoped, rows: rows.slice(0, 500), bands, total: rows.length };
+  // Transparence : on remonte la calibration effective (n historique, base observée) pour affichage.
+  const calibMeta = calib ? { calibrated: true, sample: calib.n, baseWinRate: Math.round(calib.base * 100) } : { calibrated: false };
+  return { ok: true, scoped, rows: rows.slice(0, 500), bands, total: rows.length, calib: calibMeta };
 });
 
 // === VÉLOCITÉ COMMERCIALE (Lot 8b) — indicateurs de dynamique du pipeline (taux de gain, deal moyen,

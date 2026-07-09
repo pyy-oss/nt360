@@ -49,7 +49,9 @@ export async function forecastRollup() {
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };
-export type ScoringResult = { ok: boolean; scoped: boolean; rows: ScoredOpp[]; bands: { hot: number; warm: number; cold: number }; total: number };
+// Calibration empirique (R6) : le modèle ancre sa base sur le taux de gain historique observé.
+export type ScoreCalib = { calibrated: boolean; sample?: number; baseWinRate?: number };
+export type ScoringResult = { ok: boolean; scoped: boolean; rows: ScoredOpp[]; bands: { hot: number; warm: number; cold: number }; total: number; calib?: ScoreCalib };
 /** Classe les opportunités ouvertes par probabilité de gain (score explicable + facteurs). */
 export async function scoreOpportunities() {
   const res = await httpsCallable(functions, "scoreOpportunities")({});

@@ -8,16 +8,23 @@
 const OPEN_MIN = 1, OPEN_MAX = 5; // étapes ouvertes (hors Gagné=6 / Perdu=7)
 
 // Contributions signées (points autour d'une base 50). Libellés restitués au commercial.
-function factorsFor(o, todayISO) {
+// `calib` (optionnel, cf. domain/scoreCalib) : quand fourni, les poids de CATÉGORIE de prévision sont
+// dérivés du taux de gain HISTORIQUE observé (empirique) au lieu des constantes ; sinon, heuristique.
+function factorsFor(o, todayISO, calib) {
   const f = [];
   const stage = Number(o.stage) || 0;
   const prob = Number(o.probability);
   f.push({ label: `Étape ${stage}/6`, impact: Math.round((stage - 3) * 8) });
   if (Number.isFinite(prob) && prob > 0) f.push({ label: `Indice de confiance ${Math.round(prob * 100)}%`, impact: Math.round((prob - 0.5) * 40) });
   const cat = o.forecastCategory;
-  if (cat === "commit") f.push({ label: "Prévision : Commit", impact: 15 });
-  else if (cat === "best_case") f.push({ label: "Prévision : Best Case", impact: 8 });
-  else if (cat === "omitted") f.push({ label: "Prévision : Omitted", impact: -20 });
+  const empImpact = (c) => {
+    if (!calib || !calib.byCategory || calib.byCategory[c] == null) return null;
+    const { rateToImpact } = require("./scoreCalib");
+    return rateToImpact(calib.byCategory[c], calib.base);
+  };
+  if (cat === "commit") f.push({ label: "Prévision : Commit", impact: empImpact("commit") ?? 15 });
+  else if (cat === "best_case") f.push({ label: "Prévision : Best Case", impact: empImpact("best_case") ?? 8 });
+  else if (cat === "omitted") f.push({ label: "Prévision : Omitted", impact: empImpact("omitted") ?? -20 });
   const hasNext = !!String(o.nextStep || "").trim();
   f.push(hasNext ? { label: "Prochaine action définie", impact: 10 } : { label: "Aucune prochaine action", impact: -8 });
   if (hasNext && o.nextStepDate && String(o.nextStepDate) < String(todayISO)) f.push({ label: "Action en retard", impact: -12 });
@@ -32,12 +39,15 @@ function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
 // Score 0..100 + bande (hot/warm/cold) + facteurs triés par poids décroissant. Les opportunités
 // fermées (gagné/perdu) renvoient un score dégénéré (100/0) sans facteurs (hors périmètre de scoring).
-function scoreOpportunity(o, todayISO) {
+function scoreOpportunity(o, todayISO, calib) {
   const stage = Number(o && o.stage) || 0;
   if (stage === 6) return { score: 100, band: "won", factors: [] };
   if (stage === 7) return { score: 0, band: "lost", factors: [] };
-  const factors = factorsFor(o || {}, todayISO).sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
-  const score = clamp(Math.round(50 + factors.reduce((s, x) => s + x.impact, 0)), 0, 100);
+  const factors = factorsFor(o || {}, todayISO, calib).sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
+  // Base ANCRÉE DANS LES DONNÉES quand une calibration fiable existe (taux de gain historique global,
+  // en points) ; sinon base neutre 50 (heuristique). Le modèle reste additif et explicable.
+  const base = calib && typeof calib.base === "number" ? clamp(Math.round(calib.base * 100), 5, 95) : 50;
+  const score = clamp(Math.round(base + factors.reduce((s, x) => s + x.impact, 0)), 0, 100);
   const band = score >= 70 ? "hot" : score >= 45 ? "warm" : "cold";
   return { score, band, factors };
 }
