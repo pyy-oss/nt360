@@ -39,6 +39,37 @@ test.describe("Go-live — chargement & authentification", () => {
   });
 });
 
+// R2 — parcours de navigation multi-écrans : après connexion (compte plein accès), on VISITE chaque
+// domaine et chaque onglet accessibles et on vérifie qu'AUCUN écran ne tombe sur la barrière d'erreur
+// (« Erreur d'affichage »). Preuve concrète que tous les modules se montent sans crash de rendu — le
+// parcours critique bout-en-bout du Directeur des Opérations (pilotage → pipeline → exécution → qualité).
+test.describe("Parcours de navigation — tous les écrans se montent", () => {
+  test.skip(!MARGIN.email || !MARGIN.password, "SMOKE_MARGIN_* non fourni");
+
+  test("chaque domaine et onglet accessible s'ouvre sans barrière d'erreur", async ({ page }) => {
+    await login(page, MARGIN);
+    await waitOverviewLoaded(page);
+
+    const errorBoundary = page.getByText("Erreur d'affichage");
+    const domainsNav = page.getByRole("navigation", { name: "Domaines" });
+    const domainCount = await domainsNav.getByRole("button").count();
+    expect(domainCount).toBeGreaterThan(0);
+
+    for (let d = 0; d < domainCount; d++) {
+      await domainsNav.getByRole("button").nth(d).click();
+      // Onglets du domaine actif : on parcourt chacun.
+      const tabsNav = page.getByRole("navigation", { name: "Onglets" });
+      const tabCount = await tabsNav.getByRole("button").count();
+      for (let t = 0; t < tabCount; t++) {
+        await tabsNav.getByRole("button").nth(t).click();
+        // Laisse le module (lazy) se monter, puis vérifie l'absence de barrière d'erreur.
+        await page.waitForTimeout(400);
+        await expect(errorBoundary).toHaveCount(0);
+      }
+    }
+  });
+});
+
 test.describe("Confidentialité de la marge (accès Rentabilité)", () => {
   test.skip(!NOMARGIN.email || !NOMARGIN.password, "SMOKE_NOMARGIN_* non fourni");
 
