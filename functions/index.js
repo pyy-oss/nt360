@@ -350,6 +350,18 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
   return { ok: true, ...cfg };
 });
 
+// --- Objectifs d'occupation / TACE (config/staffingTargets, Lot 18 DirOps) : cibles globales +
+// affinables par grade et par BU. Édité par la direction. Sert à détecter la dérive dans le cockpit
+// d'activité (Lot 13). Pas de recompute (lu à la volée par activityKpis). ---
+exports.setStaffingTargets = onCallG("setStaffingTargets", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { validateTargets } = require("./domain/staffingTarget");
+  const cfg = validateTargets(req.data);
+  await db.doc("config/staffingTargets").set(cfg, { merge: false });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "staffing_targets", module: "habilitations", entity: "config", entityId: "staffingTargets", detail: { occupancy: cfg.occupancy }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...cfg };
+});
+
 // --- Niveaux de PROJECTION configurables (config/projection) : activer/désactiver et pondérer
 // chacun des 3 niveaux (Certitudes ≥90 · Forecast 70-90 · Pipe 50-70). Édité par la direction ;
 // recompute COMPLET (overview, pipeline, atterrissage, AM 360° en dépendent). Poids bornés [0,1]. ---
@@ -1109,16 +1121,22 @@ exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds:
   const span = Math.min(18, Math.max(1, Number(req.data?.months) || 6));
   let [ey, em] = curYm.split("-").map(Number); em += span - 1; while (em > 12) { em -= 12; ey += 1; }
   const months = monthsRange(curYm, `${ey}-${String(em).padStart(2, "0")}`);
-  const [cSnap, aSnap] = await Promise.all([
-    db.collection("consultants").select("name", "status", "bu", "cjm").limit(MAX_SCAN + 1).get(),
+  const [cSnap, aSnap, tgtDoc] = await Promise.all([
+    db.collection("consultants").select("name", "status", "bu", "grade", "cjm").limit(MAX_SCAN + 1).get(),
     db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct", "tjmBilled").limit(MAX_SCAN + 1).get(),
+    db.doc("config/staffingTargets").get(),
   ]);
   const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   const costById = {};
   for (const c of consultants) if (c.cjm != null) costById[c.id] = Number(c.cjm);
   const kpi = computeActivity(consultants, assignments, months, costById, canCost);
-  return { ok: true, months, canCost, ...kpi };
+  // Objectifs d'occupation (Lot 18) : cible par ressource (grade > BU > global) + détection de dérive.
+  const { validateTargets, evaluate, targetFor } = require("./domain/staffingTarget");
+  const targets = validateTargets(tgtDoc.data() || {});
+  const ev = evaluate(kpi.rows, targets);
+  kpi.rows = ev.rows;
+  return { ok: true, months, canCost, targets, occupancyTargetPct: targetFor(targets, {}), belowTargetCount: ev.belowCount, ...kpi };
 });
 
 // CAPACITÉ ⇄ PIPELINE (Lot 14 « 20/10 DirOps ») — ai-je la capacité de délivrance pour honorer le pipeline

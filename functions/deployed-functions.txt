@@ -104,6 +104,7 @@ setProjectionConfig
 setRecordAccess
 setRefList
 setSecurityConfig
+setStaffingTargets
 setUserActive
 salesVelocity
 saveReport
