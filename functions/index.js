@@ -40,6 +40,11 @@ const db = getFirestore(getApp(), FIRESTORE_DB);
 // à nouveau un recalcul entier.
 db.settings({ ignoreUndefinedProperties: true });
 
+// Garde-fou des scans pleins de collection (R1 scalabilité) — borne mémoire/latence des callables
+// d'administration qui lisent une collection entière. Lecture bornée à MAX_SCAN+1 pour DÉTECTER un
+// dépassement, puis troncature SIGNALÉE (jamais silencieuse) via `sliceCapped` + auditLog côté appelant.
+const { MAX_SCAN, sliceCapped } = require("./domain/scan");
+
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
 // dual-region eur4 (non déployable comme région de fonction). Le trigger n'est donc exporté
@@ -910,13 +915,13 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").get(),
-    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").get(),
+    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").limit(MAX_SCAN + 1).get(),
     db.doc("config/fpAliases").get(),
     db.doc("config/clientAliases").get(),
   ]);
   const orders = ordSnap.docs.map((d) => d.data());
   const invoices = invSnap.docs.map((d) => d.data());
-  let opps = oppSnap.docs.map((d) => d.data());
+  let opps = sliceCapped(oppSnap.docs).docs.map((d) => d.data()); // scan borné (R1)
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne rapproche
   // que les opps de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit).
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
@@ -960,14 +965,14 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
-    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").get(),
+    db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
     db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").get(),
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
     db.doc("config/alerts").get(),
   ]);
   const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const orders = withId(ordSnap), invoices = withId(invSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
-  let allOpps = withId(oppSnap);
+  let allOpps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })); // scan borné (R1)
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
   // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
@@ -2330,8 +2335,10 @@ exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, t
   await requireWrite(req, "pipeline");
   const XLSX = require("xlsx");
   const { buildTemplateAoa } = require("./parsers/oppImport");
-  const snap = await db.collection("opportunities").get();
-  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Scan borné (R1) : lecture à MAX_SCAN+1 → troncature SIGNALÉE si dépassement (jamais silencieuse).
+  const snap = await db.collection("opportunities").limit(MAX_SCAN + 1).get();
+  const { docs, capped } = sliceCapped(snap.docs);
+  let opps = docs.map((d) => ({ id: d.id, ...d.data() }));
   // Sécurité par enregistrement : sous OWD « private », un rédacteur non-administrateur n'exporte que
   // les opportunités de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit).
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
@@ -2345,10 +2352,10 @@ exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, t
   const fileB64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "export_opps", module: "pipeline", entity: "opportunity", entityId: "*",
-    detail: { count: opps.length }, ts: FieldValue.serverTimestamp(),
+    detail: { count: opps.length, capped }, ts: FieldValue.serverTimestamp(),
   });
   const stamp = new Date().toISOString().slice(0, 10);
-  return { ok: true, filename: `nt360-opportunites-${stamp}.xlsx`, fileB64, count: opps.length };
+  return { ok: true, filename: `nt360-opportunites-${stamp}.xlsx`, fileB64, count: opps.length, capped };
 });
 
 // --- Lot 9 : IMPORT / MISE À JOUR EN MASSE des opportunités (.xlsx/.csv). Deux temps comme le
@@ -2374,9 +2381,10 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
   if (!rows.length) throw new HttpsError("failed-precondition", "aucune ligne exploitable dans le fichier");
 
   // Index des opps existantes : par doc id ET oppId (match Opp ID), par N° FP (1re rencontrée si doublon).
-  const snap = await db.collection("opportunities").get();
+  const snap = await db.collection("opportunities").limit(MAX_SCAN + 1).get(); // scan borné (R1)
+  const { docs: idxDocs } = sliceCapped(snap.docs);
   const byId = new Map(), byFp = new Map();
-  for (const d of snap.docs) {
+  for (const d of idxDocs) {
     const o = { id: d.id, ...d.data() };
     byId.set(d.id, o);
     if (o.oppId) byId.set(o.oppId, o);
