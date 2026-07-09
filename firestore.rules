@@ -150,6 +150,9 @@ service cloud.firestore {
     // Rapports self-service (Lot 6) : définitions de rapport, accès 100% par callable (run/save/list/
     // deleteReport). L'exécution reste cadrée par la visibilité de chacun. Lecture/écriture directes fermées.
     match /reports/{id} { allow read: if false; allow write: if false; }
+    // Clés API (Lot 7) : SECRET (hash de clé) — jamais lisible/écrivable côté client. Gérées par callables
+    // (create/revoke/listApiKeys, direction) ; vérifiées côté serveur par l'endpoint HTTP `api`.
+    match /apiKeys/{id} { allow read: if false; allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {

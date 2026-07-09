@@ -78,6 +78,21 @@ export async function listReports() {
 /** Supprime une définition de rapport (propriétaire ou direction). */
 export async function deleteReport(id: string) { await httpsCallable(functions, "deleteReport")({ id }); }
 
+// API REST PUBLIQUE (Lot 7) — clés API (hachées côté serveur, brut affiché une seule fois). Direction.
+export type ApiKeyInfo = { id: string; prefix: string; label: string; scopes: string[]; active: boolean };
+/** Crée une clé API (renvoie la clé brute UNE fois). Direction. */
+export async function createApiKey(label: string, scopes: string[]) {
+  const res = await httpsCallable(functions, "createApiKey")({ label, scopes });
+  return res.data as { ok: boolean; id: string; key: string; prefix: string; scopes: string[]; note: string };
+}
+/** Révoque une clé API. Direction. */
+export async function revokeApiKey(id: string) { await httpsCallable(functions, "revokeApiKey")({ id }); }
+/** Liste les clés API (métadonnées, sans secret). Direction. */
+export async function listApiKeys() {
+  const res = await httpsCallable(functions, "listApiKeys")({});
+  return res.data as { ok: boolean; keys: ApiKeyInfo[] };
+}
+
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
  *  base64 (à télécharger via downloadBase64). Réservé au droit « pipeline ». */
 export async function exportOpportunities() {
