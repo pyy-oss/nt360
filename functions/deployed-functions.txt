@@ -24,13 +24,16 @@ capacityPlan
 dedupe
 deleteActivity
 deleteAssignment
+deleteCandidate
 deleteClickupWebhook
 deleteConsultant
 deleteTimesheet
+listCandidates
 listConsultants
 staffingPlan
 timesheetKpis
 upsertAssignment
+upsertCandidate
 upsertConsultant
 upsertTimesheet
 deleteContact
