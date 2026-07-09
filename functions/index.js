@@ -1393,6 +1393,33 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
   return { ok: true, approvals: rows.slice(0, 300), total: rows.length };
 });
 
+// === PRÉVISION COMMERCIALE GOUVERNABLE (Lot 5) — roll-up des catégories de prévision (Commit/Best
+// Case/Pipeline/Closed) sur le périmètre VISIBLE de l'appelant (sécurité par enregistrement), avec
+// atteinte de l'objectif CAS (quota). Callable (comme listActivities) : évite un summary par utilisateur
+// et respecte la visibilité. Gouverné « pipeline ».
+exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const { rollupForecast } = require("./domain/forecast");
+  const [oppSnap, fiscalDoc] = await Promise.all([
+    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "stale", "ownerUid", "visibleTo").get(),
+    db.doc("config/fiscal").get(),
+  ]);
+  let opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true);
+  // Visibilité par enregistrement : sous OWD « private », un non-admin ne prévoit que son périmètre.
+  const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
+  if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  const rollup = rollupForecast(opps);
+  // Quota = objectif CAS annuel (config/fiscal.currentFy, périmètre global) — référence d'atteinte.
+  const currentFy = (fiscalDoc.data() || {}).currentFy || new Date().getUTCFullYear();
+  const objSnap = await db.collection("objectives").where("fiscalYear", "==", currentFy).where("scope", "==", "global").get();
+  const quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
+  return {
+    ok: true, fiscalYear: currentFy, scoped, quota,
+    ...rollup,
+    attainment: quota > 0 ? { closed: rollup.closed / quota, commit: rollup.commit / quota, bestCase: rollup.bestCase / quota } : null,
+  };
+});
+
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — règles configurables (config/automations) qui génèrent des
 // TÂCHES (objet Activité, Lot 3) quand une opportunité entre dans un état à traiter. Idempotent (clé
 // `type:oppId`). setAutomations = config (direction) ; runAutomations = exécution (direction, + appelée
@@ -1846,6 +1873,9 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     probability, weighted: oppWeighted(amount, probability),
     closingDate: d.closingDate || null,
     mbPrev,          // % marge brute prévisionnelle (prévision, non confidentiel)
+    // Catégorie de prévision GOUVERNÉE (Lot 5) : posée par le commercial (Commit/Best Case/Pipeline/
+    // Omitted), distincte de l'étape. Absente → défaut dérivé de l'étape au calcul (domain/forecast).
+    forecastCategory: require("./domain/forecast").FORECAST_CATEGORIES.includes(d.forecastCategory) ? d.forecastCategory : null,
     dr: d.dr === true, // DR (Deal Registration / demande de remise) — booléen Oui/Non
     // Suivi commercial (Lot B) : prochaine action + son échéance (date QU'ON MAÎTRISE → aging honnête
     // du suivi, distinct de la D Prev) ; motif de perte (analytique win/loss sur les opps stage 7).
@@ -1911,6 +1941,10 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   if (d.ownerUid !== undefined) { // réaffectation de propriété + visibleTo (Lot 2 sécurité)
     patch.ownerUid = d.ownerUid ? String(d.ownerUid) : null;
     patch.visibleTo = await visibleToFor(patch.ownerUid);
+  }
+  if (d.forecastCategory !== undefined) { // catégorie de prévision gouvernée (Lot 5)
+    const { FORECAST_CATEGORIES } = require("./domain/forecast");
+    patch.forecastCategory = FORECAST_CATEGORIES.includes(d.forecastCategory) ? d.forecastCategory : null;
   }
   // Suivi commercial (Lot B) : prochaine action + échéance + motif de perte — éditables sur toute opp.
   if (d.nextStep !== undefined) patch.nextStep = String(d.nextStep || "").trim().slice(0, 500) || null;

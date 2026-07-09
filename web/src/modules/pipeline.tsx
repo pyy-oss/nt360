@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult, type ForecastCategory } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
@@ -212,7 +212,9 @@ export const Am360: FC<Props> = () => {
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", patch: false };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", forecastCategory: "", patch: false };
+// Catégories de prévision gouvernée (Lot 5) — « — » = défaut dérivé de l'étape côté serveur.
+const FORECAST_OPTIONS = [{ value: "", label: "— (auto)" }, { value: "pipeline", label: "Pipeline" }, { value: "best_case", label: "Best Case" }, { value: "commit", label: "Commit" }, { value: "omitted", label: "Omitted" }];
 
 // « Mon pipeline » : rapprochement SOUPLE entre l'AM stocké (import : MAJ / nom de famille) et l'identité
 // connectée (displayName : nom complet). Égalité stricte échouait en silence (cf. audit). On matche sur
@@ -392,6 +394,7 @@ export const OppList: FC<Props> = () => {
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
     mbPrev: o.mbPrev != null ? String(o.mbPrev) : "", dr: o.dr ? "oui" : "non",
+    forecastCategory: (o as { forecastCategory?: string }).forecastCategory || "",
     nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", patch,
   }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
@@ -456,9 +459,9 @@ export const OppList: FC<Props> = () => {
               <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
                 fn={async () => {
                   if (f.patch) {
-                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason });
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null });
                   } else {
-                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason });
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null });
                   }
                   setOpen(false); setF({ ...EMPTY_OPP });
                 }} />
@@ -487,6 +490,9 @@ export const OppList: FC<Props> = () => {
             {/* DR (Deal Registration / demande de remise) — Oui / Non. */}
             <label className="flex flex-col gap-1 text-[11px] text-muted">DR
               <Select ariaLabel="DR (Oui / Non)" value={f.dr} onChange={(v) => setF({ ...f, dr: v })} options={[{ value: "non", label: "Non" }, { value: "oui", label: "Oui" }]} /></label>
+            {/* Prévision gouvernée (Lot 5) : catégorie posée par le commercial (Commit/Best Case/…). */}
+            <label className="flex flex-col gap-1 text-[11px] text-muted">Prévision
+              <Select ariaLabel="Catégorie de prévision" value={f.forecastCategory} onChange={(v) => setF({ ...f, forecastCategory: v })} options={FORECAST_OPTIONS} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">D Prev
               <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></label>
             {/* Suivi commercial (Lot B) : prochaine action + échéance (date maîtrisée → relances honnêtes). */}

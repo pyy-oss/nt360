@@ -7,7 +7,9 @@ export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
+  forecastCategory?: ForecastCategory | null;
 };
+export type ForecastCategory = "omitted" | "pipeline" | "best_case" | "commit";
 
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
  *  pondéré + l'étiquette d'étape, puis RECALCULE les agrégats — sinon l'opp reste invisible). */
@@ -23,8 +25,21 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null }) {
   await httpsCallable(functions, "patchOpportunity")(data);
+}
+
+// PRÉVISION COMMERCIALE GOUVERNABLE (Lot 5) — roll-up des catégories de prévision sur le périmètre visible.
+export type ForecastRollup = {
+  ok: boolean; fiscalYear: number; scoped: boolean; quota: number;
+  closed: number; commit: number; bestCase: number; pipeline: number;
+  counts: { closed: number; commit: number; bestCase: number; pipeline: number; omitted: number };
+  attainment: { closed: number; commit: number; bestCase: number } | null;
+};
+/** Roll-up de la prévision commerciale (catégories Commit/Best Case/Pipeline/Closed) + atteinte du quota. */
+export async function forecastRollup() {
+  const res = await httpsCallable(functions, "forecastRollup")({});
+  return res.data as ForecastRollup;
 }
 
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en

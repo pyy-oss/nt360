@@ -27,6 +27,7 @@ deleteRecords
 enrichClickup
 exportOpportunities
 exportReport
+forecastRollup
 importBcFromClickup
 importDelta
 importLegacyBackup
