@@ -6,7 +6,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
@@ -728,11 +728,13 @@ const BOARD_PAGE = 30; // cartes affichées par colonne avant « Voir plus » (u
 // Colonne du board : PAGINÉE par révélation incrémentale (« Voir plus ») — sans quoi une étape à
 // plusieurs centaines d'opps (ex. Qualification) rendait autant de cartes d'un coup (coût + illisibilité).
 // L'en-tête garde le compte RÉEL (total colonne) ; le pas revient à BOARD_PAGE quand le filtre change.
-function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: {
+function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey, onDropStage }: {
   stage: number; col: Opportunity[]; canWrite: boolean; movingId: string | null;
   move: (o: Opportunity, v: string) => void; today: string; resetKey: string;
+  onDropStage: (oppId: string) => void;
 }) {
   const [shown, setShown] = useState(BOARD_PAGE);
+  const [over, setOver] = useState(false); // survol de dépôt (drag-and-drop, Lot 8b)
   // Repart au 1er lot UNIQUEMENT quand le FILTRE change (resetKey) — pas sur tout changement de taille de
   // colonne : un move optimiste ou un snapshot d'un autre écrivain fait varier col.length sans que
   // l'utilisateur ait rien filtré, et réinitialiser « Voir plus » lui ferait perdre sa place.
@@ -740,7 +742,10 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: 
   const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
   const rest = col.length - shown;
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-line bg-panel2/40 p-2 min-h-[120px]">
+    <div className={cx("flex flex-col gap-2 rounded-xl border bg-panel2/40 p-2 min-h-[120px] transition-colors", over ? "border-gold bg-gold/5" : "border-line")}
+      onDragOver={canWrite ? (e) => { e.preventDefault(); if (!over) setOver(true); } : undefined}
+      onDragLeave={canWrite ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false); } : undefined}
+      onDrop={canWrite ? (e) => { e.preventDefault(); setOver(false); const id = e.dataTransfer.getData("text/plain"); if (id) onDropStage(id); } : undefined}>
       <div className="flex items-center justify-between px-1">
         <span className="text-[12px] font-semibold text-ink">{stage} · {STAGE_SHORT[stage]}</span>
         <span className="text-[11px] text-faint tabnum">{col.length} · {fmt(tot)}</span>
@@ -749,7 +754,9 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: 
         const overdue = !!(o.closingDate && o.closingDate.slice(0, 10) < today);
         const saving = movingId === (o.oppId || o.id); // enregistrement en cours (recompute serveur)
         return (
-          <div key={o.oppId || o.id} className={cx("rounded-lg border p-2 bg-panel transition-opacity", overdue ? "border-clay/40" : "border-line", saving && "opacity-60")}>
+          <div key={o.oppId || o.id} draggable={canWrite}
+            onDragStart={canWrite ? (e) => e.dataTransfer.setData("text/plain", o.oppId || o.id || "") : undefined}
+            className={cx("rounded-lg border p-2 bg-panel transition-opacity", overdue ? "border-clay/40" : "border-line", saving && "opacity-60", canWrite && "cursor-grab active:cursor-grabbing")}>
             <div className="flex items-center gap-1.5">
               <div className="text-[12px] font-semibold text-ink truncate flex-1" title={o.client || ""}>{o.client || "—"}</div>
               {saving && <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse shrink-0" title="Enregistrement…" aria-label="Enregistrement en cours" />}
@@ -780,6 +787,26 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey }: 
   );
 }
 
+// Bandeau de vélocité commerciale (Lot 8b) : taux de gain, deal moyen, pipeline pondéré, indice de
+// vélocité — calculés serveur sur le périmètre visible (sécurité par enregistrement).
+function VelocityStrip({ refreshKey }: { refreshKey: number }) {
+  const [v, setV] = useState<SalesVelocity | null>(null);
+  useEffect(() => { salesVelocity().then(setV).catch(() => setV(null)); }, [refreshKey]);
+  if (!v) return null;
+  const Kpi = ({ label, value }: { label: string; value: string }) => (
+    <div className="flex flex-col"><span className="text-[10px] text-muted uppercase tracking-wide">{label}</span><span className="font-display tabnum text-[15px] leading-tight">{value}</span></div>
+  );
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
+      <Kpi label="Ouvertes" value={String(v.openCount)} />
+      <Kpi label="Pipeline pondéré" value={fmt(v.openWeighted)} />
+      <Kpi label="Taux de gain" value={`${Math.round(v.winRate * 100)}%`} />
+      <Kpi label="Deal moyen" value={fmt(v.avgDeal)} />
+      <Kpi label="Indice de vélocité" value={fmt(v.velocityIndex)} />
+    </div>
+  );
+}
+
 export const PipelineBoard: FC<Props> = () => {
   const oppScope = useRecordScope("opportunities");
   const { rows: allRows, loading } = useCollectionData<Opportunity>("opportunities", oppScope.constraints, oppScope.scoped ? "s" : "");
@@ -788,6 +815,7 @@ export const PipelineBoard: FC<Props> = () => {
   const canWrite = useCan("pipeline") === "write";
   const toast = useToast();
   const [movingId, setMovingId] = useState<string | null>(null); // carte en cours de changement d'étape (verrou in-flight)
+  const [velRefresh, setVelRefresh] = useState(0); // recalcul de la vélocité après un déplacement de carte
   // Étape OPTIMISTE par opp (id → étape) : la carte change de colonne IMMÉDIATEMENT, sans attendre le
   // recompute serveur (plusieurs secondes). Revert en cas d'erreur ; nettoyée quand le snapshot rattrape.
   const [optim, setOptim] = useState<Record<string, number>>({});
@@ -817,6 +845,7 @@ export const PipelineBoard: FC<Props> = () => {
       // on AVERTIT au lieu d'un succès muet (cf. audit ; parité avec l'avertissement de la fiche).
       if (to === 6 && !o.fp) toast("Gagnée sans N° FP — ne deviendra pas commande. Renseignez le FP dans Opportunités.", "err");
       else toast("Étape mise à jour", "ok");
+      setVelRefresh((n) => n + 1); // rafraîchit le bandeau de vélocité
     } catch {
       setOptim((m) => { const n = { ...m }; delete n[id]; return n; }); // revert : la carte revient à sa colonne
       toast("Changement d'étape refusé", "err");
@@ -837,12 +866,14 @@ export const PipelineBoard: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / AM / client" />
+      <VelocityStrip refreshKey={velRefresh} />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
         {BOARD_STAGES.map((s) => (
-          <BoardColumn key={s} stage={s} col={byStage(s)} canWrite={canWrite} movingId={movingId} move={move} today={today} resetKey={filterKey} />
+          <BoardColumn key={s} stage={s} col={byStage(s)} canWrite={canWrite} movingId={movingId} move={move} today={today} resetKey={filterKey}
+            onDropStage={(id) => { const o = allRows.find((r) => (r.oppId || r.id) === id); if (o && (o.stage || 0) !== s) move(o, String(s)); }} />
         ))}
       </div>
-      <Tip>Pilotage visuel des deals actifs (étapes 1→5). Chaque colonne affiche les opportunités <b>les plus pondérées d'abord</b> ; « <b>Voir plus</b> » révèle la suite (le compte total reste affiché en tête). Changer l'étape d'une carte met à jour l'opportunité et relance le recalcul. Cartes en <b className="text-clay">retard</b> = D Prev dépassée (à requalifier). Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
+      <Tip>Pilotage visuel des deals actifs (étapes 1→5). <b>Glissez-déposez</b> une carte d'une colonne à l'autre pour changer son étape (ou utilisez le sélecteur). Chaque colonne affiche les opportunités <b>les plus pondérées d'abord</b> ; « <b>Voir plus</b> » révèle la suite. Cartes en <b className="text-clay">retard</b> = D Prev dépassée. Filtrable par BU/AM/client. Passer une carte en <b>6 (Gagné)</b> / 7 / 9 la sort du board.</Tip>
     </div>
   );
 };
