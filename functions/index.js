@@ -1222,6 +1222,33 @@ exports.timesheetKpis = onCallG("timesheetKpis", { memoryMiB: 256, timeoutSecond
   return { ok: true, months, plannedOccupancyPct, ...constat };
 });
 
+// IMPORT CRA EN MASSE (Lot 19 « 20/10 DirOps ») — colle un tableau (Nom / mois / facturés / congés /
+// internes) pour renseigner plusieurs CRA d'un coup. Résout le nom contre l'annuaire, valide chaque
+// ligne, upsert par batch (id déterministe consultant_mois). Écriture « pipeline ». Audité.
+exports.importTimesheets = onCallG("importTimesheets", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { parseTimesheetPaste } = require("./domain/timesheetImport");
+  const { validateTimesheet } = require("./domain/timesheet");
+  const text = String(req.data?.text || "");
+  if (!text.trim()) throw new HttpsError("invalid-argument", "texte requis (lignes à coller)");
+  const cSnap = await db.collection("consultants").select("name").limit(MAX_SCAN + 1).get();
+  const nameToId = {};
+  for (const d of sliceCapped(cSnap.docs).docs) { const n = (d.data().name || "").toLowerCase().trim(); if (n) nameToId[n] = d.id; }
+  const { rows, errors } = parseTimesheetPaste(text, nameToId);
+  if (rows.length > 500) throw new HttpsError("invalid-argument", "trop de lignes (max 500)");
+  let batch = db.batch(), n = 0, imported = 0;
+  for (const r of rows) {
+    const v = validateTimesheet(r);
+    if (!v.ok) { errors.push({ line: 0, reason: v.error }); continue; }
+    const id = `${v.value.consultantId}_${v.value.month}`;
+    batch.set(db.doc(`timesheets/${id}`), { ...v.value, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    imported++; if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_timesheets", module: "pipeline", entity: "timesheet", entityId: "*", detail: { imported, errors: errors.length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, imported, errorCount: errors.length, errors: errors.slice(0, 20) };
+});
+
 // === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
 // (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». listCandidates
 // renvoie le funnel + la capacité future attendue par BU (embauches pondérées par l'avancement).

@@ -48,6 +48,7 @@ fuzzyDuplicateClients
 exportReport
 forecastRollup
 importBcFromClickup
+importTimesheets
 importDelta
 importLegacyBackup
 importOpportunities
