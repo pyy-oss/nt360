@@ -88,6 +88,7 @@ setRecordAccess
 setRefList
 setSecurityConfig
 setUserActive
+salesVelocity
 saveReport
 setUserRole
 setupClickupWebhook

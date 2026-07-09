@@ -56,6 +56,13 @@ export async function scoreOpportunities() {
   return res.data as ScoringResult;
 }
 
+// VÉLOCITÉ COMMERCIALE (Lot 8b) — indicateurs de dynamique du pipeline sur le périmètre visible.
+export type SalesVelocity = { ok: boolean; openCount: number; openWeighted: number; winRate: number; avgDeal: number; won: number; lost: number; velocityIndex: number };
+export async function salesVelocity() {
+  const res = await httpsCallable(functions, "salesVelocity")({});
+  return res.data as SalesVelocity;
+}
+
 // REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités + définitions sauvegardées.
 export type ReportGroupBy = "bu" | "am" | "stage" | "client" | "forecastCategory";
 export type ReportMeasure = "count" | "amount" | "weighted";

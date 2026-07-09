@@ -1443,6 +1443,19 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   return { ok: true, scoped, rows: rows.slice(0, 500), bands, total: rows.length };
 });
 
+// === VÉLOCITÉ COMMERCIALE (Lot 8b) — indicateurs de dynamique du pipeline (taux de gain, deal moyen,
+// pipeline pondéré, indice de vélocité) sur le périmètre VISIBLE. Callable, gouverné « pipeline ».
+exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "pipeline");
+  const { salesVelocity } = require("./domain/velocity");
+  const snap = await db.collection("opportunities").select("stage", "amount", "weighted", "stale", "visibleTo").get();
+  let opps = snap.docs.map((d) => d.data()).filter((o) => o.stale !== true);
+  if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+    opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  }
+  return { ok: true, ...salesVelocity(opps) };
+});
+
 // === REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités (filtres + regroupement +
 // mesure, domain/report.js) exécuté sur le périmètre VISIBLE de l'appelant, + définitions de rapport
 // sauvegardées/partagées (reports/*, callable-only). Comble l'écart #6 (aucun reporting self-service).
