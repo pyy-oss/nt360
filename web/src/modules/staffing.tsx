@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, listCandidates, upsertCandidate, deleteCandidate, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -98,6 +98,53 @@ function ActivityCockpit() {
         ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
       </div>
       <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// Rentabilité par ressource (Lot 17) : P&L par consultant dérivé du CRA — CONFIDENTIEL (droit rentabilité).
+// N'est monté que si l'utilisateur a le droit « rentabilité » (sinon la carte n'apparaît pas).
+function ResourcePnlCard() {
+  const [p, setP] = useState<ResourcePnl | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { resourcePnl().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, []);
+  if (loading) return <Card title="Rentabilité par ressource (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
+  if (!p || !p.global.headcount) return <Card title="Rentabilité par ressource (6 mois)"><Tip>Saisissez des CRA (jours facturés) et renseignez TJM/CJM des consultants pour obtenir le P&L par ressource.</Tip></Card>;
+  const g = p.global;
+  return (
+    <Card title="Rentabilité par ressource (6 mois)">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {stat("CA réel", money(g.caReal))}
+        {g.cost != null && stat("Coût", money(g.cost))}
+        {g.margin != null && stat("Marge", money(g.margin), g.margin >= 0 ? "text-emerald" : "text-clay")}
+        {g.marginPct != null && stat("Taux de marge", `${g.marginPct}%`, g.marginPct >= 20 ? "text-emerald" : g.marginPct >= 0 ? "text-gold" : "text-clay")}
+        {stat("Jours facturés", String(g.billedDays))}
+      </div>
+      {p.byGrade.length > 1 && (
+        <div className="mt-4 border-t border-hair pt-3">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par grade</div>
+          <Table columns={[
+            colText("Grade", (b) => b.key),
+            colNum("Effectif", (b) => String(b.headcount), (b) => b.headcount),
+            colNum("CA réel", (b) => money(b.caReal), (b) => b.caReal),
+            colNum("Marge", (b) => (b.margin != null ? money(b.margin) : "—"), (b) => b.margin ?? 0),
+            colNum("Taux", (b) => (b.marginPct != null ? `${b.marginPct}%` : "—"), (b) => b.marginPct ?? 0),
+          ]} rows={p.byGrade} />
+        </div>
+      )}
+      <div className="mt-3 border-t border-hair pt-2">
+        <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par consultant (marge décroissante)</div>
+        <Table columns={[
+          colText("Consultant", (r) => r.name || r.id),
+          colText("Grade", (r) => r.grade || "—"),
+          colText("BU", (r) => r.bu || "—"),
+          colNum("J. fact.", (r) => String(r.billedDays), (r) => r.billedDays),
+          colNum("CA réel", (r) => money(r.caReal), (r) => r.caReal),
+          colNum("Marge", (r) => (r.margin != null ? money(r.margin) : "—"), (r) => r.margin ?? 0),
+          colNum("Taux", (r) => (r.marginPct != null ? `${r.marginPct}%` : "—"), (r) => r.marginPct ?? 0),
+        ]} rows={p.rows} />
+      </div>
+      <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). Donnée <b>confidentielle</b> — visible uniquement avec le droit « rentabilité ».</Tip>
     </Card>
   );
 }
@@ -355,6 +402,7 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
 
 export const Staffing: FC<Props> = () => {
   const canWrite = useCan("pipeline") === "write";
+  const canMargin = useCan("rentabilite") !== "none"; // P&L par ressource = confidentiel
   const [rows, setRows] = useState<Consultant[]>([]);
   const [canCost, setCanCost] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -372,6 +420,7 @@ export const Staffing: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
+      {canMargin && <ResourcePnlCard />}
       <CapacityPipeline />
       <Vivier canWrite={canWrite} />
       <ConstatCra consultants={rows} canWrite={canWrite} />
