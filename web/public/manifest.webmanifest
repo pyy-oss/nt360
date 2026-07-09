@@ -1,0 +1,15 @@
+{
+  "name": "Neurones 360 — NT CI",
+  "short_name": "NT360",
+  "description": "Cockpit commercial & rentabilité — Neurones Technologies CI",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0E1613",
+  "theme_color": "#0E1613",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
