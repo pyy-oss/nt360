@@ -42,6 +42,16 @@ export async function forecastRollup() {
   return res.data as ForecastRollup;
 }
 
+// SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
+export type ScoreFactor = { label: string; impact: number };
+export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };
+export type ScoringResult = { ok: boolean; scoped: boolean; rows: ScoredOpp[]; bands: { hot: number; warm: number; cold: number }; total: number };
+/** Classe les opportunités ouvertes par probabilité de gain (score explicable + facteurs). */
+export async function scoreOpportunities() {
+  const res = await httpsCallable(functions, "scoreOpportunities")({});
+  return res.data as ScoringResult;
+}
+
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
  *  base64 (à télécharger via downloadBase64). Réservé au droit « pipeline ». */
 export async function exportOpportunities() {
