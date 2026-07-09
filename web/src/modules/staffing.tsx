@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -232,6 +232,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
   const [k, setK] = useState<TimesheetKpis | null>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [importPaste, setImportPaste] = useState<string | null>(null);
   const [f, setF] = useState({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" });
   const load = useCallback(async () => { setLoading(true); try { setK(await timesheetKpis()); } catch { setK(null); } finally { setLoading(false); } }, []);
   useEffect(() => { load().catch(() => {}); }, [load]);
@@ -239,7 +240,23 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
   const g = k?.global;
   const delta = g ? g.occupancyPct - (k!.plannedOccupancyPct || 0) : 0;
   return (
-    <Card title="CRA — activité constatée (6 mois)" actions={canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Saisie CRA"}</button>}>
+    <Card title="CRA — activité constatée (6 mois)" actions={canWrite && (
+      <div className="flex items-center gap-1.5">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setImportPaste(importPaste == null ? "" : null); setAdding(false); }}>{importPaste != null ? "Fermer" : "Importer (coller)"}</button>
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setAdding(!adding); setImportPaste(null); }}>{adding ? "Fermer" : "+ Saisie CRA"}</button>
+      </div>)}>
+      {canWrite && importPaste != null && (
+        <div className="border-b border-hair pb-3 mb-3 flex flex-col gap-2">
+          <div className="text-[11px] text-muted">Collez un tableau (depuis ClickUp/Excel) — une ligne par CRA : <code>Nom &nbsp;AAAA-MM&nbsp; jours&nbsp;facturés&nbsp; congés&nbsp; internes</code> (séparateur tabulation, « ; » ou « , »).</div>
+          <textarea className="field !py-1 w-full font-mono text-[12px]" rows={5} value={importPaste} onChange={(e) => setImportPaste(e.target.value)} aria-label="Coller les CRA"
+            placeholder={"Alice\t2026-01\t18\t2\t0\nBob\t2026-01\t20\t0\t0"} />
+          <div className="flex items-center gap-2">
+            <Busy variant="ghost" label="Importer" okMsg="CRA importés" errMsg="Import refusé"
+              fn={async () => { const r = await importTimesheets(importPaste || ""); setImportPaste(null); await load(); if (r.errorCount) throw new Error(`${r.imported} importé(s), ${r.errorCount} erreur(s) — ex. : ${r.errors[0]?.reason || ""}`); }} />
+            <span className="text-[11px] text-muted">Résout les noms contre l'annuaire ; ré-import = mise à jour (1 CRA par consultant×mois).</span>
+          </div>
+        </div>
+      )}
       {canWrite && adding && (
         <div className="flex flex-wrap items-end gap-2 text-[13px] border-b border-hair pb-3 mb-3">
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Consultant</span>

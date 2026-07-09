@@ -144,6 +144,11 @@ export async function timesheetKpis(fromMonth?: string, months?: number) {
   const res = await httpsCallable(functions, "timesheetKpis")({ fromMonth, months });
   return res.data as TimesheetKpis;
 }
+// Import CRA en masse (Lot 19) — colle un tableau Nom/mois/facturés/congés/internes.
+export async function importTimesheets(text: string) {
+  const res = await httpsCallable(functions, "importTimesheets")({ text });
+  return res.data as { ok: boolean; imported: number; errorCount: number; errors: { line: number; reason: string }[] };
+}
 
 // VIVIER / RECRUTEMENT (Lot 16) — pipeline de candidats + capacité future attendue par BU.
 export type CandidateStatus = "sourced" | "interview" | "offer" | "hired" | "rejected";
