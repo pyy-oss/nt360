@@ -2130,6 +2130,12 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
     const defs = ((await db.doc("config/customFields").get()).data() || {}).fields || [];
     doc.custom = sanitizeCustom(defs, d.custom);
   }
+  if (d.lines !== undefined) { // lignes produit / CPQ-lite (Lot 8) : montant DÉRIVÉ des lignes
+    const { computeLines } = require("./domain/quote");
+    const q = computeLines(d.lines);
+    doc.lines = q.lines;
+    if (q.lines.length) { doc.amount = q.total; doc.weighted = oppWeighted(q.total, probability); }
+  }
   await db.doc(`opportunities/${id}`).set(doc, { merge: true });
   if (prevStage != null && prevStage !== stage) {
     await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
@@ -2213,6 +2219,12 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
     const pr = Number(d.probability);
     if (!Number.isFinite(pr) || pr < 0 || pr > 1) throw new HttpsError("invalid-argument", "probabilité (0..1) invalide");
     patch.probability = pr;
+  }
+  if (d.lines !== undefined) { // lignes produit / CPQ-lite (Lot 8) : montant DÉRIVÉ des lignes
+    const { computeLines } = require("./domain/quote");
+    const q = computeLines(d.lines);
+    patch.lines = q.lines;
+    if (q.lines.length) patch.amount = q.total; // le pondéré est recalculé par le bloc ci-dessous
   }
   // Pondéré recalculé si le montant OU la probabilité change (valeurs courantes conservées sinon).
   if (patch.amount !== undefined || patch.probability !== undefined) {

@@ -7,8 +7,10 @@ export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
-  forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>;
+  forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[];
 };
+// LIGNES PRODUIT / CPQ-lite (Lot 8) — quand des lignes existent, le montant de l'opp est DÉRIVÉ.
+export type OppLine = { product: string; qty: number; unitPrice: number; discountPct: number; lineTotal?: number };
 export type ForecastCategory = "omitted" | "pipeline" | "best_case" | "commit";
 // CHAMPS CUSTOM (Lot 7b) — définitions éditées par la direction, valeurs stockées dans opp.custom.
 export type CustomFieldDef = { key: string; label: string; type: "text" | "number" | "select"; options: string[]; active: boolean };
@@ -27,7 +29,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown> }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[] }) {
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 
