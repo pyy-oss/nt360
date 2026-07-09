@@ -117,6 +117,27 @@ export async function capacityPlan(fromMonth?: string, months?: number) {
   return res.data as CapacityPlan;
 }
 
+// CRA / TEMPS CONSTATÉ (Lot 15) — TACE et occupation RÉELS, comparés au prévisionnel.
+export type Timesheet = { id?: string; consultantId: string; month: string; billedDays: number; leaveDays: number; internalDays: number };
+export type TimesheetConstatRow = { consultantId: string; name: string; billedDays: number; leaveDays: number; internalDays: number; months: number; tacePct: number; occupancyPct: number };
+export type TimesheetKpis = {
+  ok: boolean; months: string[]; plannedOccupancyPct: number;
+  global: { tacePct: number; occupancyPct: number; billedDays: number; leaveDays: number; internalDays: number; reportedConsultants: number };
+  rows: TimesheetConstatRow[];
+};
+export async function upsertTimesheet(t: Timesheet) {
+  const res = await httpsCallable(functions, "upsertTimesheet")(t);
+  return res.data as { ok: boolean; id: string };
+}
+export async function deleteTimesheet(id: string) {
+  const res = await httpsCallable(functions, "deleteTimesheet")({ id });
+  return res.data as { ok: boolean };
+}
+export async function timesheetKpis(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "timesheetKpis")({ fromMonth, months });
+  return res.data as TimesheetKpis;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

@@ -1150,6 +1150,60 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, months, openOppCount: opps.length, ...plan };
 });
 
+// === CRA / TEMPS CONSTATÉ (Lot 15 « 20/10 DirOps ») — compte rendu d'activité mensuel (jours facturés/
+// congés/internes) → TACE et occupation RÉELS, comparés au prévisionnel. timesheets/* callable-only,
+// écriture « pipeline », lecture « overview ». Id déterministe consultant_mois (upsert sans doublon).
+exports.upsertTimesheet = onCallG("upsertTimesheet", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const { validateTimesheet } = require("./domain/timesheet");
+  const v = validateTimesheet(req.data);
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const id = assertPlainId(`${v.value.consultantId}_${v.value.month}`, "id CRA"); // 1 CRA par consultant×mois
+  await db.doc(`timesheets/${id}`).set({ ...v.value, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_timesheet", module: "pipeline", entity: "timesheet", entityId: id, detail: { consultantId: v.value.consultantId, month: v.value.month, billedDays: v.value.billedDays }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id };
+});
+
+exports.deleteTimesheet = onCallG("deleteTimesheet", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const id = assertPlainId(req.data?.id, "id CRA");
+  await db.doc(`timesheets/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_timesheet", module: "pipeline", entity: "timesheet", entityId: id, ts: FieldValue.serverTimestamp() });
+  return { ok: true };
+});
+
+// KPI constatés (TACE/occupation réels) + occupation PRÉVISIONNELLE sur la même plage → écart constaté vs prévu.
+exports.timesheetKpis = onCallG("timesheetKpis", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { monthsRange, buildLoad } = require("./domain/assignment");
+  const { computeConstat } = require("./domain/timesheet");
+  const now = new Date();
+  // Par défaut : les 6 DERNIERS mois (le constaté regarde le passé, contrairement au prévisionnel).
+  let [cy, cm] = [now.getFullYear(), now.getMonth() + 1];
+  const span = Math.min(18, Math.max(1, Number(req.data?.months) || 6));
+  let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
+  const fromYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth) ? req.data.fromMonth : `${sy}-${String(sm).padStart(2, "0")}`;
+  const months = monthsRange(fromYm, `${cy}-${String(cm).padStart(2, "0")}`);
+  const [tSnap, cSnap, aSnap] = await Promise.all([
+    db.collection("timesheets").limit(MAX_SCAN + 1).get(),
+    db.collection("consultants").select("name", "status").limit(MAX_SCAN + 1).get(),
+    db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct").limit(MAX_SCAN + 1).get(),
+  ]);
+  const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const nameById = Object.fromEntries(consultants.map((c) => [c.id, c.name || null]));
+  const constat = computeConstat(timesheets, months);
+  constat.rows = constat.rows.map((r) => ({ ...r, name: nameById[r.consultantId] || r.consultantId }));
+  // Occupation prévisionnelle moyenne (plan de charge) sur la même plage, pour l'écart constaté vs prévu.
+  const activeIds = consultants.filter((c) => (c.status || "active") === "active").map((c) => c.id);
+  const { byConsultant } = buildLoad(assignments, months, activeIds);
+  let sum = 0, n = 0;
+  for (const id of activeIds) for (const m of months) { sum += Math.min(100, (byConsultant[id] && byConsultant[id][m]) || 0); n += 1; }
+  const plannedOccupancyPct = n ? Math.round(sum / n) : 0;
+  return { ok: true, months, plannedOccupancyPct, ...constat };
+});
+
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
 // `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).

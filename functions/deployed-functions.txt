@@ -26,10 +26,13 @@ deleteActivity
 deleteAssignment
 deleteClickupWebhook
 deleteConsultant
+deleteTimesheet
 listConsultants
 staffingPlan
+timesheetKpis
 upsertAssignment
 upsertConsultant
+upsertTimesheet
 deleteContact
 deleteObjective
 deleteOpportunity
