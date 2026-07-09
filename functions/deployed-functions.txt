@@ -19,6 +19,7 @@ createUser
 curateNews
 curateNewsNow
 decideApproval
+activityKpis
 dedupe
 deleteActivity
 deleteAssignment

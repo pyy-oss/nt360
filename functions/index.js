@@ -1092,6 +1092,35 @@ exports.staffingPlan = onCallG("staffingPlan", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, months, consultants: consultants.map((c) => ({ id: c.id, name: c.name || null, status: c.status || "active", bu: c.bu || null })), assignments, byConsultant, flags };
 });
 
+// KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
+// et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
+// domain/activityKpi). Le COÛT/MARGE ne sont exposés qu'avec le droit « rentabilite » (confidentialité).
+exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { monthsRange } = require("./domain/assignment");
+  const { computeActivity } = require("./domain/activityKpi");
+  const { canRead } = require("./domain/authz");
+  const role = req.auth.token?.nt360Role;
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  const canCost = canRead(matrix, role, "rentabilite");
+  const now = new Date();
+  const curYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth)
+    ? req.data.fromMonth : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const span = Math.min(18, Math.max(1, Number(req.data?.months) || 6));
+  let [ey, em] = curYm.split("-").map(Number); em += span - 1; while (em > 12) { em -= 12; ey += 1; }
+  const months = monthsRange(curYm, `${ey}-${String(em).padStart(2, "0")}`);
+  const [cSnap, aSnap] = await Promise.all([
+    db.collection("consultants").select("name", "status", "bu", "cjm").limit(MAX_SCAN + 1).get(),
+    db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct", "tjmBilled").limit(MAX_SCAN + 1).get(),
+  ]);
+  const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const costById = {};
+  for (const c of consultants) if (c.cjm != null) costById[c.id] = Number(c.cjm);
+  const kpi = computeActivity(consultants, assignments, months, costById, canCost);
+  return { ok: true, months, canCost, ...kpi };
+});
+
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
 // `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).

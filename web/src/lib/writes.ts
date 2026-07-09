@@ -93,6 +93,19 @@ export async function staffingPlan(fromMonth?: string, months?: number) {
   return res.data as StaffingPlan;
 }
 
+// KPI D'ACTIVITÉ (Lot 13) — occupation, intercontrat, CA/marge staffés prévisionnels.
+export type ActivityConsultant = { id: string; name: string | null; bu: string | null; status: string; occupancyPct: number; idleMonths: number; billableDays: number; revenueForecast: number; marginForecast: number | null };
+export type ActivityBu = { bu: string; headcount: number; active: number; occupancyPct: number; revenueForecast: number; marginForecast: number | null };
+export type ActivityKpis = {
+  ok: boolean; months: string[]; canCost: boolean;
+  global: { headcount: number; active: number; occupancyPct: number; intercontratPct: number; revenueForecast: number; marginForecast: number | null };
+  byBu: ActivityBu[]; rows: ActivityConsultant[];
+};
+export async function activityKpis(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "activityKpis")({ fromMonth, months });
+  return res.data as ActivityKpis;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

@@ -2,11 +2,11 @@
 // (Lot 12) et des KPI d'activité (TACE / intercontrat — Lot 13). Comble l'angle mort « métier ESN » de
 // l'évaluation Directeur des Opérations : qui sont les ressources, leur grade, TJM/CJM, compétences, statut.
 // Le COÛT (CJM) n'est visible que si l'utilisateur a le droit « rentabilité » (confidentialité serveur).
-import { useState, useEffect, useCallback, type FC } from "react";
+import { useState, useEffect, useCallback, type FC, type ReactNode } from "react";
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -49,6 +49,56 @@ function ConsultantForm({ initial, canCost, onDone }: { initial: Consultant; can
       <Busy variant="ghost" label={initial.id ? "Enregistrer" : "Ajouter"} okMsg="Consultant enregistré" errMsg="Enregistrement refusé"
         fn={async () => { if (!f.name.trim()) throw new Error("nom requis"); await upsertConsultant({ ...f, id: initial.id }); onDone(); }} />
     </div>
+  );
+}
+
+// Cockpit d'activité (Lot 13) : KPI de pilotage DirOps sur les 6 prochains mois — occupation prévisionnelle,
+// intercontrat, CA staffé et marge (si droit coût), + palmarès par BU et consultants les moins occupés.
+function stat(label: string, value: ReactNode, tone?: string) {
+  return <div className="flex flex-col gap-0.5 min-w-[8rem]"><span className="text-[11px] text-muted uppercase tracking-wide">{label}</span><span className={cx("font-display tabnum text-xl leading-tight", tone)}>{value}</span></div>;
+}
+function ActivityCockpit() {
+  const [k, setK] = useState<ActivityKpis | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { activityKpis().then(setK).catch(() => setK(null)).finally(() => setLoading(false)); }, []);
+  if (loading) return <Card title="Activité — pilotage (6 mois)"><div className="text-[13px] text-muted py-2">Calcul des KPI…</div></Card>;
+  if (!k || !k.global.headcount) return <Card title="Activité — pilotage (6 mois)"><Tip>Renseignez consultants et affectations pour obtenir les KPI d'activité : taux d'occupation, intercontrat, CA staffé prévisionnel.</Tip></Card>;
+  const g = k.global;
+  const occTone = g.occupancyPct >= 85 ? "text-emerald" : g.occupancyPct >= 70 ? "text-gold" : "text-clay";
+  const icTone = g.intercontratPct <= 10 ? "text-emerald" : g.intercontratPct <= 20 ? "text-gold" : "text-clay";
+  return (
+    <Card title="Activité — pilotage (6 mois)">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {stat("Taux d'occupation", `${g.occupancyPct}%`, occTone)}
+        {stat("Intercontrat", `${g.intercontratPct}%`, icTone)}
+        {stat("Effectif actif", `${g.active}/${g.headcount}`)}
+        {stat("CA staffé prév.", money(g.revenueForecast))}
+        {k.canCost && g.marginForecast != null && stat("Marge prév.", money(g.marginForecast), g.marginForecast >= 0 ? "text-emerald" : "text-clay")}
+      </div>
+      {k.byBu.length > 1 && (
+        <div className="mt-4 border-t border-hair pt-3">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par business unit</div>
+          <Table columns={[
+            colText("BU", (b) => b.bu),
+            colNum("Effectif", (b) => `${b.active}/${b.headcount}`, (b) => b.headcount),
+            colNum("Occupation", (b) => `${b.occupancyPct}%`, (b) => b.occupancyPct),
+            colNum("CA staffé prév.", (b) => money(b.revenueForecast), (b) => b.revenueForecast),
+            ...(k.canCost ? [colNum("Marge prév.", (b) => (b.marginForecast != null ? money(b.marginForecast) : "—"), (b) => b.marginForecast ?? 0)] : []),
+          ]} rows={k.byBu} />
+        </div>
+      )}
+      <div className="mt-3 border-t border-hair pt-2">
+        <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Ressources les moins occupées (à repositionner)</div>
+        <Table columns={[
+          colText("Consultant", (r) => r.name || r.id),
+          colText("BU", (r) => r.bu || "—"),
+          colText("Statut", (r) => r.status),
+          colNum("Occupation", (r) => `${r.occupancyPct}%`, (r) => r.occupancyPct),
+          colNum("Mois IC", (r) => String(r.idleMonths), (r) => r.idleMonths),
+        ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
+      </div>
+      <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
+    </Card>
   );
 }
 
@@ -148,6 +198,7 @@ export const Staffing: FC<Props> = () => {
 
   return (
     <div className="flex flex-col gap-4">
+      <ActivityCockpit />
       <Card title="Staffing — ressources" actions={
         <div className="flex items-center gap-1.5">
           {counts.map((c) => <Badge key={c.value} tone={c.tone}>{c.label} · {c.n}</Badge>)}
