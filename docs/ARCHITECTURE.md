@@ -49,6 +49,11 @@ structurants : (1) claims d'auth **namespacés** `nt360Role` ; (2) déploiement 
   (`hierarchy`), activités, approbations, automatisation, prévision (`forecast`), scoring
   (`scoring` + `scoreCalib`), reporting, clés API, champs custom, devis (`quote`), vélocité, fuzzy,
   bornage des scans (`scan`), rejeu webhooks (`outboundRetry`)…
+- `functions/handlers/*.js` — **sous-systèmes extraits** du monolithe sous forme de fabriques
+  `create…(deps)` avec **injection de dépendances** (Firestore/logger/FieldValue/onSchedule) : le
+  handler ne référence aucun global d'`index.js`, et l'export reste déclaré dans `index.js` pour le
+  garde-fou de déploiement. Premier module : `handlers/outbound.js` (webhooks sortants + rejeu durable).
+  C'est le **patron d'amincissement** progressif d'`index.js`.
 - `functions/parsers/`, `functions/lib/` — parseurs d'ingestion (SheetJS) et utilitaires (ids, fx,
   sheets, config).
 - **Tests** : `functions/test/*.test.js` (vitest, 600+), `functions/test-rules/*.test.js` (règles via
