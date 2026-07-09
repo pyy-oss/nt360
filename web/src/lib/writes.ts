@@ -46,6 +46,27 @@ export async function forecastRollup() {
   return res.data as ForecastRollup;
 }
 
+// CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes.
+export type ConsultantGrade = "junior" | "confirme" | "senior" | "expert" | "manager";
+export type ConsultantStatus = "active" | "intercontrat" | "conge" | "inactive";
+export type Consultant = {
+  id?: string; name: string; email?: string; grade?: ConsultantGrade; bu?: string;
+  tjmTarget?: number | null; cjm?: number | null; skills?: string[]; status?: ConsultantStatus;
+  managerUid?: string | null; startDate?: string | null;
+};
+export async function upsertConsultant(c: Consultant) {
+  const res = await httpsCallable(functions, "upsertConsultant")(c);
+  return res.data as { ok: boolean; id: string };
+}
+export async function deleteConsultant(id: string) {
+  const res = await httpsCallable(functions, "deleteConsultant")({ id });
+  return res.data as { ok: boolean };
+}
+export async function listConsultants() {
+  const res = await httpsCallable(functions, "listConsultants")({});
+  return res.data as { ok: boolean; rows: Consultant[]; canCost: boolean };
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

@@ -22,6 +22,9 @@ decideApproval
 dedupe
 deleteActivity
 deleteClickupWebhook
+deleteConsultant
+listConsultants
+upsertConsultant
 deleteContact
 deleteObjective
 deleteOpportunity

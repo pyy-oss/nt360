@@ -153,6 +153,9 @@ service cloud.firestore {
     // Clés API (Lot 7) : SECRET (hash de clé) — jamais lisible/écrivable côté client. Gérées par callables
     // (create/revoke/listApiKeys, direction) ; vérifiées côté serveur par l'endpoint HTTP `api`.
     match /apiKeys/{id} { allow read: if false; allow write: if false; }
+    // Consultants / ressources (Lot 11 DirOps) : accès 100% par callable (upsert/delete/listConsultants).
+    // Le coût (CJM) est masqué serveur sauf droit « rentabilite ». Lecture/écriture directes fermées.
+    match /consultants/{id} { allow read: if false; allow write: if false; }
 
     // Lignes BC : le client ne peut faire évoluer QUE le statut.
     match /bcLines/{id} {
