@@ -159,6 +159,19 @@ export async function listCandidates() {
   return res.data as Recruitment;
 }
 
+// RENTABILITÉ PAR RESSOURCE (Lot 17) — P&L par consultant (confidentiel, droit « rentabilité »).
+export type ResourcePnlRow = { id: string; name: string | null; bu: string | null; grade: string | null; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+export type ResourcePnlGroup = { key: string; headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+export type ResourcePnl = {
+  ok: boolean; months: string[];
+  global: { headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+  byBu: ResourcePnlGroup[]; byGrade: ResourcePnlGroup[]; rows: ResourcePnlRow[];
+};
+export async function resourcePnl(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "resourcePnl")({ fromMonth, months });
+  return res.data as ResourcePnl;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

@@ -30,6 +30,7 @@ deleteConsultant
 deleteTimesheet
 listCandidates
 listConsultants
+resourcePnl
 staffingPlan
 timesheetKpis
 upsertAssignment
