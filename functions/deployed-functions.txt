@@ -21,9 +21,12 @@ curateNewsNow
 decideApproval
 dedupe
 deleteActivity
+deleteAssignment
 deleteClickupWebhook
 deleteConsultant
 listConsultants
+staffingPlan
+upsertAssignment
 upsertConsultant
 deleteContact
 deleteObjective
