@@ -146,7 +146,7 @@ export interface CashflowSummary {
   // Engagement (BC non facturés) : sortie potentielle, hors position nette de base (règle SOA).
   decaissementEngaged?: number; decaissementEngagedCount?: number; decaissementEngagedBeyond?: number;
 }
-export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number; isOther?: boolean };
+export type EntityRow = { key: string; cas?: number; facture?: number; backlog?: number; mb?: number; pmb?: number; forecast?: number; projete?: number; isOther?: boolean };
 
 export interface SuppliersSummary {
   totalExpo?: number; openTotal?: number; encoursTotal?: number; engagementTotal?: number; soldeTotal?: number;

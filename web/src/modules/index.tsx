@@ -49,6 +49,7 @@ const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
 const Fiches = from(() => import("./fiches"), "Fiches");
+const Codir = from(() => import("./codir"), "Codir");
 const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
@@ -59,6 +60,7 @@ const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
 export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "news", key: "overview", label: "Actualité", icon: Newspaper, Component: Actualite },
+  { id: "codir", key: "overview", label: "Bilan CODIR", icon: Gauge, Component: Codir },
   { id: "commercial", key: "pipeline", label: "Cockpit commercial", icon: Gauge, Component: CommercialCockpit },
   { id: "opplist", key: "pipeline", label: "Opportunités", icon: ListChecks, Component: OppList },
   { id: "board", key: "pipeline", label: "Board pipeline", icon: Kanban, Component: PipelineBoard },
@@ -96,7 +98,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
 export const GROUPS: { label: string; ids: string[] }[] = [
-  { label: "Cockpit", ids: ["overview", "news", "guide"] },
+  { label: "Cockpit", ids: ["overview", "codir", "news", "guide"] },
   // « Commercial » = cockpit de pilotage de la performance commerciale + du pipeline : Cockpit (synthèse)
   // → Opportunités (saisie/édition en modale) → Board (Kanban par étape) → Pipeline (analyse) → AM 360°.
   { label: "Commercial", ids: ["commercial", "opplist", "board", "pipeline", "am360", "salesforecast", "scoring", "reports", "activites", "approvals"] },
