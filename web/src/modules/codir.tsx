@@ -129,7 +129,21 @@ function ExportBtn() {
       toast("Export refusé : " + String(e?.message || e?.code || "").replace(/^functions\//, ""), "err");
     } finally { setBusy(false); }
   };
-  return <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2.5 !py-1 text-xs font-semibold">{busy ? "Export…" : "Exporter CODIR (XLSX)"}</button>;
+  return <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2.5 !py-1 text-xs font-semibold">{busy ? "Export…" : "Exporter (XLSX)"}</button>;
+}
+
+// Export PowerPoint du deck CODIR — pptxgenjs chargé À LA DEMANDE (import dynamique).
+function PptxBtn({ build }: { build: () => Promise<void> }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const onClick = async () => {
+    if (busy) return; setBusy(true);
+    toast("Génération du PowerPoint CODIR…", "info");
+    try { await build(); toast("PowerPoint généré.", "ok"); }
+    catch (e: any) { toast("Export PPTX échoué : " + String(e?.message || e), "err"); }
+    finally { setBusy(false); }
+  };
+  return <button type="button" onClick={onClick} disabled={busy} className="btn-primary !px-2.5 !py-1 text-xs font-semibold">{busy ? "Génération…" : "Exporter (PowerPoint)"}</button>;
 }
 
 // ── BULLETIN HEBDO « Hot Topics Opérations » — commentaires / points clés (Phase 1, saisie manuelle) ──
@@ -239,9 +253,10 @@ export const Codir: FC<Props> = () => {
   const { data: clients } = useDocData<EntitySummary>(fy ? `summaries/clients_${fy}` : null);
   const { data: backlog } = useDocData<BacklogSummary>("summaries/backlog_fy");
   const { data: trend } = useDocData<BillingTrendSummary>(fy ? `summaries/billingTrend_${fy}` : null);
+  const week = isoWeek(new Date());
+  const { data: bulletin } = useDocData<OpsBulletin>(fy ? `opsBulletins/${fy}_W${String(week).padStart(2, "0")}` : null);
   const canExport = useCanExport();
 
-  const week = isoWeek(new Date());
   // KPI (atterrissage CAF) : facturé YTD, backlog, CAF projeté (certitudes) et yc forecast (pipeline pondéré).
   const cafYtd = att?.factureN || 0;
   const backlogYtd = att?.backlog || 0;
@@ -265,6 +280,16 @@ export const Codir: FC<Props> = () => {
   const monthRows = (trend?.months || []).map((m) => ({ name: monthLabel(m.month), realise: m.realise || 0, planifie: m.planifie || 0 }))
     .filter((m) => m.realise + m.planifie > 0);
 
+  // Export PowerPoint (deck 3 slides : Projection CAF · Backlog & Facturation · Hot Topics). pptxgenjs
+  // chargé à la demande. Réutilise les données déjà calculées ci-dessus + le bulletin de la semaine.
+  const doPptx = async () => {
+    const { exportCodirPptx } = await import("../lib/codirPptx");
+    await exportCodirPptx({
+      fy: fy || 0, week, cafYtd, backlogYtd, cafEst, cafEstYcForecast, forecast, objectifCaf,
+      topClients: topProj, backlog: top10, months: monthRows, bulletin: bulletin?.sections || [],
+    });
+  };
+
   const backlogCols = [
     colText("Client", (r: NonNullable<BacklogSummary["top"]>[number]) => r.client || "—", (r: any) => r.client || ""),
     colText("Description du projet", (r: any) => <span className="truncate max-w-[380px] inline-block align-bottom">{r.affaire || "—"}</span>),
@@ -276,7 +301,7 @@ export const Codir: FC<Props> = () => {
       <FreshnessGuard />
       <Card
         title={<span className="flex items-center gap-3">Bilan hebdomadaire — Projection CAF <Badge tone="gold">S{week}</Badge>{fy && <Badge tone="neutral">FY {fy}</Badge>}</span>}
-        actions={canExport ? <ExportBtn /> : undefined}
+        actions={canExport ? <div className="flex items-center gap-2"><ExportBtn /><PptxBtn build={doPptx} /></div> : undefined}
       >
         {!att ? <div className="py-8 text-center text-faint">Agrégats indisponibles — lance un recalcul (Vue d'ensemble).</div> : (
           <div className="flex flex-col gap-5">
