@@ -162,6 +162,21 @@ describe("alerts", () => {
     expect(byType.raf_incoherent.count).toBeGreaterThanOrEqual(1); // FP/2022/9 (attendu 800 vs raf 300)
     expect(byType.facture_pre_po.count).toBe(1); // FP/2026/1 prePo
   });
+  it("PAS de faux positifs par formatage FP : facture au FP formaté différemment N'EST PAS orpheline/surfacturée (rapport terrain)", () => {
+    // Commande FP/2021/4687 ; factures au MÊME FP canonique mais formaté autrement (zéros de tête,
+    // espaces) et `linked` PÉRIMÉ à false. Elles SONT rattachées → aucune « non rattachée » ; Σ facturé
+    // (500+500=1000) agrégée sur la clé canonique reste < CAS 10000 → aucune surfacturation.
+    const ord = [{ fp: "FP/2021/4687", client: "ACME", bu: "ICT", yearPo: 2021, cas: 10000, raf: 9000 }];
+    const inv = [
+      { fp: "FP/2021/04687", amountHt: 500, linked: false }, // zéro de tête → même FP canonique
+      { fp: "FP 2021 4687", amountHt: 500, linked: false },  // espaces → même FP canonique
+    ];
+    const a = Object.fromEntries(alerts(ord, inv, { bySupplier: [] }, [], 2021, "2021-06-01").map((i) => [i.type, i]));
+    expect(a.factures_non_rattachees).toBeUndefined(); // aucune orpheline (FP canonique présent)
+    expect(a.surfacturation).toBeUndefined();          // Σ par FP canonique < CAS
+    // RAF cohérent : attendu = CAS − Facturé = 10000 − 1000 = 9000 = raf → pas d'incohérence.
+    expect(a.raf_incoherent).toBeUndefined();
+  });
   it("seuil dormantYears configurable (config/alerts)", () => {
     const d0 = alerts(ORDERS, INV, sup, BCL, 2026, "2026-06-01");
     expect(d0.find((x) => x.type === "backlog_dormant").message).toContain("2024"); // défaut fy-2
