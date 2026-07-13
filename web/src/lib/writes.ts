@@ -845,7 +845,8 @@ export async function callAddBcLine(fields: BcLineFields, pdf?: File | null) {
   return res.data as { ok: boolean; id: string; pdfStored: boolean };
 }
 
-export type DedupeStat = { total: number; duplicateGroups: number; duplicates: number };
+export type DedupeSampleGroup = { keep: { id: string; ref: string; source: string | null }; remove: { id: string; ref: string; source: string | null }[] };
+export type DedupeStat = { total: number; duplicateGroups: number; duplicates: number; capped?: boolean; sample?: DedupeSampleGroup[] };
 export type DedupeResult = { ok: boolean; applied: boolean; result: Record<string, DedupeStat> };
 
 /** Dédoublonne (admin) factures/opportunités/BC. `apply:false` = analyse seule (aperçu). */

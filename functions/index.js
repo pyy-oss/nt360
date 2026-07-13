@@ -1959,8 +1959,10 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
   const names = new Set();
   for (const snap of [ord, inv, opp]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
   const threshold = Math.min(0.95, Math.max(0.7, Number(req.data?.threshold) || 0.84));
-  const pairs = findFuzzyDuplicates([...names], threshold);
-  return { ok: true, pairs, scanned: names.size, threshold };
+  // `scanned` = noms EFFECTIVEMENT comparés (après plafond O(n²)) ; `capped` signale une troncature (au-delà,
+  // des quasi-doublons peuvent rester invisibles) — plutôt qu'annoncer names.size en laissant croire à l'exhaustivité.
+  const { pairs, scanned, capped } = findFuzzyDuplicates([...names], threshold);
+  return { ok: true, pairs, scanned, total: names.size, capped, threshold };
 });
 
 // === REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités (filtres + regroupement +
@@ -4045,17 +4047,26 @@ exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 12
 exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
+  const { buildFpAliasResolver } = require("./lib/ids");
   const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
   const only = (Array.isArray(req.data?.collections) ? req.data.collections : Object.keys(KEYS)).filter((c) => KEYS[c]);
   const apply = req.data?.apply !== false; // défaut : applique (l'UI propose une analyse préalable)
+  // MÊME overlay de réconciliation FP (config/fpAliases) que le recompute/Centre de correction → un FP
+  // aliasé est vu comme UN seul deal par le dédup (cohérence détection ↔ action).
+  const canonFp = buildFpAliasResolver((((await db.doc("config/fpAliases").get()).data()) || {}).map || {});
 
   const result = {};
   const toDelete = [];
   for (const col of only) {
-    const snap = await db.collection(col).get();
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Scan BORNÉ : un dédup DESTRUCTIF doit voir TOUS les docs pour choisir le bon représentant. Si la
+    // collection dépasse MAX_SCAN, on REFUSE de dédoublonner (capped:true, aucune suppression) plutôt que
+    // de supprimer sur des données INCOMPLÈTES (un représentant pourrait être dans la partie non lue).
+    const snap = await db.collection(col).limit(MAX_SCAN + 1).get();
+    const { docs: kept, capped } = sliceCapped(snap.docs);
+    if (capped) { result[col] = { total: kept.length, duplicateGroups: 0, duplicates: 0, capped: true, sample: [] }; continue; }
+    const docs = kept.map((d) => { const v = { id: d.id, ...d.data() }; if (v.fp != null && v.fp !== "") v.fp = canonFp(v.fp); return v; });
     const plan = planDedupe(docs, KEYS[col]);
-    result[col] = { total: plan.total, duplicateGroups: plan.duplicateGroups, duplicates: plan.duplicates };
+    result[col] = { total: plan.total, duplicateGroups: plan.duplicateGroups, duplicates: plan.duplicates, capped: false, sample: plan.sample };
     if (apply) plan.remove.forEach((id) => toDelete.push(`${col}/${id}`));
   }
 

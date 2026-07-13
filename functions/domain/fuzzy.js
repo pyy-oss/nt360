@@ -29,20 +29,32 @@ function similarity(a, b) {
   return L === 0 ? 1 : 1 - levenshtein(s1, s2) / L;
 }
 
+const FUZZY_NAME_CAP = 800; // plafond de noms comparés (coût O(n²)) — au-delà, troncature SIGNALÉE
+
+// Radical d'un nom sans suffixe purement NUMÉRIQUE final (« AGENCE 1 » → « AGENCE »). Deux noms qui ne
+// diffèrent QUE par ce suffixe sont des entités DISTINCTES numérotées (agences/lots), PAS des quasi-doublons
+// → on ne les propose pas à la fusion (sinon faux positif « AGENCE 1 » ⇄ « AGENCE 2 »).
+const numberedStem = (s) => String(s || "").toUpperCase().replace(/[\s.\-#°n]*\d+\s*$/i, "").trim();
+
 // Paires de noms QUASI-identiques (similarité ≥ seuil, mais pas identiques) parmi une liste. Comparaison
-// insensible à la casse/espaces. Borné (cap noms + cap résultats) pour maîtriser le coût O(n²).
-function findFuzzyDuplicates(names, threshold = 0.82, cap = 800) {
+// insensible à la casse/espaces. Borné (cap noms + cap résultats) pour maîtriser le coût O(n²). Renvoie
+// { pairs, scanned, capped } : `scanned` = nb de noms EFFECTIVEMENT comparés, `capped` = troncature.
+function findFuzzyDuplicates(names, threshold = 0.82, cap = FUZZY_NAME_CAP) {
   const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
-  const uniq = [...new Set((names || []).map(norm).filter(Boolean))].slice(0, cap);
+  const all = [...new Set((names || []).map(norm).filter(Boolean))];
+  const capped = all.length > cap;
+  const uniq = capped ? all.slice(0, cap) : all;
   const out = [];
   for (let i = 0; i < uniq.length; i++) {
-    const ai = uniq[i].toUpperCase();
+    const ai = uniq[i].toUpperCase(), aStem = numberedStem(uniq[i]);
     for (let j = i + 1; j < uniq.length; j++) {
+      // Entités numérotées distinctes (même radical, suffixe numérique différent) → PAS un doublon.
+      if (aStem && aStem === numberedStem(uniq[j]) && ai !== uniq[j].toUpperCase()) continue;
       const s = similarity(ai, uniq[j].toUpperCase());
       if (s >= threshold && s < 1) out.push({ a: uniq[i], b: uniq[j], score: Math.round(s * 100) / 100 });
     }
   }
-  return out.sort((x, y) => y.score - x.score).slice(0, 200);
+  return { pairs: out.sort((x, y) => y.score - x.score).slice(0, 200), scanned: uniq.length, capped };
 }
 
-module.exports = { levenshtein, similarity, findFuzzyDuplicates };
+module.exports = { levenshtein, similarity, findFuzzyDuplicates, FUZZY_NAME_CAP };
