@@ -21,6 +21,7 @@ ficheAdvance
 ficheReject
 getFiche
 listFiches
+upsertOpsBulletin
 createUser
 curateNews
 curateNewsNow
