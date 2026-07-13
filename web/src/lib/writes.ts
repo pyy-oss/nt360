@@ -52,7 +52,7 @@ export type ConsultantStatus = "active" | "intercontrat" | "conge" | "inactive";
 export type Consultant = {
   id?: string; name: string; email?: string; grade?: ConsultantGrade; bu?: string;
   tjmTarget?: number | null; cjm?: number | null; skills?: string[]; status?: ConsultantStatus;
-  managerUid?: string | null; startDate?: string | null;
+  managerUid?: string | null; startDate?: string | null; clickupUserId?: string | null;
 };
 export async function upsertConsultant(c: Consultant) {
   const res = await httpsCallable(functions, "upsertConsultant")(c);
@@ -148,6 +148,11 @@ export async function timesheetKpis(fromMonth?: string, months?: number) {
 export async function importTimesheets(text: string) {
   const res = await httpsCallable(functions, "importTimesheets")({ text });
   return res.data as { ok: boolean; imported: number; errorCount: number; errors: { line: number; reason: string }[] };
+}
+// Auto-CRA depuis ClickUp (Lot 20) — pré-remplit les jours facturés depuis le temps ClickUp.
+export async function syncClickupTimesheets(months?: number) {
+  const res = await httpsCallable(functions, "syncClickupTimesheets")({ months });
+  return res.data as { ok: boolean; entries: number; upserts: number; mapped: number; months: string[] };
 }
 
 // VIVIER / RECRUTEMENT (Lot 16) — pipeline de candidats + capacité future attendue par BU.

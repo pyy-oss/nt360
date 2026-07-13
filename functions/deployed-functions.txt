@@ -115,6 +115,7 @@ setupClickupWebhook
 submitForApproval
 syncBcFromClickup
 syncClickupCaf
+syncClickupTimesheets
 syncFromClickup
 syncSalesData
 upsertAccount
