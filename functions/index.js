@@ -1234,6 +1234,31 @@ exports.timesheetKpis = onCallG("timesheetKpis", { memoryMiB: 256, timeoutSecond
   return { ok: true, months, plannedOccupancyPct, ...constat };
 });
 
+// HISTORISATION TACE + TENDANCE (Lot 22 « 20/10 DirOps ») — série MENSUELLE du TACE constaté (congés
+// exclus) + occupation, dérivée des CRA (source de vérité) : montre la TENDANCE (le TACE progresse-t-il
+// ou se dégrade-t-il ?) plutôt qu'un seul chiffre agrégé. DÉRIVÉ À LA DEMANDE (pas de snapshot périmé) :
+// corriger un CRA passé met à jour la courbe. Gouverné « overview » comme timesheetKpis (KPI, pas de coût).
+exports.taceHistory = onCallG("taceHistory", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "overview");
+  const { monthsRange } = require("./domain/assignment");
+  const { computeTaceTrend } = require("./domain/taceTrend");
+  const now = new Date();
+  let [cy, cm] = [now.getFullYear(), now.getMonth() + 1];
+  // Par défaut : 12 derniers mois (une tendance a besoin de recul ; bornée à 24 pour rester lisible).
+  const span = Math.min(24, Math.max(3, Number(req.data?.months) || 12));
+  let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
+  const fromYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth) ? req.data.fromMonth : `${sy}-${String(sm).padStart(2, "0")}`;
+  const months = monthsRange(fromYm, `${cy}-${String(cm).padStart(2, "0")}`, 24);
+  const [tSnap, cSnap] = await Promise.all([
+    db.collection("timesheets").limit(MAX_SCAN + 1).get(),
+    db.collection("consultants").select("bu").limit(MAX_SCAN + 1).get(),
+  ]);
+  const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const trend = computeTaceTrend(timesheets, consultants, months);
+  return { ok: true, months, ...trend };
+});
+
 // IMPORT CRA EN MASSE (Lot 19 « 20/10 DirOps ») — colle un tableau (Nom / mois / facturés / congés /
 // internes) pour renseigner plusieurs CRA d'un coup. Résout le nom contre l'annuaire, valide chaque
 // ligne, upsert par batch (id déterministe consultant_mois). Écriture « pipeline ». Audité.

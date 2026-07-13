@@ -5,8 +5,10 @@
 import { useState, useEffect, useCallback, type FC, type ReactNode } from "react";
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
+import { PctLine } from "../design/charts";
+import { T } from "../design/tokens";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, preBillingFromCra, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type PreBilling, type PreBillingLine } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, preBillingFromCra, taceHistory, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type PreBilling, type PreBillingLine, type TaceTrend } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -150,6 +152,35 @@ function ResourcePnlCard() {
         ]} rows={p.rows} />
       </div>
       <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). Donnée <b>confidentielle</b> — visible uniquement avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// Historisation TACE + tendance (Lot 22) : courbe MENSUELLE du TACE constaté (congés exclus) + occupation,
+// dérivée des CRA à la demande (pas de snapshot périmé). Sort du « chiffre unique » : on voit si le TACE
+// progresse ou se dégrade, avec une pente (régression linéaire) et l'écart au mois précédent.
+const dirMeta = (d: string) => d === "up" ? { tone: "emerald" as const, label: "en hausse" } : d === "down" ? { tone: "clay" as const, label: "en baisse" } : { tone: "steel" as const, label: "stable" };
+const taceTone = (v: number | null) => v == null ? undefined : v >= 80 ? "text-emerald" : v >= 70 ? "text-gold" : "text-clay";
+function TaceTrendCard() {
+  const [d, setD] = useState<TaceTrend | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { taceHistory().then(setD).catch(() => setD(null)).finally(() => setLoading(false)); }, []);
+  if (loading) return <Card title="Tendance TACE (12 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
+  if (!d || !d.summary.points) return <Card title="Tendance TACE (12 mois)"><Tip>Saisissez des CRA sur plusieurs mois pour visualiser la <b>tendance</b> du TACE (Taux d'Activité Congés Exclus) et détecter une dérive avant qu'elle ne pèse sur la marge.</Tip></Card>;
+  const s = d.summary;
+  const m = dirMeta(s.direction);
+  const chart = d.series.map((p) => ({ name: monthLabel(p.month), TACE: p.tacePct, Occupation: p.occupancyPct }));
+  return (
+    <Card title="Tendance TACE (12 mois)" actions={
+      <Badge tone={m.tone}>{m.label}{s.slope != null && s.slope !== 0 ? ` · ${s.slope > 0 ? "+" : ""}${s.slope} pt/mois` : ""}</Badge>}>
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {stat("TACE dernier mois", s.latest != null ? `${s.latest}%` : "—", taceTone(s.latest))}
+        {stat("Moyenne période", s.avg != null ? `${s.avg}%` : "—")}
+        {s.delta != null && stat("Δ vs mois préc.", `${s.delta > 0 ? "+" : ""}${s.delta} pt`, s.delta >= 0 ? "text-emerald" : "text-clay")}
+        {stat("Mois renseignés", String(s.points))}
+      </div>
+      <PctLine data={chart} series={[{ key: "TACE", color: T.emerald, name: "TACE" }, { key: "Occupation", color: T.gold, name: "Occupation" }]} />
+      <Tip>TACE = jours <b>facturés</b> ÷ jours ouvrables (<b>congés exclus</b>). Occupation = (facturés + internes) ÷ jours ouvrés. Courbe <b>dérivée des CRA à la demande</b> : corriger un CRA passé met à jour la tendance (pas de snapshot figé). La <b>pente</b> = régression linéaire sur les mois renseignés — au-delà de ±1 pt/mois, on parle de tendance.</Tip>
     </Card>
   );
 }
@@ -507,6 +538,7 @@ export const Staffing: FC<Props> = () => {
       <CapacityPipeline />
       <Vivier canWrite={canWrite} />
       <ConstatCra consultants={rows} canWrite={canWrite} />
+      <TaceTrendCard />
       <Card title="Staffing — ressources" actions={
         <div className="flex items-center gap-1.5">
           {counts.map((c) => <Badge key={c.value} tone={c.tone}>{c.label} · {c.n}</Badge>)}

@@ -206,6 +206,17 @@ export async function preBillingFromCra(fromMonth?: string, months?: number) {
   return res.data as PreBilling;
 }
 
+// HISTORISATION TACE + TENDANCE (Lot 22) — série mensuelle du TACE constaté + occupation, dérivée du CRA.
+export type TacePoint = { month: string; headcount: number; billedDays: number; leaveDays: number; internalDays: number; tacePct: number | null; occupancyPct: number | null; byBu: { bu: string; tacePct: number | null; occupancyPct: number | null; headcount: number }[] };
+export type TaceTrend = {
+  ok: boolean; months: string[]; series: TacePoint[];
+  summary: { latest: number | null; previous: number | null; avg: number | null; delta: number | null; slope: number | null; direction: "up" | "down" | "flat"; points: number };
+};
+export async function taceHistory(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "taceHistory")({ fromMonth, months });
+  return res.data as TaceTrend;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

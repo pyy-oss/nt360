@@ -115,6 +115,34 @@ export function MultiLine({ data, series, h = 240 }: { data: any[]; series: { ke
   );
 }
 
+/** Ligne(s) de POURCENTAGE (0..100) — ex. tendance TACE / occupation. data: [{name, ...keys}].
+ *  Tooltip et axe en %, valeurs nulles reliées (connectNulls) pour ne pas casser la courbe sur un mois vide. */
+export function PctLine({ data, series, h = 220 }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number }) {
+  const tip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    return (
+      <div className="rounded-lg border border-line bg-panel2 px-3 py-2 text-xs shadow-card">
+        <div className="text-muted mb-1">{label}</div>
+        {payload.map((p: any, i: number) => (
+          <div key={i} className="tabnum" style={{ color: p.color || T.ink }}>{p.name}: <b>{p.value == null ? "—" : `${p.value}%`}</b></div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <H h={h} label="Tendance (%)">
+      <LineChart data={data} margin={{ left: -6, right: 8 }}>
+        <CartesianGrid stroke={T.line} vertical={false} />
+        <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={20} />
+        <YAxis {...axis} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} width={40} />
+        <Tooltip cursor={{ stroke: T.line }} content={tip} />
+        {series.length > 1 && <Legend verticalAlign="top" height={30} iconType="line" iconSize={12} wrapperStyle={legendStyle} />}
+        {series.map((s) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={{ r: 2 }} connectNulls />)}
+      </LineChart>
+    </H>
+  );
+}
+
 /** Jauge radiale (0..1) — probabilité d'atteinte. */
 export function Gauge({ value, color = T.gold, h = 200 }: { value: number; color?: string; h?: number }) {
   const v = Math.max(0, Math.min(1, value || 0));

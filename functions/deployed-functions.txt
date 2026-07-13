@@ -33,6 +33,7 @@ listConsultants
 preBillingFromCra
 resourcePnl
 staffingPlan
+taceHistory
 timesheetKpis
 upsertAssignment
 upsertCandidate
