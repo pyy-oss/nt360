@@ -155,7 +155,9 @@ export const Codir: FC<Props> = () => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const fy = cfg?.currentFy;
   const { data: att } = useDocData<AtterrissageSummary>(fy ? `summaries/atterrissage_${fy}` : null);
-  const { data: clients } = useDocData<EntitySummary>("summaries/clients_all");
+  // Top clients ALIGNÉS sur l'exercice courant (comme les KPI atterrissage) : commandes ET forecast
+  // de l'exercice `fy`, et non tous exercices confondus (clients_all).
+  const { data: clients } = useDocData<EntitySummary>(fy ? `summaries/clients_${fy}` : null);
   const { data: backlog } = useDocData<BacklogSummary>("summaries/backlog_fy");
   const { data: trend } = useDocData<BillingTrendSummary>(fy ? `summaries/billingTrend_${fy}` : null);
   const canExport = useCanExport();
