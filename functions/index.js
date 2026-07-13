@@ -1023,6 +1023,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // CORRECTION lui-même (faux positifs signalés au terrain). Non destructif (en mémoire, avant issueDefs).
   const fpAliasMap = ((aliasDoc.data() || {}).map) || {};
   if (Object.keys(fpAliasMap).length) {
+    const { buildFpAliasResolver } = require("./lib/ids"); // require LOCAL (les autres requires de ce module sont fn-scoped) — sinon ReferenceError « buildFpAliasResolver is not defined »
     const canonFp = buildFpAliasResolver(fpAliasMap);
     for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
