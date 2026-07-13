@@ -31,13 +31,16 @@ const sum = (rows, f) => rows.reduce((s, x) => s + (Number(f(x)) || 0), 0);
 // Similarité de libellé : coefficient de recouvrement des mots significatifs (≥ 3 lettres, sans
 // accents/ponctuation). Tolère les longueurs différentes (« RESEAU LAN » ⊂ « DEPLOIEMENT RESEAU LAN »).
 const words = (s) => new Set(noAcc(String(s || "")).replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w.length >= 3));
-function textSim(a, b) {
-  const A = words(a), B = words(b);
+// Recouvrement de deux ENSEMBLES de mots déjà calculés (coefficient inter/min). Séparé de `words` pour
+// précalculer les ensembles UNE fois par cluster et éviter de re-tokeniser à chaque paire dans la boucle
+// de matching O(clusters²) (optimisation perf — cf. Dossier client sur gros clients).
+function overlap(A, B) {
   if (!A.size || !B.size) return 0;
   let inter = 0;
   for (const w of A) if (B.has(w)) inter++;
   return inter / Math.min(A.size, B.size);
 }
+function textSim(a, b) { return overlap(words(a), words(b)); }
 
 /** Regroupe et diagnostique par client. Renvoie un tableau de dossiers triés (écarts d'abord).
  *  @param fpKeyOf  fp brut → clé FP canonique (alias appliqués) ou null si illisible.
@@ -76,7 +79,9 @@ function reconcileClients({ orders = [], invoices = [], opps = [], fpKeyOf, norm
       // se comparent par désignation). On concatène désignation d'opp et affaire/désignation de commande.
       const oppText = c.opps.map((x) => x.designation || "").join(" ");
       const orderText = c.orders.map((x) => x.affaire || x.designation || "").join(" ");
-      return { ...c, oppAmount, orderCas, invoiceTotal, hasOrder, hasInvoice, won, oppText, orderText };
+      // Ensembles de mots PRÉCALCULÉS (une seule tokenisation par cluster) → réutilisés dans la boucle
+      // de matching sans re-parser, ce qui borne le coût sur les clients à nombreux clusters.
+      return { ...c, oppAmount, orderCas, invoiceTotal, hasOrder, hasInvoice, won, oppText, orderText, oppWords: words(oppText), orderWords: words(orderText) };
     });
     // FP d'AUTORITÉ = cluster portant une facture (prioritaire) ou une commande P&L.
     const authoritative = clusters.filter((c) => c.hasInvoice || c.hasOrder);
@@ -93,7 +98,7 @@ function reconcileClients({ orders = [], invoices = [], opps = [], fpKeyOf, norm
         .map((t) => {
           const amt = t.hasInvoice ? t.invoiceTotal : t.orderCas;
           const amountMatch = near(c.oppAmount, amt, tolerancePct);
-          const sim = textSim(c.oppText, t.orderText); // 0 si la cible n'a pas de libellé (facture seule)
+          const sim = overlap(c.oppWords, t.orderWords); // 0 si la cible n'a pas de libellé (facture seule)
           return { t, amountMatch, textMatch: sim >= TEXT_MIN, sim, prio: t.hasInvoice ? 0 : 1, amtDelta: Math.abs(c.oppAmount - amt) };
         })
         .filter((x) => x.amountMatch || x.textMatch);
