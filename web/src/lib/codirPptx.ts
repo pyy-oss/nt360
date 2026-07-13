@@ -53,13 +53,12 @@ export async function exportCodirPptx(d: CodirPptxData): Promise<void> {
   const cl = d.topClients.slice(0, 8);
   if (cl.length) {
     const labels = cl.map((c) => c.name);
-    s1.addText("Top clients — Commandes & Certitudes & Forecast (M XOF)", { x: 0.3, y: 2.45, w: 9.4, h: 0.3, color: C.ink, bold: true, fontSize: 12 });
+    s1.addText("Top clients — Commandes (M XOF)", { x: 0.3, y: 2.45, w: 9.4, h: 0.3, color: C.ink, bold: true, fontSize: 12 });
     s1.addChart(pptx.ChartType.bar, [
-      { name: "Certitudes (CAS)", labels, values: cl.map((c) => M(c.cas)) },
-      { name: "Forecast", labels, values: cl.map((c) => M(c.forecast)) },
+      { name: "Commandes (CAS)", labels, values: cl.map((c) => M(c.cas)) },
     ], {
-      x: 0.3, y: 2.75, w: 9.4, h: 2.7, barDir: "bar", barGrouping: "stacked",
-      chartColors: [C.steel, C.gold], showLegend: true, legendPos: "b", showValue: false,
+      x: 0.3, y: 2.75, w: 9.4, h: 2.7, barDir: "bar",
+      chartColors: [C.steel], showLegend: false, showValue: false,
       catAxisLabelFontSize: 9, valAxisLabelFontSize: 8, showTitle: false,
     });
   }
