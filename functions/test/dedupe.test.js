@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("../domain/dedupe");
+const { planDedupe, invoiceKey, opportunityKey, bcKey, freshMs } = require("../domain/dedupe");
+// Simule un Timestamp Firestore (objet à .toMillis()) — c'est ce que la PROD stocke dans updatedAt.
+const ts = (ms) => ({ toMillis: () => ms });
 
 describe("dédoublonnage — clés métier", () => {
   it("facture : même Numéro (casse/espaces) ⇒ même clé", () => {
@@ -61,5 +63,49 @@ describe("planDedupe — sélection du représentant", () => {
     const plan = planDedupe([{ id: "a", numero: "N1" }, { id: "b", numero: "N2" }], invoiceKey);
     expect(plan.duplicates).toBe(0);
     expect(plan.remove).toEqual([]);
+  });
+  it("FRAÎCHEUR sur Timestamp Firestore (prod) : garde la CORRECTION récente, supprime le doc PÉRIMÉ (audit A1)", () => {
+    // updatedAt = objet Timestamp (.toMillis) comme en prod. Avant correctif : Date.parse(Timestamp)=NaN→0
+    // → fraîcheur morte → départage par complétude → la correction (1 champ vidé) était SUPPRIMÉE.
+    const docs = [
+      { id: "old", numero: "N1", source: "salesData", updatedAt: ts(1000), client: "ACME", am: "X" }, // complet, ancien
+      { id: "new", numero: "n1", source: "salesData", updatedAt: ts(9000), client: "ACME", am: "" },   // corrigé (am vidé), récent
+    ];
+    const plan = planDedupe(docs, invoiceKey);
+    expect(plan.remove).toEqual(["old"]); // on GARDE la version récente « new », pas la périmée « old »
+  });
+  it("SOURCE strictement prioritaire sur la fraîcheur : garde le P&L figé même moins récent (audit A2)", () => {
+    // Somme pondérée : un salesData très récent pouvait dépasser le rang du pnl → perte de la source d'autorité.
+    const docs = [
+      { id: "pnl", numero: "N1", source: "pnl", updatedAt: ts(1000) },        // autorité, ancien
+      { id: "sales", numero: "n1", source: "salesData", updatedAt: ts(9e12) }, // très récent, source inférieure
+    ];
+    const plan = planDedupe(docs, invoiceKey);
+    expect(plan.remove).toEqual(["sales"]); // la source figée (pnl) l'emporte malgré la fraîcheur
+  });
+  it("clé par FP CANONIQUE : deux opps au FP formaté différemment sont fusionnées (audit B1)", () => {
+    expect(opportunityKey({ fp: "FP/2026/7" })).toBe(opportunityKey({ fp: "FP/2026/007" }));
+    const plan = planDedupe([
+      { id: "a", fp: "FP/2026/7", source: "salesData", updatedAt: ts(1) },
+      { id: "b", fp: "FP/2026/007", source: "salesData", updatedAt: ts(2) },
+    ], opportunityKey);
+    expect(plan.duplicateGroups).toBe(1);
+    expect(plan.remove).toEqual(["a"]);
+  });
+  it("aperçu (sample) : chaque groupe expose le représentant gardé + les doublons écartés", () => {
+    const docs = [
+      { id: "a", numero: "N1", source: "pnl", updatedAt: ts(2) },
+      { id: "b", numero: "N1", source: "legacy", updatedAt: ts(1) },
+    ];
+    const plan = planDedupe(docs, invoiceKey);
+    expect(plan.sample).toHaveLength(1);
+    expect(plan.sample[0].keep.id).toBe("a");
+    expect(plan.sample[0].remove.map((r) => r.id)).toEqual(["b"]);
+  });
+  it("freshMs robuste : Timestamp, ISO string, nombre, ou vide", () => {
+    expect(freshMs(ts(1234))).toBe(1234);
+    expect(freshMs("2026-01-02")).toBe(Date.parse("2026-01-02"));
+    expect(freshMs(5000)).toBe(5000);
+    expect(freshMs(undefined)).toBe(0);
   });
 });

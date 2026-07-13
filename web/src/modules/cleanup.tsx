@@ -106,10 +106,27 @@ function DedupeCard() {
             colNum("Total", (r: any) => r.total.toLocaleString("fr-FR")),
             colNum("Groupes en doublon", (r: any) => r.duplicateGroups),
             colNum("À supprimer", (r: any) => r.duplicates),
+            colText("", (r: any) => r.capped ? <Badge tone="clay">volume &gt; plafond — ignoré</Badge> : ""),
           ]} rows={Object.entries(res.result).map(([col, s]) => ({ col, ...s }))} />
+          {/* APERÇU avant suppression (op destructive) : pour chaque groupe, l'enregistrement CONSERVÉ et
+              ceux ÉCARTÉS — l'admin voit exactement ce qui disparaît avant de confirmer. */}
+          {!res.applied && Object.entries(res.result).some(([, s]) => (s.sample || []).length > 0) && (
+            <div className="border-t border-hair pt-2">
+              <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Aperçu — enregistrement conservé ✓ / écartés ✗ (échantillon)</div>
+              <div className="flex flex-col gap-1 max-h-56 overflow-auto">
+                {Object.entries(res.result).flatMap(([col, s]) => (s.sample || []).map((g, i) => (
+                  <div key={`${col}-${i}`} className="text-[12px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-faint">{DEDUPE_LABEL[col] || col}</span>
+                    <span className="text-emerald tabnum">✓ {g.keep.ref}{g.keep.source ? ` · ${g.keep.source}` : ""}</span>
+                    {g.remove.map((d) => <span key={d.id} className="text-clay tabnum">✗ {d.ref}{d.source ? ` · ${d.source}` : ""}</span>)}
+                  </div>
+                )))}
+              </div>
+            </div>
+          )}
           <Tip>{res.applied
-            ? "Doublons supprimés — le meilleur enregistrement de chaque groupe (source figée, plus récent) est conservé ; agrégats recalculés."
-            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — cliquez « Supprimer » pour nettoyer.` : "Aucun doublon détecté."}</Tip>
+            ? "Doublons supprimés — le meilleur enregistrement de chaque groupe (source figée, plus récent, plus complet) est conservé ; agrégats recalculés."
+            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — vérifiez l'aperçu (✓ conservé / ✗ écartés) puis cliquez « Supprimer ». Clé : N° FP canonique (opps/BC), numéro (factures).` : "Aucun doublon détecté."}</Tip>
         </div>
       ) : (
         <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement de chaque groupe.</Tip>
