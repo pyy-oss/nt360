@@ -1205,7 +1205,8 @@ exports.upsertTimesheet = onCallG("upsertTimesheet", { memoryMiB: 256, timeoutSe
   const v = validateTimesheet(req.data);
   if (!v.ok) throw new HttpsError("invalid-argument", v.error);
   const id = assertPlainId(`${v.value.consultantId}_${v.value.month}`, "id CRA"); // 1 CRA par consultant×mois
-  await db.doc(`timesheets/${id}`).set({ ...v.value, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // source « manual » : une saisie manuelle PRIME sur l'auto-CRA ClickUp (qui ne l'écrase plus) — cf. audit F1.
+  await db.doc(`timesheets/${id}`).set({ ...v.value, source: "manual", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_timesheet", module: "pipeline", entity: "timesheet", entityId: id, detail: { consultantId: v.value.consultantId, month: v.value.month, billedDays: v.value.billedDays }, ts: FieldValue.serverTimestamp() });
   return { ok: true, id };
 });
@@ -1332,15 +1333,34 @@ exports.syncClickupTimesheets = onCallG("syncClickupTimesheets", { secrets: [CLI
   try { entries = await clickup.listTimeEntries(token, teamId, startMs, endMs); }
   catch (e) { throw new HttpsError("unavailable", "ClickUp : temps non récupéré — " + ((e && e.message) || e)); }
   const rows = aggregateTime(entries, u2c, monthsSet);
-  let batch = db.batch(), n = 0, upserts = 0;
+  // État existant des CRA sur la fenêtre synchronisée : pour (F1) NE PAS écraser un CRA manuel, et
+  // (F2) REMETTRE À 0 un facturé auto dont toutes les saisies ClickUp ont été supprimées (sinon le
+  // facturé restait figé à l'ancienne valeur → TACE sur-estimé). `in` borné (months ≤ 12).
+  const existing = new Map();
+  (await db.collection("timesheets").where("month", "in", months).get()).forEach((d) => existing.set(d.id, d.data() || {}));
+  const mappedIds = new Set(Object.values(u2c));
+  const aggIds = new Set();
+
+  let batch = db.batch(), n = 0, upserts = 0, skippedManual = 0, reset = 0;
   for (const r of rows) {
     const id = `${r.consultantId}_${r.month}`;
+    aggIds.add(id);
+    const ex = existing.get(id);
+    if (ex && ex.source === "manual") { skippedManual++; continue; } // F1 : le CRA MANUEL prime sur l'auto-CRA
     batch.set(db.doc(`timesheets/${id}`), { consultantId: r.consultantId, month: r.month, billedDays: r.billedDays, source: "clickup", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     upserts++; if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); n = 0; }
   }
+  // F2 : un CRA auto (source clickup) d'un consultant MAPPÉ, dans la fenêtre, ABSENT du nouvel agrégat
+  // = toutes ses saisies ClickUp ont été supprimées → on remet le facturé à 0 (merge, congés préservés).
+  for (const [id, ex] of existing) {
+    if (aggIds.has(id) || ex.source !== "clickup") continue;
+    if (!monthsSet.has(ex.month) || !mappedIds.has(ex.consultantId) || (ex.billedDays || 0) === 0) continue;
+    batch.set(db.doc(`timesheets/${id}`), { billedDays: 0, source: "clickup", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    reset++; if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
   if (n) await batch.commit();
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_clickup_timesheets", module: "pipeline", entity: "timesheet", entityId: "*", detail: { entries: entries.length, upserts, mapped: Object.keys(u2c).length }, ts: FieldValue.serverTimestamp() });
-  return { ok: true, entries: entries.length, upserts, mapped: Object.keys(u2c).length, months };
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_clickup_timesheets", module: "pipeline", entity: "timesheet", entityId: "*", detail: { entries: entries.length, upserts, reset, skippedManual, mapped: Object.keys(u2c).length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, entries: entries.length, upserts, reset, skippedManual, mapped: Object.keys(u2c).length, months };
 });
 
 // === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
@@ -1517,6 +1537,19 @@ async function recordAccessOwd(obj) {
   return cfg[obj] === "private" ? "private" : "public";
 }
 
+// GARDE RBAC PAR ENREGISTREMENT (audit) : sous OWD « private », une mutation ciblée (réattribution,
+// édition, suppression, activité) exige que l'appelant VOIE déjà l'enregistrement (visibleTo). Sans
+// cela, un rôle « pipeline » pouvait, par simple énumération d'id, éditer / SE RÉATTRIBUER (et donc
+// lire) un enregistrement privé hors de son périmètre — les Security Rules cadrent la LECTURE directe
+// mais pas ces callables Admin SDK. Les admins d'enregistrement (direction / droit habilitations) et
+// l'OWD « public » (défaut historique) passent sans restriction. `curData` = doc DÉJÀ chargé.
+async function assertRecordVisible(req, coll, curData) {
+  if (await isRecordAdmin(req)) return;
+  if ((await recordAccessOwd(coll)) !== "private") return;
+  const vt = Array.isArray(curData && curData.visibleTo) ? curData.visibleTo : [];
+  if (!vt.includes(req.auth.uid)) throw new HttpsError("permission-denied", "enregistrement non visible (OWD privé) — action refusée");
+}
+
 // Exige un 2e facteur (MFA) pour les actions sensibles SI config/security.require2fa est actif. Le jeton
 // Firebase porte `firebase.sign_in_second_factor` quand l'utilisateur s'est authentifié avec un second
 // facteur. Direction INCLUSE (pas d'exception : un compte admin est la cible la plus sensible). Par
@@ -1539,7 +1572,11 @@ exports.assignOwner = onCallG("assignOwner", { memoryMiB: 256, timeoutSeconds: 6
   const id = assertPlainId(req.data?.id, "id enregistrement");
   const ownerUid = req.data?.ownerUid ? String(req.data.ownerUid) : null;
   const ref = db.doc(`${coll}/${id}`);
-  if (!(await ref.get()).exists) throw new HttpsError("not-found", "enregistrement introuvable");
+  const cur = await ref.get();
+  if (!cur.exists) throw new HttpsError("not-found", "enregistrement introuvable");
+  // Sous OWD privé, on ne peut réattribuer (et donc s'accorder la lecture de) qu'un enregistrement
+  // qu'on VOIT déjà — sinon self-grant par énumération d'id (audit RBAC : assignOwner le plus impactant).
+  await assertRecordVisible(req, coll, cur.data() || {});
   const usersMap = await loadUsersMap();
   const visibleTo = await visibleToFor(ownerUid, usersMap);
   await ref.set({ ownerUid, visibleTo, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -1742,6 +1779,9 @@ exports.upsertActivity = onCallG("upsertActivity", { memoryMiB: 256, timeoutSeco
   // journalise sur SON enregistrement (sinon, sous OWD « private », il en serait exclu — re-audit).
   const relColl = v.value.relatedType === "account" ? "accounts" : "opportunities";
   const relSnap = await db.doc(`${relColl}/${v.value.relatedId}`).get();
+  // OWD privé : on ne journalise une activité que sur un enregistrement qu'on VOIT déjà — sinon
+  // injection dans la timeline d'un enregistrement hors périmètre (audit RBAC).
+  await assertRecordVisible(req, relColl, relSnap.exists ? (relSnap.data() || {}) : {});
   const relOwner = relSnap.exists ? relSnap.data().ownerUid : null;
   const chains = await Promise.all([visibleToFor(ownerUid), relOwner ? visibleToFor(relOwner) : Promise.resolve([])]);
   const visibleTo = Array.from(new Set([].concat(...chains)));
@@ -2815,7 +2855,7 @@ exports.upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeo
   let prevStage = null;
   if (typeof d.id === "string" && d.id.startsWith("saisie_")) {
     const ps = await db.doc(`opportunities/${d.id}`).get();
-    if (ps.exists) prevStage = Number(ps.data().stage) || 0;
+    if (ps.exists) { await assertRecordVisible(req, "opportunities", ps.data() || {}); prevStage = Number(ps.data().stage) || 0; } // OWD privé : édition dans le périmètre
   }
   // Proba : valeur fournie (0..1) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
   const pr = Number(d.probability);
@@ -2891,6 +2931,7 @@ exports.deleteOpportunity = onCallG("deleteOpportunity", { memoryMiB: 256, timeo
   // sinon une suppression manuelle (bouton « Suppr. ») ne laissait AUCUNE trace de qui/quand/quoi.
   const snap = await db.doc(`opportunities/${id}`).get();
   const cur = snap.exists ? (snap.data() || {}) : {};
+  await assertRecordVisible(req, "opportunities", cur); // OWD privé : pas de suppression hors périmètre
   await db.doc(`opportunities/${id}`).delete();
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "delete_opp", module: "pipeline", entity: "opportunity", entityId: id,
@@ -2919,6 +2960,7 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("not-found", "opportunité introuvable");
   const cur = snap.data() || {};
+  await assertRecordVisible(req, "opportunities", cur); // OWD privé : pas d'édition hors périmètre
   const patch = { updatedAt: FieldValue.serverTimestamp() };
   if (d.fp !== undefined) patch.fp = fpKey(d.fp) || null; // '' → détache le FP
   if (d.closingDate !== undefined) patch.closingDate = d.closingDate || null;
@@ -3257,8 +3299,10 @@ async function buildFpIndex(token, listIds) {
   const uniq = [...new Set(lists.filter(Boolean))];
   const all = [];
   for (const lid of uniq) {
-    try { all.push(...(await clickup.listTasks(token, lid, { includeClosed: true }))); }
-    catch (e) { logger.warn("ClickUp: liste non scannée", { list: lid, msg: e && e.message }); }
+    // PAS de swallow (audit F3) : un scan de liste raté (429/timeout) produirait un index PARTIEL →
+    // une tâche existante non vue → CRÉATION d'un DOUBLON. On laisse l'erreur remonter pour que
+    // l'appelant ANNULE la création plutôt que de dupliquer.
+    all.push(...(await clickup.listTasks(token, lid, { includeClosed: true })));
   }
   return cf.buildTaskFpIndex(all, fpKey);
 }
@@ -3297,8 +3341,13 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
   // formulaire), on l'ADOPTE (mise à jour) au lieu de créer un doublon.
   if (!links[id]) {
-    try { const t = (await buildFpIndex(token, allScanLists(listId)))[fp]; if (t) links[id] = t; }
-    catch (e) { logger.warn("ClickUp: réconciliation impossible", { msg: e && e.message }); }
+    // ANTI-DOUBLON STRICT (audit F3) : si l'on ne peut PAS vérifier l'existant (scan en échec), on
+    // ANNULE plutôt que de risquer un doublon — l'utilisateur réessaie. Un lien déjà connu, lui,
+    // n'a pas besoin de scan (mise à jour sûre).
+    let idx;
+    try { idx = await buildFpIndex(token, allScanLists(listId)); }
+    catch (e) { throw new HttpsError("unavailable", "ClickUp : vérification anti-doublon impossible (liste non scannée) — réessayez. " + ((e && e.message) || "")); }
+    if (idx[fp]) links[id] = idx[fp];
   }
   let r;
   try { r = await pushOrderCore({ token, clickup, cf, safeId, fpKey, listId, members, fieldDefs, statuses, links, order, extra }); }
@@ -3332,7 +3381,11 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("bulk push: champs illisibles", { msg: e && e.message }); }
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("bulk push: statuts illisibles", { msg: e && e.message }); }
   // ANTI-DOUBLON : index des tâches existantes par FP (Opp ID) → adopter au lieu de dupliquer.
-  let fpIndex = {}; try { fpIndex = await buildFpIndex(token, allScanLists(listId)); } catch (e) { logger.warn("bulk push: réconciliation impossible", { msg: e && e.message }); }
+  // Audit F3 : un index PARTIEL (scan en échec) dupliquerait EN MASSE → on ANNULE le push entier
+  // plutôt que de créer des doublons sur toutes les commandes non liées.
+  let fpIndex;
+  try { fpIndex = await buildFpIndex(token, allScanLists(listId)); }
+  catch (e) { throw new HttpsError("unavailable", "ClickUp : index anti-doublon indisponible — push en masse annulé pour éviter les doublons. " + ((e && e.message) || "")); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();
   const newLinks = {};

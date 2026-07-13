@@ -129,9 +129,12 @@ service cloud.firestore {
       allow read: if canSeeRecord('pipeline', 'opportunities');
       allow write: if false;
     }
-    // Historique des transitions d'étape (Lot C) : lisible par qui voit le pipeline ; écrit UNIQUEMENT
-    // par les Cloud Functions (recordOppTransition, Admin SDK) → le funnel n'est pas falsifiable côté client.
-    match /oppHistory/{id} { allow read: if canRead('pipeline'); allow write: if false; }
+    // Historique des transitions d'étape (Lot C) : ACCÈS 100% SERVEUR. Écrit par les Functions
+    // (recordOppTransition, Admin SDK) et relu UNIQUEMENT côté serveur pour bâtir le funnel (summary).
+    // La lecture directe est FERMÉE (read:false) : sous OWD « private », `canRead('pipeline')` aurait
+    // laissé fuir client/AM/montant des transitions d'opps hors périmètre (audit RBAC). Aucun écran ne
+    // lit oppHistory directement (le funnel vient du summary), donc pas de régression.
+    match /oppHistory/{id} { allow read: if false; allow write: if false; }
 
     // Objet COMPTE (Account 360) + CONTACTS rattachés : entité relationnelle stable clé sur le nom
     // client canonique. Lecture par qui voit le carnet (overview) ; écriture via callables (upsert/
