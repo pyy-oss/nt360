@@ -525,6 +525,15 @@ export async function setOrderPm(fp: string, pm: string) {
   await httpsCallable(functions, "setOrderPm")({ fp, pm });
 }
 
+/** Synchronise le montant (CA Signé) entre une commande et son opportunité liée (même N° FP).
+ *  - "toOpp"   : le CAS de la commande (`cas`) devient le montant de l'opp ;
+ *  - "toOrder" : le montant de l'opp devient le CAS de la commande (surcharge persistante) ;
+ *  - "clear"   : retire la surcharge (la commande reprend son CAS P&L/opp/fiche). */
+export async function syncOrderAmount(fp: string, direction: "toOpp" | "toOrder" | "clear", cas?: number) {
+  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 120_000 })({ fp, direction, cas });
+  return res.data as { ok: boolean; fp: string; direction: string; oppId?: string; cas: number | null };
+}
+
 /** Enregistre la table des taux de change (XOF par unité de devise) — admin. Remplace l'ensemble. */
 export async function setFxRates(rates: Record<string, number>) {
   const res = await httpsCallable(functions, "setFxRates")({ rates });

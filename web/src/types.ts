@@ -186,6 +186,7 @@ export interface RelanceBc { asOf?: string; count?: number; total?: number; item
 export interface RelanceJalons { asOf?: string; count?: number; total?: number; items?: JalonItem[]; byResp?: RelanceResp[] }
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; pm?: string | null; cas?: number; raf?: number; facture?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null;
+  casSource?: string | null; // 'override' = CAS surchargé depuis l'opportunité liée (syncOrderAmount)
   // Synchro inverse ClickUp (overlay config/clickupSync) : statut projet + dates (ISO yyyy-mm-dd).
   clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null;
   // Enrichissements ClickUp → app (Lot 4) : priorité, blocage, avancement checklists (%), temps passé (h).

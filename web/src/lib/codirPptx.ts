@@ -39,7 +39,7 @@ export async function exportCodirPptx(d: CodirPptxData): Promise<void> {
     { label: "CAF YTD", value: mMd(d.cafYtd), color: C.emerald },
     { label: "Backlog YTD", value: mMd(d.backlogYtd), color: C.clay },
     { label: "CAF Estimé", value: mMd(d.cafEst), color: C.steel },
-    { label: "CAF Estimé yc Forecast", value: mMd(d.cafEstYcForecast), color: C.gold },
+    { label: "CAF Estimé yc Certitude", value: mMd(d.cafEstYcForecast), color: C.gold },
   ];
   kpis.forEach((k, i) => {
     const x = 0.3 + i * 2.4;
@@ -47,7 +47,7 @@ export async function exportCodirPptx(d: CodirPptxData): Promise<void> {
     s1.addText(k.label, { x: x + 0.1, y: 0.98, w: 2.05, h: 0.3, color: C.muted, fontSize: 9, valign: "middle" });
     s1.addText(k.value, { x: x + 0.1, y: 1.28, w: 2.05, h: 0.5, color: k.color, bold: true, fontSize: 22, valign: "middle" });
   });
-  s1.addText(`Objectif CAF ${d.fy} : ${mMd(d.objectifCaf)}  ·  Atteinte ${d.objectifCaf > 0 ? Math.round((d.cafEstYcForecast / d.objectifCaf) * 100) : 0}%  ·  Forecast annuel (pipeline pondéré) : ${mMd(d.forecast)}`,
+  s1.addText(`Objectif CAF ${d.fy} : ${mMd(d.objectifCaf)}  ·  Atteinte ${d.objectifCaf > 0 ? Math.round((d.cafEstYcForecast / d.objectifCaf) * 100) : 0}%  ·  Certitude annuelle (pipeline pondéré) : ${mMd(d.forecast)}`,
     { x: 0.3, y: 2.05, w: 9.4, h: 0.3, color: C.muted, fontSize: 11, italic: true });
 
   const cl = d.topClients.slice(0, 8);

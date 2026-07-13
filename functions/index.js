@@ -2848,6 +2848,65 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
   return { ok: true, fp, pm: pm || null };
 });
 
+// SYNCHRO DU MONTANT commande ⇄ opportunité (CA Signé), au choix par commande. L'opportunité liée =
+// opp de MÊME N° FP canonique ; priorité à l'opp GAGNÉE (stage 6), sinon l'unique opp (ambiguïté → refus).
+//  • toOpp  (commande → opp)   : pose le CAS de la commande comme montant de l'opp. Écrit l'opp (gouverné
+//    « pipeline »). Refusé si l'opp est chiffrée par lignes (CPQ) — le montant y est dérivé.
+//  • toOrder (opp → commande)  : pose le montant de l'opp comme CAS de la commande, en SURCHARGE
+//    persistante (overlay config/orderCasOverride) qui PRIME sur P&L/fiche et SURVIT aux ré-imports
+//    (comme l'affectation PM / les alias FP). Gouverné « import ».
+//  • clear                     : retire la surcharge (la commande reprend son CAS P&L/opp/fiche).
+exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  const { fpKey } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const { oppWeighted } = require("./domain/mutations");
+  const d = req.data || {};
+  const fp = fpKey(d.fp);
+  const direction = String(d.direction || "");
+  if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
+  if (!["toOpp", "toOrder", "clear"].includes(direction)) throw new HttpsError("invalid-argument", "sens de synchronisation invalide");
+  const id = safeId(fp);
+
+  // Retrait de la surcharge : la commande reprend son CAS d'origine (P&L / opp gagnée / fiche).
+  if (direction === "clear") {
+    await requireWrite(req, "import");
+    await db.doc("config/orderCasOverride").set({ map: { [id]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_clear", module: "import", entity: "order", entityId: id, detail: { fp }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute();
+    return { ok: true, fp, direction, cas: null };
+  }
+
+  // Localise l'opportunité liée (même N° FP canonique) — scan borné. Priorité à l'opp gagnée (stage 6).
+  const snap = await db.collection("opportunities").select("fp", "amount", "stage", "probability", "lines", "visibleTo").limit(MAX_SCAN + 1).get();
+  const matches = sliceCapped(snap.docs).docs.map((x) => ({ id: x.id, ...x.data() })).filter((o) => fpKey(o.fp) === fp);
+  if (!matches.length) throw new HttpsError("not-found", "aucune opportunité liée à ce N° FP");
+  const won = matches.filter((o) => Number(o.stage) === 6);
+  const pool = won.length ? won : matches;
+  if (pool.length > 1) throw new HttpsError("failed-precondition", `${pool.length} opportunités portent ce N° FP — désambiguïsez avant de synchroniser`);
+  const opp = pool[0];
+
+  if (direction === "toOpp") {
+    await requireWrite(req, "pipeline");
+    await assertRecordVisible(req, "opportunities", opp); // OWD privé : pas d'écriture hors périmètre
+    if (Array.isArray(opp.lines) && opp.lines.length) throw new HttpsError("failed-precondition", "opportunité chiffrée par lignes (CPQ) — ajustez les lignes, pas le montant global");
+    const cas = Number(d.cas);
+    if (!Number.isFinite(cas) || cas < 0) throw new HttpsError("invalid-argument", "montant de la commande invalide");
+    await db.doc(`opportunities/${opp.id}`).set({ amount: cas, weighted: oppWeighted(cas, opp.probability || 0), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_amount_to_opp", module: "pipeline", entity: "opportunity", entityId: opp.id, detail: { fp, cas }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute();
+    return { ok: true, fp, direction, oppId: opp.id, cas };
+  }
+
+  // toOrder : montant de l'opp → surcharge CAS de la commande (overlay persistant, prioritaire).
+  await requireWrite(req, "import");
+  const amount = Math.round(Number(opp.amount) || 0);
+  if (!(amount > 0)) throw new HttpsError("failed-precondition", "l'opportunité liée n'a pas de montant exploitable");
+  await db.doc("config/orderCasOverride").set({ map: { [id]: amount }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_set", module: "import", entity: "order", entityId: id, detail: { fp, cas: amount, oppId: opp.id }, ts: FieldValue.serverTimestamp() });
+  await requestRecompute();
+  return { ok: true, fp, direction, oppId: opp.id, cas: amount };
+});
+
 // --- Ajout unitaire d'un BC fournisseur (mode « Unitaire / PDF ») : une ligne bcLines,
 // PDF joint stocké pour traçabilité. ID déterministe (clés métier) ⇒ ré-envoi idempotent. ---
 // --- Saisie / édition d'opportunités (source 'saisie') en onCall : RECALCULE ensuite les
