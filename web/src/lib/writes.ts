@@ -189,6 +189,23 @@ export async function resourcePnl(fromMonth?: string, months?: number) {
   return res.data as ResourcePnl;
 }
 
+// PRÉ-FACTURATION DEPUIS LE CRA (Lot 21) — proposition de facturation = jours facturés × TJM. Lecture seule.
+export type PreBillingLine = {
+  consultantId: string; name: string; bu: string | null; month: string; billedDays: number;
+  tjm: number | null; tjmSource: "assignment" | "target" | "none"; projectFp: string | null;
+  amountHt: number; missingTjm: boolean; ambiguousRate: boolean;
+};
+export type PreBillingGroup = { key: string; billedDays: number; amountHt: number; lines: number; missingTjm: number };
+export type PreBilling = {
+  ok: boolean; months: string[];
+  global: { lines: number; billedDays: number; amountHt: number; missingTjm: number };
+  lines: PreBillingLine[]; byConsultant: PreBillingGroup[]; byBu: PreBillingGroup[]; byMonth: PreBillingGroup[];
+};
+export async function preBillingFromCra(fromMonth?: string, months?: number) {
+  const res = await httpsCallable(functions, "preBillingFromCra")({ fromMonth, months });
+  return res.data as PreBilling;
+}
+
 // SCORING IA EXPLICABLE (Lot 5b) — probabilité de gain des opportunités ouvertes + facteurs.
 export type ScoreFactor = { label: string; impact: number };
 export type ScoredOpp = { id: string; client: string | null; am: string | null; amount: number; stage: number; score: number; band: "hot" | "warm" | "cold"; factors: ScoreFactor[] };

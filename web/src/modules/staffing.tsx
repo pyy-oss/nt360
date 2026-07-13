@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, preBillingFromCra, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type PreBilling, type PreBillingLine } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -150,6 +150,64 @@ function ResourcePnlCard() {
         ]} rows={p.rows} />
       </div>
       <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). Donnée <b>confidentielle</b> — visible uniquement avec le droit « rentabilité ».</Tip>
+    </Card>
+  );
+}
+
+// Pré-facturation depuis le CRA (Lot 21) : proposition de facturation mensuelle = jours FACTURÉS × TJM
+// (taux d'affectation prioritaire, sinon TJM cible). LECTURE SEULE — ne crée aucune facture ; c'est un
+// cadrage exportable (CSV) pour transmettre à la compta et ne rien oublier de facturer. Confidentiel
+// (TJM/CA par ressource) → même porte que le P&L (droit « rentabilité »).
+const tjmSourceLabel = (s: string) => (s === "assignment" ? "affectation" : s === "target" ? "cible" : "—");
+function PreFacturation() {
+  const [p, setP] = useState<PreBilling | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { preBillingFromCra().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, []);
+  if (loading) return <Card title="Pré-facturation (CRA → à facturer)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
+  if (!p || !p.global.lines) return <Card title="Pré-facturation (CRA → à facturer)"><Tip>Saisissez des CRA avec des <b>jours facturés</b> et renseignez le TJM (annuaire ou affectation) : nt360 propose ici le <b>montant HT à facturer</b> par consultant/BU/mois, exportable pour la compta.</Tip></Card>;
+  const g = p.global;
+  return (
+    <Card title="Pré-facturation (CRA → à facturer)">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {stat("À facturer (HT)", money(g.amountHt), "text-emerald")}
+        {stat("Jours facturés", String(g.billedDays))}
+        {stat("Lignes", String(g.lines))}
+        {g.missingTjm > 0 && stat("Sans TJM", String(g.missingTjm), "text-clay")}
+      </div>
+      {p.byBu.length > 1 && (
+        <div className="mt-4 border-t border-hair pt-3">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par BU</div>
+          <Table columns={[
+            colText("BU", (b) => b.key),
+            colNum("Jours", (b) => String(b.billedDays), (b) => b.billedDays),
+            colNum("À facturer (HT)", (b) => money(b.amountHt), (b) => b.amountHt),
+          ]} rows={p.byBu} />
+        </div>
+      )}
+      {p.byMonth.length > 1 && (
+        <div className="mt-3 border-t border-hair pt-2">
+          <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par mois</div>
+          <Table columns={[
+            colText("Mois", (b) => monthLabel(b.key)),
+            colNum("Jours", (b) => String(b.billedDays), (b) => b.billedDays),
+            colNum("À facturer (HT)", (b) => money(b.amountHt), (b) => b.amountHt),
+          ]} rows={p.byMonth} />
+        </div>
+      )}
+      <div className="mt-3 border-t border-hair pt-2">
+        <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Détail (à transmettre à la facturation)</div>
+        <Table colsKey="prefac-lines" columns={[
+          colText("Mois", (r: PreBillingLine) => monthLabel(r.month), (r: PreBillingLine) => r.month),
+          colText("Consultant", (r: PreBillingLine) => r.name),
+          colText("BU", (r: PreBillingLine) => r.bu || "—"),
+          colText("Mission (FP)", (r: PreBillingLine) => r.projectFp || "—"),
+          colNum("Jours fact.", (r: PreBillingLine) => String(r.billedDays), (r: PreBillingLine) => r.billedDays),
+          colNum("TJM", (r: PreBillingLine) => (r.tjm != null ? money(r.tjm) : <Badge tone="clay">à définir</Badge>), (r: PreBillingLine) => r.tjm ?? 0),
+          colText("Source TJM", (r: PreBillingLine) => (r.ambiguousRate ? <Badge tone="gold">cible (taux ambigu)</Badge> : tjmSourceLabel(r.tjmSource))),
+          colNum("À facturer (HT)", (r: PreBillingLine) => money(r.amountHt), (r: PreBillingLine) => r.amountHt),
+        ]} rows={p.lines} />
+      </div>
+      <Tip>Montant HT = jours <b>facturés</b> (CRA) × TJM. Le TJM retenu est celui de l'<b>affectation</b> (taux contractualisé) s'il est connu et non ambigu, sinon le <b>TJM cible</b> de l'annuaire. Vue <b>lecture seule</b> : aucune facture n'est créée — exportez le détail (bouton CSV) pour la compta. Les lignes « à définir » n'ont pas de TJM : à tarifer avant facturation.</Tip>
     </Card>
   );
 }
@@ -445,6 +503,7 @@ export const Staffing: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
       {canMargin && <ResourcePnlCard />}
+      {canMargin && <PreFacturation />}
       <CapacityPipeline />
       <Vivier canWrite={canWrite} />
       <ConstatCra consultants={rows} canWrite={canWrite} />

@@ -1363,6 +1363,34 @@ exports.resourcePnl = onCallG("resourcePnl", { memoryMiB: 256, timeoutSeconds: 6
   return { ok: true, months, ...pnl };
 });
 
+// PRÉ-FACTURATION DEPUIS LE CRA (Lot 21 « 20/10 DirOps ») — proposition de facturation mensuelle =
+// jours FACTURÉS au CRA × TJM (taux d'affectation contractualisé prioritaire, sinon TJM cible annuaire),
+// par consultant / BU / mois. LECTURE SEULE : ne crée aucune facture (les factures restent ingérées
+// depuis la compta) — outil de cadrage pour ne pas oublier de facturer des jours consommés. Gouverné
+// « rentabilite » : expose le TJM et le CA par ressource (même sensibilité que le P&L, sans le coût).
+exports.preBillingFromCra = onCallG("preBillingFromCra", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "rentabilite");
+  const { monthsRange } = require("./domain/assignment");
+  const { computePreBilling } = require("./domain/preBilling");
+  const now = new Date();
+  let [cy, cm] = [now.getFullYear(), now.getMonth() + 1];
+  // Par défaut : les 3 DERNIERS mois (la facturation cadre le passé proche à transmettre à la compta).
+  const span = Math.min(18, Math.max(1, Number(req.data?.months) || 3));
+  let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
+  const fromYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth) ? req.data.fromMonth : `${sy}-${String(sm).padStart(2, "0")}`;
+  const months = monthsRange(fromYm, `${cy}-${String(cm).padStart(2, "0")}`);
+  const [cSnap, tSnap, aSnap] = await Promise.all([
+    db.collection("consultants").select("name", "bu", "tjmTarget").limit(MAX_SCAN + 1).get(),
+    db.collection("timesheets").limit(MAX_SCAN + 1).get(),
+    db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "projectFp", "label", "status").limit(MAX_SCAN + 1).get(),
+  ]);
+  const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const result = computePreBilling(consultants, timesheets, assignments, months);
+  return { ok: true, months, ...result };
+});
+
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
 // `visibleTo` = chaîne ascendante du propriétaire (propriétaire + manager + … , cf. domain/hierarchy).
