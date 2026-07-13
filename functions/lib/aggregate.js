@@ -174,6 +174,9 @@ async function recomputeCore(db, only) {
   // AFFECTATION PMO (Project Manager par commande) : overlay config/orderPm { map: { <safeId(fp)>: pm } },
   // stocké hors des docs commandes → SURVIT au recompute et à un ré-import delta (comme l'annulation).
   const orderPmMap = ((await db.doc("config/orderPm").get()).data() || {}).map || {};
+  // SURCHARGE DU MONTANT (CAS) par commande : overlay config/orderCasOverride { map: { <safeId(fp)>: cas } },
+  // posé via syncOrderAmount (sens opp → commande). PRIME sur P&L/opp/fiche et SURVIT aux ré-imports.
+  const orderCasOverrideMap = ((await db.doc("config/orderCasOverride").get()).data() || {}).map || {};
   // SYNCHRO INVERSE ClickUp : overlay config/clickupSync { map: { <safeId(fp)>: { status, dateCommande,
   // dateContractuelle, dateFinPrev } } } — statut projet + dates remontés de ClickUp, hors docs commandes
   // → SURVIT au recompute (comme l'affectation PMO). Fusionné dans les rows commandes ci-dessous.
@@ -248,6 +251,18 @@ async function recomputeCore(db, only) {
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
   const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
+  // SURCHARGE DU MONTANT (CAS) : la valeur synchronisée depuis l'opportunité PRIME sur P&L/opp/fiche.
+  // Le RAF DÉRIVÉ (rafSource='derive' = CAS − facturé) est recalculé sur le nouveau CAS ; le RAF curaté
+  // (Excel) est conservé tel quel (source de vérité métier). `casSource='override'` trace la surcharge.
+  if (Object.keys(orderCasOverrideMap).length) {
+    for (const o of orders) {
+      const ov = Number(orderCasOverrideMap[safeId(o.fp)]);
+      if (Number.isFinite(ov) && ov >= 0) {
+        o.cas = ov; o.casSource = "override";
+        if (o.rafSource === "derive") o.raf = Math.max(ov - (o.facture || 0), 0);
+      }
+    }
+  }
   // Commandes annulées : écartées de la source de vérité fusionnée → exclues de TOUS les agrégats
   // en aval (carnet, CAS, backlog, byEntity, exposition fournisseurs, rentabilité, qualité).
   if (cancelledOrders.size) for (let i = orders.length - 1; i >= 0; i--) if (cancelledOrders.has(safeId(orders[i].fp))) orders.splice(i, 1);
@@ -512,6 +527,7 @@ async function recomputeCore(db, only) {
       return {
         fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", affaire: o.affaire || null,
         cas: o.cas || 0, raf: o.raf || 0, facture: o.facture || 0, yearPo: o.yearPo || 0, source: o.source || null, pnlSource: o.pnlSource || null,
+        casSource: o.casSource || null, // 'override' = CAS surchargé depuis l'opp (syncOrderAmount)
         pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
         clickupStatus: cu ? (cu.status || null) : null,
         dateCommande: cu ? isoDay(cu.dateCommande) : null,

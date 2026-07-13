@@ -127,6 +127,7 @@ syncBcFromClickup
 syncClickupCaf
 syncClickupTimesheets
 syncFromClickup
+syncOrderAmount
 syncSalesData
 upsertAccount
 upsertActivity

@@ -11,7 +11,7 @@ import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, type BillingMilestone } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
@@ -741,6 +741,50 @@ const isoToMs = (iso: string) => (iso ? new Date(iso).getTime() || undefined : u
 
 // Pousse la commande vers ClickUp via un MODAL qui remplace l'ancien formulaire ClickUp : liste cible
 // (CI/BF/Guinée), données pré-remplies depuis la commande, + champs complémentaires. Ouvre la tâche.
+// Synchro du MONTANT (CA Signé) entre la commande et son opportunité liée (même N° FP), dans un sens
+// ou l'autre. Opp → Commande crée une SURCHARGE persistante (badge •). Commande → Opp écrit l'opp.
+function AmountSyncBtn({ row }: { row: Order }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const run = async (direction: "toOpp" | "toOrder" | "clear") => {
+    if (busy || !row.fp) return;
+    setBusy(true);
+    try {
+      const r = await syncOrderAmount(row.fp, direction, row.cas);
+      toast(direction === "toOpp" ? `Opportunité alignée sur ${money(r.cas || 0)} — recalcul lancé`
+        : direction === "toOrder" ? `Commande surchargée à ${money(r.cas || 0)} depuis l'opp — recalcul lancé`
+        : "Surcharge retirée — recalcul lancé", "ok");
+      setOpen(false);
+    } catch (e: any) {
+      toast("Synchro refusée — " + String(e?.message || e?.code || "").replace(/^functions\//, ""), "err");
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-1 text-xs" title="Synchroniser le montant avec l'opportunité liée">
+        Montant ⇄{row.casSource === "override" && <span className="ml-0.5 text-gold" title="CAS surchargé depuis l'opportunité">•</span>}
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} size="sm"
+        title={<>Montant (CA Signé) — <span className="text-gold">{row.fp}</span></>}
+        actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
+        <div className="flex flex-col gap-3 text-[13px]">
+          <div className="rounded-lg border border-line bg-white/[0.03] px-3 py-2">
+            CA Signé actuel : <b className="text-ink">{money(row.cas)}</b>
+            {row.casSource === "override" && <div className="mt-1 text-[11px] text-gold">Surchargé depuis l'opportunité (prioritaire, survit aux ré-imports P&L).</div>}
+          </div>
+          <p className="text-[12px] text-muted">Aligne le montant avec l'<b>opportunité de même N° FP</b> (priorité à l'opp gagnée).</p>
+          <div className="flex flex-col gap-2">
+            <button type="button" disabled={busy} onClick={() => run("toOpp")} className="btn-ghost !py-1.5 text-xs text-left">Commande → Opportunité <span className="text-faint">· pose le CAS sur l'opp</span></button>
+            <button type="button" disabled={busy} onClick={() => run("toOrder")} className="btn-ghost !py-1.5 text-xs text-left">Opportunité → Commande <span className="text-faint">· surcharge le CAS (persistant)</span></button>
+            {row.casSource === "override" && <button type="button" disabled={busy} onClick={() => run("clear")} className="btn-ghost !py-1.5 text-xs text-left text-clay">Retirer la surcharge</button>}
+          </div>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 function ClickupBtn({ row }: { row: Order }) {
   const [open, setOpen] = useState(false);
   const toast = useToast();
@@ -1054,6 +1098,7 @@ export const OrderList: FC<Props> = () => {
           det(colText("Note ClickUp", (r) => (r.clickupLastComment?.text
             ? <span className="text-[12px]" title={r.clickupLastComment.text}>💬 {r.clickupLastComment.by ? <b>{r.clickupLastComment.by} : </b> : null}{r.clickupLastComment.text.slice(0, 80)}{r.clickupLastComment.text.length > 80 ? "…" : ""}</span>
             : <span className="text-faint">—</span>), (r) => (r.clickupLastComment?.text ? 1 : 0))),
+          ...(canImport ? [colText("Montant", (r: Order) => (r.fp ? <AmountSyncBtn row={r} /> : <span className="text-[11px] text-faint">—</span>), (r) => (r.casSource === "override" ? 1 : 0))] : []),
           ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
             <span className="inline-flex items-center gap-2">
               <ClickupBtn row={r} />

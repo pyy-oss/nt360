@@ -133,8 +133,8 @@ function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: n
   const objPos = (objectif / scale) * 100;
   const seg = [
     { v: facture, color: T.emerald, label: "Facturé YTD" },
-    { v: certitudes, color: T.steel, label: "Certitudes restantes" },
-    { v: forecast, color: T.gold, label: "Forecast pondéré" },
+    { v: certitudes, color: T.steel, label: "Backlog" },
+    { v: forecast, color: T.gold, label: "Certitude (pipeline pondéré)" },
   ].filter((s) => s.v > 0);
   return (
     <div>
@@ -153,7 +153,7 @@ function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: n
         {objectif > 0 && objPos < 99.5 && <div className="absolute -top-1.5 -bottom-1.5 w-px bg-ink/70" style={{ left: `${objPos}%` }} aria-hidden="true" />}
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Certitudes restantes" }, { color: T.gold, label: "Forecast" }]} />
+        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Backlog" }, { color: T.gold, label: "Certitude" }]} />
         {gap > 0
           ? <span className="text-clay">Reste à trouver : <b className="tabnum">{fmt(gap)}</b></span>
           : <span className="text-emerald">Objectif dépassé de <b className="tabnum">{fmt(over)}</b></span>}
@@ -485,8 +485,8 @@ export const Codir: FC<Props> = () => {
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               <StatTile label="CAF YTD" value={fmt(cafYtd)} color={T.emerald} sub="facturé — exercice" />
               <StatTile label="Backlog YTD" value={fmt(backlogYtd)} color={T.clay} sub="RAF glissant" />
-              <StatTile label="CAF Estimé" value={fmt(cafEst)} color={T.steel} sub="certitudes (hors forecast)" />
-              <StatTile label="CAF Estimé yc Forecast" value={fmt(cafEstYcForecast)} color={T.gold} sub={`+ ${fmt(forecast)} pipeline pondéré`} />
+              <StatTile label="CAF Estimé" value={fmt(cafEst)} color={T.steel} sub="acquis : facturé + backlog" />
+              <StatTile label="CAF Estimé yc Certitude" value={fmt(cafEstYcForecast)} color={T.gold} sub={`+ ${fmt(forecast)} certitude (pipeline pondéré)`} />
             </div>
 
             {/* Synthèse « en un coup d'œil » : trajectoire vers l'objectif (décompose l'atteinte par source) */}
@@ -496,8 +496,8 @@ export const Codir: FC<Props> = () => {
 
             {/* Indicateurs dérivés — lecture CODIR (couverture, risque de concentration, rythme requis) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <InsightChip label="Couverture certitudes" value={pctR(couvertureCert)} hint="objectif hors forecast" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
-              <InsightChip label="Poids du forecast" value={pctR(poidsForecast)} hint="dans le CAF projeté" color={T.gold} />
+              <InsightChip label="Couverture acquis" value={pctR(couvertureCert)} hint="facturé + backlog / objectif" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
+              <InsightChip label="Poids de la certitude" value={pctR(poidsForecast)} hint="pipeline pondéré / CAF projeté" color={T.gold} />
               <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
               <InsightChip label="Rythme facturation requis" value={`${fmt(rythmeRequis)}/mois`} hint={`pour l'objectif · ${monthsRemaining} mois · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
             </div>
@@ -505,7 +505,7 @@ export const Codir: FC<Props> = () => {
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
             <div className="grid gap-3 md:grid-cols-2 items-stretch">
               <GaugeCard title={`CA réel vs objectif ${fy || ""}`} value={objectifCaf > 0 ? Math.min(cafYtd / objectifCaf, 1) : 0} num={cafYtd} objectif={objectifCaf} sub="facturé YTD" />
-              <GaugeCard title={`CAF prévisionnel vs objectif ${fy || ""}`} value={atteinte} num={cafEstYcForecast} objectif={objectifCaf} sub="projeté yc forecast" />
+              <GaugeCard title={`CAF prévisionnel vs objectif ${fy || ""}`} value={atteinte} num={cafEstYcForecast} objectif={objectifCaf} sub="projeté yc certitude" />
             </div>
 
             {/* Top clients (commandes réelles, à gauche) + Top 10 backlog (droite). Le forecast par client
