@@ -305,6 +305,20 @@ describe("reporting — facturation/rentabilité/entités", () => {
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
     expect(rows.some((r) => r.isOther)).toBe(false);
   });
+  it("byEntity avec opps → forecast (pondéré ouvert) + projeté par client (Bilan CODIR)", () => {
+    const opps = [
+      { client: "ACME", stage: 3, weighted: 500 }, // ouverte → forecast
+      { client: "ACME", stage: 6, weighted: 999 }, // GAGNÉE → déjà dans le CAS, exclue du forecast
+      { client: "MTN", stage: 2, weighted: 200 },
+    ];
+    const rows = byEntity(ORDERS, INVOICES, (x) => x.client, opps);
+    const acme = rows.find((r) => r.key === "ACME");
+    expect(acme.forecast).toBe(500);              // seule l'opp ouverte
+    expect(acme.projete).toBe(acme.cas + 500);    // CAS (+ certitudes) + forecast
+    // sans opps : projeté = CAS (rétrocompatible).
+    const plain = byEntity(ORDERS, INVOICES, (x) => x.client);
+    expect(plain.find((r) => r.key === "ACME").projete).toBe(plain.find((r) => r.key === "ACME").cas);
+  });
 });
 
 describe("filterInvoices — période", () => {

@@ -101,10 +101,13 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
   };
 }
 
-/** Indicateurs par entité (client ou BU) : CAS/Facturé/Backlog/Marge/%MB (§ modules 11-12). */
-function byEntity(orders, invoices, keyFn) {
+/** Indicateurs par entité (client ou BU) : CAS/Facturé/Backlog/Marge/%MB (§ modules 11-12).
+ *  `opps` (optionnel) ajoute par entité le FORECAST = Σ pondéré des opps OUVERTES (étapes 1..5) et la
+ *  valeur PROJETÉE = CAS + forecast (les opps GAGNÉES sont déjà repliées dans le CAS via mergeCommandes
+ *  → « certitudes »). Alimente le Bilan CODIR (Top clients « Commandes & Certitudes & Forecast »). */
+function byEntity(orders, invoices, keyFn, opps) {
   const m = {};
-  const get = (k) => (m[k] = m[k] || { key: k, cas: 0, facture: 0, backlog: 0, mb: 0 });
+  const get = (k) => (m[k] = m[k] || { key: k, cas: 0, facture: 0, backlog: 0, mb: 0, forecast: 0 });
   for (const o of orders) {
     const a = get(keyFn(o) || "AUTRE");
     a.cas += o.cas || 0;
@@ -115,8 +118,12 @@ function byEntity(orders, invoices, keyFn) {
     const a = get(keyFn(i) || "AUTRE");
     a.facture += i.amountHt || 0;
   }
+  for (const o of opps || []) {
+    const s = Number(o.stage) || 0;
+    if (s >= 1 && s <= 5) get(keyFn(o) || "AUTRE").forecast += o.weighted || 0; // pipeline pondéré ouvert
+  }
   const all = Object.values(m)
-    .map((a) => ({ ...a, pmb: a.cas > 0 ? a.mb / a.cas : 0 }))
+    .map((a) => ({ ...a, pmb: a.cas > 0 ? a.mb / a.cas : 0, projete: a.cas + a.forecast }))
     .sort((x, y) => y.cas - x.cas);
   const CAP = 100;
   if (all.length <= CAP) return all;
@@ -124,9 +131,10 @@ function byEntity(orders, invoices, keyFn) {
   // que abandonnée silencieusement (cf. audit intégral A2 : sinon sommes front sous-évaluées + entités
   // disparues sans trace). `isOther` → le front la rend non cliquable (ce n'est pas une entité réelle).
   const rest = all.slice(CAP);
-  const other = rest.reduce((s, a) => { s.cas += a.cas; s.facture += a.facture; s.backlog += a.backlog; s.mb += a.mb; return s; },
-    { key: `Autres (${rest.length})`, cas: 0, facture: 0, backlog: 0, mb: 0, isOther: true });
+  const other = rest.reduce((s, a) => { s.cas += a.cas; s.facture += a.facture; s.backlog += a.backlog; s.mb += a.mb; s.forecast += a.forecast; return s; },
+    { key: `Autres (${rest.length})`, cas: 0, facture: 0, backlog: 0, mb: 0, forecast: 0, isOther: true });
   other.pmb = other.cas > 0 ? other.mb / other.cas : 0;
+  other.projete = other.cas + other.forecast;
   return [...all.slice(0, CAP), other];
 }
 
