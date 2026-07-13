@@ -346,7 +346,7 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
     uid: req.auth.uid, action: "alert_thresholds", module: "habilitations",
     entity: "config", entityId: "alerts", detail: cfg, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["alerts", "dataQuality"]);
+  await requestRecompute(["alerts", "dataQuality"]);
   return { ok: true, ...cfg };
 });
 
@@ -386,7 +386,7 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, t
     uid: req.auth.uid, action: "projection_config", module: "habilitations",
     entity: "config", entityId: "projection", detail: cfg, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // projection → overview / pipeline / atterrissage / ams : recompute complet
+  await requestRecompute(); // projection → overview / pipeline / atterrissage / ams : recompute complet
   return { ok: true, ...cfg };
 });
 
@@ -409,7 +409,7 @@ exports.setClientAliases = onCallG("setClientAliases", { memoryMiB: 512, timeout
     uid: req.auth.uid, action: "client_aliases", module: "habilitations", entity: "config", entityId: "clientAliases",
     detail: { count: pairs.length }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // les noms canoniques pilotent byClient/concentration/EntityView/atterrissage
+  await requestRecompute(); // les noms canoniques pilotent byClient/concentration/EntityView/atterrissage
   return { ok: true, count: pairs.length };
 });
 
@@ -434,7 +434,7 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
   // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
   // 'relances' inclus (cf. audit cycle de vie) : les jalons pilotent summaries/relancesJalons (jalons échus
   // non facturés) ; sans lui, éditer les jalons ne rafraîchissait pas le plan de relance sur échéances.
-  await recomputeSummaries(["atterrissage", "news", "relances"]);
+  await requestRecompute(["atterrissage", "news", "relances"]);
   return { ok: true, fp, milestones };
 });
 
@@ -469,7 +469,7 @@ exports.upsertObjective = onCallG("upsertObjective", { memoryMiB: 512, timeoutSe
     uid: req.auth.uid, action: "upsert_objective", module: "objectifs", entity: "objective", entityId: id,
     detail: { fiscalYear, scope, scopeValue, targetCas: obj.targetCas, targetInvoiced: obj.targetInvoiced, targetMargin: obj.targetMargin }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["atterrissage", "ams", "pipeline", "news", "alerts"]);
+  await requestRecompute(["atterrissage", "ams", "pipeline", "news", "alerts"]);
   return { ok: true, id };
 });
 
@@ -483,7 +483,7 @@ exports.deleteObjective = onCallG("deleteObjective", { memoryMiB: 256, timeoutSe
     uid: req.auth.uid, action: "delete_objective", module: "objectifs", entity: "objective", entityId: id,
     detail: {}, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["atterrissage", "ams", "pipeline", "news", "alerts"]);
+  await requestRecompute(["atterrissage", "ams", "pipeline", "news", "alerts"]);
   return { ok: true, id };
 });
 
@@ -883,7 +883,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds:
     uid: req.auth.uid, action: "set_invoice_fp", module: "facturation", entity: "invoice", entityId: id,
     detail: { fp }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, id, fp };
 });
 
@@ -920,7 +920,7 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
@@ -2258,7 +2258,7 @@ exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSecond
     // qu'au compte, jamais aux FP/numéros retirés.
     detail: { collection, count: ids.length, ids: ids.slice(0, 500), truncated: ids.length > 500 }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, count: ids.length };
 });
 
@@ -2296,7 +2296,7 @@ exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSe
     uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module: spec.module,
     entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
+  await requestRecompute(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
   return { ok: true, id, cancelled };
 });
 
@@ -2324,7 +2324,7 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds:
     uid: req.auth.uid, action: "patch_invoice", module: "facturation", entity: "invoice", entityId: id,
     detail: { date: patch.date ?? null, dueDate: patch.dueDate ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // date/échéance → échéancier cash, encours âgés, qualité des données
+  await requestRecompute(); // date/échéance → échéancier cash, encours âgés, qualité des données
   return { ok: true, id };
 });
 
@@ -2359,7 +2359,7 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeo
     uid: req.auth.uid, action: "patch_fiche", module: "rentabilite", entity: "projectSheet", entityId: id,
     detail: { fp, saleTotal: m.saleTotal, costTotal: m.costTotal }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
+  await requestRecompute(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
   return { ok: true, fp };
 });
 
@@ -2474,7 +2474,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
     detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null, client: patch.client ?? null, am: patch.am ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, fp: newFp || fp };
 });
 
@@ -2524,7 +2524,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
     uid: req.auth.uid, action: "create_order", module: "overview", entity: "order", entityId: id,
     detail: { fp, cas, source: "manuel" }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, fp };
 });
 
@@ -2547,7 +2547,7 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: pm ? "assign_pm" : "unassign_pm", module: "import", entity: "order", entityId: id,
     detail: { fp, pm: pm || null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries();
+  await requestRecompute();
   return { ok: true, fp, pm: pm || null };
 });
 
@@ -2936,7 +2936,7 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : un BC ajouté alimente immédiatement les décaissements
   // prévisionnels (domain/cashflow) ; sans lui la prévision cash restait périmée jusqu'au recompute complet.
-  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow"]);
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
@@ -3870,7 +3870,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : passer un BC en « facturé » en fait un décaissement
   // (SOA) → la prévision cash doit se rafraîchir tout de suite, pas au prochain recompute complet.
-  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow"]);
   return { ok: true };
 });
 
@@ -3913,7 +3913,7 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
     uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,
     detail: { fp: patch.fp ?? null, amountXof: patch.amountXof ?? null, supplier: patch.supplier ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow"]);
   return { ok: true };
 });
 
@@ -3934,7 +3934,7 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
     uid: req.auth.uid, action: "credit_line", module: "fournisseurs", entity: "creditLine", entityId: id,
     detail: { authorized: patch.authorized, openingBalance: patch.openingBalance ?? null, openingDate: patch.openingDate ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await recomputeSummaries(["suppliers", "alerts"]);
+  await requestRecompute(["suppliers", "alerts"]);
   return { ok: true };
 });
 
