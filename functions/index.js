@@ -1249,6 +1249,47 @@ exports.importTimesheets = onCallG("importTimesheets", { memoryMiB: 256, timeout
   return { ok: true, imported, errorCount: errors.length, errors: errors.slice(0, 20) };
 });
 
+// AUTO-CRA DEPUIS CLICKUP (Lot 20 « 20/10 DirOps ») — pré-remplit les jours FACTURÉS du CRA à partir du
+// temps saisi dans ClickUp (time entries), via la correspondance consultant.clickupUserId. Ferme la
+// dernière limite du Lot 19 (plus de double saisie du facturé). Merge → préserve congés/internes déjà
+// saisis. Best-effort : messages clairs si l'intégration est désactivée / non mappée.
+exports.syncClickupTimesheets = onCallG("syncClickupTimesheets", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "pipeline");
+  const clickup = require("./lib/clickup");
+  const { aggregateTime } = require("./domain/clickupTime");
+  const { monthsRange } = require("./domain/assignment");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const teamId = cfg.teamId || CLICKUP_TEAM;
+  const now = new Date();
+  const cy = now.getFullYear(), cm = now.getMonth() + 1;
+  const span = Math.min(12, Math.max(1, Number(req.data?.months) || 3)); // derniers N mois (défaut 3)
+  let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
+  const months = monthsRange(`${sy}-${String(sm).padStart(2, "0")}`, `${cy}-${String(cm).padStart(2, "0")}`);
+  const monthsSet = new Set(months);
+  const startMs = Date.UTC(sy, sm - 1, 1);
+  const endMs = Date.UTC(cy, cm, 0, 23, 59, 59); // dernier jour du mois courant
+  const cSnap = await db.collection("consultants").select("name", "clickupUserId").limit(MAX_SCAN + 1).get();
+  const u2c = {};
+  for (const d of sliceCapped(cSnap.docs).docs) { const cu = d.data().clickupUserId; if (cu) u2c[String(cu)] = d.id; }
+  if (!Object.keys(u2c).length) throw new HttpsError("failed-precondition", "aucun consultant n'a d'identifiant ClickUp (champ clickupUserId à renseigner)");
+  let entries;
+  try { entries = await clickup.listTimeEntries(token, teamId, startMs, endMs); }
+  catch (e) { throw new HttpsError("unavailable", "ClickUp : temps non récupéré — " + ((e && e.message) || e)); }
+  const rows = aggregateTime(entries, u2c, monthsSet);
+  let batch = db.batch(), n = 0, upserts = 0;
+  for (const r of rows) {
+    const id = `${r.consultantId}_${r.month}`;
+    batch.set(db.doc(`timesheets/${id}`), { consultantId: r.consultantId, month: r.month, billedDays: r.billedDays, source: "clickup", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    upserts++; if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_clickup_timesheets", module: "pipeline", entity: "timesheet", entityId: "*", detail: { entries: entries.length, upserts, mapped: Object.keys(u2c).length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, entries: entries.length, upserts, mapped: Object.keys(u2c).length, months };
+});
+
 // === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
 // (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». listCandidates
 // renvoie le funnel + la capacité future attendue par BU (embauches pondérées par l'avancement).

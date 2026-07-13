@@ -28,6 +28,7 @@ function validateConsultant(d) {
     status: STATUSES.includes(o.status) ? o.status : "active",
     managerUid: o.managerUid ? String(o.managerUid).slice(0, 128) : null,
     startDate: isoOrNull(o.startDate),
+    clickupUserId: o.clickupUserId ? String(o.clickupUserId).slice(0, 40) : null, // mapping auto-CRA (Lot 20)
   };
   return { ok: true, value };
 }

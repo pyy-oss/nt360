@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl } from "../lib/writes";
 import type { Props } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
@@ -44,6 +44,8 @@ function ConsultantForm({ initial, canCost, onDone }: { initial: Consultant; can
         <input className="field !py-1 w-24" type="number" value={f.tjmTarget ?? ""} onChange={(e) => set("tjmTarget", numOrNull(e.target.value))} aria-label="TJM cible" /></label>
       {canCost && <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">CJM (coût)</span>
         <input className="field !py-1 w-24" type="number" value={f.cjm ?? ""} onChange={(e) => set("cjm", numOrNull(e.target.value))} aria-label="Coût jour moyen" /></label>}
+      <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">ID ClickUp</span>
+        <input className="field !py-1 w-28" value={f.clickupUserId || ""} onChange={(e) => set("clickupUserId", e.target.value)} aria-label="Identifiant utilisateur ClickUp" placeholder="ex. 1234567" /></label>
       <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Compétences (virgules)</span>
         <input className="field !py-1 w-full" value={(f.skills || []).join(", ")} onChange={(e) => set("skills", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} aria-label="Compétences" placeholder="Java, AWS, DevOps…" /></label>
       <Busy variant="ghost" label={initial.id ? "Enregistrer" : "Ajouter"} okMsg="Consultant enregistré" errMsg="Enregistrement refusé"
@@ -242,6 +244,8 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
   return (
     <Card title="CRA — activité constatée (6 mois)" actions={canWrite && (
       <div className="flex items-center gap-1.5">
+        <Busy variant="ghost" label="Synchroniser ClickUp" okMsg="Jours facturés synchronisés" errMsg="Synchro ClickUp indisponible"
+          fn={async () => { const r = await syncClickupTimesheets(); await load(); if (!r.upserts) throw new Error(`Aucune entrée exploitable (${r.entries} entrée(s) ClickUp, ${r.mapped} consultant(s) mappé(s)). Renseignez l'« ID ClickUp » des consultants.`); }} />
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setImportPaste(importPaste == null ? "" : null); setAdding(false); }}>{importPaste != null ? "Fermer" : "Importer (coller)"}</button>
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setAdding(!adding); setImportPaste(null); }}>{adding ? "Fermer" : "+ Saisie CRA"}</button>
       </div>)}>

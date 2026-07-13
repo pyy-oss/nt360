@@ -214,4 +214,15 @@ async function deleteWebhook(token, webhookId) {
   return api(token, "DELETE", `/webhook/${webhookId}`);
 }
 
-module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, getListStatuses, setField, getTask, getTaskDetail, listTasks, createSubtask, deleteTask, createChecklist, deleteChecklist, createChecklistItem, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook };
+// --- Entrées de temps (Lot 20 : auto-CRA) ---
+/** Liste les entrées de temps du workspace sur [startMs, endMs] (epoch ms). Renvoie le tableau `data`
+ *  (chaque entrée : { user: { id }, duration (ms), start (ms), ... }). `assignee` optionnel = filtre
+ *  par id(s) utilisateur ClickUp (séparés par virgule). Best-effort : renvoie [] si l'API n'a rien. */
+async function listTimeEntries(token, teamId, startMs, endMs, assignee) {
+  const qs = new URLSearchParams({ start_date: String(startMs), end_date: String(endMs) });
+  if (assignee) qs.set("assignee", String(assignee));
+  const d = await api(token, "GET", `/team/${teamId}/time_entries?${qs.toString()}`);
+  return (d && d.data) || [];
+}
+
+module.exports = { api, retryDelay, listMembers, resolveAssignee, createTask, updateTask, listFields, getListStatuses, setField, getTask, getTaskDetail, listTasks, createSubtask, deleteTask, createChecklist, deleteChecklist, createChecklistItem, listComments, createComment, updateComment, addTag, removeTag, listWebhooks, createWebhook, updateWebhook, deleteWebhook, listTimeEntries };
