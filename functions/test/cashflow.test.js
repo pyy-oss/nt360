@@ -59,6 +59,23 @@ describe("cashflow — échéancier des encaissements", () => {
   });
 });
 
+describe("cashflow — avoirs nettés + RAF borné (audit cash)", () => {
+  it("un AVOIR réduit l'encaissement attendu le plus proche (cohérent AR ↔ CAF)", () => {
+    const cf = cashflow([
+      { client: "ACME", amountHt: 1000, dueDate: "2026-07-15", paid: false },
+      { client: "ACME", amountHt: -400, date: "2026-06-01", paid: false }, // avoir
+    ], [], "2026-07-01", { horizon: 6 });
+    expect(cf.grossAR).toBe(1000);
+    expect(cf.avoirs).toBe(400);
+    expect(cf.totalAR).toBe(600);          // net
+    expect(cf.months[0].ar).toBe(600);     // avoir imputé sur le mois courant (le plus proche)
+  });
+  it("RAF NÉGATIF (commande sur-facturée) ne retranche pas du backlog cash", () => {
+    const cf = cashflow([], [{ raf: 1200 }, { raf: -500 }], "2026-07-01", { horizon: 6 });
+    expect(cf.totalRaf).toBe(1200); // le RAF négatif est borné à 0, pas soustrait
+  });
+});
+
 describe("decaissements — payable = BC FACTURÉ (règle SOA), engagement à part", () => {
   const BC = [
     { amountXof: 1000, status: "facture", etaContrat: "2026-08-15" }, // FACTURÉ → payable mois +1

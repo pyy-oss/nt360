@@ -66,3 +66,19 @@ describe("parseLogistics — identité BC STABLE sur correction du FP (cf. audit
     expect(idOf({ "PO N°": "", "Opp ID": "FP/2024/13" })).not.toBe(idOf({ "PO N°": "", "Opp ID": "FP/2024/14" }));
   });
 });
+
+describe("parseLogistics — dates-sentinelles Excel rejetées (audit ingestion)", () => {
+  it("ETA 1899 (cellule vide Excel) → null : décaissement non positionné en retard extrême", () => {
+    const wb = wbFrom([
+      ["PO N°", "Fournisseur", "Montant", "Devise", "ETA Contrat", "ETA Reel"],
+      ["BC-1899", "KUKUZA", 500000, "XOF", "1899-12-31", "1899-12-30"],
+      ["BC-OK", "CISCO", 100000, "XOF", "2026-09-15", ""],
+    ]);
+    const { rows } = parseLogistics(wb);
+    const bad = byBc(rows, "BC-1899");
+    expect(bad.etaContrat).toBeNull();
+    expect(bad.etaReel).toBeNull();
+    const ok = byBc(rows, "BC-OK");
+    expect(ok.etaContrat).toBe("2026-09-15"); // une date plausible passe
+  });
+});

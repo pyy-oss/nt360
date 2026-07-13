@@ -57,6 +57,14 @@ describe("dates sentinelles Excel rejetées", () => {
     const wb = wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "D Prev": "1899-12-31" }]);
     expect(parseSalesData(wb).rows[0].closingDate).toBeNull();
   });
+  it("FACTURE date/échéance 1899 → null (aging/DSO/cash non faussés)", () => {
+    const wb = wbFromRows("Facturation DF", [
+      { "Numéro": "INV9", "N° FP": "FP/2026/1", "Montant HT": 100, "Date": "1899-12-31", "Date d'échéance": "1899-12-30" },
+    ]);
+    const r = parseFacturationDf(wb).rows[0];
+    expect(r.date).toBeNull();
+    expect(r.dueDate).toBeNull();
+  });
 });
 
 describe("parseFacturationDf → invoices (§17.3)", () => {

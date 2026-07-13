@@ -1,8 +1,11 @@
 // Parseur Facturation DF / Odoo account.move → invoices/{numero} (BUILD_KIT §17.3, §18.3).
 // Module pur (testable). Dé-doublonnage par Numéro ; Σ factures d'un FP = son CAF Total.
 const XLSX = require("xlsx");
-const { fpKey, num, cleanBu, cleanName } = require("../lib/ids");
+const { fpKey, num, cleanBu, cleanName, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, toISO, safeId } = require("../lib/sheets");
+// Rejette les dates-sentinelles (1899/1900/0 des cellules Excel vides) : une échéance « 1899 »
+// classait la facture en retard extrême (DSO/aging/cash faussés). Année hors fenêtre → null.
+const plausibleDate = (iso) => (iso && plausibleYear(String(iso).slice(0, 4)) ? iso : null);
 
 // Choisit la 1re feuille pertinente (feuille "Facturation DF" sinon la 1re).
 function pickSheet(wb) {
@@ -30,8 +33,8 @@ function parseFacturationDf(wb) {
       val(r, keys, "montant ht", "total signe en devises", "total signé en devises", "montant")
     );
     const id = safeId(numero);
-    const date = toISO(val(r, keys, "date de facturation", "date"));
-    const dueDate = toISO(val(r, keys, "date d'échéance", "date d echeance", "echeance", "due date"));
+    const date = plausibleDate(toISO(val(r, keys, "date de facturation", "date")));
+    const dueDate = plausibleDate(toISO(val(r, keys, "date d'échéance", "date d echeance", "echeance", "due date")));
     const paymentStatus = String(val(r, keys, "statut en cours de paiement", "statut de paiement", "statut", "payment") || "").trim();
     const paid = /pay[ée]|régl|encaiss|sold/i.test(paymentStatus); // encaissée ?
     // Signature de LIGNE. Si un identifiant de LIGNE stable est présent (id Odoo de la ligne de

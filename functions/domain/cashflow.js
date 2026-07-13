@@ -12,6 +12,7 @@
 // (« 2026-07 ») est ramenée à la fin du mois : sinon une facture due en juillet serait déclarée
 // en retard dès le 1er juillet. (Comparaison de chaînes uniquement → « -31 » factice sans risque.)
 const cmpDay = (d) => { const s = String(d); return s.length <= 7 ? s + "-31" : s.slice(0, 10); };
+const { splitAvoirs } = require("./receivables"); // netting des avoirs partagé (cohérence AR ↔ cash)
 
 function monthList(asOf, horizon) {
   const [y0, m0] = String(asOf).split("-").map(Number); // m0 : 1..12
@@ -39,7 +40,10 @@ function cashflow(invoices, orders, asOf, opts = {}) {
   const inHorizon = new Set(months);
   const monthOf = (d) => String(d).slice(0, 7);
 
-  const open = (invoices || []).filter((i) => !i.paid && (i.amountHt || 0) > 0);
+  // Ouvertes non nulles ; on isole positives (échéancier) et avoirs (à imputer), nettés PAR CLIENT
+  // (cf. receivables : le CAF nette déjà les avoirs, l'échéancier de cash doit être cohérent).
+  const openAll = (invoices || []).filter((i) => !i.paid && (i.amountHt || 0) !== 0);
+  const { positives: open, avoirsApplied } = splitAvoirs(openAll);
   const ar = Object.fromEntries(months.map((m) => [m, 0]));
   let overdue = 0, overdueCount = 0, beyond = 0;
 
@@ -55,8 +59,17 @@ function cashflow(invoices, orders, asOf, opts = {}) {
     else beyond += amt; // au-delà de l'horizon
   }
 
+  // Imputation des AVOIRS sur les encaissements les PLUS PROCHES (un avoir réduit la prochaine
+  // rentrée du client) : mois de l'horizon dans l'ordre, puis au-delà, puis retard.
+  let credit = avoirsApplied;
+  for (const m of months) { const take = Math.min(credit, ar[m]); ar[m] -= take; credit -= take; if (credit <= 0) break; }
+  if (credit > 0) { const t = Math.min(credit, beyond); beyond -= t; credit -= t; }
+  if (credit > 0) { const t = Math.min(credit, overdue); overdue -= t; credit -= t; }
+
   // Backlog RAF (glissant, toutes commandes ouvertes) étalé également sur l'horizon : INDICATIF.
-  const totalRaf = (orders || []).reduce((s, o) => s + (o.raf || 0), 0);
+  // RAF borné à ≥ 0 : une commande à RAF négatif (sur-facturée, cf. audit) ne doit pas RETRANCHER
+  // du backlog cash prévisionnel (ce serait une rentrée fictive) — elle est signalée ailleurs (qualité).
+  const totalRaf = (orders || []).reduce((s, o) => s + Math.max(o.raf || 0, 0), 0);
   const backlogPerMonth = totalRaf / horizon;
 
   let cumAr = 0;
@@ -65,12 +78,14 @@ function cashflow(invoices, orders, asOf, opts = {}) {
     return { month: m, ar: ar[m], backlog: Math.round(backlogPerMonth), cumulAr: cumAr };
   });
 
-  const totalAR = open.reduce((s, i) => s + (i.amountHt || 0), 0);
+  // AR total NET des avoirs (encours recouvrable) — cohérent avec receivables.totalAR et le CAF.
+  const grossAR = open.reduce((s, i) => s + (i.amountHt || 0), 0);
+  const totalAR = Math.max(grossAR - avoirsApplied, 0);
   const arHorizon = months.reduce((s, m) => s + ar[m], 0);
   return {
     asOf: today, horizon, months: rowsMonthly,
     overdue, overdueCount, beyond,
-    totalAR, arHorizon, totalRaf, openCount: open.length,
+    totalAR, grossAR, avoirs: avoirsApplied, arHorizon, totalRaf, openCount: open.length,
   };
 }
 

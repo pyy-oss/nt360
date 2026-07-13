@@ -46,4 +46,28 @@ describe("receivables — aging + DSO", () => {
     expect(r2.overdue).toBe(0);           // aucune en retard
     expect(r2.buckets.b90p).toBe(0);      // pas de classement arbitraire en > 90 j
   });
+
+  it("AVOIR (facture négative) NETTÉ par client dans l'AR — cohérent avec le CAF (audit cash HIGH)", () => {
+    // Avant : le filtre `> 0` ignorait l'avoir → un client crédité semblait devoir le brut.
+    const r = receivables([
+      { client: "ACME", amountHt: 1000, dueDate: "2026-08-01", paid: false }, // créance
+      { client: "ACME", amountHt: -300, date: "2026-06-01", paid: false },    // avoir à imputer
+      { client: "MTN", amountHt: 500, dueDate: "2026-08-01", paid: false },
+    ], "2026-07-01");
+    expect(r.grossAR).toBe(1500);        // brut âgé inchangé (seaux)
+    expect(r.avoirs).toBe(300);          // avoir imputé
+    expect(r.totalAR).toBe(1200);        // NET = brut − avoir
+    expect(r.topAR.find((c) => c.key === "ACME").value).toBe(700); // net par client
+    expect(r.buckets.notDue).toBe(1500); // l'ancienneté reste sur les factures ouvertes réelles
+  });
+
+  it("AVOIR d'un client n'efface JAMAIS la dette d'un AUTRE (bornage par client)", () => {
+    const r = receivables([
+      { client: "ACME", amountHt: -900, date: "2026-06-01", paid: false }, // avoir > dette ACME
+      { client: "ACME", amountHt: 200, dueDate: "2026-08-01", paid: false },
+      { client: "MTN", amountHt: 500, dueDate: "2026-08-01", paid: false },
+    ], "2026-07-01");
+    expect(r.avoirs).toBe(200);   // borné à la dette ACME (200), pas 900
+    expect(r.totalAR).toBe(500);  // MTN intacte ; ACME nette à 0
+  });
 });

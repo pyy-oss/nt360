@@ -2,8 +2,11 @@
 // Feuille « PO List » : une ligne = un bon de commande fournisseur rattaché à un N° FP.
 // IDs déterministes (hash des clés métier) ⇒ ré-import idempotent (upsert, pas de doublon).
 const XLSX = require("xlsx");
-const { fpKey, num, cleanName, noAcc } = require("../lib/ids");
+const { fpKey, num, cleanName, noAcc, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, toISO, hashId } = require("../lib/sheets");
+// Rejette les dates-sentinelles (1899/1900/0 des cellules vides) : un ETA « 1899 » positionnerait
+// le décaissement en retard extrême (échéancier cash faussé). Année hors fenêtre plausible → null.
+const plausibleDate = (iso) => (iso && plausibleYear(String(iso).slice(0, 4)) ? iso : null);
 const { toXof } = require("../lib/fx");
 
 // Choisit la feuille de suivi des PO (sinon la 1re).
@@ -90,10 +93,10 @@ function parseLogistics(wb) {
       fxSource: conv.fxSource,
       statusRaw,
       status: mapBcStatus(statusRaw),
-      dateIn: toISO(val(r, keys, "date in")),
-      etaContrat: toISO(val(r, keys, "eta contrat")),
-      etaReel: toISO(val(r, keys, "eta reel")),
-      updateDate: toISO(val(r, keys, "update date")),
+      dateIn: plausibleDate(toISO(val(r, keys, "date in"))),
+      etaContrat: plausibleDate(toISO(val(r, keys, "eta contrat"))),
+      etaReel: plausibleDate(toISO(val(r, keys, "eta reel"))),
+      updateDate: plausibleDate(toISO(val(r, keys, "update date"))),
       comment: String(val(r, keys, "commentaires", "comment") || "").trim(),
       source: "logistics",
     };
