@@ -52,8 +52,22 @@ jobs:
           echo "App Check : enforce=true + clé présente — OK"
 
       - name: Configurer l'env des functions
+        env:
+          RECOMPUTE_REGION: ${{ secrets.RECOMPUTE_REGION }}
         run: |
           printf 'IMPORTS_BUCKET=nt360\nAPPCHECK_ENFORCE=%s\nBACKUP_BUCKET=%s\n' "${{ vars.APPCHECK_ENFORCE }}" "${{ vars.BACKUP_BUCKET }}" > functions/.env
+          # RECOMPUTE DIFFÉRÉ (perf des boutons d'action) : si le secret RECOMPUTE_REGION est fourni, on
+          # l'écrit dans l'env runtime → les mutations répondent en ~ms (elles déposent une demande dans
+          # config/recomputeRequest) au lieu d'attendre le recompute, ET index.js exporte alors le trigger
+          # onRecomputeRequest (co-localisé à la base Firestore nommée) qui le traite hors du chemin de
+          # réponse. Absent ⇒ repli synchrone (comportement historique). La valeur doit être une région de
+          # fonction compatible avec la région de la base nt360 (cf. functions/.env.example).
+          if [ -n "$RECOMPUTE_REGION" ]; then
+            printf 'RECOMPUTE_REGION=%s\n' "$RECOMPUTE_REGION" >> functions/.env
+            echo "Recompute différé : RECOMPUTE_REGION=$RECOMPUTE_REGION (trigger onRecomputeRequest inclus au déploiement)."
+          else
+            echo "Recompute différé NON activé (secret RECOMPUTE_REGION absent) — repli synchrone."
+          fi
 
       - name: Write service account
         run: |
@@ -66,6 +80,8 @@ jobs:
       # de l'autre app.
       # Retry : `firebase deploy` renvoie parfois une erreur transitoire à l'upload des fonctions.
       - name: Deploy (hosting dédié + firestore:rules nt360 + nos functions)
+        env:
+          RECOMPUTE_REGION: ${{ secrets.RECOMPUTE_REGION }}
         run: |
           # NB : « storage » est VOLONTAIREMENT hors des cibles --only. Le déploiement des Storage
           # rules interroge le bucket Storage par défaut du projet (firebasestorage.defaultBucket.get) ;
@@ -80,6 +96,13 @@ jobs:
           # une nouvelle fonction non listée fait échouer le check AVANT le merge, pas silencieusement en prod.
           FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
           if [ -z "$FN_TARGETS" ]; then echo "::error::liste de fonctions vide"; exit 1; fi
+          # Trigger du recompute DIFFÉRÉ : env-gated (exporté uniquement si RECOMPUTE_REGION est défini) donc
+          # VOLONTAIREMENT ABSENT de deployed-functions.txt (le garde-fou CI n'attrape que les exports de
+          # premier niveau). Quand la région est fournie, on l'ajoute aux cibles pour qu'il soit déployé EN
+          # MÊME TEMPS que l'env runtime qui l'active — sinon les mutations déposeraient des demandes de
+          # recompute que personne ne traiterait (summaries périmés jusqu'au recompute nocturne). Fail = le
+          # déploiement échoue et l'ANCIENNE version (recompute synchrone) reste en ligne → toujours correct.
+          if [ -n "$RECOMPUTE_REGION" ]; then FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest"; fi
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
