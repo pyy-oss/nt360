@@ -362,10 +362,12 @@ async function recomputeCore(db, only) {
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
   }
   // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
-  // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier PAR DÉFAUT pour les projets SANS
-  // jalons (RAF projetable restant en N réparti uniformément sur 3 jalons jusqu'au 31/12). Ainsi la
-  // tendance couvre TOUT le backlog, pas seulement les projets manuellement échéancés. Aucun effet de
-  // bord sur l'atterrissage (les défauts sont in-year → report N+1 = 0).
+  // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier AUTO-GÉNÉRÉ pour les projets SANS
+  // jalons (RAF projetable restant réparti du mois courant au 31/12, un jalon par mois ; les projets DÉJÀ
+  // en facturation voient leur reliquat concentré sur la fenêtre de clôture sept–nov). Ainsi la tendance
+  // couvre TOUT le backlog sans trou (juillet non nul, sept/nov comblés, pic d'août aplati) et reste
+  // corrigeable manuellement (les jalons saisis priment). Aucun effet de bord sur l'atterrissage (les
+  // défauts sont in-year → report N+1 = 0).
   // Calculée dès qu'atterrissage / news / alertes sont (re)construits : l'Actualité (bulletins de
   // facturation) dépend de `trendForNews` — sinon un recompute partiel « alerts »-only reconstruisait
   // l'Actualité SANS ces bulletins (trendForNews resté null).
@@ -376,7 +378,8 @@ async function recomputeCore(db, only) {
       if (k && milestonesByFp[k]) continue; // FP à jalons saisis → déjà pris en compte
       const bp = projetableBacklog(o);
       if (bp <= 0) continue;
-      trendMilestones.push(...defaultMilestones(bp, asOf, currentFy));
+      // Projet DÉJÀ en facturation (taux > 0) → clôture différée sur sept–nov (fenêtre de clôture).
+      trendMilestones.push(...defaultMilestones(bp, asOf, currentFy, { started: (o.facture || 0) > 0 }));
     }
     const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
     trendForNews = trend;

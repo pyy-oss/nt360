@@ -434,8 +434,12 @@ export const Codir: FC<Props> = () => {
   const top3Share = totalCas > 0 ? top3Cas / totalCas : 0;                      // concentration : poids des 3 premiers clients
   const monthsElapsed = Number(curMonth.slice(5, 7)) || 12;                     // mois calendaires écoulés (janv=1)
   const monthsRemaining = Math.max(12 - monthsElapsed, 0);
-  const gapObj = Math.max(objectifCaf - cafEstYcForecast, 0);                   // reste à trouver vs objectif (yc forecast)
-  const rythmeRequis = monthsRemaining > 0 ? gapObj / monthsRemaining : 0;      // facturation requise / mois pour combler l'écart
+  // Rythme de facturation REQUIS pour atteindre l'objectif = facturation restante (objectif − facturé YTD)
+  // répartie sur les mois restants. On NE crédite PAS le forecast/backlog ici : sinon le rythme requis
+  // tomberait sous le rythme observé et afficherait un faux « on est en avance ». C'est un rythme
+  // d'EXÉCUTION de facturation, directement COMPARABLE au rythme observé (même unité, même base facturée).
+  const gapFacturation = Math.max(objectifCaf - cafYtd, 0);
+  const rythmeRequis = monthsRemaining > 0 ? gapFacturation / monthsRemaining : 0;
   const rythmeActuel = monthsElapsed > 0 ? cafYtd / monthsElapsed : 0;          // rythme de facturation observé / mois
 
   // Export PowerPoint (deck 3 slides : Projection CAF · Backlog & Facturation · Hot Topics). pptxgenjs
@@ -499,7 +503,7 @@ export const Codir: FC<Props> = () => {
               <InsightChip label="Couverture certitudes" value={pctR(couvertureCert)} hint="objectif hors forecast" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
               <InsightChip label="Poids du forecast" value={pctR(poidsForecast)} hint="dans le CAF projeté" color={T.gold} />
               <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
-              <InsightChip label="Rythme requis" value={`${fmt(rythmeRequis)}/mois`} hint={`${monthsRemaining} mois restants · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
+              <InsightChip label="Rythme facturation requis" value={`${fmt(rythmeRequis)}/mois`} hint={`pour l'objectif · ${monthsRemaining} mois · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
             </div>
 
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
