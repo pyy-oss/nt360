@@ -120,6 +120,48 @@ function GaugeCard({ title, value, num, objectif, sub }: { title: string; value:
   );
 }
 
+// Trajectoire vers l'objectif CAF — barre empilée en une lecture : facturé YTD → certitudes restantes
+// → forecast pondéré → reste à trouver (écart), avec repère d'objectif. Décompose l'atteinte affichée
+// par les jauges en ses SOURCES (d'où vient le CAF projeté) — la synthèse « en un coup d'œil » du CODIR.
+function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: number; certitudes: number; forecast: number; objectif: number }) {
+  const projete = facture + certitudes + forecast;
+  const scale = Math.max(objectif, projete, 1);
+  const gap = Math.max(objectif - projete, 0);
+  const over = Math.max(projete - objectif, 0);
+  const atteinte = objectif > 0 ? Math.round((projete / objectif) * 100) : 0;
+  const atteinteColor = atteinte >= 100 ? T.emerald : atteinte >= 60 ? T.gold : T.clay;
+  const objPos = (objectif / scale) * 100;
+  const seg = [
+    { v: facture, color: T.emerald, label: "Facturé YTD" },
+    { v: certitudes, color: T.steel, label: "Certitudes restantes" },
+    { v: forecast, color: T.gold, label: "Forecast pondéré" },
+  ].filter((s) => s.v > 0);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Trajectoire vers l'objectif</span>
+        <span className="text-[12px] text-muted tabnum">
+          <b className="text-ink">{fmt(projete)}</b> / {fmt(objectif)} · <b style={{ color: atteinteColor }}>{atteinte}%</b>
+        </span>
+      </div>
+      <div className="relative">
+        {objectif > 0 && objPos < 99.5 && <span className="absolute -top-3 -translate-x-1/2 text-[9px] font-semibold text-ink whitespace-nowrap" style={{ left: `${objPos}%` }}>Objectif</span>}
+        <div className="flex h-5 w-full overflow-hidden rounded-md bg-panel2">
+          {seg.map((s) => <div key={s.label} className="h-full" style={{ width: `${(s.v / scale) * 100}%`, background: s.color }} title={`${s.label} : ${fmt(s.v)}`} />)}
+          {gap > 0 && <div className="h-full opacity-50" style={{ width: `${(gap / scale) * 100}%`, background: `repeating-linear-gradient(45deg, ${T.faint} 0, ${T.faint} 4px, transparent 4px, transparent 8px)` }} title={`Reste à trouver : ${fmt(gap)}`} />}
+        </div>
+        {objectif > 0 && objPos < 99.5 && <div className="absolute -top-1.5 -bottom-1.5 w-px bg-ink/70" style={{ left: `${objPos}%` }} aria-hidden="true" />}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Certitudes restantes" }, { color: T.gold, label: "Forecast" }]} />
+        {gap > 0
+          ? <span className="text-clay">Reste à trouver : <b className="tabnum">{fmt(gap)}</b></span>
+          : <span className="text-emerald">Objectif dépassé de <b className="tabnum">{fmt(over)}</b></span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Primitives « premium » du Bilan CODIR ────────────────────────────────────
 // Tuile KPI : liseré d'accent haut, grand nombre display, fond subtil, survol relevé.
 function StatTile({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
@@ -423,6 +465,11 @@ export const Codir: FC<Props> = () => {
               <StatTile label="CAF Estimé" value={fmt(cafEst)} color={T.steel} sub="certitudes (hors forecast)" />
               <StatTile label="CAF Estimé yc Forecast" value={fmt(cafEstYcForecast)} color={T.gold} sub={`+ ${fmt(forecast)} pipeline pondéré`} />
             </div>
+
+            {/* Synthèse « en un coup d'œil » : trajectoire vers l'objectif (décompose l'atteinte par source) */}
+            <Panel>
+              <TrajectoryBar facture={cafYtd} certitudes={Math.max(cafEst - cafYtd, 0)} forecast={forecast} objectif={objectifCaf} />
+            </Panel>
 
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
             <div className="grid gap-3 md:grid-cols-2 items-stretch">
