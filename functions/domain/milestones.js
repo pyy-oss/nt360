@@ -36,28 +36,28 @@ function plannedInMonth(list, ym) {
   return normalizeMilestones(list).filter((m) => m.date.slice(0, 7) === String(ym)).reduce((s, m) => s + m.amount, 0);
 }
 
-// Fenêtre de CLÔTURE cible : septembre → novembre (mois 9,10,11). Les projets DÉJÀ en facturation y
-// voient leur reliquat CONCENTRÉ (clôture différée à l'automne) — cf. pilotage CODIR : combler le creux
-// sept–nov et aplatir le pic d'août. Poids appliqué à ces mois vs les autres mois cibles.
-const CLOSE_WINDOW = [9, 10, 11];
-const CLOSE_WEIGHT = 3;
+/** Mois (1-12) d'une date epoch ms, en UTC (déterministe), ou 0 si invalide. */
+function monthOfMs(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const d = new Date(n);
+  return d.getUTCFullYear() * 100 + (d.getUTCMonth() + 1); // AAAAMM pour comparer année+mois
+}
 
-/** Échéancier PAR DÉFAUT / AUTO-GÉNÉRÉ (repli quand un projet n'a pas de jalons saisis) : `amount`
- *  réparti sur les mois de l'exercice, DU MOIS COURANT au 31/12 (inclus — le mois courant reçoit donc
- *  du planifié : le « reste à facturer » du mois en cours n'est plus systématiquement nul), UN jalon
- *  par mois (plus de trous sept/nov). Pondération selon l'avancement :
- *   • projet DÉJÀ en facturation (`opts.started`, taux > 0) → reliquat CONCENTRÉ sur la fenêtre de
- *     clôture sept–nov encore à venir (×CLOSE_WEIGHT) ; jalon léger sur les autres mois → clôture
- *     différée à l'automne, pic d'août aplati ;
- *   • projet PAS ENCORE facturé → réparti UNIFORMÉMENT du mois courant à décembre.
- *  DÉTERMINISTE (aucun aléa) : même entrée → même échéancier — condition sine qua non de la cohérence
- *  des recalculs. Tous les jalons ≤ 31/12 → report N+1 dérivé = 0 (le repli n'introduit aucun report
- *  fantôme). Σ jalons = `amount` (le reliquat d'arrondi tombe sur décembre, dernier mois).
- *  @param {object} [opts] { started?: boolean } — projet déjà en cours de facturation (taux > 0). */
+/** Échéancier PAR DÉFAUT / AUTO-GÉNÉRÉ (repli quand un projet n'a pas de jalons saisis).
+ *  PILOTÉ PAR LA DATE DE CLÔTURE RÉELLE quand elle est connue et À VENIR :
+ *   • `opts.closeMs` (date de fin prév. / contractuelle remontée de ClickUp) tombant dans l'exercice et
+ *     AU MOIS COURANT OU APRÈS → UN seul jalon, tout le RAF sur ce mois de clôture (relief piloté par les
+ *     vraies échéances, pas de lissage artificiel).
+ *   • Sinon (aucune date, date PASSÉE, ou hors exercice) → repli : courbe pondérée NON UNIFORME sur les
+ *     mois du MOIS COURANT au 31/12, poids croissants vers la fin d'année (facturation qui monte vers la
+ *     clôture) → pas de plateaux identiques (« trop linéaire »), pas de trou, mois courant non nul.
+ *  DÉTERMINISTE (aucun aléa) : même entrée → même échéancier — condition sine qua non de la cohérence des
+ *  recalculs. Tous les jalons ≤ 31/12 → report N+1 dérivé = 0. Σ jalons = `amount` (reliquat sur décembre).
+ *  @param {object} [opts] { closeMs?: number } — date de clôture attendue (epoch ms). */
 function defaultMilestones(amount, asOf, fy, opts = {}) {
   const total = Math.round(Number(amount) || 0);
   if (total <= 0) return [];
-  const started = !!(opts && opts.started);
   const y = Number(fy);
   const asOfYm = String(asOf || "").slice(0, 7);
   const asOfYear = asOfYm.slice(0, 4);
@@ -67,12 +67,20 @@ function defaultMilestones(amount, asOf, fy, opts = {}) {
   let firstMonth = asOfYear === String(y) ? curMonth : asOfYear > String(y) ? 12 : 1;
   if (firstMonth < 1) firstMonth = 1;
   if (firstMonth > 12) firstMonth = 12;
+
+  // 1) Date de clôture réelle dans l'exercice et non passée → un seul jalon sur ce mois.
+  const closeYm = monthOfMs(opts && opts.closeMs);          // AAAAMM ou 0
+  if (closeYm) {
+    const cy = Math.floor(closeYm / 100), cm = closeYm % 100;
+    if (cy === y && cm >= firstMonth && cm <= 12) {
+      return normalizeMilestones([{ date: `${y}-${String(cm).padStart(2, "0")}-28`, amount: total }]);
+    }
+  }
+
+  // 2) Repli : courbe pondérée croissante (poids 1,2,3… vers décembre) → non plate, sans trou.
   const months = [];
   for (let m = firstMonth; m <= 12; m++) months.push(m);
-  // Concentration sur la fenêtre de clôture UNIQUEMENT si le projet est démarré ET qu'au moins un mois
-  // sept–nov est encore à venir ; sinon répartition uniforme.
-  const windowOpen = started && CLOSE_WINDOW.some((m) => m >= firstMonth);
-  const weights = months.map((m) => (windowOpen && CLOSE_WINDOW.includes(m) ? CLOSE_WEIGHT : 1));
+  const weights = months.map((_, i) => i + 1);
   const wSum = weights.reduce((s, w) => s + w, 0);
   const lastIdx = months.length - 1;
   const list = [];
@@ -85,4 +93,4 @@ function defaultMilestones(amount, asOf, fy, opts = {}) {
   return normalizeMilestones(list);
 }
 
-module.exports = { MAX_MILESTONES, DEFAULT_MILESTONE_COUNT, CLOSE_WINDOW, CLOSE_WEIGHT, normalizeMilestones, milestonesTotal, reportedFromMilestones, plannedInMonth, defaultMilestones };
+module.exports = { MAX_MILESTONES, DEFAULT_MILESTONE_COUNT, monthOfMs, normalizeMilestones, milestonesTotal, reportedFromMilestones, plannedInMonth, defaultMilestones };
