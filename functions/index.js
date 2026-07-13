@@ -1024,6 +1024,13 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     allOpps = allOpps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
+  // MÊME dédup inter-source que le recompute (aggregate.js) : une opp « saisie » dont le FP est déjà
+  // couvert par une opp importée « salesData » est écartée (la version importée fait foi) → l'assiette des
+  // buckets opp du Centre de correction colle AU COCKPIT/SCORE (plus de sur-comptage opps_doublons /
+  // opps_gagnees_sans_pnl / opps_sans_dprev côté correction). Calculé sur allOpps AVANT le split stale/aged.
+  const { fpKey: fpKeyCorr } = require("./lib/ids");
+  const salesFps = new Set(allOpps.filter((o) => o.source === "salesData" && fpKeyCorr(o.fp)).map((o) => fpKeyCorr(o.fp)));
+  allOpps = allOpps.filter((o) => !(o.source === "saisie" && fpKeyCorr(o.fp) && salesFps.has(fpKeyCorr(o.fp))));
   const thr = thrDoc.data() || {};
   // MÊME préparation des opportunités que le recompute (aggregate.js) → les compteurs du Centre de
   // correction collent au score/aux bulletins : fantômes (stale) et périmées (aged) sont sortis de

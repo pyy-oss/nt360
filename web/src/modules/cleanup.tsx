@@ -23,7 +23,7 @@ import {
 // d'abord d'une correction du N° FP. Aligné sur fpKey côté serveur (validation finale par le callable).
 const looksCanonicalFp = (fp?: string) => /FP\/?\s*\d{4}(?!\d)\/?\s*\d+/i.test(String(fp || ""));
 import { Props, relTime, AnomaliesList } from "./_shared";
-import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
+import type { DataQualitySummary, QualityHistory, AuditLog, BcLine, Opportunity } from "../types";
 
 // Sparkline SVG minimaliste (aucune dépendance chart dans ce chunk admin). points ∈ [0,1].
 function Spark({ points }: { points: number[] }) {
@@ -465,13 +465,13 @@ export const Cleanup: FC<Props> = () => {
   const canPipe = useCan("pipeline") !== "none";
   const isDirection = useClaims().role === "direction"; // le dédoublonnage (callable) est direction-only
   // Collections chargées seulement si le rôle a l'accès (chaque purge est gouvernée par son module).
-  const { rows: invoices } = useCollectionData<Invoice>(canImport ? "invoices" : null);
+  // NB : plus de chargement des `invoices` ici — les factures non rattachées sont traitées au Centre de
+  // correction (prédicat FP CANONIQUE côté serveur), pas via le drapeau `linked` (jamais persisté à
+  // l'ingestion → obsolète : il flaguait à tort quasi toutes les factures). Alignement des vues qualité.
   const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
   const { rows: opps } = useCollectionData<Opportunity>(canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
 
-  const orphanIds = invoices.filter((r) => r.linked !== true && r.id).map((r) => r.id!) as string[];
-  const orphanAmt = invoices.filter((r) => r.linked !== true).reduce((s, r) => s + (r.amountHt || 0), 0);
   // BC NON RÉPARABLES : ni FP, ni fournisseur, ni N° BC, ni montant XOF → ligne vide/fantôme.
   const junkBcIds = bcLines.filter((b) => b.id && !b.fp && !b.supplier && !b.bcNumber && !((b.amountXof || 0) > 0)).map((b) => b.id!) as string[];
   // Opportunités PERDUES (7) / ANNULÉES (9) : mortes. Purge OPTIONNELLE (retire de l'historique).
@@ -505,10 +505,12 @@ export const Cleanup: FC<Props> = () => {
 
       <Card title="Purge en lot">
         <div className="flex flex-col gap-2.5">
-          <PurgeRow label="Factures orphelines" collection="invoices" ids={orphanIds}
-            hint={orphanAmt > 0 ? `${(orphanAmt / 1e9).toFixed(2)} Md non rattachés` : undefined}
-            okMsg="Factures orphelines purgées (recalcul lancé)"
-            confirm={`Supprimer définitivement ${orphanIds.length} facture(s) non rattachée(s) à une commande ? À ne faire que si elles ne doivent pas exister. Un futur import delta les recréera si la source les contient encore.`} />
+          {canImport && (
+            <div className="flex items-center justify-between gap-2 text-[13px] border-b border-hair pb-2">
+              <span className="text-ink">Factures non rattachées</span>
+              <span className="text-faint text-[11px]">→ à traiter au <b className="text-ink">Centre de correction</b> (générer la commande, ou corriger le N° FP) — canonique, sans perte de donnée.</span>
+            </div>
+          )}
           {canBc && (
             <PurgeRow label="BC non réparables" collection="bcLines" ids={junkBcIds}
               hint="ni FP, ni fournisseur, ni N° BC, ni montant"
