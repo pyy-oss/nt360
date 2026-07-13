@@ -15,9 +15,13 @@ import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, u
 import { pct } from "../design/tokens";
 import {
   deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
-  setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder,
+  setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem,
 } from "../lib/writes";
+
+// Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
+// d'abord d'une correction du N° FP. Aligné sur fpKey côté serveur (validation finale par le callable).
+const looksCanonicalFp = (fp?: string) => /FP\/?\s*\d{4}(?!\d)\/?\s*\d+/i.test(String(fp || ""));
 import { Props, relTime, AnomaliesList } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, Invoice, BcLine, Opportunity } from "../types";
 
@@ -206,7 +210,14 @@ function ItemFix({ item, kind, module, canFix, onDone }: { item: CorrectionItem;
   if (kind === "dedupe") return row(<span className="text-faint text-[11px]">→ carte « Doublons » (direction)</span>);
   if (!canFix) return row(<span className="text-faint text-[11px]">correction hors de vos droits</span>);
   switch (kind) {
-    case "fp-invoice": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await setInvoiceFp(item.id!, v.trim()); await done(); }} />);
+    case "fp-invoice": return row(
+      <span className="inline-flex items-center gap-2 flex-wrap">
+        <FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await setInvoiceFp(item.id!, v.trim()); await done(); }} />
+        {looksCanonicalFp(item.fp) && (
+          <Busy variant="ghost" label="→ Générer commande+opp" okMsg="Commande + opp gagnée créées (recalcul lancé)" errMsg="Génération refusée"
+            fn={async () => { await generateFromInvoices({ ids: [item.id!] }); await done(); }} />
+        )}
+      </span>);
     case "date-invoice": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, date: v }); await done(); }} />);
     case "date-invoice-due": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, dueDate: v }); await done(); }} />);
     case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="2026" save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
@@ -232,13 +243,30 @@ function ItemFix({ item, kind, module, canFix, onDone }: { item: CorrectionItem;
 // Bloc d'un type d'anomalie : entête (sévérité, libellé, compte) repliable → lignes corrigeables.
 function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; onDone: () => Promise<void> }) {
   const cfg = FIX[bucket.type] || { kind: "" };
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  // Génération EN MASSE réservée aux factures non rattachées (crée commande + opp gagnée pour TOUTES les
+  // orphelines à FP canonique absentes du carnet — les FP inconnus/déjà présents sont ignorés côté serveur).
+  const bulkGen = bucket.type === "factures_orphelines" && canFix;
   return (
     <div className="border-t border-hair pt-2">
-      <button type="button" onClick={onToggle} className="w-full flex items-center gap-2 text-left text-[13px] py-0.5">
-        <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
-        <span className="text-ink">{bucket.label}</span>
-        <span className="text-faint ml-auto text-[11px]">{open ? "▾ masquer" : "▸ corriger"}</span>
-      </button>
+      <div className="w-full flex items-center gap-2 text-[13px] py-0.5">
+        <button type="button" onClick={onToggle} className="flex items-center gap-2 text-left grow min-w-0">
+          <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
+          <span className="text-ink truncate">{bucket.label}</span>
+        </button>
+        {bulkGen && !confirmBulk && (
+          <button type="button" className="text-gold hover:underline text-[11px] shrink-0" onClick={() => setConfirmBulk(true)} title="Créer commande + opp gagnée pour toutes les factures non rattachées (FP canonique)">⚡ tout générer</button>
+        )}
+        {bulkGen && confirmBulk && (
+          <span className="inline-flex items-center gap-1.5 shrink-0 text-[11px]">
+            <span className="text-faint">Générer toutes ?</span>
+            <Busy variant="ghost" label="Oui" okMsg="Commandes + opps créées (recalcul lancé)" errMsg="Génération refusée"
+              fn={async () => { await generateFromInvoices({ all: true }); setConfirmBulk(false); await onDone(); }} />
+            <button type="button" className="text-faint hover:underline" onClick={() => setConfirmBulk(false)}>non</button>
+          </span>
+        )}
+        <button type="button" onClick={onToggle} className="text-faint text-[11px] shrink-0">{open ? "▾ masquer" : "▸ corriger"}</button>
+      </div>
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5 pl-1">
           {bucket.items.map((it, i) => (

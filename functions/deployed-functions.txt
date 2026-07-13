@@ -23,6 +23,7 @@ activityKpis
 capacityPlan
 dedupe
 deleteActivity
+generateFromInvoices
 deleteAssignment
 deleteCandidate
 deleteClickupWebhook
