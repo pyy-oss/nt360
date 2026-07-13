@@ -997,16 +997,21 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
   // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
   // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
-  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc] = await Promise.all([
-    db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").limit(MAX_SCAN + 1).get(),
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc] = await Promise.all([
+    // raf/designation : requis par mergeCommandes (RAF curaté + affaire) pour aligner l'assiette « commandes ».
+    db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "raf", "designation", "source").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").limit(MAX_SCAN + 1).get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
     db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
     db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
-    db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").limit(MAX_SCAN + 1).get(),
+    // commercial : mergeCommandes en dérive l'AM d'une commande enrichie par fiche (sinon commandes_sans_am divergerait).
+    db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal", "commercial").limit(MAX_SCAN + 1).get(),
     db.doc("config/alerts").get(),
     db.doc("config/fpAliases").get(),
+    db.doc("config/cancelOrders").get(),
+    db.doc("config/cancelInvoices").get(),
+    db.doc("config/orderCasOverride").get(),
   ]);
   let scanCapped = false;
   const withId = (snap) => { const s = sliceCapped(snap.docs); if (s.capped) scanCapped = true; return s.docs.map((d) => ({ id: d.id, ...d.data() })); };
@@ -1018,6 +1023,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // CORRECTION lui-même (faux positifs signalés au terrain). Non destructif (en mémoire, avant issueDefs).
   const fpAliasMap = ((aliasDoc.data() || {}).map) || {};
   if (Object.keys(fpAliasMap).length) {
+    const { buildFpAliasResolver } = require("./lib/ids"); // require LOCAL (les autres requires de ce module sont fn-scoped) — sinon ReferenceError « buildFpAliasResolver is not defined »
     const canonFp = buildFpAliasResolver(fpAliasMap);
     for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
@@ -1042,7 +1048,25 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   const staleOpps = allOpps.filter((o) => o.stale === true);
   const agedOpps = allOpps.filter((o) => o.stale !== true && isAgedLost(o));
   const opps = allOpps.filter((o) => o.stale !== true && !isAgedLost(o));
-  const defs = issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps);
+  // ASSIETTE « COMMANDES » IDENTIQUE AU RECOMPUTE (source unique) : issueDefs doit voir les MÊMES commandes
+  // que le cockpit Qualité / le score, sinon les compteurs divergent (« non cohérent »). On reconstruit donc
+  // la source de vérité fusionnée — mergeCommandes (fiche > opp gagnée > P&L) + surcharge CAS (config/
+  // orderCasOverride) + exclusion des annulations — au lieu de scanner les lignes P&L brutes. Ainsi
+  // surfacturation (CAS fusionné), commandes_sans_client/am (client/AM hérités de l'opp/fiche) et
+  // factures_orphelines (commandes annulées écartées) donnent le MÊME nombre que la Vue Qualité.
+  const { mergeCommandes } = require("./domain/commandes");
+  const { safeId: safeIdCorr } = require("./lib/sheets");
+  const itemsOfCorr = (snap) => new Set((((snap.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
+  const cancelledOrders = itemsOfCorr(cxlODoc), cancelledInvoices = itemsOfCorr(cxlIDoc);
+  const casOverrideMap = ((casOvrDoc.data() || {}).map) || {};
+  const mergedOrders = mergeCommandes(orders, opps, sheets, invoices);
+  for (const o of mergedOrders) {
+    const ov = Number(casOverrideMap[safeIdCorr(o.fp)]);
+    if (Number.isFinite(ov) && ov >= 0) { o.cas = ov; if (o.rafSource === "derive") o.raf = Math.max(ov - (o.facture || 0), 0); }
+  }
+  const ordersDq = mergedOrders.filter((o) => !cancelledOrders.has(safeIdCorr(o.fp)));
+  const invoicesDq = invoices.filter((i) => !cancelledInvoices.has(i.id));
+  const defs = issueDefs(ordersDq, invoicesDq, opps, bcLines, sheets, thr, staleOpps, agedOpps);
   const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
   const buckets = defs.filter((d) => d.records.length).map((d) => ({
     type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),
