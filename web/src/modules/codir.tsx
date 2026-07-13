@@ -6,7 +6,7 @@
 import { useState, type FC } from "react";
 import { Card, Kpi, Badge, Table, money, useToast, EmptyState, colText, colNum } from "../design/components";
 import { Gauge } from "../design/charts";
-import { HBars, FreshnessGuard, type Props } from "./_shared";
+import { FreshnessGuard, type Props } from "./_shared";
 import { T, fmt } from "../design/tokens";
 import { useDocData } from "../lib/hooks";
 import { useCanExport } from "../lib/rbac";
@@ -23,27 +23,77 @@ function isoWeek(d: Date) {
 }
 const MONTH_FR = ["janv", "févr", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"];
 const monthLabel = (ym: string) => { const [, m] = (ym || "").split("-"); return MONTH_FR[Number(m) - 1] || ym; };
+// Montant compact : « 1.39 Md » au-delà du milliard, sinon « 693 M » (aligné sur l'affichage Excel CODIR).
+const mM = (v: number) => (Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(2)} Md` : `${Math.round(v / 1e6)} M`);
 
-// Barres mensuelles maison (projection facturation) — réalisé vs planifié, style sobre du design system.
-function MonthBars({ rows }: { rows: { name: string; realise: number; planifie: number }[] }) {
-  if (!rows.length) return <EmptyState label="Projection de facturation indisponible (dates ClickUp à synchroniser)." />;
-  const mx = Math.max(1, ...rows.map((r) => r.realise + r.planifie));
+// Barre horizontale client — soit simple (CAS), soit EMPILÉE Certitudes (CAS) + Forecast (pipeline
+// pondéré ouvert), pour que la part de forecast soit VISIBLE même petite. Aligné à droite : valeur + delta.
+function ClientBars({ rows, stacked }: { rows: { name: string; cas: number; forecast: number }[]; stacked?: boolean }) {
+  if (!rows.length) return <EmptyState />;
+  const mx = Math.max(1, ...rows.map((r) => r.cas + (stacked ? r.forecast : 0)));
   return (
-    <div className="flex items-end justify-around gap-2 h-[200px] pt-4">
+    <div className="flex flex-col gap-2.5 mt-1">
       {rows.map((r) => {
-        const hR = (r.realise / mx) * 160, hP = (r.planifie / mx) * 160;
+        const total = r.cas + (stacked ? r.forecast : 0);
         return (
-          <div key={r.name} className="flex flex-col items-center gap-1 flex-1 min-w-0">
-            <span className="text-[10px] text-muted tabnum">{fmt(r.realise + r.planifie)}</span>
-            <div className="flex flex-col justify-end" style={{ height: 160 }}>
-              {hP > 0 && <div className="w-7 rounded-t" style={{ height: hP, background: T.gold, opacity: 0.5 }} title={`Planifié ${fmt(r.planifie)}`} />}
-              <div className="w-7" style={{ height: hR, background: T.emerald }} title={`Réalisé ${fmt(r.realise)}`} />
+          <div key={r.name}>
+            <div className="flex justify-between text-[12.5px] mb-1">
+              <span className="truncate max-w-[180px] text-ink">{r.name}</span>
+              <span className="text-muted tabnum">
+                {mM(total)}
+                {stacked && r.forecast > 0 && <span className="text-gold"> · +{mM(r.forecast)} forecast</span>}
+              </span>
             </div>
-            <span className="text-[11px] text-faint">{r.name}</span>
+            <div className="flex h-[8px] w-full overflow-hidden rounded bg-panel2">
+              <div className="h-full" style={{ width: `${Math.max((r.cas / mx) * 100, 1)}%`, background: T.steel }} title={`Commandes (CAS) ${fmt(r.cas)}`} />
+              {stacked && r.forecast > 0 && (
+                <div className="h-full" style={{ width: `${(r.forecast / mx) * 100}%`, background: T.gold }} title={`Forecast pondéré ${fmt(r.forecast)}`} />
+              )}
+            </div>
           </div>
         );
       })}
     </div>
+  );
+}
+
+// Projection facturation mensuelle — barres verticales empilées (réalisé + planifié), valeur en M au
+// sommet, ligne de base, largeur constante. Plus lisible que la version brute.
+function MonthBars({ rows }: { rows: { name: string; realise: number; planifie: number }[] }) {
+  if (!rows.length) return <EmptyState label="Projection de facturation indisponible (dates ClickUp à synchroniser)." />;
+  const mx = Math.max(1, ...rows.map((r) => r.realise + r.planifie));
+  const H = 150;
+  return (
+    <div className="relative pt-5">
+      <div className="flex items-end justify-between gap-1.5 border-b border-line" style={{ height: H + 4 }}>
+        {rows.map((r) => {
+          const total = r.realise + r.planifie;
+          const hR = (r.realise / mx) * H, hP = (r.planifie / mx) * H;
+          return (
+            <div key={r.name} className="group relative flex flex-1 flex-col items-center justify-end min-w-0" style={{ height: H }}>
+              <span className="mb-1 text-[10px] text-muted tabnum whitespace-nowrap">{mM(total)}</span>
+              {hP > 0 && <div className="w-full max-w-[30px] rounded-t-sm" style={{ height: hP, background: T.gold, opacity: 0.45 }} title={`Planifié ${fmt(r.planifie)}`} />}
+              {hR > 0 && <div className={`w-full max-w-[30px] ${hP > 0 ? "" : "rounded-t-sm"}`} style={{ height: hR, background: T.emerald }} title={`Réalisé ${fmt(r.realise)}`} />}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex justify-between gap-1.5">
+        {rows.map((r) => <span key={r.name} className="flex-1 text-center text-[11px] text-faint">{r.name}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function Legend({ items }: { items: { color: string; label: string; faded?: boolean }[] }) {
+  return (
+    <span className="ml-2 inline-flex items-center gap-2 text-[10px] font-normal text-faint">
+      {items.map((it) => (
+        <span key={it.label} className="inline-flex items-center gap-1">
+          <span className="inline-block h-2 w-2.5 rounded-sm" style={{ background: it.color, opacity: it.faded ? 0.45 : 1 }} />{it.label}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -84,10 +134,14 @@ export const Codir: FC<Props> = () => {
   const atteinte = objectifCaf > 0 ? Math.min(cafEstYcForecast / objectifCaf, 1) : 0;
 
   const rows = (clients?.rows || []).filter((r) => !r.isOther);
-  const topCmd = [...rows].sort((a, b) => (b.cas || 0) - (a.cas || 0)).slice(0, 8)
-    .map((r) => ({ name: r.key, v: r.cas || 0, sub: `${Math.round((r.cas || 0) / 1e6)} M` }));
-  const topProj = [...rows].sort((a, b) => (b.projete || b.cas || 0) - (a.projete || a.cas || 0)).slice(0, 8)
-    .map((r) => ({ name: r.key, v: r.projete || r.cas || 0, sub: `${Math.round((r.projete || r.cas || 0) / 1e6)} M` }));
+  // Le champ `forecast`/`projete` est produit par le recompute. S'il est absent (agrégat antérieur à
+  // l'ajout du champ), on le signale plutôt que d'afficher deux graphes identiques (CAS = projeté).
+  const hasForecast = rows.some((r) => r.forecast != null);
+  const barRows = (getVal: (r: typeof rows[number]) => number) =>
+    [...rows].sort((a, b) => getVal(b) - getVal(a)).slice(0, 8)
+      .map((r) => ({ name: r.key, cas: r.cas || 0, forecast: r.forecast || 0 }));
+  const topCmd = barRows((r) => r.cas || 0);
+  const topProj = barRows((r) => r.projete || r.cas || 0);
 
   const top10 = (backlog?.top || []).slice(0, 10);
   const monthRows = (trend?.months || []).map((m) => ({ name: monthLabel(m.month), realise: m.realise || 0, planifie: m.planifie || 0 }))
@@ -107,7 +161,7 @@ export const Codir: FC<Props> = () => {
         actions={canExport ? <ExportBtn /> : undefined}
       >
         {!att ? <div className="py-8 text-center text-faint">Agrégats indisponibles — lance un recalcul (Vue d'ensemble).</div> : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             {/* KPI row */}
             <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
               <Kpi label="CAF YTD" value={fmt(cafYtd)} tone="emerald" sub="facturé — exercice" />
@@ -133,26 +187,29 @@ export const Codir: FC<Props> = () => {
             </div>
 
             {/* Top clients */}
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes (PO value)</div>
-                {topCmd.length ? <HBars rows={topCmd} colorFn={() => T.steel} /> : <EmptyState />}
+                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes <Legend items={[{ color: T.steel, label: "PO value (CAS)" }]} /></div>
+                <ClientBars rows={topCmd} />
               </div>
               <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes &amp; Certitudes &amp; Forecast</div>
-                {topProj.length ? <HBars rows={topProj} colorFn={() => T.gold} /> : <EmptyState />}
+                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes &amp; Certitudes &amp; Forecast
+                  <Legend items={[{ color: T.steel, label: "certitudes" }, { color: T.gold, label: "forecast" }]} /></div>
+                {hasForecast
+                  ? <ClientBars rows={topProj} stacked />
+                  : <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-[12px] text-ink">Le <b>forecast par client</b> sera disponible au prochain recalcul (nouvel indicateur). Lance « Recalculer » (Vue d'ensemble) pour distinguer certitudes et forecast.</div>}
               </div>
             </div>
 
             {/* Top 10 backlog + projection facturation */}
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className="grid gap-4 lg:grid-cols-2">
               <div>
                 <div className="text-[12px] font-semibold text-muted mb-2">Top 10 Backlog</div>
                 <Table columns={backlogCols} rows={top10} colsKey="codir-backlog" empty="Aucun backlog." pageSize={10} />
               </div>
               <div>
                 <div className="text-[12px] font-semibold text-muted mb-2">Projection facturation
-                  <span className="ml-2 text-[10px] font-normal text-faint">▮ réalisé · ▯ planifié</span></div>
+                  <Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} /></div>
                 <MonthBars rows={monthRows} />
               </div>
             </div>
