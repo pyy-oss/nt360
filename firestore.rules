@@ -162,6 +162,10 @@ service cloud.firestore {
       allow read: if false; allow write: if false;
       match /history/{h} { allow read: if false; allow write: if false; }
     }
+    // BULLETIN HEBDO « Hot Topics Opérations » : commentaires / points clés non confidentiels →
+    // lecture par qui voit le cockpit (« overview ») ; écriture 100% par callable (upsertOpsBulletin,
+    // direction/PMO, validé + audité) → write:false côté client.
+    match /opsBulletins/{id} { allow read: if canRead('overview'); allow write: if false; }
     // Clés API (Lot 7) : SECRET (hash de clé) — jamais lisible/écrivable côté client. Gérées par callables
     // (create/revoke/listApiKeys, direction) ; vérifiées côté serveur par l'endpoint HTTP `api`.
     match /apiKeys/{id} { allow read: if false; allow write: if false; }

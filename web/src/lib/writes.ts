@@ -915,3 +915,15 @@ export async function listFiches(filter?: { statut?: string; client?: string; co
   const res = await httpsCallable(functions, "listFiches")(filter || {});
   return res.data as { ok: boolean; fiches: Fiche[]; count: number };
 }
+
+// BULLETIN HEBDO « Hot Topics Opérations » — commentaires / points clés saisis manuellement (Phase 1).
+// Structuré en sections (ex. « Engagements fournisseurs », « Projets ») → puces → sous-puces (2 niveaux).
+export type BulletinItem = { text: string; sub?: string[] };
+export type BulletinSection = { title: string; items: BulletinItem[] };
+export type OpsBulletin = { _id?: string; fy: number; week: number; sections: BulletinSection[]; updatedByName?: string; updatedAt?: unknown };
+
+/** Enregistre le bulletin hebdo d'une semaine d'exercice (direction / PMO). Upsert : 1 par semaine. */
+export async function upsertOpsBulletin(b: { fy: number; week: number; sections: BulletinSection[] }) {
+  const res = await httpsCallable(functions, "upsertOpsBulletin")(b);
+  return res.data as { ok: boolean; id: string };
+}

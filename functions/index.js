@@ -990,22 +990,26 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
 // seule, gouvernée « import » (l'action de correction, elle, reste gouvernée par le module de chaque
 // donnée via son callable dédié : setInvoiceFp, patchOrder, patchOpportunity, patchBcLine…). Plafonné
 // par type pour borner le payload ; `count` reste le total réel. ---
-exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "import");
   const { issueDefs } = require("./domain/dataQuality");
   const { isAgedLost } = require("./domain/oppLifecycle");
+  // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
+  // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
+  // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
   const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc] = await Promise.all([
-    db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").get(),
-    db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
+    db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").limit(MAX_SCAN + 1).get(),
+    db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").limit(MAX_SCAN + 1).get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
     db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
-    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").get(),
-    db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
+    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
+    db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").limit(MAX_SCAN + 1).get(),
     db.doc("config/alerts").get(),
     db.doc("config/fpAliases").get(),
   ]);
-  const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let scanCapped = false;
+  const withId = (snap) => { const s = sliceCapped(snap.docs); if (s.capped) scanCapped = true; return s.docs.map((d) => ({ id: d.id, ...d.data() })); };
   const orders = withId(ordSnap), invoices = withId(invSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
   let allOpps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })); // scan borné (R1)
   // RÉCONCILIATION DE N° FP (overlay config/fpAliases) — MÊME canonisation que le recompute
@@ -1043,7 +1047,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   const buckets = defs.filter((d) => d.records.length).map((d) => ({
     type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),
   }));
-  return { ok: true, buckets, cap: CAP, total: buckets.reduce((s, b) => s + b.count, 0) };
+  return { ok: true, buckets, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
 // === CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes de l'ESN,
@@ -2798,6 +2802,27 @@ exports.listFiches = onCallG("listFiches", { memoryMiB: 256 }, async (req) => {
     .filter((f) => (!cli || String(f.client || "").toUpperCase().includes(cli)) && (!com || String(f.commercial || "").toUpperCase().includes(com)))
     .map((f) => presentFor(f, role, canSee));
   return { ok: true, fiches: rows, count: rows.length };
+});
+
+// --- upsertOpsBulletin : enregistre le BULLETIN HEBDO « Hot Topics Opérations » (commentaires /
+// points clés d'une semaine d'exercice). Saisie MANUELLE (Phase 1) ; réservé à la DIRECTION et au
+// PMO (pilotage opérations). Lecture directe ouverte au niveau « overview » (rules), écriture 100%
+// par ce callable (validé + audité). 1 bulletin par semaine (id déterministe 2026_W27, upsert). ---
+exports.upsertOpsBulletin = onCallG("upsertOpsBulletin", { memoryMiB: 256 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  const role = req.auth.token?.nt360Role;
+  if (role !== "direction" && role !== "pmo") throw new HttpsError("permission-denied", "réservé à la direction / PMO (opérations)");
+  const { validateOpsBulletin, bulletinId } = require("./domain/opsBulletin");
+  const v = validateOpsBulletin(req.data);
+  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+  const id = bulletinId(v.value.fy, v.value.week);
+  await db.doc(`opsBulletins/${id}`).set({
+    ...v.value, _id: id,
+    updatedBy: req.auth.uid, updatedByName: req.auth.token?.name || req.auth.token?.email || req.auth.uid,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_ops_bulletin", module: "overview", entity: "opsBulletin", entityId: id, detail: { fy: v.value.fy, week: v.value.week, sections: v.value.sections.length }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, id };
 });
 
 // --- setOrderPm : affecte un Project Manager (PMO) à une commande. Stocké en OVERLAY
