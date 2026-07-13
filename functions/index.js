@@ -936,34 +936,43 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const { fpKey } = require("./lib/ids");
   const { buildFpAliasResolver } = require("./lib/ids");
   const { buildClientResolver } = require("./domain/clientName");
-  // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits.
+  // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits. Scans BORNÉS
+  // (R1) sur les TROIS collections (orders/invoices désormais plafonnés comme opps) → mémoire/latence
+  // bornées même sur gros volumes ; `capped` remonté pour l'observabilité (troncature JAMAIS silencieuse).
   const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
-    db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").get(),
-    db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").get(),
+    db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").limit(MAX_SCAN + 1).get(),
+    db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").limit(MAX_SCAN + 1).get(),
     db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").limit(MAX_SCAN + 1).get(),
     db.doc("config/fpAliases").get(),
     db.doc("config/clientAliases").get(),
   ]);
-  const orders = ordSnap.docs.map((d) => d.data());
-  const invoices = invSnap.docs.map((d) => d.data());
-  let opps = sliceCapped(oppSnap.docs).docs.map((d) => d.data()); // scan borné (R1)
+  const oCap = sliceCapped(ordSnap.docs), iCap = sliceCapped(invSnap.docs), pCap = sliceCapped(oppSnap.docs);
+  const orders = oCap.docs.map((d) => d.data());
+  const invoices = iCap.docs.map((d) => d.data());
+  let opps = pCap.docs.map((d) => d.data());
+  const capped = oCap.capped || iCap.capped || pCap.capped;
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne rapproche
-  // que les opps de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit).
+  // que les opps de sa ligne hiérarchique (même filtre que les autres lecteurs d'opps — re-audit). Ce
+  // filtrage PAR UTILISATEUR interdit un précalcul en summary partagé (fuite hiérarchique) → calcul à la demande.
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
   const aliasResolver = buildFpAliasResolver((aliasDoc.data() || {}).map || {});
   const fpKeyOf = (fp) => fpKey(aliasResolver(fp)); // clé FP canonique, alias de réconciliation appliqués
   const normClient = buildClientResolver((clientDoc.data() || {}).pairs || []);
-  const dossiers = reconcileClients({ orders, invoices, opps, fpKeyOf, normClient });
 
   const wanted = String(req.data?.client || "").trim();
   if (wanted) {
+    // DÉTAIL : on ne rapproche QUE le client demandé (filtrage AMONT par nom canonique) au lieu de
+    // construire tous les dossiers pour n'en renvoyer qu'un → coût O(1 client) par ouverture de fiche.
     const target = normClient(wanted);
-    const d = dossiers.find((x) => x.client === target) || dossiers.find((x) => x.client === wanted) || null;
-    return { ok: true, mode: "detail", dossier: d };
+    const inClient = (r) => normClient(r.client) === target;
+    const dossiers = reconcileClients({ orders: orders.filter(inClient), invoices: invoices.filter(inClient), opps: opps.filter(inClient), fpKeyOf, normClient });
+    const d = dossiers.find((x) => x.client === target) || dossiers[0] || null;
+    return { ok: true, mode: "detail", dossier: d, capped };
   }
   // Triage : uniquement les clients porteurs d'un écart (proposition ou opp gagnée orpheline), plafonné.
+  const dossiers = reconcileClients({ orders, invoices, opps, fpKeyOf, normClient });
   const clients = dossiers
     .filter((d) => d.suggestions.length || d.wonNoPnl)
     .slice(0, 300)
@@ -971,7 +980,7 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   return {
     ok: true, mode: "list", clients,
     totalSuggestions: dossiers.reduce((s, d) => s + d.suggestions.length, 0),
-    scanned: { orders: orders.length, invoices: invoices.length, opps: opps.length },
+    scanned: { orders: orders.length, invoices: invoices.length, opps: opps.length }, capped,
   };
 });
 
