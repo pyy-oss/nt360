@@ -15,6 +15,12 @@ clickupWebhook
 correctionQueue
 createApiKey
 createOrder
+createFiche
+updateFiche
+ficheAdvance
+ficheReject
+getFiche
+listFiches
 createUser
 curateNews
 curateNewsNow

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 const FA = require("../domain/ficheAffaire");
-const { computeFinancials, stepErrors, advance, reject, presentFor, toProjectSheet, toBcLines, normalizeFiche, CIRCUIT } = FA;
+const { computeFinancials, stepErrors, advance, reject, applyEdit, presentFor, toProjectSheet, toBcLines, normalizeFiche, CIRCUIT } = FA;
 
 // Acteurs par rôle nt360 (mapping du circuit : AC=assistante, DC=commercial_dir, DRO=pmo,
 // DGA/CDGDF=direction, PM=lecture).
@@ -143,6 +143,33 @@ describe("rejet", () => {
     const done = { ...baseFiche(), terminee: true, statut: "validee", etape_courante: 5 };
     expect(advance(done, CDGDF, { nowMs: 1 }).ok).toBe(false);
     expect(reject(done, CDGDF, { nowMs: 1, commentaire: "x" }).ok).toBe(false);
+  });
+});
+
+describe("édition — verrou des champs par étape / rôle", () => {
+  it("étape 0 : l'AC édite l'entête et les lignes, jamais le N° de DC", () => {
+    const f = { ...baseFiche(), numero_dc: null };
+    const r = applyEdit(f, { affaire: "Nouveau libellé", numero_dc: "PIRATE", prix_vente_ht_xof: 999 }, "assistante");
+    expect(r.ok).toBe(true);
+    expect(r.fiche.affaire).toBe("Nouveau libellé");
+    expect(r.fiche.prix_vente_ht_xof).toBe(999);
+    expect(r.fiche.numero_dc).toBe(null); // tentative d'écrire le DC ignorée
+  });
+  it("étape 2 : le DRO ne peut éditer QUE le N° de DC", () => {
+    const at2 = { ...baseFiche(), etape_courante: 2 };
+    expect(applyEdit(at2, { numero_dc: "DC-7" }, "pmo").fiche.numero_dc).toBe("DC-7");
+    expect(applyEdit(at2, { prix_vente_ht_xof: 1 }, "pmo").ok).toBe(false); // autre champ → refus
+    expect(applyEdit(at2, { numero_dc: "DC-7" }, "assistante").ok).toBe(false); // mauvais rôle
+  });
+  it("étape 3 : l'AC ne renseigne QUE les N° de BC des lignes (par ordre)", () => {
+    const at3 = { ...baseFiche(), etape_courante: 3 };
+    const r = applyEdit(at3, { lignes: [{ ordre: 0, numero_bc: "BC-42" }] }, "assistante");
+    expect(r.ok).toBe(true);
+    expect(r.fiche.lignes[0].numero_bc).toBe("BC-42");
+  });
+  it("étapes de validation (1) → aucun champ éditable ; fiche validée → verrouillée", () => {
+    expect(applyEdit({ ...baseFiche(), etape_courante: 1 }, { affaire: "x" }, "commercial_dir").ok).toBe(false);
+    expect(applyEdit({ ...baseFiche(), terminee: true }, { affaire: "x" }, "assistante").ok).toBe(false);
   });
 });
 

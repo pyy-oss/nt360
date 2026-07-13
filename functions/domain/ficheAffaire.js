@@ -176,14 +176,59 @@ function reject(fiche, actor, opts) {
   return { ok: true, fiche: out, event };
 }
 
-// ── Présentation (masquage PM côté serveur) ──────────────────────────────────
-// Le rôle `lecture` (PM) ne reçoit JAMAIS les champs confidentiels : on les OMET du payload
-// (jamais avec une valeur null — ils transiteraient sur le réseau). Les autres rôles reçoivent la
-// fiche complète + les agrégats financiers calculés.
-function presentFor(fiche, role) {
+// ── Édition (verrouillage des champs par étape / rôle) ───────────────────────
+// Applique un patch en n'autorisant QUE les champs éditables à l'étape courante par le rôle acteur
+// (verrou serveur, cf. api-spec PUT). Étape 0 (AC) : tout l'entête + lignes, sauf N° de DC / N° de BC.
+// Étape 2 (DRO) : N° de DC uniquement. Étape 3 (AC) : N° de BC des lignes uniquement.
+// { ok, fiche } ou { ok:false, error }.
+function applyEdit(fiche, patch, role) {
   const f = fiche || {};
-  const isPm = String(role || "") === "lecture";
-  if (isPm) {
+  if (f.terminee) return { ok: false, error: "fiche validée — verrouillée en écriture" };
+  const etape = f.etape_courante || 0;
+  const step = stepDef(etape);
+  if (!step) return { ok: false, error: "étape inconnue" };
+  if (String(role || "") !== step.role) return { ok: false, error: `édition réservée au rôle « ${step.role} » à cette étape` };
+  const p = patch || {};
+  if (etape === 0) {
+    // L'AC édite l'entête + les lignes ; le N° de DC (DRO) et les N° de BC (étape 3) restent hors de
+    // portée. On re-normalise depuis la fiche fusionnée puis on RESTAURE les champs de workflow + DC.
+    const norm = normalizeFiche({ ...f, ...p });
+    return { ok: true, fiche: {
+      ...norm,
+      lignes: norm.lignes.map((l) => ({ ...l, numero_bc: null })), // BC pas encore connus à l'édition
+      numero_dc: f.numero_dc || null, // jamais éditable par l'AC
+      statut: f.statut, etape_courante: f.etape_courante, terminee: f.terminee, etape_started_ms: f.etape_started_ms,
+    } };
+  }
+  if (etape === 2) {
+    if (!("numero_dc" in p)) return { ok: false, error: "seul le N° de DC est éditable à cette étape" };
+    return { ok: true, fiche: { ...f, numero_dc: String(p.numero_dc || "").trim() || null } };
+  }
+  if (etape === 3) {
+    // Patch = { lignes: [{ id|ordre, numero_bc }] } — uniquement le N° de BC ligne à ligne.
+    const updates = Array.isArray(p.lignes) ? p.lignes : [];
+    const byKey = new Map(updates.map((u) => [String(u.id != null ? u.id : u.ordre), String(u.numero_bc || "").trim() || null]));
+    const lignes = (Array.isArray(f.lignes) ? f.lignes : []).map((l, i) => {
+      const k1 = l.id != null ? String(l.id) : null;
+      const k2 = String(l.ordre != null ? l.ordre : i);
+      const bc = k1 != null && byKey.has(k1) ? byKey.get(k1) : byKey.has(k2) ? byKey.get(k2) : l.numero_bc;
+      return { ...l, numero_bc: bc };
+    });
+    return { ok: true, fiche: { ...f, lignes } };
+  }
+  return { ok: false, error: "aucun champ éditable à cette étape (fiche en attente de validation)" };
+}
+
+// ── Présentation (masquage PM côté serveur) ──────────────────────────────────
+// Le PM (rôle lecture) — et plus généralement TOUT rôle sans droit de voir la marge — ne reçoit
+// JAMAIS les champs confidentiels : on les OMET du payload (jamais avec une valeur null — ils
+// transiteraient sur le réseau). Par défaut, seul `lecture` est masqué ; l'appelant peut passer
+// `canSeeMargin` explicite (dérivé de la matrice `rentabilite`) pour masquer aussi les autres rôles
+// non habilités (commercial, achats…). Les rôles habilités reçoivent la fiche complète + agrégats.
+function presentFor(fiche, role, canSeeMargin) {
+  const f = fiche || {};
+  const see = canSeeMargin === undefined ? String(role || "") !== "lecture" : !!canSeeMargin;
+  if (!see) {
     const { provisions_xof, autres_frais_financiers_xof, seuil_marge_pct, ...rest } = f;
     return { ...rest, financials: null, pmMasked: true };
   }
@@ -273,5 +318,5 @@ function normalizeFiche(input) {
 module.exports = {
   CIRCUIT, TYPES_CHARGE, DEVISES, DEFAULT_SEUIL, CONFIDENTIAL_KEYS, STATUT_VALIDEE,
   stepDef, roleAllowed, rateFor, ligneXof, computeFinancials, stepErrors,
-  advance, reject, presentFor, toProjectSheet, toBcLines, normalizeFiche,
+  advance, reject, applyEdit, presentFor, toProjectSheet, toBcLines, normalizeFiche,
 };
