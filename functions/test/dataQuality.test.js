@@ -117,6 +117,25 @@ describe("dataQuality — hygiène d'ingestion", () => {
     const t = Object.fromEntries(q.issues.map((i) => [i.type, i]));
     expect(t.opps_fantomes).toBeUndefined();
   });
+  it("N° FP inconnu = FP CANONIQUE absent des commandes — pas de FAUX orphelins par formatage (rapport terrain)", () => {
+    // Facture avec un FP formaté DIFFÉREMMENT de la commande (zéros de tête) et linked=false PÉRIMÉ :
+    // elle EST rattachée (même FP canonique) → ne doit PAS être signalée « non rattachée ».
+    const q8 = dataQuality(
+      [{ fp: "FP/2021/4687", client: "ACME", cas: 10000, yearPo: 2021 }],
+      [
+        { numero: "JVEXO/2021/0001", fp: "FP/2021/04687", amountHt: 500, linked: false }, // zéro de tête → même FP
+        { numero: "JVEXO/2021/0002", fp: "FP 2021 4687", amountHt: 500, linked: false },   // espaces → même FP
+        { numero: "ORPHAN", fp: "FP/2099/1", amountHt: 100, linked: true },                // vraiment inconnu (linked périmé à true)
+      ],
+      [], [], [],
+    );
+    const t = Object.fromEntries(q8.issues.map((i) => [i.type, i]));
+    expect(t.factures_orphelines.count).toBe(1);               // seulement ORPHAN (FP/2099/1)
+    expect(t.factures_orphelines.refs).toContain("ORPHAN");
+    expect(t.factures_orphelines.refs).not.toContain("JVEXO/2021/0001");
+    // Surfacturation : Σ facturé (500+500=1000) par FP canonique — sous le CAS 10000 → pas de surfacturation.
+    expect(t.surfacturation).toBeUndefined();
+  });
   it("opportunités PÉRIMÉES par âge signalées en Qualité (medium) — règle source (Lot 7)", () => {
     const aged = [{ fp: "FP/2026/50", client: "ZED", stage: 3 }];
     const q7 = dataQuality([], [], [], [], [], undefined, [], aged);

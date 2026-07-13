@@ -17,8 +17,10 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
   // en contradiction avec alerts.js). Cf. audit P2.
   const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
 
+  // Σ facturé par FP CANONIQUE (fpKey) — sinon un même FP formaté différemment côté facture/commande
+  // fausse la surfacturation (sous-comptage). Clé cohérente avec orderFps ci-dessous.
   const billed = {};
-  for (const i of invoices) if (i.fp) billed[i.fp] = (billed[i.fp] || 0) + (i.amountHt || 0);
+  for (const i of invoices) { const k = fpKey(i.fp); if (k) billed[k] = (billed[k] || 0) + (i.amountHt || 0); }
 
   const numAm = (x) => { const a = String(x.am || "").trim(); return a !== "" && /^[\d.,\s]+$/.test(a); };
   const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5);
@@ -37,10 +39,13 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
   const def = (type, severity, records, label, ref) => ({ type, severity, records, label, ref });
   return [
     // Factures
-    def("factures_orphelines", "high", invoices.filter((i) => i.linked !== true), "Factures non rattachées à une commande (N° FP inconnu)", (i) => i.numero || i.fp),
+    // « N° FP inconnu » = le FP CANONIQUE (fpKey) de la facture n'est PAS parmi les FP de commande.
+    // On teste l'appartenance FRAÎCHE à orderFps (et non le drapeau `linked`, qui pouvait rester périmé à
+    // false quand le FP était formaté différemment côté facture/commande → fausses « non rattachées »).
+    def("factures_orphelines", "high", invoices.filter((i) => { const k = fpKey(i.fp); return !k || !orderFps.has(k); }), "Factures non rattachées à une commande (N° FP inconnu)", (i) => i.numero || i.fp),
     def("factures_sans_date", "medium", invoices.filter((i) => !i.date), "Factures sans date de facturation", (i) => i.numero),
     def("factures_sans_echeance", "low", invoices.filter((i) => !i.dueDate), "Factures sans date d'échéance (prévision cash imprécise)", (i) => i.numero),
-    def("surfacturation", "high", orders.filter((o) => (o.cas || 0) > 0 && (billed[o.fp] || 0) > (o.cas || 0) * (1 + surfacPct)), "Commandes surfacturées (Σ factures > CAS)", (o) => o.fp),
+    def("surfacturation", "high", orders.filter((o) => (o.cas || 0) > 0 && (billed[fpKey(o.fp)] || 0) > (o.cas || 0) * (1 + surfacPct)), "Commandes surfacturées (Σ factures > CAS)", (o) => o.fp),
     // Commandes
     def("commandes_sans_annee", "medium", orders.filter((o) => !(o.yearPo > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp),
     def("commandes_sans_client", "medium", orders.filter((o) => !o.client), "Commandes sans client", (o) => o.fp),

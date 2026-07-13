@@ -1,6 +1,7 @@
 // Enrichissement cross-source (fiabilisation, lot A de l'audit) :
 // reconstruit la BU des factures/opportunités en AUTRE par jointure FP → orders.bu,
 // puis par BU majoritaire du client. orders = référentiel de vérité.
+const { fpKey } = require("./ids");
 
 /** BU majoritaire par client à partir des orders (BU ≠ AUTRE). */
 function clientBuMap(orders) {
@@ -45,11 +46,15 @@ function enrichBu(store) {
  * @returns {{orphanCount:number, orphanAmount:number}}
  */
 function enrichLinks(store) {
+  // Index par FP CANONIQUE (fpKey) : un même FP formaté différemment côté facture/commande (zéros de
+  // tête, espaces, « FP/2021/0001 » vs « FP/2021/1 ») doit matcher — sinon fausses « factures non
+  // rattachées ». La correspondance exacte (chaîne brute) manquait ces cas (cf. rapport terrain).
   const orderByFp = {};
-  for (const o of store.orders || []) if (o.fp) orderByFp[o.fp] = o;
+  for (const o of store.orders || []) { const k = fpKey(o.fp); if (k) orderByFp[k] = o; }
   let orphanCount = 0, orphanAmount = 0;
   for (const inv of store.invoices || []) {
-    const ord = inv.fp ? orderByFp[inv.fp] : null;
+    const k = fpKey(inv.fp);
+    const ord = k ? orderByFp[k] : null;
     inv.linked = !!ord;
     inv.prePo = !!(ord && ord.yearPo && inv.date && +inv.date.slice(0, 4) < ord.yearPo);
     if (!inv.linked) { orphanCount++; orphanAmount += inv.amountHt || 0; }
