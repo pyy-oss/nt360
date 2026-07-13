@@ -860,3 +860,58 @@ export async function callExportReport(period: string) {
   const res = await httpsCallable(functions, "exportReport")({ period });
   return res.data as { ok: boolean; objectKey: string; url: string | null };
 }
+
+// FICHE D'AFFAIRE dématérialisée — chemin ALTERNATIF à l'import du fichier P&L. Circuit 6 étapes,
+// masquage serveur des champs confidentiels (le PM / rôle sans « rentabilité » les reçoit OMIS).
+export type FicheLine = {
+  id?: string | null; ordre?: number; description: string; fournisseur: string;
+  type_charge: string; devise: "XOF" | "USD" | "EUR"; montant: number; numero_bc?: string | null;
+};
+export type FicheFinancials = {
+  lignes_xof: number; prix_de_revient_ht: number; prix_vente_ht: number;
+  marge_brute: number; pct_marge: number; seuil_marge_pct: number; below_threshold: boolean;
+};
+export type Fiche = {
+  _id?: string; numero_fp: string; numero_dc?: string | null; client: string; affaire: string;
+  commercial: string; po_client_ref?: string | null; po_client_date?: string | null;
+  date_fiche?: string | null; editeur_ac?: string; taux_usd?: number; taux_eur?: number;
+  seuil_marge_pct?: number; provisions_xof?: number; autres_frais_financiers_xof?: number;
+  prix_vente_ht_xof?: number; memo?: string | null; lignes: FicheLine[];
+  statut: string; etape_courante: number; terminee?: boolean;
+  financials?: FicheFinancials | null; pmMasked?: boolean;
+};
+export type FicheEvent = {
+  etape_code: string; type_action: string; acteur_nom: string; role: string;
+  commentaire?: string | null; duree_etape_s?: number | null; horodatage_ms?: number;
+};
+
+/** Crée une fiche d'affaire en brouillon (assistance commerciale / direction). */
+export async function createFiche(data: Partial<Fiche>) {
+  const res = await httpsCallable(functions, "createFiche")(data);
+  return res.data as { ok: boolean; id: string; fp: string };
+}
+/** Édite les champs autorisés à l'étape courante (verrou serveur). */
+export async function updateFiche(id: string, patch: Record<string, unknown>) {
+  const res = await httpsCallable(functions, "updateFiche")({ id, patch });
+  return res.data as { ok: boolean; id: string };
+}
+/** Soumet / valide l'étape courante → étape suivante (le DRO passe numero_dc). */
+export async function ficheAdvance(id: string, opts?: { numero_dc?: string; commentaire?: string }) {
+  const res = await httpsCallable(functions, "ficheAdvance")({ id, ...opts });
+  return res.data as { ok: boolean; id: string; fiche: Fiche; recomputed: boolean };
+}
+/** Rejette l'étape courante (motif obligatoire) → retour édition AC. */
+export async function ficheReject(id: string, commentaire: string) {
+  const res = await httpsCallable(functions, "ficheReject")({ id, commentaire });
+  return res.data as { ok: boolean; id: string; fiche: Fiche };
+}
+/** Charge une fiche + son journal (masquée selon le rôle). */
+export async function getFiche(id: string) {
+  const res = await httpsCallable(functions, "getFiche")({ id });
+  return res.data as { ok: boolean; fiche: Fiche; history: FicheEvent[] };
+}
+/** Liste les fiches (masquées selon le rôle), filtrable statut/client/commercial. */
+export async function listFiches(filter?: { statut?: string; client?: string; commercial?: string; limit?: number }) {
+  const res = await httpsCallable(functions, "listFiches")(filter || {});
+  return res.data as { ok: boolean; fiches: Fiche[]; count: number };
+}

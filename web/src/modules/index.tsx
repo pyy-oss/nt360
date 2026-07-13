@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, FileCheck2, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -48,6 +48,7 @@ const Reports = from(() => import("./reports"), "Reports");
 const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
+const Fiches = from(() => import("./fiches"), "Fiches");
 const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
@@ -74,6 +75,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "relances", key: "overview", label: "Relances", icon: BellRing, Component: Relances },
   { id: "backlog", key: "backlog", label: "Suivi Backlog", icon: Layers, Component: Backlog },
   { id: "orderlist", key: "overview", label: "Commandes", icon: ShoppingCart, Component: OrderList },
+  { id: "fiches", key: "overview", label: "Fiches d'affaire", icon: FileCheck2, Component: Fiches },
   { id: "staffing", key: "overview", label: "Staffing", icon: UsersRound, Component: Staffing },
   { id: "prevision", key: "prevision", label: "Prévision", icon: TrendingUp, Component: Prevision },
   { id: "simulator", key: "prevision", label: "Simulateur", icon: SlidersHorizontal, Component: Simulateur },
@@ -99,7 +101,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   // → Opportunités (saisie/édition en modale) → Board (Kanban par étape) → Pipeline (analyse) → AM 360°.
   { label: "Commercial", ids: ["commercial", "opplist", "board", "pipeline", "am360", "salesforecast", "scoring", "reports", "activites", "approvals"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
-  { label: "Exécution", ids: ["orderlist", "staffing", "backlog", "prevision", "simulator", "fp360"] },
+  { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "domaines", "dataquality"] },
   { label: "Admin", ids: ["cleanup", "habilitations"] },
