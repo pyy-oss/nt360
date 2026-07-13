@@ -71,5 +71,22 @@ describe("preBilling — pré-facturation depuis le CRA (Lot 21)", () => {
     expect(l.ambiguousRate).toBe(true);
     expect(l.tjm).toBe(500);          // repli sur TJM cible
     expect(l.tjmSource).toBe("target");
+    expect(l.projectFp).toBe(null);   // ref non renseignée quand le taux est ambigu (pas d'attribution trompeuse)
+  });
+  it("byConsultant regroupé par IDENTITÉ (id) : deux homonymes ne fusionnent pas (audit correctness)", () => {
+    const cons = [{ id: "c1", name: "DUPONT", bu: "ICT", tjmTarget: 500 }, { id: "c9", name: "DUPONT", bu: "CLOUD", tjmTarget: 500 }];
+    const ts = [{ consultantId: "c1", month: "2026-06", billedDays: 10 }, { consultantId: "c9", month: "2026-06", billedDays: 8 }];
+    const rr = computePreBilling(cons, ts, [], ["2026-06"]);
+    expect(rr.byConsultant.length).toBe(2);          // deux personnes distinctes, pas une ligne fusionnée
+    expect(rr.byConsultant.every((g) => g.key === "DUPONT")).toBe(true); // libellé = nom (homonymes)
+    expect(rr.byConsultant.reduce((s, g) => s + g.billedDays, 0)).toBe(18);
+  });
+  it("affectation PLANNED (prévisionnelle) n'impose pas son TJM : repli sur le TJM cible (audit correctness)", () => {
+    const cons = [{ id: "c1", name: "ALICE", bu: "ICT", tjmTarget: 500 }];
+    const ts = [{ consultantId: "c1", month: "2026-06", billedDays: 10 }];
+    const planned = [{ consultantId: "c1", startMonth: "2026-06", endMonth: "2026-06", tjmBilled: 900, status: "planned" }];
+    const rr = computePreBilling(cons, ts, planned, ["2026-06"]);
+    expect(rr.lines[0].tjm).toBe(500);           // TJM cible, PAS le 900 prévisionnel
+    expect(rr.lines[0].tjmSource).toBe("target");
   });
 });

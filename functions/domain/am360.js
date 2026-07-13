@@ -5,6 +5,7 @@
 // Module PUR (testable).
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
+const { fpKey } = require("../lib/ids");
 
 // AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
 // en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
@@ -19,9 +20,11 @@ const normAm = (a) => (a && String(a).trim().toUpperCase()) || "—";
  */
 function am360(orders, invoices, opps, objectives, fy, tiers) {
   const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
-  // FP → AM (depuis les commandes) pour rattacher les factures à un commercial.
+  // FP → AM (depuis les commandes) pour rattacher les factures à un commercial. Clé CANONIQUE (fpKey) :
+  // orders.fp est canonisé (mergeCommandes), invoices.fp reste au format source → sans fpKey, une facture
+  // au FP formaté autrement n'est pas rattachée à son AM → CAF par commercial sous-comptée.
   const amOfFp = {};
-  for (const o of orders || []) if (o.fp) amOfFp[o.fp] = normAm(o.am);
+  for (const o of orders || []) { const k = fpKey(o.fp); if (k) amOfFp[k] = normAm(o.am); }
 
   const objByAm = {};
   for (const ob of objectives || []) {
@@ -41,7 +44,7 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
       const cas = sum(os, (o) => o.cas);
       const casFy = sum(os.filter((o) => String(o.yearPo) === String(fy)), (o) => o.cas);
       const backlog = sum(os, (o) => Math.max(o.raf || 0, 0));
-      const facture = sum((invoices || []).filter((i) => normAm(amOfFp[i.fp]) === am), (i) => i.amountHt);
+      const facture = sum((invoices || []).filter((i) => normAm(amOfFp[fpKey(i.fp)]) === am), (i) => i.amountHt);
 
       const myOpps = (opps || []).filter((o) => normAm(o.am) === am);
       const active = myOpps.filter((o) => o.stage >= 1 && o.stage <= 5);

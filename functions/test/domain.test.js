@@ -61,6 +61,16 @@ describe("overview — chaîne (§7)", () => {
     expect(ov.perdu).toBe(100);
     expect(ov.ratios.tauxConversionVente).toBeCloseTo(2300 / 3450, 6); // convDenom = 2300 (cmd) + 1050 (pipeline projeté : 1000 + 5%·1000) + 100 (perdu)
   });
+  it("exclusion « déjà au carnet » par FP CANONIQUE : opp ouverte au FP formaté autrement n'est PAS double-comptée (audit fiabilité, parité atterrissage)", () => {
+    // Commande FP/2026/1 (canonique) ; opp ENCORE OUVERTE (stage 3, IdC 95 %) portant le MÊME FP mais
+    // formaté avec des zéros de tête. Elle est déjà dans `commandes` (CAS) → doit être EXCLUE du pipeline
+    // projeté (avant correctif : test d'appartenance sur le FP brut ⇒ non exclue ⇒ pondéré gonflé).
+    const ord = [{ fp: "FP/2026/1", client: "ACME", cas: 1000, raf: 0, mb: 0 }];
+    const openBooked = [{ client: "ACME", fp: "FP/2026/001", stage: 3, probability: 0.95, amount: 1000 }];
+    const ov4 = overview(ord, [], openBooked);
+    expect(ov4.pipelineProjete).toBe(0); // l'opp « déjà au carnet » est exclue → aucun pipeline projeté
+    // Sans le correctif, elle serait valorisée à 100 % (≥90 %) → pipelineProjete = 1000.
+  });
 });
 
 describe("backlogFy — ancré FY, indépendant de la période (§7)", () => {

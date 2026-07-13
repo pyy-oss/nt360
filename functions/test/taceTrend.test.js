@@ -61,4 +61,27 @@ describe("taceTrend — historisation TACE + tendance (Lot 22)", () => {
     const p = monthPoint([{ consultantId: "x", billedDays: 0, leaveDays: 20 }]); // 20 ouvrés − 20 congés = 0
     expect(p.tacePct).toBe(null);
   });
+  it("pente en pt/mois CALENDAIRE : les mois vides intercalés espacent les points (audit correctness)", () => {
+    // Deux relevés à 5 mois d'écart : TACE 80 → 90 (janvier puis juin). Pente vraie = 10/5 = 2 pt/mois.
+    // Avant correctif (index de mois renseigné) : 10/1 = 10 pt/mois → direction faussement « en hausse » forte.
+    const cons = [{ id: "c1", bu: "ICT" }];
+    const ts = [
+      { consultantId: "c1", month: "2026-01", billedDays: 16, leaveDays: 0 }, // 80 %
+      { consultantId: "c1", month: "2026-06", billedDays: 18, leaveDays: 0 }, // 90 %
+    ];
+    const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+    const rr = computeTaceTrend(ts, cons, months);
+    expect(rr.summary.slope).toBe(2);     // 10 points sur 5 mois calendaires
+    expect(rr.summary.delta).toBe(null);  // relevés NON adjacents → Δ « vs mois préc. » non défini
+  });
+  it("Δ défini seulement pour des mois adjacents ; pente exacte sur mois contigus", () => {
+    const cons = [{ id: "c1", bu: "ICT" }];
+    const ts = [
+      { consultantId: "c1", month: "2026-05", billedDays: 16, leaveDays: 0 }, // 80 %
+      { consultantId: "c1", month: "2026-06", billedDays: 18, leaveDays: 0 }, // 90 %
+    ];
+    const rr = computeTaceTrend(ts, cons, ["2026-05", "2026-06"]);
+    expect(rr.summary.delta).toBe(10);  // mois adjacents → Δ = 90 − 80
+    expect(rr.summary.slope).toBe(10);  // 10 points sur 1 mois
+  });
 });
