@@ -2528,6 +2528,73 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   return { ok: true, fp };
 });
 
+// --- generateFromInvoices : GÉNÈRE une commande P&L + une opportunité GAGNÉE à partir de factures NON
+// RATTACHÉES (Centre de correction), à l'unité (ids) ou EN MASSE (all:true). Résout l'anomalie « facture
+// non rattachée » à la source : le FP FACTURE fait foi → on crée la commande manquante (CAS = Σ factures
+// du FP) et l'opp gagnée du même FP (se réconcilient). SÛR : ignore les factures sans FP canonique et les
+// FP déjà au carnet (aucun doublon ; ids d'opp DÉTERMINISTES → ré-exécution idempotente). Droit « import ». ---
+exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey, buildFpAliasResolver } = require("./lib/ids");
+  const { safeId } = require("./lib/sheets");
+  const { planFromInvoices } = require("./domain/genFromInvoice");
+  const { STAGE_LABEL } = require("./parsers/salesData");
+  const { oppWeighted } = require("./domain/mutations");
+  const d = req.data || {};
+  const wantAll = d.all === true;
+  const ids = Array.isArray(d.ids) ? [...new Set(d.ids.filter(Boolean).map(String))] : [];
+  if (!wantAll && !ids.length) throw new HttpsError("invalid-argument", "sélection de factures requise (ou all:true)");
+
+  const [invSnap, ordSnap, aliasDoc] = await Promise.all([
+    db.collection("invoices").select("fp", "client", "amountHt", "date", "numero").get(),
+    db.collection("orders").select("fp").get(),
+    db.doc("config/fpAliases").get(),
+  ]);
+  // MÊME canonisation FP que le recompute / correctionQueue (overlay d'alias) → cohérence des orphelines.
+  const canonFp = buildFpAliasResolver(((aliasDoc.data() || {}).map) || {});
+  let invoices = invSnap.docs.map((s) => { const v = { id: s.id, ...s.data() }; if (v.fp != null && v.fp !== "") v.fp = canonFp(v.fp); return v; });
+  const orderFps = new Set(ordSnap.docs.map((s) => fpKey(s.data().fp)).filter(Boolean));
+  if (!wantAll) { const sel = new Set(ids); invoices = invoices.filter((i) => sel.has(i.id)); }
+
+  const { plan, skippedNoFp, skippedExisting } = planFromInvoices(invoices, orderFps);
+  if (!plan.length) return { ok: true, created: { orders: 0, opps: 0 }, skippedNoFp, skippedExisting, plan: [] };
+  if (plan.length > 500) throw new HttpsError("invalid-argument", "trop de commandes à générer d'un coup (max 500) — affinez la sélection");
+
+  const visibleTo = await visibleToFor(req.auth.uid);
+  let batch = db.batch(), pending = 0, createdOrders = 0, createdOpps = 0;
+  for (const p of plan) {
+    const oid = safeId(p.fp);
+    // COMMANDE (source « manuel », marquée genFromInvoice). RAF null → dérivé (CAS − facturé = 0, soldée).
+    // merge:true : idempotent si le FP a été créé entre-temps ; le P&L Excel reste prioritaire au ré-import.
+    batch.set(db.doc(`orders/${oid}`), {
+      _id: oid, fp: p.fp, client: p.client, designation: "", bu: "AUTRE", am: "",
+      yearPo: p.yearPo, cas: p.cas, raf: null, suppliers: [],
+      source: "manuel", genFromInvoice: true, createdBy: req.auth.uid,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    createdOrders++;
+    // OPPORTUNITÉ GAGNÉE (id DÉTERMINISTE → pas de doublon en ré-exécution). Même FP → réconciliée au P&L.
+    const opId = `saisie_geninv_${oid}`;
+    batch.set(db.doc(`opportunities/${opId}`), {
+      oppId: opId, source: "saisie", genFromInvoice: true,
+      client: p.client, am: "", bu: "AUTRE", fp: p.fp,
+      amount: p.cas, stage: 6, stageLabel: STAGE_LABEL[6] || "6",
+      probability: 1, weighted: oppWeighted(p.cas, 1),
+      closingDate: p.closingDate, ownerUid: req.auth.uid, visibleTo,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    createdOpps++;
+    if ((pending += 2) >= 400) { await batch.commit(); batch = db.batch(); pending = 0; }
+  }
+  if (pending) await batch.commit();
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "generate_from_invoices", module: "import", entity: "order", entityId: "*",
+    detail: { orders: createdOrders, opps: createdOpps, all: wantAll, skippedNoFp, skippedExisting }, ts: FieldValue.serverTimestamp(),
+  });
+  await requestRecompute();
+  return { ok: true, created: { orders: createdOrders, opps: createdOpps }, skippedNoFp, skippedExisting, plan };
+});
+
 // --- setOrderPm : affecte un Project Manager (PMO) à une commande. Stocké en OVERLAY
 // config/orderPm { map: { <safeId(fp)>: pm } }, hors du doc commande → l'affectation SURVIT au
 // recompute ET à un ré-import delta (même logique que l'annulation). `pm` vide → désaffectation.

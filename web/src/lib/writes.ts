@@ -365,6 +365,17 @@ export async function correctionQueue(): Promise<CorrectionQueueResult> {
   return res.data as CorrectionQueueResult;
 }
 
+/** Génère commande P&L + opp gagnée depuis des factures NON RATTACHÉES (unitaire via ids, ou masse via all).
+ *  Skip les factures sans FP canonique et les FP déjà au carnet (aucun doublon). Droit « import ». */
+export type GenFromInvoiceResult = {
+  ok: boolean; created: { orders: number; opps: number }; skippedNoFp: number; skippedExisting: number;
+  plan: { fp: string; cas: number; client: string; yearPo: number; invoiceCount: number }[];
+};
+export async function generateFromInvoices(args: { ids?: string[]; all?: boolean }): Promise<GenFromInvoiceResult> {
+  const res = await httpsCallable(functions, "generateFromInvoices", { timeout: 300_000 })({ ids: args.ids, all: !!args.all });
+  return res.data as GenFromInvoiceResult;
+}
+
 // OBJET COMPTE (Account 360) + CONTACTS. Métadonnée gouvernée « pipeline » ; lecture « overview ».
 export type Account = { id?: string; name?: string; sector?: string; country?: string; territory?: string; parentId?: string | null; ownerUid?: string | null; notes?: string; tags?: string[] };
 export type Contact = { id?: string; accountId?: string; name?: string; role?: string; email?: string; phone?: string; primary?: boolean };
