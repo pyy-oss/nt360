@@ -233,10 +233,13 @@ describe("Objectifs", () => {
 });
 
 describe("Historique des transitions d'étape (oppHistory · funnel)", () => {
-  // oppHistory est écrit uniquement par les Cloud Functions (recordOppTransition, Admin SDK) : lisible
-  // par qui voit le pipeline, jamais éditable côté client (funnel non falsifiable).
-  it("commercial (pipeline:write) LIT oppHistory", async () => {
-    await assertSucceeds(getDoc(doc(as("commercial"), "oppHistory/h1")));
+  // oppHistory est écrit uniquement par les Cloud Functions (recordOppTransition, Admin SDK) et relu
+  // UNIQUEMENT côté serveur pour bâtir le funnel (summary). Lecture directe FERMÉE (audit RBAC) : sous
+  // OWD « private », `canRead('pipeline')` aurait laissé fuir client/AM/montant des transitions d'opps
+  // hors périmètre. Aucun écran ne lit oppHistory directement (le funnel vient du summary).
+  it("lecture directe de oppHistory FERMÉE, même pour le pipeline (fuite record-level évitée)", async () => {
+    await assertFails(getDoc(doc(as("commercial"), "oppHistory/h1")));
+    await assertFails(getDoc(doc(as("direction"), "oppHistory/h1")));
   });
   it("oppHistory n'est PAS éditable en direct — même par direction (callable-only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "oppHistory/h1"), { from: 1, to: 2 }));
