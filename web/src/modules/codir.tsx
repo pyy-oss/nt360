@@ -174,6 +174,16 @@ function StatTile({ label, value, sub, color }: { label: string; value: string; 
     </div>
   );
 }
+// Puce d'indicateur dérivé (couverture, concentration, rythme…) — compacte, nombre display.
+function InsightChip({ label, value, hint, color }: { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-panel2/40 px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</div>
+      <div className="font-display text-[17px] tabnum mt-0.5" style={{ color: color || "rgb(var(--ink))" }}>{value}</div>
+      {hint && <div className="text-[10px] text-faint mt-0.5 leading-tight">{hint}</div>}
+    </div>
+  );
+}
 // Titre de section : petit repère d'accent + libellé capitales espacées.
 function SectionTitle({ children, legend }: { children: ReactNode; legend?: ReactNode }) {
   return (
@@ -415,6 +425,19 @@ export const Codir: FC<Props> = () => {
     return { name: monthLabel(ym), realise, planifie };
   }).filter((m) => m.realise + m.planifie > 0);
 
+  // Indicateurs dérivés (lecture CODIR) — tous calculés depuis les agrégats déjà chargés.
+  const pctR = (v: number) => `${Math.round(v * 100)}%`;
+  const couvertureCert = objectifCaf > 0 ? cafEst / objectifCaf : 0;           // objectif couvert par les certitudes seules
+  const poidsForecast = cafEstYcForecast > 0 ? forecast / cafEstYcForecast : 0; // part du forecast dans le CAF projeté
+  const totalCas = (clients?.rows || []).reduce((s, r) => s + (r.cas || 0), 0);
+  const top3Cas = [...rows].sort((a, b) => (b.cas || 0) - (a.cas || 0)).slice(0, 3).reduce((s, r) => s + (r.cas || 0), 0);
+  const top3Share = totalCas > 0 ? top3Cas / totalCas : 0;                      // concentration : poids des 3 premiers clients
+  const monthsElapsed = Number(curMonth.slice(5, 7)) || 12;                     // mois calendaires écoulés (janv=1)
+  const monthsRemaining = Math.max(12 - monthsElapsed, 0);
+  const gapObj = Math.max(objectifCaf - cafEstYcForecast, 0);                   // reste à trouver vs objectif (yc forecast)
+  const rythmeRequis = monthsRemaining > 0 ? gapObj / monthsRemaining : 0;      // facturation requise / mois pour combler l'écart
+  const rythmeActuel = monthsElapsed > 0 ? cafYtd / monthsElapsed : 0;          // rythme de facturation observé / mois
+
   // Export PowerPoint (deck 3 slides : Projection CAF · Backlog & Facturation · Hot Topics). pptxgenjs
   // chargé à la demande. Réutilise les données déjà calculées ci-dessus + le bulletin de la semaine.
   const doPptx = async () => {
@@ -470,6 +493,14 @@ export const Codir: FC<Props> = () => {
             <Panel>
               <TrajectoryBar facture={cafYtd} certitudes={Math.max(cafEst - cafYtd, 0)} forecast={forecast} objectif={objectifCaf} />
             </Panel>
+
+            {/* Indicateurs dérivés — lecture CODIR (couverture, risque de concentration, rythme requis) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <InsightChip label="Couverture certitudes" value={pctR(couvertureCert)} hint="objectif hors forecast" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
+              <InsightChip label="Poids du forecast" value={pctR(poidsForecast)} hint="dans le CAF projeté" color={T.gold} />
+              <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
+              <InsightChip label="Rythme requis" value={`${fmt(rythmeRequis)}/mois`} hint={`${monthsRemaining} mois restants · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
+            </div>
 
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
             <div className="grid gap-3 md:grid-cols-2 items-stretch">
