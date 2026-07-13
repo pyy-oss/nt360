@@ -60,26 +60,30 @@ function ClientBars({ rows, stacked }: { rows: { name: string; cas: number; fore
 
 // Projection facturation mensuelle — barres verticales empilées (réalisé + planifié), valeur en M au
 // sommet, ligne de base, largeur constante. Plus lisible que la version brute.
-function MonthBars({ rows }: { rows: { name: string; realise: number; planifie: number }[] }) {
+function MonthBars({ rows, h = 300 }: { rows: { name: string; realise: number; planifie: number }[]; h?: number }) {
   if (!rows.length) return <EmptyState label="Projection de facturation indisponible (dates ClickUp à synchroniser)." />;
   const mx = Math.max(1, ...rows.map((r) => r.realise + r.planifie));
-  const H = 150;
+  const H = h;
   return (
     <div className="relative pt-5">
-      <div className="flex items-end justify-between gap-1.5 border-b border-line" style={{ height: H + 4 }}>
+      {/* Repères horizontaux (0 / 50% / 100% de l'échelle) pour mieux occuper la hauteur. */}
+      <div className="absolute inset-x-0 top-5 flex flex-col justify-between" style={{ height: H }} aria-hidden="true">
+        {[0, 1, 2].map((i) => <div key={i} className="border-t border-line/40" />)}
+      </div>
+      <div className="relative flex items-end justify-between gap-1.5 border-b border-line" style={{ height: H + 4 }}>
         {rows.map((r) => {
           const total = r.realise + r.planifie;
           const hR = (r.realise / mx) * H, hP = (r.planifie / mx) * H;
           return (
             <div key={r.name} className="group relative flex flex-1 flex-col items-center justify-end min-w-0" style={{ height: H }}>
               <span className="mb-1 text-[10px] text-muted tabnum whitespace-nowrap">{mM(total)}</span>
-              {hP > 0 && <div className="w-full max-w-[30px] rounded-t-sm" style={{ height: hP, background: T.gold, opacity: 0.45 }} title={`Planifié ${fmt(r.planifie)}`} />}
-              {hR > 0 && <div className={`w-full max-w-[30px] ${hP > 0 ? "" : "rounded-t-sm"}`} style={{ height: hR, background: T.emerald }} title={`Réalisé ${fmt(r.realise)}`} />}
+              {hP > 0 && <div className="w-full max-w-[42px] rounded-t-sm" style={{ height: hP, background: T.gold, opacity: 0.55 }} title={`Reste à facturer / planifié ${fmt(r.planifie)}`} />}
+              {hR > 0 && <div className={`w-full max-w-[42px] ${hP > 0 ? "" : "rounded-t-sm"}`} style={{ height: hR, background: T.emerald }} title={`Réalisé ${fmt(r.realise)}`} />}
             </div>
           );
         })}
       </div>
-      <div className="flex justify-between gap-1.5">
+      <div className="flex justify-between gap-1.5 mt-1">
         {rows.map((r) => <span key={r.name} className="flex-1 text-center text-[11px] text-faint">{r.name}</span>)}
       </div>
     </div>
@@ -277,8 +281,16 @@ export const Codir: FC<Props> = () => {
   const topProj = barRows((r) => r.projete || r.cas || 0);
 
   const top10 = (backlog?.top || []).slice(0, 10);
-  const monthRows = (trend?.months || []).map((m) => ({ name: monthLabel(m.month), realise: m.realise || 0, planifie: m.planifie || 0 }))
-    .filter((m) => m.realise + m.planifie > 0);
+  // Projection facturation, cohérente avec Exécution → Prévision (même source billingTrend). Répartition
+  // par période : mois ÉCHUS = réalisé seul ; mois COURANT = réalisé (facturé) + reste-à-facturer
+  // (jalon planifié − déjà facturé, ≥ 0, sans double-compte) ; mois À VENIR = planifié (jalons).
+  const curMonth = new Date().toISOString().slice(0, 7);
+  const monthRows = (trend?.months || []).map((m) => {
+    const ym = m.month, r = m.realise || 0, p = m.planifie || 0;
+    const realise = ym > curMonth ? 0 : r;
+    const planifie = ym < curMonth ? 0 : ym === curMonth ? Math.max(p - r, 0) : p;
+    return { name: monthLabel(ym), realise, planifie };
+  }).filter((m) => m.realise + m.planifie > 0);
 
   // Export PowerPoint (deck 3 slides : Projection CAF · Backlog & Facturation · Hot Topics). pptxgenjs
   // chargé à la demande. Réutilise les données déjà calculées ci-dessus + le bulletin de la semaine.
