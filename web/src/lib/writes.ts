@@ -3,6 +3,29 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
 
+// Un appel callable peut échouer TRANSITOIREMENT pendant un DÉPLOIEMENT des Cloud Functions : le temps
+// que la fonction soit remplacée, l'infra renvoie un 500/INTERNAL (parfois UNAVAILABLE / DEADLINE).
+// Pour les appels de LECTURE idempotents (analyses), on réessaie brièvement sur ces codes transitoires
+// avant d'abandonner — sinon un simple redéploiement fait échouer « Analyser » et fige la liste. Les
+// vraies erreurs (permission, invalid-argument…) remontent immédiatement, sans réessai.
+const TRANSIENT_CODES = new Set([
+  "functions/internal", "internal",
+  "functions/unavailable", "unavailable",
+  "functions/deadline-exceeded", "deadline-exceeded",
+]);
+async function withTransientRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (e) {
+      last = e;
+      if (!TRANSIENT_CODES.has(String((e as { code?: string })?.code || ""))) throw e;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 2000 * (i + 1))); // 2s, 4s, 6s (déploiement ~qq s/fonction)
+    }
+  }
+  throw last;
+}
+
 export type OppInput = {
   id?: string; client: string; am: string; bu: string; amount: number; stage: number;
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
@@ -346,7 +369,7 @@ export type ReconResult = { ok: boolean; mode: "list" | "detail"; clients?: Reco
 /** Dossier de rapprochement. Sans `client` : liste de triage (clients à rapprocher). Avec `client` :
  *  détail aligné (clusters par N° FP) + propositions de réconciliation. */
 export async function reconClient(client?: string): Promise<ReconResult> {
-  const res = await httpsCallable(functions, "reconClient", { timeout: 120_000 })(client ? { client } : {});
+  const res = await withTransientRetry(() => httpsCallable(functions, "reconClient", { timeout: 120_000 })(client ? { client } : {}));
   return res.data as ReconResult;
 }
 
@@ -361,7 +384,7 @@ export type CorrectionBucket = { type: string; severity: "high" | "medium" | "lo
 export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; cap: number; total: number };
 /** File de correction : par type d'anomalie, les enregistrements concrets à corriger (plafonnés). */
 export async function correctionQueue(): Promise<CorrectionQueueResult> {
-  const res = await httpsCallable(functions, "correctionQueue", { timeout: 120_000 })({});
+  const res = await withTransientRetry(() => httpsCallable(functions, "correctionQueue", { timeout: 120_000 })({}));
   return res.data as CorrectionQueueResult;
 }
 

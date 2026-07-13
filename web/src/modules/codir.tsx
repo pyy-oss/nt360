@@ -404,14 +404,10 @@ export const Codir: FC<Props> = () => {
   const atteinte = objectifCaf > 0 ? Math.min(cafEstYcForecast / objectifCaf, 1) : 0;
 
   const rows = (clients?.rows || []).filter((r) => !r.isOther);
-  // Le champ `forecast`/`projete` est produit par le recompute. S'il est absent (agrégat antérieur à
-  // l'ajout du champ), on le signale plutôt que d'afficher deux graphes identiques (CAS = projeté).
-  const hasForecast = rows.some((r) => r.forecast != null);
-  const barRows = (getVal: (r: typeof rows[number]) => number) =>
-    [...rows].sort((a, b) => getVal(b) - getVal(a)).slice(0, 8)
-      .map((r) => ({ name: r.key, cas: r.cas || 0, forecast: r.forecast || 0 }));
-  const topCmd = barRows((r) => r.cas || 0);
-  const topProj = barRows((r) => r.projete || r.cas || 0);
+  // Top clients par COMMANDES RÉELLES (CAS) uniquement. Le forecast par client (pipeline pondéré,
+  // tributaire de la fiabilité des étapes d'opportunité) a été retiré du Bilan CODIR.
+  const topCmd = [...rows].sort((a, b) => (b.cas || 0) - (a.cas || 0)).slice(0, 8)
+    .map((r) => ({ name: r.key, cas: r.cas || 0, forecast: 0 }));
 
   const top10 = (backlog?.top || []).slice(0, 10);
   // Projection facturation, cohérente avec Exécution → Prévision (même source billingTrend). Répartition
@@ -448,7 +444,7 @@ export const Codir: FC<Props> = () => {
     const { exportCodirPptx } = await import("../lib/codirPptx");
     await exportCodirPptx({
       fy: fy || 0, week, cafYtd, backlogYtd, cafEst, cafEstYcForecast, forecast, objectifCaf,
-      topClients: topProj, backlog: top10, months: monthRows, bulletin: bulletin?.sections || [],
+      topClients: topCmd, backlog: top10, months: monthRows, bulletin: bulletin?.sections || [],
     });
   };
 
@@ -512,31 +508,24 @@ export const Codir: FC<Props> = () => {
               <GaugeCard title={`CAF prévisionnel vs objectif ${fy || ""}`} value={atteinte} num={cafEstYcForecast} objectif={objectifCaf} sub="projeté yc forecast" />
             </div>
 
-            {/* Top clients — deux panneaux encadrés */}
-            <div className="grid gap-4 md:grid-cols-2 items-stretch">
+            {/* Top clients (commandes réelles, à gauche) + Top 10 backlog (droite). Le forecast par client
+                (pipeline pondéré, tributaire de la fiabilité des étapes d'opp) est retiré du Bilan CODIR. */}
+            <div className="grid gap-4 lg:grid-cols-2 items-stretch">
               <Panel>
                 <SectionTitle legend={<Legend items={[{ color: T.steel, label: "PO value (CAS)" }]} />}>Top clients — Commandes</SectionTitle>
                 <ClientBars rows={topCmd} />
               </Panel>
               <Panel>
-                <SectionTitle legend={<Legend items={[{ color: T.steel, label: "certitudes" }, { color: T.gold, label: "forecast" }]} />}>Top clients — Commandes &amp; Forecast</SectionTitle>
-                {hasForecast
-                  ? <ClientBars rows={topProj} stacked />
-                  : <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-[12px] text-ink">Le <b>forecast par client</b> sera disponible au prochain recalcul (nouvel indicateur). Lance « Recalculer » (Vue d'ensemble) pour distinguer certitudes et forecast.</div>}
-              </Panel>
-            </div>
-
-            {/* Top 10 backlog + projection facturation */}
-            <div className="grid gap-4 lg:grid-cols-2 items-stretch">
-              <Panel>
                 <SectionTitle>Top 10 Backlog</SectionTitle>
                 <Table columns={backlogCols} rows={top10} colsKey="codir-backlog" empty="Aucun backlog." pageSize={10} />
               </Panel>
-              <Panel>
-                <SectionTitle legend={<Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} />}>Projection facturation</SectionTitle>
-                <MonthBars rows={monthRows} />
-              </Panel>
             </div>
+
+            {/* Projection facturation — pleine largeur (meilleure lisibilité des barres mensuelles) */}
+            <Panel>
+              <SectionTitle legend={<Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} />}>Projection facturation</SectionTitle>
+              <MonthBars rows={monthRows} />
+            </Panel>
           </div>
         )}
       </div>

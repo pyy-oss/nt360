@@ -363,11 +363,11 @@ async function recomputeCore(db, only) {
   }
   // Tendance de facturation (réalisé vs planifié par les jalons, trajectoire au 31/12) — revenu, non marge.
   // Jalons EFFECTIFS = jalons saisis (une fois par FP) + échéancier AUTO-GÉNÉRÉ pour les projets SANS
-  // jalons (RAF projetable restant réparti du mois courant au 31/12, un jalon par mois ; les projets DÉJÀ
-  // en facturation voient leur reliquat concentré sur la fenêtre de clôture sept–nov). Ainsi la tendance
-  // couvre TOUT le backlog sans trou (juillet non nul, sept/nov comblés, pic d'août aplati) et reste
-  // corrigeable manuellement (les jalons saisis priment). Aucun effet de bord sur l'atterrissage (les
-  // défauts sont in-year → report N+1 = 0).
+  // jalons. L'auto-généré est PILOTÉ PAR LA DATE DE CLÔTURE RÉELLE de la tâche ClickUp (date fin prév. →
+  // à défaut contractuelle) : RAF placé sur ce mois de clôture s'il est dans l'exercice et à venir ;
+  // sinon (date absente/passée) repli sur une courbe pondérée croissante du mois courant au 31/12. Ainsi
+  // la tendance suit les vraies échéances (relief), couvre tout le backlog sans trou, reste corrigeable
+  // manuellement (jalons saisis prioritaires) et n'a aucun effet de bord sur l'atterrissage (in-year → report N+1 = 0).
   // Calculée dès qu'atterrissage / news / alertes sont (re)construits : l'Actualité (bulletins de
   // facturation) dépend de `trendForNews` — sinon un recompute partiel « alerts »-only reconstruisait
   // l'Actualité SANS ces bulletins (trendForNews resté null).
@@ -378,8 +378,10 @@ async function recomputeCore(db, only) {
       if (k && milestonesByFp[k]) continue; // FP à jalons saisis → déjà pris en compte
       const bp = projetableBacklog(o);
       if (bp <= 0) continue;
-      // Projet DÉJÀ en facturation (taux > 0) → clôture différée sur sept–nov (fenêtre de clôture).
-      trendMilestones.push(...defaultMilestones(bp, asOf, currentFy, { started: (o.facture || 0) > 0 }));
+      // Date de clôture réelle (synchro inverse ClickUp) : fin prévisionnelle en priorité, sinon contractuelle.
+      const cu = clickupSyncMap[safeId(o.fp)] || {};
+      const closeMs = cu.dateFinPrev || cu.dateContractuelle || 0;
+      trendMilestones.push(...defaultMilestones(bp, asOf, currentFy, { closeMs }));
     }
     const trend = billingTrend(invoices, trendMilestones, currentFy, asOf);
     trendForNews = trend;
