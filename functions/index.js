@@ -985,7 +985,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
   await requireRead(req, "import");
   const { issueDefs } = require("./domain/dataQuality");
   const { isAgedLost } = require("./domain/oppLifecycle");
-  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc] = await Promise.all([
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "source").get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
@@ -994,10 +994,22 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 512, timeoutSe
     db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").get(),
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal").get(),
     db.doc("config/alerts").get(),
+    db.doc("config/fpAliases").get(),
   ]);
   const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const orders = withId(ordSnap), invoices = withId(invSnap), bcLines = withId(bcSnap), sheets = withId(shSnap);
   let allOpps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })); // scan borné (R1)
+  // RÉCONCILIATION DE N° FP (overlay config/fpAliases) — MÊME canonisation que le recompute
+  // (aggregate.js) : sans elle, une opp gagnée réconciliée via alias apparaîtrait à tort « sans P&L »
+  // et des factures/BC saisis sous l'ancien FP passeraient pour « non rattachés » DANS LE CENTRE DE
+  // CORRECTION lui-même (faux positifs signalés au terrain). Non destructif (en mémoire, avant issueDefs).
+  const fpAliasMap = ((aliasDoc.data() || {}).map) || {};
+  if (Object.keys(fpAliasMap).length) {
+    const canonFp = buildFpAliasResolver(fpAliasMap);
+    for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
+      for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
+    }
+  }
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
   // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {

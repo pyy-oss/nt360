@@ -2,6 +2,7 @@
 // ligne fournisseur saturée, concentration client, BC en attente. Fonction pure.
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
+const { fpKey } = require("../lib/ids");
 // Seuils d'alerte PAR DÉFAUT (source unique domain/thresholds ; surchargés par config/alerts).
 const { ALERT_DEFAULTS } = require("./thresholds");
 
@@ -31,11 +32,15 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   if (achatSup.length) out.push({ type: "achat_sup_vente", severity: "high", margin: true, count: achatSup.length, message: `${achatSup.length} commande(s) où les achats dépassent la vente`, refs: achatSup.slice(0, 10).map((o) => o.fp) });
 
   // --- Cohérence financière (identité CAS = Facturé + RAF) ---
+  // Σ facturé par FP CANONIQUE (fpKey) : un même FP formaté différemment côté facture/commande
+  // (zéros de tête, espaces) doit s'agréger sur la même clé, sinon surfacturation/RAF faussés.
   const invByFp = {};
-  for (const i of invoices || []) if (i.fp) invByFp[i.fp] = (invByFp[i.fp] || 0) + (i.amountHt || 0);
-  // Non rattachée = tout ce qui n'est pas explicitement lié (linked !== true) : robuste même
-  // si une facture n'a pas été enrichie (drapeau absent).
-  const orphan = (invoices || []).filter((i) => i.linked !== true);
+  for (const i of invoices || []) { const k = fpKey(i.fp); if (k) invByFp[k] = (invByFp[k] || 0) + (i.amountHt || 0); }
+  // Non rattachée = FP CANONIQUE de la facture absent des commandes (appartenance FRAÎCHE à orderFps,
+  // et non le drapeau `linked` qui pouvait rester périmé à false quand le FP était formaté
+  // différemment côté facture/commande → fausses « non rattachées ». Cf. rapport terrain.
+  const orderFps = new Set((orders || []).map((o) => fpKey(o.fp)).filter(Boolean));
+  const orphan = (invoices || []).filter((i) => { const k = fpKey(i.fp); return !k || !orderFps.has(k); });
   const orphanAmt = orphan.reduce((s, i) => s + (i.amountHt || 0), 0);
   if (orphan.length) out.push({ type: "factures_non_rattachees", severity: "high", count: orphan.length, message: `${orphan.length} facture(s) non rattachées à une commande (${(orphanAmt / 1e9).toFixed(2)} Md)` });
 
@@ -43,12 +48,12 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   const prePo = (invoices || []).filter((i) => i.prePo);
   if (prePo.length) out.push({ type: "facture_pre_po", severity: "medium", count: prePo.length, message: `${prePo.length} facture(s) antérieure(s) à l'année du PO` });
 
-  const surfac = orders.filter((o) => o.cas > 0 && (invByFp[o.fp] || 0) > o.cas * (1 + T.surfacturationPct));
+  const surfac = orders.filter((o) => o.cas > 0 && (invByFp[fpKey(o.fp)] || 0) > o.cas * (1 + T.surfacturationPct));
   if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });
 
   const rafIncoh = orders.filter((o) => {
     if (!(o.cas > 0)) return false;
-    const attendu = Math.max(o.cas - (invByFp[o.fp] || 0), 0);
+    const attendu = Math.max(o.cas - (invByFp[fpKey(o.fp)] || 0), 0);
     return Math.abs((o.raf || 0) - attendu) > T.rafEcartPct * o.cas;
   });
   if (rafIncoh.length) out.push({ type: "raf_incoherent", severity: "medium", count: rafIncoh.length, message: `${rafIncoh.length} commande(s) où le RAF s'écarte de >${(T.rafEcartPct * 100).toFixed(0)} % de (CAS − Facturé)`, refs: rafIncoh.slice(0, 10).map((o) => o.fp) });

@@ -33,8 +33,10 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     for (const x of arr) { const k = keyFn(x); if (!k || /^\|+$/.test(k)) continue; (g[k] = g[k] || []).push(x); }
     return Object.values(g).filter((grp) => grp.length > 1);
   };
-  const oppDups = dupGroups(opps, (o) => [o.client, o.amount, o.stage, o.am, o.fp, o.closingDate].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
-  const bcDups = dupGroups(bcLines, (b) => [b.fp, b.supplier, b.amountXof, b.expenseType, b.bcNumber].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
+  // Clé de doublon sur FP CANONIQUE (fpKey) : un même FP zero-paddé/espacé différemment au ré-import
+  // ne doit pas échapper à la détection (sinon faux négatifs — deux docs jugés distincts).
+  const oppDups = dupGroups(opps, (o) => [o.client, o.amount, o.stage, o.am, fpKey(o.fp), o.closingDate].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
+  const bcDups = dupGroups(bcLines, (b) => [fpKey(b.fp), b.supplier, b.amountXof, b.expenseType, b.bcNumber].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
 
   const def = (type, severity, records, label, ref) => ({ type, severity, records, label, ref });
   return [
