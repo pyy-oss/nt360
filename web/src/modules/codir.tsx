@@ -3,8 +3,8 @@
 // mise en page du tableau de bord Excel « Projection CA ». AUCUN calcul confidentiel (CAF, backlog,
 // prise de commande — pas de marge) → visible au niveau « overview ». Export XLSX = one-pager CODIR
 // existant (exportReport).
-import { useState, useEffect, type FC } from "react";
-import { Card, Kpi, Badge, Table, Modal, Busy, money, useToast, EmptyState, colText, colNum } from "../design/components";
+import { useState, useEffect, type FC, type ReactNode } from "react";
+import { Card, Badge, Table, Modal, Busy, money, cx, useToast, EmptyState, colText, colNum } from "../design/components";
 import { Gauge } from "../design/charts";
 import { FreshnessGuard, type Props } from "./_shared";
 import { T, fmt } from "../design/tokens";
@@ -105,11 +105,12 @@ function Legend({ items }: { items: { color: string; label: string; faded?: bool
 // Carte JAUGE CIRCULAIRE réutilisable (atteinte d'un objectif CAF) — même rendu pour le prévisionnel
 // (projeté) et le réel (facturé YTD), pour une paire cohérente.
 function GaugeCard({ title, value, num, objectif, sub }: { title: string; value: number; num: number; objectif: number; sub?: string }) {
+  const color = value >= 0.9 ? T.emerald : value >= 0.6 ? T.gold : T.clay;
   return (
-    <div className="flex flex-col rounded-lg border border-line bg-panel2/40 p-3">
-      <div className="text-[12px] text-muted mb-1">{title}</div>
+    <div className="flex flex-col rounded-xl border border-line bg-panel2/40 p-4 transition-shadow hover:shadow-md">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1">{title}</div>
       <div className="flex-1 flex flex-col justify-center">
-        <Gauge value={value} color={value >= 0.9 ? T.emerald : value >= 0.6 ? T.gold : T.clay} />
+        <Gauge value={value} color={color} />
         <div className="text-center text-[12px] text-muted -mt-1">
           <b className="text-ink tabnum">{fmt(num)}</b> / objectif <b className="tabnum">{fmt(objectif)}</b>
           {sub && <span className="text-faint"> · {sub}</span>}
@@ -117,6 +118,85 @@ function GaugeCard({ title, value, num, objectif, sub }: { title: string; value:
       </div>
     </div>
   );
+}
+
+// Trajectoire vers l'objectif CAF — barre empilée en une lecture : facturé YTD → certitudes restantes
+// → forecast pondéré → reste à trouver (écart), avec repère d'objectif. Décompose l'atteinte affichée
+// par les jauges en ses SOURCES (d'où vient le CAF projeté) — la synthèse « en un coup d'œil » du CODIR.
+function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: number; certitudes: number; forecast: number; objectif: number }) {
+  const projete = facture + certitudes + forecast;
+  const scale = Math.max(objectif, projete, 1);
+  const gap = Math.max(objectif - projete, 0);
+  const over = Math.max(projete - objectif, 0);
+  const atteinte = objectif > 0 ? Math.round((projete / objectif) * 100) : 0;
+  const atteinteColor = atteinte >= 100 ? T.emerald : atteinte >= 60 ? T.gold : T.clay;
+  const objPos = (objectif / scale) * 100;
+  const seg = [
+    { v: facture, color: T.emerald, label: "Facturé YTD" },
+    { v: certitudes, color: T.steel, label: "Certitudes restantes" },
+    { v: forecast, color: T.gold, label: "Forecast pondéré" },
+  ].filter((s) => s.v > 0);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Trajectoire vers l'objectif</span>
+        <span className="text-[12px] text-muted tabnum">
+          <b className="text-ink">{fmt(projete)}</b> / {fmt(objectif)} · <b style={{ color: atteinteColor }}>{atteinte}%</b>
+        </span>
+      </div>
+      <div className="relative">
+        {objectif > 0 && objPos < 99.5 && <span className="absolute -top-3 -translate-x-1/2 text-[9px] font-semibold text-ink whitespace-nowrap" style={{ left: `${objPos}%` }}>Objectif</span>}
+        <div className="flex h-5 w-full overflow-hidden rounded-md bg-panel2">
+          {seg.map((s) => <div key={s.label} className="h-full" style={{ width: `${(s.v / scale) * 100}%`, background: s.color }} title={`${s.label} : ${fmt(s.v)}`} />)}
+          {gap > 0 && <div className="h-full opacity-50" style={{ width: `${(gap / scale) * 100}%`, background: `repeating-linear-gradient(45deg, ${T.faint} 0, ${T.faint} 4px, transparent 4px, transparent 8px)` }} title={`Reste à trouver : ${fmt(gap)}`} />}
+        </div>
+        {objectif > 0 && objPos < 99.5 && <div className="absolute -top-1.5 -bottom-1.5 w-px bg-ink/70" style={{ left: `${objPos}%` }} aria-hidden="true" />}
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Certitudes restantes" }, { color: T.gold, label: "Forecast" }]} />
+        {gap > 0
+          ? <span className="text-clay">Reste à trouver : <b className="tabnum">{fmt(gap)}</b></span>
+          : <span className="text-emerald">Objectif dépassé de <b className="tabnum">{fmt(over)}</b></span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Primitives « premium » du Bilan CODIR ────────────────────────────────────
+// Tuile KPI : liseré d'accent haut, grand nombre display, fond subtil, survol relevé.
+function StatTile({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-line bg-panel2/50 p-4 transition-shadow hover:shadow-md">
+      <div className="absolute inset-x-0 top-0 h-[3px]" style={{ background: color }} aria-hidden="true" />
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</div>
+      <div className="font-display text-[26px] sm:text-[28px] leading-none tabnum mt-2" style={{ color }}>{value}</div>
+      {sub && <div className="text-[11px] text-faint mt-2">{sub}</div>}
+    </div>
+  );
+}
+// Puce d'indicateur dérivé (couverture, concentration, rythme…) — compacte, nombre display.
+function InsightChip({ label, value, hint, color }: { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-panel2/40 px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</div>
+      <div className="font-display text-[17px] tabnum mt-0.5" style={{ color: color || "rgb(var(--ink))" }}>{value}</div>
+      {hint && <div className="text-[10px] text-faint mt-0.5 leading-tight">{hint}</div>}
+    </div>
+  );
+}
+// Titre de section : petit repère d'accent + libellé capitales espacées.
+function SectionTitle({ children, legend }: { children: ReactNode; legend?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="h-3.5 w-[3px] rounded-full" style={{ background: T.gold }} aria-hidden="true" />
+      <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{children}</span>
+      {legend}
+    </div>
+  );
+}
+// Panneau encadré cohérent (dashboard).
+function Panel({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx("rounded-xl border border-line bg-panel2/30 p-4", className)}>{children}</div>;
 }
 
 function ExportBtn() {
@@ -345,6 +425,19 @@ export const Codir: FC<Props> = () => {
     return { name: monthLabel(ym), realise, planifie };
   }).filter((m) => m.realise + m.planifie > 0);
 
+  // Indicateurs dérivés (lecture CODIR) — tous calculés depuis les agrégats déjà chargés.
+  const pctR = (v: number) => `${Math.round(v * 100)}%`;
+  const couvertureCert = objectifCaf > 0 ? cafEst / objectifCaf : 0;           // objectif couvert par les certitudes seules
+  const poidsForecast = cafEstYcForecast > 0 ? forecast / cafEstYcForecast : 0; // part du forecast dans le CAF projeté
+  const totalCas = (clients?.rows || []).reduce((s, r) => s + (r.cas || 0), 0);
+  const top3Cas = [...rows].sort((a, b) => (b.cas || 0) - (a.cas || 0)).slice(0, 3).reduce((s, r) => s + (r.cas || 0), 0);
+  const top3Share = totalCas > 0 ? top3Cas / totalCas : 0;                      // concentration : poids des 3 premiers clients
+  const monthsElapsed = Number(curMonth.slice(5, 7)) || 12;                     // mois calendaires écoulés (janv=1)
+  const monthsRemaining = Math.max(12 - monthsElapsed, 0);
+  const gapObj = Math.max(objectifCaf - cafEstYcForecast, 0);                   // reste à trouver vs objectif (yc forecast)
+  const rythmeRequis = monthsRemaining > 0 ? gapObj / monthsRemaining : 0;      // facturation requise / mois pour combler l'écart
+  const rythmeActuel = monthsElapsed > 0 ? cafYtd / monthsElapsed : 0;          // rythme de facturation observé / mois
+
   // Export PowerPoint (deck 3 slides : Projection CAF · Backlog & Facturation · Hot Topics). pptxgenjs
   // chargé à la demande. Réutilise les données déjà calculées ci-dessus + le bulletin de la semaine.
   const doPptx = async () => {
@@ -364,18 +457,49 @@ export const Codir: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <FreshnessGuard />
-      <Card
-        title={<span className="flex items-center gap-3">Bilan hebdomadaire — Projection CAF <Badge tone="gold">S{week}</Badge>{fy && <Badge tone="neutral">FY {fy}</Badge>}</span>}
-        actions={canExport ? <div className="flex items-center gap-2"><ExportBtn /><PptxBtn build={doPptx} /></div> : undefined}
-      >
-        {!att ? <div className="py-8 text-center text-faint">Agrégats indisponibles — lance un recalcul (Vue d'ensemble).</div> : (
-          <div className="flex flex-col gap-5">
-            {/* KPI row */}
-            <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
-              <Kpi label="CAF YTD" value={fmt(cafYtd)} tone="emerald" sub="facturé — exercice" />
-              <Kpi label="Backlog YTD" value={fmt(backlogYtd)} tone="clay" sub="RAF glissant" />
-              <Kpi label="CAF Estimé" value={fmt(cafEst)} tone="steel" sub="certitudes (hors forecast)" />
-              <Kpi label="CAF Estimé yc Forecast" value={fmt(cafEstYcForecast)} tone="gold" sub={`+ ${fmt(forecast)} pipeline pondéré`} />
+
+      {/* Bandeau « héros » premium : dégradé encre → sarcelle, filet doré, badges & exports. */}
+      <div className="overflow-hidden rounded-2xl border border-line shadow-sm">
+        <div className="relative flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4"
+          style={{ background: "linear-gradient(105deg, rgb(var(--panel)) 0%, rgb(var(--panel2)) 62%, rgb(var(--panel)) 100%)" }}>
+          <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${T.gold}, ${T.emerald})` }} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white" style={{ background: T.gold }}>Projection CAF</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Comité de direction</span>
+            </div>
+            <h1 className="font-display text-[22px] sm:text-[26px] leading-tight text-ink mt-1.5">Bilan hebdomadaire</h1>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge tone="gold">Semaine {week}</Badge>
+            {fy && <Badge tone="neutral">Exercice {fy}</Badge>}
+            {canExport && <span className="ml-1 flex items-center gap-2"><ExportBtn /><PptxBtn build={doPptx} /></span>}
+          </div>
+        </div>
+
+        {!att ? (
+          <div className="bg-panel px-5 py-12 text-center text-faint">Agrégats indisponibles — lance un recalcul (Vue d'ensemble).</div>
+        ) : (
+          <div className="flex flex-col gap-6 bg-panel p-5">
+            {/* KPI — tuiles d'accent */}
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              <StatTile label="CAF YTD" value={fmt(cafYtd)} color={T.emerald} sub="facturé — exercice" />
+              <StatTile label="Backlog YTD" value={fmt(backlogYtd)} color={T.clay} sub="RAF glissant" />
+              <StatTile label="CAF Estimé" value={fmt(cafEst)} color={T.steel} sub="certitudes (hors forecast)" />
+              <StatTile label="CAF Estimé yc Forecast" value={fmt(cafEstYcForecast)} color={T.gold} sub={`+ ${fmt(forecast)} pipeline pondéré`} />
+            </div>
+
+            {/* Synthèse « en un coup d'œil » : trajectoire vers l'objectif (décompose l'atteinte par source) */}
+            <Panel>
+              <TrajectoryBar facture={cafYtd} certitudes={Math.max(cafEst - cafYtd, 0)} forecast={forecast} objectif={objectifCaf} />
+            </Panel>
+
+            {/* Indicateurs dérivés — lecture CODIR (couverture, risque de concentration, rythme requis) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <InsightChip label="Couverture certitudes" value={pctR(couvertureCert)} hint="objectif hors forecast" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
+              <InsightChip label="Poids du forecast" value={pctR(poidsForecast)} hint="dans le CAF projeté" color={T.gold} />
+              <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
+              <InsightChip label="Rythme requis" value={`${fmt(rythmeRequis)}/mois`} hint={`${monthsRemaining} mois restants · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
             </div>
 
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
@@ -384,36 +508,34 @@ export const Codir: FC<Props> = () => {
               <GaugeCard title={`CAF prévisionnel vs objectif ${fy || ""}`} value={atteinte} num={cafEstYcForecast} objectif={objectifCaf} sub="projeté yc forecast" />
             </div>
 
-            {/* Top clients */}
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes <Legend items={[{ color: T.steel, label: "PO value (CAS)" }]} /></div>
+            {/* Top clients — deux panneaux encadrés */}
+            <div className="grid gap-4 md:grid-cols-2 items-stretch">
+              <Panel>
+                <SectionTitle legend={<Legend items={[{ color: T.steel, label: "PO value (CAS)" }]} />}>Top clients — Commandes</SectionTitle>
                 <ClientBars rows={topCmd} />
-              </div>
-              <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Top clients — Commandes &amp; Certitudes &amp; Forecast
-                  <Legend items={[{ color: T.steel, label: "certitudes" }, { color: T.gold, label: "forecast" }]} /></div>
+              </Panel>
+              <Panel>
+                <SectionTitle legend={<Legend items={[{ color: T.steel, label: "certitudes" }, { color: T.gold, label: "forecast" }]} />}>Top clients — Commandes &amp; Forecast</SectionTitle>
                 {hasForecast
                   ? <ClientBars rows={topProj} stacked />
                   : <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-[12px] text-ink">Le <b>forecast par client</b> sera disponible au prochain recalcul (nouvel indicateur). Lance « Recalculer » (Vue d'ensemble) pour distinguer certitudes et forecast.</div>}
-              </div>
+              </Panel>
             </div>
 
             {/* Top 10 backlog + projection facturation */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Top 10 Backlog</div>
+            <div className="grid gap-4 lg:grid-cols-2 items-stretch">
+              <Panel>
+                <SectionTitle>Top 10 Backlog</SectionTitle>
                 <Table columns={backlogCols} rows={top10} colsKey="codir-backlog" empty="Aucun backlog." pageSize={10} />
-              </div>
-              <div>
-                <div className="text-[12px] font-semibold text-muted mb-2">Projection facturation
-                  <Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} /></div>
+              </Panel>
+              <Panel>
+                <SectionTitle legend={<Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} />}>Projection facturation</SectionTitle>
                 <MonthBars rows={monthRows} />
-              </div>
+              </Panel>
             </div>
           </div>
         )}
-      </Card>
+      </div>
 
       {/* Page 2 du bilan hebdo : Hot Topics Opérations (commentaires / points clés, saisie manuelle) */}
       {fy && <HotTopics fy={fy} week={week} />}
