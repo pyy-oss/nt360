@@ -97,6 +97,43 @@ function Legend({ items }: { items: { color: string; label: string; faded?: bool
   );
 }
 
+// Progression CAF vers l'OBJECTIF : barre segmentée Réalisé → Certitudes → Forecast, avec repère
+// d'objectif. Raconte la construction du CAF projeté (facturé + certitudes + pipeline) vs la cible.
+function ObjectiveProgress({ realise, certitudes, forecast, objectif }: { realise: number; certitudes: number; forecast: number; objectif: number }) {
+  const proj = realise + certitudes + forecast; // = CAF estimé yc forecast
+  const scale = Math.max(objectif, proj, 1);
+  const pc = (v: number) => `${Math.max((v / scale) * 100, 0)}%`;
+  const objPct = Math.min((objectif / scale) * 100, 100);
+  const seg: { v: number; color: string; label: string }[] = [
+    { v: realise, color: T.emerald, label: "Réalisé" },
+    { v: certitudes, color: T.steel, label: "Certitudes" },
+    { v: forecast, color: T.gold, label: "Forecast" },
+  ];
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative h-5 w-full overflow-hidden rounded bg-panel2">
+        <div className="absolute inset-y-0 left-0 flex h-full">
+          {seg.map((s) => s.v > 0 && <div key={s.label} className="h-full" style={{ width: pc(s.v), background: s.color }} title={`${s.label} ${fmt(s.v)}`} />)}
+        </div>
+        {/* Repère d'objectif */}
+        <div className="absolute inset-y-0 z-10 w-[2px] bg-ink/70" style={{ left: `${objPct}%` }} title={`Objectif ${fmt(objectif)}`} />
+      </div>
+      <div className="flex justify-between text-[11px] text-faint"><span>0</span><span>Objectif <b className="text-ink tabnum">{mM(objectif)}</b></span></div>
+      <div className="grid grid-cols-3 gap-2 text-[11px]">
+        {seg.map((s) => (
+          <div key={s.label} className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
+            <span className="text-muted">{s.label}</span><span className="tabnum text-ink">{mM(s.v)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-faint">
+        Projeté <b className="text-ink tabnum">{mM(proj)}</b> · {objectif > 0 ? <>atteinte <b className={proj / objectif >= 0.9 ? "text-emerald" : proj / objectif >= 0.6 ? "text-gold" : "text-clay"}>{Math.round((proj / objectif) * 100)}%</b> de l'objectif</> : "objectif non défini"}
+      </div>
+    </div>
+  );
+}
+
 function ExportBtn() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -170,19 +207,22 @@ export const Codir: FC<Props> = () => {
               <Kpi label="CAF Estimé yc Forecast" value={fmt(cafEstYcForecast)} tone="gold" sub={`+ ${fmt(forecast)} pipeline pondéré`} />
             </div>
 
-            {/* Jauge d'atteinte + forecast */}
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-line bg-panel2/40 p-3">
+            {/* Jauge d'atteinte + progression CAF vers l'objectif (cartes équilibrées, même hauteur) */}
+            <div className="grid gap-3 md:grid-cols-2 items-stretch">
+              <div className="flex flex-col rounded-lg border border-line bg-panel2/40 p-3">
                 <div className="text-[12px] text-muted mb-1">CAF prévisionnel vs objectif {fy || ""}</div>
-                <Gauge value={atteinte} color={atteinte >= 0.9 ? T.emerald : atteinte >= 0.6 ? T.gold : T.clay} />
-                <div className="text-center text-[12px] text-muted -mt-1">
-                  <b className="text-ink tabnum">{fmt(cafEstYcForecast)}</b> / objectif <b className="tabnum">{fmt(objectifCaf)}</b>
+                <div className="flex-1 flex flex-col justify-center">
+                  <Gauge value={atteinte} color={atteinte >= 0.9 ? T.emerald : atteinte >= 0.6 ? T.gold : T.clay} />
+                  <div className="text-center text-[12px] text-muted -mt-1">
+                    <b className="text-ink tabnum">{fmt(cafEstYcForecast)}</b> / objectif <b className="tabnum">{fmt(objectifCaf)}</b>
+                  </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-line bg-panel2/40 p-3 flex flex-col justify-center">
-                <div className="text-[12px] text-muted">Forecast annuel (pipeline pondéré)</div>
-                <div className="font-display tabnum text-[28px] text-gold leading-tight">{fmt(forecast)}</div>
-                <div className="text-[11px] text-faint">Écart entre le CAF estimé et le CAF estimé yc forecast — potentiel non encore certain.</div>
+              <div className="flex flex-col rounded-lg border border-line bg-panel2/40 p-3">
+                <div className="text-[12px] text-muted mb-3">CAF YTD → Objectif {fy || ""} — construction du projeté</div>
+                <div className="flex-1 flex flex-col justify-center">
+                  <ObjectiveProgress realise={cafYtd} certitudes={Math.max(cafEst - cafYtd, 0)} forecast={forecast} objectif={objectifCaf} />
+                </div>
               </div>
             </div>
 
