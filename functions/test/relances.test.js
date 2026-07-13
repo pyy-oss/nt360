@@ -61,6 +61,26 @@ describe("relances — plan de relance daté par responsable", () => {
     expect(j.am).toBe("ALICE");
   });
 
+  it("PAS de FAUX jalon échu quand la facture est formatée autrement que la clé jalon (audit fiabilité)", () => {
+    // Jalon échu 1000 sous FP canonique FP/2026/9 ; facture couvrante au FP formaté différemment
+    // (zéros de tête). Avant correctif : factByFp indexé BRUT ⇒ invoiced=0 ⇒ FAUX « jalon non facturé ».
+    const ord = [{ fp: "FP/2026/9", am: "ALICE", client: "ACME" }];
+    const inv = [{ id: "J1", numero: "F9", fp: "FP/2026/009", client: "ACME", amountHt: 1000, dueDate: "2026-09-01", paid: true }];
+    const ms = { "FP/2026/9": [{ date: "2026-03-01", amount: 1000 }] }; // échu 1000
+    const r2 = relances(inv, ord, [], ms, ASOF);
+    expect(r2.jalons.count).toBe(0); // facturé 1000 ≥ attendu 1000 → aucun retard de facturation
+  });
+  it("responsabilité/client jalon rattachés par FP canonique malgré le formatage", () => {
+    const ord = [{ fp: "FP/2026/5", am: "BOB", client: "BETA" }];
+    const inv = [{ id: "K1", fp: "FP/2026/05", client: "BETA", amountHt: 100, dueDate: "2026-01-01", paid: false }];
+    const ms = { "FP/2026/5": [{ date: "2026-02-01", amount: 1000 }] }; // échu 1000, facturé 100 → gap 900
+    const r3 = relances(inv, ord, [], ms, ASOF);
+    expect(r3.jalons.count).toBe(1);
+    expect(r3.jalons.items[0].am).toBe("BOB");       // attribué (pas « PMO » par défaut)
+    expect(r3.jalons.items[0].invoiced).toBe(100);   // facture reliée malgré les zéros de tête
+    expect(r3.jalons.items[0].gap).toBe(900);
+  });
+
   it("aucune donnée → agrégats vides et cohérents", () => {
     const e = relances([], [], [], {}, ASOF);
     expect(e.creances.count).toBe(0);

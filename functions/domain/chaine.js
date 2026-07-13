@@ -6,6 +6,8 @@
 //   • Certitudes : pipeline pondéré ≥90 %, GLISSANT (à venir), indépendant de l'année.
 // Fonctions pures (testables).
 
+const { fpKey } = require("../lib/ids");
+
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 
 // Pondération de PROJECTION : moteur à 3 niveaux configurables (domain/projection). Fonction UNIQUE
@@ -42,8 +44,11 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // ACTIVE dont le FP porte DÉJÀ une commande est comptée dans `commandes` (CAS) ; la garder aussi dans le
   // pipeline projeté la double-compterait dans le dénominateur de conversion (taux sous-estimé). Les FP des
   // commandes viennent de `orders` ; les opps sans FP ou dont le FP n'est pas au carnet restent dans le pipe.
-  const bookedFps = new Set(orders.map((o) => o.fp).filter(Boolean));
-  const active = opps.filter((o) => o.stage >= 1 && o.stage <= 5 && !(o.fp && bookedFps.has(o.fp)));
+  // FP CANONIQUE des deux côtés (parité avec atterrissage.alreadyBooked) : orders.fp est canonisé par
+  // mergeCommandes, opps.fp reste au format source → sans fpKey, une opp au FP formaté autrement (zéros
+  // de tête, espaces) échappe à l'exclusion et se double-compte au dénominateur de conversion.
+  const bookedFps = new Set(orders.map((o) => fpKey(o.fp)).filter(Boolean));
+  const active = opps.filter((o) => { const k = o.fp ? fpKey(o.fp) : ""; return o.stage >= 1 && o.stage <= 5 && !(k && bookedFps.has(k)); });
   const breakdown = tierBreakdown(active, tiers);
   const pipelineProjete = breakdown.reduce((s, b) => s + b.pond, 0); // Σ niveaux ACTIFS
   const pondCertain = breakdown.find((b) => b.key === "certitudes")?.pond || 0;

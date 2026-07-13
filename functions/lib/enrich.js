@@ -24,14 +24,17 @@ function clientBuMap(orders) {
  */
 function enrichBu(store) {
   const orders = store.orders || [];
+  // Index FP → BU par clé CANONIQUE (fpKey) des deux côtés : un FP formaté différemment côté
+  // facture/opp doit hériter de la BU de sa commande (cohérent avec enrichLinks), sinon la jointure
+  // manque et l'on retombe sur la BU majoritaire du client (moins précise).
   const fpBu = {};
-  for (const o of orders) if (o.fp && o.bu && o.bu !== "AUTRE") fpBu[o.fp] = o.bu;
+  for (const o of orders) { const k = fpKey(o.fp); if (k && o.bu && o.bu !== "AUTRE") fpBu[k] = o.bu; }
   const cliBu = clientBuMap(orders);
 
   let buFixedInvoices = 0, buFixedOpps = 0;
   const fix = (doc) => {
     if (doc.bu && doc.bu !== "AUTRE") return false;
-    const bu = fpBu[doc.fp] || cliBu[doc.client];
+    const bu = fpBu[fpKey(doc.fp)] || cliBu[doc.client];
     if (bu) { doc.bu = bu; return true; }
     return false;
   };

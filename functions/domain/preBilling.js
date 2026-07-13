@@ -15,13 +15,18 @@ function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 // (plusieurs affectations couvrantes à TJM DIFFÉRENTS), on ne devine pas : tjm=null + ambiguous=true, ce
 // qui fait retomber l'appelant sur le TJM cible de l'annuaire. Retourne aussi une réf de mission (FP/label).
 function coveringRate(assignments, consultantId, month) {
+  // Seules les affectations CONFIRMÉES portent un taux réellement contractualisé : une affectation
+  // « planned » (prévisionnelle) ne doit pas imposer son TJM à une pré-facturation (repli TJM cible).
   const cov = (assignments || []).filter((a) =>
     a && a.consultantId === consultantId && a.startMonth <= month && a.endMonth >= month &&
-    num(a.tjmBilled) != null && num(a.tjmBilled) > 0);
+    (a.status || "confirmed") === "confirmed" && num(a.tjmBilled) != null && num(a.tjmBilled) > 0);
   if (!cov.length) return { tjm: null, ref: null, ambiguous: false };
   const rates = new Set(cov.map((a) => num(a.tjmBilled)));
+  const ambiguous = rates.size > 1;
   const a0 = cov[0];
-  return { tjm: rates.size === 1 ? num(a0.tjmBilled) : null, ref: a0.projectFp || a0.label || null, ambiguous: rates.size > 1 };
+  // Réf de mission renseignée seulement si le taux est NON ambigu (sinon on ne sait pas quelle mission
+  // porte la facturation → pas d'attribution trompeuse).
+  return { tjm: ambiguous ? null : num(a0.tjmBilled), ref: ambiguous ? null : (a0.projectFp || a0.label || null), ambiguous };
 }
 
 // Une ligne de pré-facturation par (consultant, mois) où des jours ont été FACTURÉS au CRA.
@@ -51,11 +56,13 @@ function computePreBilling(consultants, timesheets, assignments, months) {
   // Tri : mois le plus récent d'abord, puis montant décroissant.
   lines.sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : b.amountHt - a.amountHt));
 
-  const agg = (keyFn) => {
+  // keyFn = clé de regroupement (identité) ; labelFn = libellé affiché (facultatif). Regrouper par
+  // IDENTITÉ (ex. consultantId) et non par libellé évite qu'deux homonymes fusionnent en une ligne.
+  const agg = (keyFn, labelFn) => {
     const m = {};
     for (const l of lines) {
       const k = keyFn(l) || "—";
-      const g = m[k] || (m[k] = { key: k, billedDays: 0, amountHt: 0, lines: 0, missingTjm: 0 });
+      const g = m[k] || (m[k] = { key: (labelFn ? labelFn(l) : k) || "—", billedDays: 0, amountHt: 0, lines: 0, missingTjm: 0 });
       g.billedDays += l.billedDays; g.amountHt += l.amountHt; g.lines += 1; if (l.missingTjm) g.missingTjm += 1;
     }
     return Object.values(m).sort((a, b) => b.amountHt - a.amountHt);
@@ -68,7 +75,8 @@ function computePreBilling(consultants, timesheets, assignments, months) {
   };
   // byMonth trié chronologiquement (lisibilité de la proposition mois par mois).
   const byMonth = agg((l) => l.month).sort((a, b) => (a.key < b.key ? -1 : 1));
-  return { global, lines, byConsultant: agg((l) => l.name), byBu: agg((l) => l.bu), byMonth };
+  // byConsultant regroupé par consultantId (identité), affiché par nom → deux homonymes restent distincts.
+  return { global, lines, byConsultant: agg((l) => l.consultantId, (l) => l.name), byBu: agg((l) => l.bu), byMonth };
 }
 
 module.exports = { computePreBilling, coveringRate };

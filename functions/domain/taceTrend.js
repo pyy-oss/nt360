@@ -10,6 +10,10 @@ const WORKING_DAYS_PER_MONTH = 20; // cohérent avec timesheet / activityKpi
 
 function num(v) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; }
 
+// Ordinal de mois calendaire (YYYY-MM → entier monotone) : deux mois adjacents diffèrent de 1, un trou
+// de N mois de N. Base de l'espacement correct de la régression de tendance.
+function monthOrd(m) { const [y, mm] = String(m).split("-").map(Number); return (y || 0) * 12 + ((mm || 1) - 1); }
+
 // TACE + occupation d'UN groupe de CRA (un mois, éventuellement filtré par BU). workable = Σ(ouvrés − congés)
 // = têtes × ouvrés − congés (définition « congés exclus »). tacePct/occupancyPct = null si dénominateur nul.
 function monthPoint(rows, workingDays = WORKING_DAYS_PER_MONTH) {
@@ -47,15 +51,21 @@ function computeTaceTrend(timesheets, consultants, months, workingDays = WORKING
 
   // Résumé calculé sur les mois RENSEIGNÉS uniquement (tacePct != null) — un mois sans CRA ne compte pas.
   const pts = series.filter((s) => s.tacePct != null);
-  const latest = pts.length ? pts[pts.length - 1].tacePct : null;
-  const previous = pts.length > 1 ? pts[pts.length - 2].tacePct : null;
+  const latestPt = pts.length ? pts[pts.length - 1] : null;
+  const prevPt = pts.length > 1 ? pts[pts.length - 2] : null;
+  const latest = latestPt ? latestPt.tacePct : null;
+  const previous = prevPt ? prevPt.tacePct : null;
   const avg = pts.length ? Math.round(pts.reduce((s, p) => s + p.tacePct, 0) / pts.length) : null;
-  const delta = latest != null && previous != null ? latest - previous : null;
-  // Pente = régression linéaire (moindres carrés) du TACE sur l'index de mois renseigné (arrondie au 1/10).
+  // Δ « vs mois précédent » n'a de sens que si les deux relevés sont des mois CALENDAIRES adjacents
+  // (sinon on comparerait par-dessus un trou de plusieurs mois). Sinon null (non affiché).
+  const delta = latestPt && prevPt && monthOrd(latestPt.month) - monthOrd(prevPt.month) === 1 ? latest - previous : null;
+  // Pente = régression linéaire (moindres carrés) du TACE sur l'index de mois CALENDAIRE (pas l'index de
+  // mois renseigné) : des mois vides intercalés espacent correctement les points → la pente est bien en
+  // « points de TACE par mois calendaire », et le seuil ±1 pt/mois de direction n'est pas faussé.
   let slope = null;
   if (pts.length >= 2) {
     const n = pts.length;
-    const xs = pts.map((_, i) => i);
+    const xs = pts.map((p) => monthOrd(p.month));
     const ys = pts.map((p) => p.tacePct);
     const mx = xs.reduce((a, b) => a + b, 0) / n;
     const my = ys.reduce((a, b) => a + b, 0) / n;

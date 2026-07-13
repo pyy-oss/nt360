@@ -54,4 +54,13 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     expect(rows[0].am).toBe("DATCHA");
     expect(fy).toBe(2026);
   });
+  it("CAF rattachée par FP CANONIQUE : facture au format différent (zéros/espaces) attribuée au bon AM (audit fiabilité)", () => {
+    // Commande FP/2026/7 (AM DATCHA) ; facture au MÊME FP canonique mais formaté autrement → doit être
+    // attribuée à DATCHA (avant correctif : amOfFp indexé brut ⇒ lookup raté ⇒ CAF sous-comptée).
+    const o = [{ fp: "FP/2026/7", am: "DATCHA", cas: 1000, yearPo: 2026 }];
+    const inv = [{ fp: "FP/2026/007", amountHt: 400 }, { fp: "FP 2026 7", amountHt: 100 }];
+    const r = am360(o, inv, [], [], 2026).rows;
+    const d = r.find((x) => x.am === "DATCHA");
+    expect(d.facture).toBe(500); // 400 + 100 rattachés malgré le formatage
+  });
 });

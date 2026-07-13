@@ -4,6 +4,7 @@
 //   3) Jalons échus non facturés — projets dont la Σ des jalons échus dépasse le facturé à date.
 // Module PUR (testable). La responsabilité est dérivée de la commande (AM de l'affaire) avec repli
 // métier (Non attribué / Achats / PMO). Aucune donnée de marge (revenu / exécution uniquement).
+const { fpKey } = require("../lib/ids");
 const DAY = 86400000;
 const daysLate = (asOf, ref) => Math.floor((Date.parse(asOf) - Date.parse(String(ref).slice(0, 10))) / DAY);
 const bucketOf = (late) => (late <= 30 ? "0-30" : late <= 60 ? "31-60" : late <= 90 ? "61-90" : "90+");
@@ -29,10 +30,13 @@ function byResponsable(items, amountOf) {
  */
 function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
   const today = asOf || new Date().toISOString().slice(0, 10);
-  // Responsable (AM) & client par FP, d'après la commande (source de vérité de l'affaire).
+  // Responsable (AM) & client par FP CANONIQUE (fpKey), d'après la commande (source de vérité de l'affaire).
+  // Les jalons (milestonesByFp) sont stockés sous FP canonique ; sans canoniser le facturé, factByFp
+  // (indexé sur le FP BRUT de la facture) ne matchait pas la clé jalon → « jalon échu non facturé » FAUX
+  // même projet entièrement facturé. amByFp/clientByFp canonisés → attribution client/AM robuste au format.
   const amByFp = {}, clientByFp = {}, factByFp = {};
-  for (const o of orders || []) { if (!o.fp) continue; if (o.am) amByFp[o.fp] = o.am; if (o.client) clientByFp[o.fp] = o.client; }
-  for (const i of invoices || []) { if (i.fp) factByFp[i.fp] = (factByFp[i.fp] || 0) + (i.amountHt || 0); }
+  for (const o of orders || []) { const k = fpKey(o.fp); if (!k) continue; if (o.am) amByFp[k] = o.am; if (o.client) clientByFp[k] = o.client; }
+  for (const i of invoices || []) { const k = fpKey(i.fp); if (k) factByFp[k] = (factByFp[k] || 0) + (i.amountHt || 0); }
 
   // 1) Créances échues (échéance sinon date de facture dépassée, non payée, montant > 0).
   const creItems = [];
@@ -40,10 +44,11 @@ function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
     if (i.paid || (i.amountHt || 0) <= 0) continue;
     const ref = i.dueDate || i.date; if (!ref) continue;
     const late = daysLate(today, ref); if (!(late > 0)) continue;
+    const ik = fpKey(i.fp);
     creItems.push({
       numero: i.numero || i.id || "", fp: i.fp || null,
-      client: i.client || (i.fp && clientByFp[i.fp]) || "—",
-      am: (i.fp && amByFp[i.fp]) || "Non attribué",
+      client: i.client || (ik && clientByFp[ik]) || "—",
+      am: (ik && amByFp[ik]) || "Non attribué",
       amount: i.amountHt || 0, dueDate: String(ref).slice(0, 10), daysLate: late, bucket: bucketOf(late),
     });
   }
@@ -56,11 +61,12 @@ function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
     if (DELIVERED.has(b.status)) continue;
     const eta = b.etaReel || b.etaContrat; if (!eta) continue;
     const late = daysLate(today, eta); if (!(late > 0)) continue;
+    const bk = fpKey(b.fp);
     bcItems.push({
       bcNumber: b.bcNumber || "", supplier: b.supplier || "—", fp: b.fp || null,
-      customer: b.customer || (b.fp && clientByFp[b.fp]) || "—",
+      customer: b.customer || (bk && clientByFp[bk]) || "—",
       amount: b.amountXof || b.amount || 0, eta: String(eta).slice(0, 10), daysLate: late,
-      status: b.status || "", am: (b.fp && amByFp[b.fp]) || "Achats",
+      status: b.status || "", am: (bk && amByFp[bk]) || "Achats",
     });
   }
   bcItems.sort((a, b) => b.daysLate - a.daysLate);
@@ -72,12 +78,13 @@ function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
     const dueMs = (milestonesByFp[fp] || []).filter((m) => m.date && daysLate(today, m.date) > 0);
     if (!dueMs.length) continue;
     const expected = dueMs.reduce((s, m) => s + (m.amount || 0), 0);
-    const invoiced = factByFp[fp] || 0;
+    const k = fpKey(fp) || fp; // clé jalon déjà canonique en principe ; on re-canonise par sûreté
+    const invoiced = factByFp[k] || 0;
     const gap = expected - invoiced;
     if (gap <= 0) continue;
     const lastDue = dueMs.reduce((mx, m) => (m.date > mx ? m.date : mx), dueMs[0].date);
     jalItems.push({
-      fp, client: clientByFp[fp] || "—", am: amByFp[fp] || "PMO",
+      fp, client: clientByFp[k] || "—", am: amByFp[k] || "PMO",
       dueDate: String(lastDue).slice(0, 10), expected, invoiced, gap, daysLate: daysLate(today, lastDue),
     });
   }
