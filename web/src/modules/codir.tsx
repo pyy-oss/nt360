@@ -151,6 +151,32 @@ function PptxBtn({ build }: { build: () => Promise<void> }) {
 }
 
 // ── BULLETIN HEBDO « Hot Topics Opérations » — commentaires / points clés (Phase 1, saisie manuelle) ──
+
+// IMPORT par collage : structure un texte multi-lignes (copié depuis Excel / PowerPoint / mail) en
+// sections → puces → sous-puces. Heuristique robuste (le résultat reste éditable avant enregistrement) :
+//  · ligne NON-puce se terminant par « : » → titre de SECTION ;
+//  · ligne plus INDENTÉE que la puce courante, ou préfixée « ◦ / o / - - » → SOUS-PUCE ;
+//  · sinon → PUCE. Les marqueurs de puce (• - * ◦) et l'indentation sont retirés du texte.
+function parseBulletinText(text: string): BulletinSection[] {
+  const sections: BulletinSection[] = [];
+  let sec: BulletinSection | null = null, item: { text: string; sub: string[] } | null = null, itemIndent = 0;
+  for (const raw of String(text || "").replace(/\r/g, "").split("\n")) {
+    if (!raw.trim()) continue;
+    const indent = raw.length - raw.replace(/^[\s ]+/, "").length;
+    const bullet = raw.trim().match(/^([•◦*·o]|-{1,2})\s+/);
+    const line = raw.trim().replace(/^([•◦*·o]|-{1,2})\s+/, "").trim();
+    if (!line) continue;
+    const isSub = /^[◦o]\s/.test(raw.trim());
+    if (!bullet && /:\s*$/.test(line) && line.length <= 60) { // titre de section
+      sec = { title: line.replace(/:\s*$/, "").trim(), items: [] }; sections.push(sec); item = null; continue;
+    }
+    if (!sec) { sec = { title: "", items: [] }; sections.push(sec); }
+    if (item && (isSub || indent > itemIndent + 1)) { item.sub.push(line); continue; } // sous-puce
+    item = { text: line, sub: [] }; itemIndent = indent; sec.items.push(item);
+  }
+  return sections.filter((s) => s.title || s.items.length);
+}
+
 const DEFAULT_SECTIONS = (): BulletinSection[] => [
   { title: "Engagements fournisseurs", items: [{ text: "", sub: [] }] },
   { title: "Projets", items: [{ text: "", sub: [] }] },
@@ -186,11 +212,38 @@ function BulletinView({ sections }: { sections: BulletinSection[] }) {
 function BulletinEditor({ fy, week, initial, onClose, onSaved }: { fy: number; week: number; initial: BulletinSection[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [secs, setSecs] = useState<BulletinSection[]>(initial.length ? JSON.parse(JSON.stringify(initial)) : DEFAULT_SECTIONS());
+  const [importOpen, setImportOpen] = useState(false);
+  const [pasted, setPasted] = useState("");
   const upd = (fn: (d: BulletinSection[]) => void) => setSecs((p) => { const c = JSON.parse(JSON.stringify(p)); fn(c); return c; });
   const save = async () => { await upsertOpsBulletin({ fy, week, sections: secs }); toast("Bulletin enregistré", "ok"); onSaved(); };
+  const doImport = (mode: "replace" | "append") => {
+    const parsed = parseBulletinText(pasted);
+    if (!parsed.length) { toast("Rien à importer (texte vide ou non structuré)", "err"); return; }
+    setSecs((p) => (mode === "replace" ? parsed : [...p, ...parsed]));
+    setImportOpen(false); setPasted("");
+    toast(`Importé : ${parsed.length} section(s)`, "ok");
+  };
   return (
     <Modal open title={`Hot Topics Opérations — S${week} / FY ${fy}`} onClose={onClose} size="md" actions={<Busy label="Enregistrer" fn={save} okMsg="Enregistré" errMsg="Enregistrement refusé" />}>
       <div className="flex flex-col gap-4 text-[13px]">
+        {/* IMPORT par collage (Excel / PowerPoint / mail) → structuré, éditable ensuite */}
+        <div className="rounded-lg border border-gold/40 bg-gold/5 p-2.5">
+          {!importOpen ? (
+            <button type="button" className="text-[12px] font-semibold text-gold hover:underline" onClick={() => setImportOpen(true)}>⇪ Importer depuis un texte collé (Excel / PowerPoint / mail)</button>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="text-[11px] text-muted">Collez le bulletin. Une ligne finissant par « : » devient une section ; les puces (•, -) des points ; les lignes indentées ou « ◦ » des sous-points. Vous pourrez tout ajuster ci-dessous.</div>
+              <textarea className="field !py-1 w-full font-mono text-[11px]" rows={6} value={pasted} onChange={(e) => setPasted(e.target.value)} aria-label="Texte du bulletin à importer"
+                placeholder={"Engagements fournisseurs :\n• WESTCON : BP BF 111K$ -> On Hold\nProjets :\n• CORIS Holding\n\t◦ Projet HUAWEI : contrat attendu"} />
+              <div className="flex items-center gap-2">
+                <button type="button" className="btn-primary !px-2.5 !py-1 text-xs font-semibold" onClick={() => doImport("replace")} disabled={!pasted.trim()}>Structurer (remplacer)</button>
+                <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => doImport("append")} disabled={!pasted.trim()}>Ajouter à la suite</button>
+                <button type="button" className="text-[11px] text-faint hover:text-ink ml-auto" onClick={() => { setImportOpen(false); setPasted(""); }}>Annuler</button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {secs.map((s, i) => (
           <div key={i} className="rounded-lg border border-line p-3">
             <div className="flex items-center gap-2 mb-2">
