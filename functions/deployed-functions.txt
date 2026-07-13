@@ -30,6 +30,7 @@ deleteConsultant
 deleteTimesheet
 listCandidates
 listConsultants
+preBillingFromCra
 resourcePnl
 staffingPlan
 timesheetKpis
