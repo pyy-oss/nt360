@@ -1066,7 +1066,9 @@ function PmWorkload() {
 export const OrderList: FC<Props> = () => {
   const { rows: all, loading } = useCommandesRows();
   const { match } = useFilters();
-  const rows = all.filter((r) => match(r, ["bu", "am", "client", "pm"]));
+  // Filtre MÉMOÏSÉ : sur un gros carnet (toute la collection en mémoire), refiltrer à CHAQUE render
+  // (frappe, ouverture de modale…) est coûteux. Recalculé seulement si les données/filtres changent.
+  const rows = useMemo(() => all.filter((r) => match(r, ["bu", "am", "client", "pm"])), [all, match]);
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
