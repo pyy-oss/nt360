@@ -7,6 +7,11 @@
 
 const { fpKey, cleanName, cleanBu, plausibleYear, num } = require("../lib/ids");
 
+// Année de PO extraite du N° FP (« …/2021/… »), bornée. Repli quand les factures n'ont pas de date
+// exploitable : sans année de PO, la commande générée tombe HORS exercice (atterrissage la compte à
+// l'année 0). Le N° FP porte quasi toujours l'année → rattachement comptable fiable.
+const yearOfFp = (fp) => { const m = String(fp || "").match(/\/(\d{4})\//); return m ? plausibleYear(m[1]) : 0; };
+
 // Montant HT d'une facture, ROBUSTE au nom de colonne (imports variés / anciens) : premier champ
 // numérique non nul parmi les alias connus. Sans ça, une facture dont le montant est stocké sous
 // « montant »/« montantHt » (et non « amountHt ») donnait 0 → commande générée SANS montant.
@@ -58,7 +63,9 @@ function planFromInvoices(invoices, existingOrderFps) {
       invoiceCount: g.invoiceCount,
       client: majority(g.clients) || "",   // "" → l'appelant pose un placeholder
       bu: majority(g.bus) || "",           // BU majoritaire des factures ("" si aucune → placeholder « AUTRE »)
-      yearPo: Number(majority(g.years)) || 0,
+      // Année de PO = année majoritaire des factures ; repli sur l'année du N° FP (rattachement comptable
+      // fiable même sans date de facture) puis sur l'année de la dernière facture. Jamais 0 si le FP est daté.
+      yearPo: Number(majority(g.years)) || yearOfFp(g.fp) || plausibleYear(String(g.latestDate).slice(0, 4)) || 0,
       closingDate: g.latestDate || null,
       numeros: g.numeros.slice(0, 20),
     }))
