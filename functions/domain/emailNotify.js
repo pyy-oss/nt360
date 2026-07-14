@@ -74,13 +74,16 @@ function buildApprovalEmail(reqObj) {
 }
 
 /** Email « relances » (au responsable). `groups` : {creances:[], bc:[], jalons:[]} (montants agrégés). */
+// `g` = agrégats COMPLETS par responsable : { creances:{count,total}, bc:{count,total}, jalons:{count,total} }.
+// Basé sur `byResp` (couvre TOUS les responsables, y compris ceux dont le détail dépasse le plafond
+// d'items du summary — sinon un responsable très chargé ne recevait aucun email / des totaux tronqués).
 function buildRelancesEmail(who, g) {
   const sections = [];
-  const sum = (arr, f) => (arr || []).reduce((s, x) => s + (Number(f(x)) || 0), 0);
   const fmt = (n) => Math.round(n).toLocaleString("fr-FR");
-  if (g.creances && g.creances.length) sections.push(`<b>${g.creances.length}</b> créance(s) échue(s) · ${fmt(sum(g.creances, (x) => x.amount))} FCFA à relancer`);
-  if (g.bc && g.bc.length) sections.push(`<b>${g.bc.length}</b> BC fournisseur(s) en retard`);
-  if (g.jalons && g.jalons.length) sections.push(`<b>${g.jalons.length}</b> jalon(s) échu(s) non facturé(s) · ${fmt(sum(g.jalons, (x) => x.gap))} FCFA à émettre`);
+  const c = g.creances || {}, b = g.bc || {}, j = g.jalons || {};
+  if (c.count) sections.push(`<b>${c.count}</b> créance(s) échue(s) · ${fmt(c.total || 0)} FCFA à relancer`);
+  if (b.count) sections.push(`<b>${b.count}</b> BC fournisseur(s) en retard`);
+  if (j.count) sections.push(`<b>${j.count}</b> jalon(s) échu(s) non facturé(s) · ${fmt(j.total || 0)} FCFA à émettre`);
   return {
     subject: `nt360 — Relances à traiter (${who})`,
     html: shell("Relances à traiter", `<p>Bonjour ${esc(who)}, éléments à relancer aujourd'hui :</p>`, listRows(sections), "Ouvrez « Relances » dans nt360 pour le détail et les actions."),

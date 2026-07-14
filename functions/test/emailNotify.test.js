@@ -33,6 +33,14 @@ describe("emailNotify — config & résolution", () => {
     expect(al.subject).toContain("1 alerte");
     expect(al.html).toContain("3 factures orphelines");
   });
+  it("buildRelancesEmail : compteurs/totaux depuis les agrégats byResp (pas des items tronqués)", () => {
+    // Agrégats COMPLETS par responsable (250 créances, au-delà du plafond d'items 200) → totaux exacts.
+    const r = em.buildRelancesEmail("Awa Dupont", { creances: { count: 250, total: 12_000_000 }, bc: { count: 3, total: 0 }, jalons: { count: 0, total: 0 } });
+    expect(r.subject).toContain("Awa Dupont");
+    expect(r.html).toContain(">250</b> créance"); // compteur complet, pas tronqué à 200
+    expect(r.html).toContain("BC fournisseur");
+    expect(r.html).not.toContain("jalon"); // count 0 → section omise
+  });
 });
 
 describe("graphMail — jeton (client credentials) + sendMail via fetch injecté", () => {
