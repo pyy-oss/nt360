@@ -2126,8 +2126,10 @@ async function scopedOpps(req, fields) {
 exports.runReport = onCallG("runReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { applyReport } = require("./domain/report");
-  const opps = await scopedOpps(req, ["bu", "am", "client", "stage", "amount", "probability", "weighted", "forecastCategory"]);
-  return { ok: true, ...applyReport(req.data?.def || req.data || {}, opps) };
+  const { normalizeTiers } = require("./domain/projection");
+  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
+  const opps = await scopedOpps(req, ["bu", "am", "client", "stage", "amount", "probability", "forecastCategory"]);
+  return { ok: true, ...applyReport(req.data?.def || req.data || {}, opps, tiers) };
 });
 
 exports.saveReport = onCallG("saveReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
