@@ -676,11 +676,13 @@ exports.emailRelancesDigest = onSchedule({ schedule: "every day 07:15", secrets:
   const [cre, bc, jal] = await Promise.all([
     db.doc("summaries/relancesCreances").get(), db.doc("summaries/relancesBc").get(), db.doc("summaries/relancesJalons").get(),
   ]);
-  const items = (snap) => ((snap.data() || {}).items) || [];
-  // Regroupe par responsable (champ `am`).
+  // Regroupe par responsable via `byResp` (agrégats COMPLETS par `am`) et NON via `items` (tronqués à 200
+  // par ancienneté) : sinon un responsable dont toutes les créances tombent au-delà du top-200 ne recevait
+  // AUCUN email, et les présents avaient des compteurs/montants sous-évalués.
   const byWho = new Map();
-  const push = (arr, key) => { for (const it of arr) { const who = it.am || ""; if (!who) continue; if (!byWho.has(who)) byWho.set(who, { creances: [], bc: [], jalons: [] }); byWho.get(who)[key].push(it); } };
-  push(items(cre), "creances"); push(items(bc), "bc"); push(items(jal), "jalons");
+  const ensure = (who) => { if (!byWho.has(who)) byWho.set(who, { creances: { count: 0, total: 0 }, bc: { count: 0, total: 0 }, jalons: { count: 0, total: 0 } }); return byWho.get(who); };
+  const applyResp = (snap, key) => { for (const r of ((snap.data() || {}).byResp) || []) { const who = r.key; if (!who || who === "—") continue; ensure(who)[key] = { count: r.count || 0, total: r.total || 0 }; } };
+  applyResp(cre, "creances"); applyResp(bc, "bc"); applyResp(jal, "jalons");
   if (!byWho.size) return;
   // Annuaire nom→email (normalisé).
   const usersByName = {};
@@ -2465,13 +2467,22 @@ async function writeFicheTransition(id, fiche, event, req) {
 // Alimente le P&L à la validation FINALE : backbone commande (sinon mergeCommandes ignore la fiche)
 // + identité (projectSheets, public) + marge/coût (projectSheetsMargin, isolé « rentabilite »).
 async function feedPnlFromFiche(fiche) {
-  const { toProjectSheet } = require("./domain/ficheAffaire");
+  const { toProjectSheet, toBcLines } = require("./domain/ficheAffaire");
   const { safeId } = require("./lib/sheets");
   const { cleanBu } = require("./lib/ids");
   const sheet = toProjectSheet(fiche);
   if (!sheet) return null;
   const id = safeId(sheet.fp);
+  // Lignes fournisseur de la fiche (N° BC saisis à l'étape 3) → bcLines source "fiche", pour la TRAÇABILITÉ
+  // et la réconciliation logistics↔fiche (bcKey), à parité avec le chemin d'import Excel. source "fiche" =
+  // achats PLANIFIÉS, EXCLUS de la SOA/cash/engagement par tous les consommateurs → impact financier NUL.
+  // Idempotent : on PURGE les lignes fiche existantes de ce FP (requête mono-champ ficheId, auto-indexée)
+  // avant de réécrire → une re-validation ne duplique pas et une ligne retirée disparaît.
+  const bcRows = toBcLines(fiche);
+  const existing = await db.collection("bcLines").where("ficheId", "==", id).get();
   const batch = db.batch();
+  existing.forEach((d) => { if ((d.data() || {}).source === "fiche") batch.delete(d.ref); });
+  bcRows.forEach((b, i) => { const bid = `bcfiche_${id}_${i}`; batch.set(db.doc(`bcLines/${bid}`), { ...b, _id: bid, ficheId: id, updatedAt: FieldValue.serverTimestamp() }); });
   batch.set(db.doc(`orders/${id}`), {
     _id: id, fp: sheet.fp, client: sheet.client, designation: sheet.affaire, am: sheet.commercial,
     bu: cleanBu(fiche.bu), cas: sheet.saleTotal, raf: null, suppliers: [],
