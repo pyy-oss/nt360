@@ -326,7 +326,6 @@ function EmailNotifyCard() {
   }} />;
 }
 function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
-  const toast = useToast();
   const [enabled, setEnabled] = useState(initial.enabled);
   const [tenantId, setTenantId] = useState(initial.tenantId);
   const [clientId, setClientId] = useState(initial.clientId);
@@ -338,17 +337,19 @@ function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
   const parseList = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
   const cfg = (): EmailNotifyConfig => ({ enabled, tenantId: tenantId.trim(), clientId: clientId.trim(), sender: sender.trim(), recipients: { alerts: parseList(alerts), codir: parseList(codir) }, triggers: trig });
   const save = () => setEmailNotifyConfig(cfg());
+  // Le test lève en cas d'échec → c'est `Busy` qui affiche l'unique toast (succès ou erreur). On NE toaste
+  // PAS ici en plus (sinon double notification au succès).
   const test = async () => {
     const to = testTo.trim();
-    if (!to) { toast("Renseignez une adresse de test.", "err"); return; }
+    if (!to) throw new Error("Renseignez une adresse de test.");
     await setEmailNotifyConfig(cfg()); // enregistre d'abord (le test lit la config serveur)
     const r = await sendTestEmail(to);
-    toast(r.ok ? `Email de test envoyé à ${to}.` : "Test : email non envoyé.", r.ok ? "ok" : "err");
+    if (!r.ok) throw new Error(r.skipped || "email non envoyé");
   };
   return (
     <Card title="Notifications email — Office 365" actions={
       <div className="flex gap-2">
-        <Busy variant="ghost" label="Tester" okMsg="Test traité" errMsg="Échec du test (voir config Azure / secret)" fn={test} />
+        <Busy variant="ghost" label="Tester" okMsg="Email de test envoyé" errMsg="Échec du test (voir config Azure / secret)" fn={test} />
         <Busy label="Enregistrer" okMsg="Config email enregistrée" fn={save} />
       </div>}>
       <div className="grid gap-3 sm:grid-cols-2">
