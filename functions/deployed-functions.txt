@@ -27,6 +27,7 @@ curateNews
 curateNewsNow
 decideApproval
 activityKpis
+aiSuggestCorrections
 capacityPlan
 dedupe
 deleteActivity
