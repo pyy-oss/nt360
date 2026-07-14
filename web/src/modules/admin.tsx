@@ -3,7 +3,7 @@ import { useState, useEffect, type FC } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
-import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast } from "../design/components";
+import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
@@ -614,6 +614,7 @@ function ClickupCard() {
   const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [listId, setListId] = useState<string | null>(null);
+  const [ask, confirmNode] = useConfirm();
   const [cafBusy, setCafBusy] = useState(false);
   const [pullBusy, setPullBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -679,7 +680,7 @@ function ClickupCard() {
   const bulkPush = async (force: boolean) => {
     if (bulkBusy) return;
     const label = force ? "Resynchroniser TOUTES les tâches liées (cœur + CAF) ?" : "Créer les tâches ClickUp de toutes les commandes non liées ? (les tâches existantes sont adoptées, pas dupliquées)";
-    if (!window.confirm(label + "\n\nAstuce : lancez d'abord « Rattacher les tâches existantes ».")) return;
+    if (!(await ask(<>{label}<p className="mt-2 text-faint">Astuce : lancez d'abord « Rattacher les tâches existantes ».</p></>, { title: "Push en masse ClickUp", confirmLabel: force ? "Tout resynchroniser" : "Créer les tâches" }))) return;
     setBulkBusy(true);
     try {
       const r = await pushAllOrdersToClickup({ force, listId: list });
@@ -714,7 +715,7 @@ function ClickupCard() {
   };
   const bcImport = async () => {
     if (bcImportBusy) return;
-    if (!window.confirm("Importer dans l'app les BC saisis directement dans ClickUp (non encore présents) ?\n\nLes BC déjà connus par un import (Logistics/PDF) sont ignorés. Les BC importés sont créés au statut « émis » (engagement, sans impact sur le solde du compte).")) return;
+    if (!(await ask(<>Importer dans l'app les BC saisis directement dans ClickUp (non encore présents) ?<p className="mt-2 text-faint">Les BC déjà connus par un import (Logistics/PDF) sont ignorés. Les BC importés sont créés au statut « émis » (engagement, sans impact sur le solde du compte).</p></>, { title: "Importer les BC depuis ClickUp", confirmLabel: "Importer" }))) return;
     setBcImportBusy(true);
     try {
       const r = await importBcFromClickup();
@@ -738,7 +739,7 @@ function ClickupCard() {
   const bcBulkPush = async (force: boolean) => {
     if (bcBulkBusy) return;
     const label = force ? "Resynchroniser TOUTES les tâches BC liées ?" : "Créer les tâches ClickUp de tous les BC non liés ? (les tâches existantes sont adoptées par N° de Commande, pas dupliquées)";
-    if (!window.confirm(label + "\n\nAstuce : lancez d'abord « Rattacher les BC existants ».")) return;
+    if (!(await ask(<>{label}<p className="mt-2 text-faint">Astuce : lancez d'abord « Rattacher les BC existants ».</p></>, { title: "Push BC en masse ClickUp", confirmLabel: force ? "Tout resynchroniser" : "Créer les tâches" }))) return;
     setBcBulkBusy(true);
     try {
       const r = await pushAllBcToClickup({ force });
@@ -762,7 +763,7 @@ function ClickupCard() {
   };
   const removeWebhook = async () => {
     if (whBusy) return;
-    if (!window.confirm("Désactiver les webhooks temps réel ? La synchro repassera au tirage quotidien.")) return;
+    if (!(await ask("Désactiver les webhooks temps réel ? La synchro repassera au tirage quotidien.", { title: "Désactiver le temps réel", confirmLabel: "Désactiver", tone: "clay" }))) return;
     setWhBusy(true);
     try {
       await deleteClickupWebhook();
@@ -837,6 +838,7 @@ function ClickupCard() {
         </div>
         <Tip>Le webhook remonte <b>en secondes</b> les changements ClickUp (statut, dates, champs, avancement BC) sans attendre le tirage quotidien. La signature est vérifiée par <b>HMAC</b> (secret stocké côté serveur). Après un <b>redéploiement des fonctions</b>, vérifiez que l'URL ci-dessus correspond à celle de <code>clickupWebhook</code>, puis ré-enregistrez si besoin.</Tip>
       </div>
+      {confirmNode}
       <Tip>Le <b>token API</b> est stocké dans Secret Manager (<code>CLICKUP_TOKEN</code>) — jamais dans l'app. Depuis la liste <b>Commandes</b>, le bouton <b>« ClickUp »</b> crée (ou met à jour) une tâche dans la liste choisie, <b>assignée au PM</b> de la commande. Le <b>CA Facturé</b> est entretenu automatiquement à chaque recalcul (bouton <b>« Forcer la synchro CAF »</b> pour tout repousser) ; le <b>Backlog</b> (RAF) est une formule ClickUp, rien à pousser. Le bouton <b>« Synchroniser depuis ClickUp »</b> (et un tirage quotidien) remonte le <b>statut projet</b>, les <b>dates</b> et le <b>PM assigné</b> dans les Commandes. <b>⚠️ Avant tout push en masse</b>, lancez <b>« Rattacher les tâches existantes »</b> : il relie les commandes aux tâches déjà présentes (Opp ID = N° FP) pour <b>ne pas créer de doublons</b>.</Tip>
     </Card>
   );

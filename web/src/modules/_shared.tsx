@@ -10,7 +10,7 @@ import { relTime, ageDays } from "../lib/format";
 import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
+import { Card, Badge, EmptyState, Modal, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { Select } from "../design/inputs";
 import { callImportDelta, callReingest, type ImportDeltaResult } from "../lib/writes";
@@ -428,10 +428,11 @@ export function DataImportCard() {
 const REINGEST_REFUSAL = new Set(["permission-denied", "unauthenticated", "invalid-argument", "failed-precondition", "not-found"]);
 function ReingestButton() {
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
   const toast = useToast();
-  const onClick = async () => {
+  const run = async () => {
     if (busy) return;
-    if (!window.confirm("Re-parser tous les classeurs sources de gs://nt360 ?\nÉcrase les champs recalculés (ex. désignation) sur l'existant, puis relance un recalcul complet. Aucune donnée n'est supprimée.\n\nL'opération prend quelques minutes ; son résultat apparaît dans le journal d'import ci-dessous.")) return;
+    setConfirm(false);
     setBusy(true);
     // Feedback immédiat : l'opération est longue, on ne laisse pas l'utilisateur devant un bouton figé.
     toast("Ré-ingestion lancée — suivez l'avancement dans le journal d'import ci-dessous.", "info");
@@ -454,9 +455,19 @@ function ReingestButton() {
     }
   };
   return (
-    <button type="button" onClick={onClick} disabled={busy} className="btn-ghost !px-2.5 !py-1 text-xs font-semibold shrink-0">
-      {busy ? "Ré-ingestion…" : "Ré-ingérer depuis le stockage"}
-    </button>
+    <>
+      <button type="button" onClick={() => !busy && setConfirm(true)} disabled={busy} className="btn-ghost !px-2.5 !py-1 text-xs font-semibold shrink-0">
+        {busy ? "Ré-ingestion…" : "Ré-ingérer depuis le stockage"}
+      </button>
+      <Modal open={confirm} onClose={() => setConfirm(false)} title="Ré-ingérer depuis le stockage"
+        actions={<>
+          <button className="btn-ghost" onClick={() => setConfirm(false)}>Annuler</button>
+          <button className="btn-gold" data-autofocus onClick={run}>Ré-ingérer</button>
+        </>}>
+        Re-parser tous les classeurs sources de <code>gs://nt360</code> ? Les champs recalculés (ex. désignation) sont réécrits sur l'existant, puis un recalcul complet est relancé. <strong>Aucune donnée n'est supprimée.</strong>
+        <p className="mt-2 text-faint">L'opération prend quelques minutes ; son résultat apparaît dans le journal d'import ci-dessous.</p>
+      </Modal>
+    </>
   );
 }
 

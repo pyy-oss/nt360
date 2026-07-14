@@ -490,7 +490,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => {
           const sk = TOAST_SKIN[t.type];
           return (
-            <div key={t.id} className="pointer-events-auto card overflow-hidden flex items-stretch gap-0 animate-slide-in shadow-card">
+            <div key={t.id} role={t.type === "err" ? "alert" : undefined} className="pointer-events-auto card overflow-hidden flex items-stretch gap-0 animate-slide-in shadow-card">
               <span className={cx("w-1 shrink-0", sk.bar)} aria-hidden="true" />
               <div className="flex items-center gap-2.5 px-3 py-2.5 text-sm flex-1 min-w-0">
                 <span className={cx("shrink-0 grid place-items-center w-6 h-6 rounded-full", sk.ring)}><sk.Icon size={14} /></span>
@@ -663,6 +663,29 @@ export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "S
       </Modal>
     </>
   );
+}
+
+// Confirmation accessible et promise-based — remplace `window.confirm` (piégeage clavier, pas de
+// style, bloque le thread). Retourne [ask, node] : place `node` dans le rendu, et fais
+// `if (!(await ask("message"))) return;` en tête du handler. Utile quand l'action garde sa propre
+// logique de toast/état occupé (là où DangerBtn, avec son toast générique, ne convient pas).
+export function useConfirm() {
+  const [state, setState] = useState<{ message: ReactNode; title?: string; confirmLabel?: string; tone?: "clay" | "gold" | "steel"; resolve: (v: boolean) => void } | null>(null);
+  const ask = (message: ReactNode, opts?: { title?: string; confirmLabel?: string; tone?: "clay" | "gold" | "steel" }) =>
+    new Promise<boolean>((resolve) => setState({ message, title: opts?.title, confirmLabel: opts?.confirmLabel, tone: opts?.tone, resolve }));
+  const close = (v: boolean) => { state?.resolve(v); setState(null); };
+  const tone = state?.tone || "gold";
+  const btnCls = tone === "clay" ? "btn bg-clay text-bg hover:bg-clay/90" : tone === "steel" ? "btn bg-steel text-bg hover:bg-steel/90" : "btn-gold";
+  const node = (
+    <Modal open={!!state} onClose={() => close(false)} title={state?.title || "Confirmer l'action"}
+      actions={<>
+        <button className="btn-ghost" onClick={() => close(false)}>Annuler</button>
+        <button className={btnCls} data-autofocus onClick={() => close(true)}>{state?.confirmLabel || "Confirmer"}</button>
+      </>}>
+      {state?.message}
+    </Modal>
+  );
+  return [ask, node] as const;
 }
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
