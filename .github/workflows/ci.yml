@@ -47,6 +47,12 @@ jobs:
       - name: Cohérence du déploiement (exports index.js ⇔ deployed-functions.txt)
         run: node functions/scripts/check-deploy-targets.mjs
 
+      # Garde anti-ReferenceError (no-undef sur le code SERVEUR) : attrape un identifiant utilisé sans
+      # require/définition dans sa portée AVANT le déploiement (classe du bug « buildFpAliasResolver is
+      # not defined » qui ne se voyait qu'en prod, faute d'étape de compilation côté functions).
+      - name: Garde no-undef (functions)
+        run: node functions/scripts/check-no-undef.mjs
+
       - name: Validité des index Firestore (pas d'index mono-champ → déploiement)
         run: node functions/scripts/check-firestore-indexes.mjs
 
