@@ -2123,54 +2123,14 @@ async function scopedOpps(req, fields) {
   return opps;
 }
 
-exports.runReport = onCallG("runReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  await requireRead(req, "pipeline");
-  const { applyReport } = require("./domain/report");
-  const { normalizeTiers } = require("./domain/projection");
-  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
-  const opps = await scopedOpps(req, ["bu", "am", "client", "stage", "amount", "probability", "forecastCategory"]);
-  return { ok: true, ...applyReport(req.data?.def || req.data || {}, opps, tiers) };
-});
-
-exports.saveReport = onCallG("saveReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  await requireWrite(req, "pipeline");
-  const { validateReportDef } = require("./domain/report");
-  const name = String(req.data?.name || "").trim().slice(0, 120);
-  if (!name) throw new HttpsError("invalid-argument", "nom du rapport requis");
-  const v = validateReportDef(req.data?.def);
-  if (!v.ok) throw new HttpsError("invalid-argument", v.error);
-  const usersMap = await loadUsersMap();
-  const doc = { name, def: v.value, ownerUid: req.auth.uid, ownerName: (usersMap[req.auth.uid] && usersMap[req.auth.uid].name) || null, updatedAt: FieldValue.serverTimestamp() };
-  let id = req.data?.id ? String(req.data.id) : null;
-  if (id) { assertPlainId(id, "id rapport"); await db.doc(`reports/${id}`).set(doc, { merge: true }); }
-  else { const ref = await db.collection("reports").add({ ...doc, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: "save_report", module: "pipeline", entity: "report", entityId: id, detail: { name }, ts: FieldValue.serverTimestamp() });
-  return { ok: true, id };
-});
-
-// Définitions de rapport : PARTAGÉES entre les utilisateurs « pipeline » (ce sont des définitions, pas
-// des données d'enregistrement — l'exécution, elle, reste cadrée par la visibilité de chacun).
-exports.listReports = onCallG("listReports", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  await requireRead(req, "pipeline");
-  const snap = await db.collection("reports").limit(500).get();
-  const reports = snap.docs.map((s) => ({ id: s.id, ...s.data() }))
-    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  return { ok: true, reports };
-});
-
-exports.deleteReport = onCallG("deleteReport", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  await requireWrite(req, "pipeline");
-  const id = assertPlainId(req.data?.id, "id rapport");
-  const snap = await db.doc(`reports/${id}`).get();
-  if (!snap.exists) throw new HttpsError("not-found", "rapport introuvable");
-  // Seul le propriétaire ou la direction supprime un rapport partagé.
-  if (snap.data().ownerUid !== req.auth.uid && req.auth.token?.nt360Role !== "direction") {
-    throw new HttpsError("permission-denied", "réservé au propriétaire ou à la direction");
-  }
-  await db.doc(`reports/${id}`).delete();
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_report", module: "pipeline", entity: "report", entityId: id, ts: FieldValue.serverTimestamp() });
-  return { ok: true };
-});
+// Reporting self-service EXTRAIT dans handlers/reports.js (patron R3 — découpe du monolithe). Deps
+// d'infra + helpers injectés ; les exports restent DÉCLARÉS ici (garde-fou de déploiement par nom).
+const { createReports } = require("./handlers/reports");
+const _reports = createReports({ onCallG, requireRead, requireWrite, db, HttpsError, FieldValue, scopedOpps, loadUsersMap, assertPlainId });
+exports.runReport = _reports.runReport;
+exports.saveReport = _reports.saveReport;
+exports.listReports = _reports.listReports;
+exports.deleteReport = _reports.deleteReport;
 
 // === API REST PUBLIQUE (Lot 7) — endpoint HTTP versionné (/v1) authentifié par CLÉ API (Bearer), pour
 // intégrer nt360 à un SI tiers. Comble l'écart #7 (aucune API/webhooks). Les clés (hachées SHA-256,
