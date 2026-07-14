@@ -1,6 +1,6 @@
 // Parseur feuille LIVE / Sales_DATA → opportunities/{extId|hash} (BUILD_KIT §17.5, §18.5).
 // Module pur (testable). Étapes 1..9, proba défaut, actif=1-5 / veille=8 / conversion=6 vs 7.
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanBu, noAcc, cleanName, cleanPerson, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, toISO, hashId, safeId } = require("../lib/sheets");
 
@@ -36,7 +36,7 @@ function pickSheet(wb) {
  * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parseSalesData(wb) {
-  const rows = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const rows = sheetToJson(pickSheet(wb), { defval: null });
   const out = [];
   const dupSeq = new Map(); // clé métier → nb d'occurrences déjà vues (idempotent, préserve les doublons légitimes)
   let rowsIn = 0;

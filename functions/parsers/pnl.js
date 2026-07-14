@@ -1,7 +1,7 @@
 // Parseur feuille P&L → orders/{fp} + orders.suppliers (BUILD_KIT §17.2).
 // Module pur (testable). Matcher robuste (val) : les entêtes réels contiennent des
 // espaces (" CAS ", " MB TOTAL ") et des colonnes proches (" MB TOTAL Manuel ").
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanBu, NOISE, cleanName, cleanPerson, noAcc, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, safeId } = require("../lib/sheets");
 
@@ -16,7 +16,7 @@ const rafOf = (v) => (v == null || v === "" ? null : Math.max(num(v), 0));
 function pickSheet(wb) {
   const hdrHas = (ws, ...terms) => {
     if (!ws) return false;
-    const hdr = (XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || []).map((v) => noAcc(v).trim());
+    const hdr = (sheetToJson(ws, { header: 1, range: 0 })[0] || []).map((v) => noAcc(v).trim());
     return terms.every((t) => hdr.some((h) => h.includes(noAcc(t))));
   };
   const byHeader = wb.SheetNames.find((n) => hdrHas(wb.Sheets[n], "opp id", "cas", "raf total"));
@@ -30,7 +30,7 @@ function pickSheet(wb) {
  * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parsePnl(wb) {
-  const rows = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const rows = sheetToJson(pickSheet(wb), { defval: null });
   const byFp = new Map(); // dédup par FP (dernière ligne gagne)
   for (const r of rows) {
     const keys = headerKeys(r);

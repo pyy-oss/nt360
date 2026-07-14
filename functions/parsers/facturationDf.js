@@ -1,6 +1,6 @@
 // Parseur Facturation DF / Odoo account.move → invoices/{numero} (BUILD_KIT §17.3, §18.3).
 // Module pur (testable). Dé-doublonnage par Numéro ; Σ factures d'un FP = son CAF Total.
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanBu, cleanName, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, toISO, safeId } = require("../lib/sheets");
 // Rejette les dates-sentinelles (1899/1900/0 des cellules Excel vides) : une échéance « 1899 »
@@ -18,7 +18,7 @@ function pickSheet(wb) {
  * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parseFacturationDf(wb) {
-  const rows = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const rows = sheetToJson(pickSheet(wb), { defval: null });
   const byNumero = new Map();
   let rowsIn = 0;
   for (const r of rows) {

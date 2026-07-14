@@ -7,7 +7,8 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 const { getAuth } = require("firebase-admin/auth");
-const XLSX = require("xlsx");
+// Lecture/écriture de classeurs via exceljs (remplace xlsx@0.18 — CVE-2023-30533). readWorkbook est ASYNC.
+const { readWorkbook, aoaToXlsxBase64 } = require("./lib/xlsxRead");
 
 const { getApp } = require("firebase-admin/app");
 const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
@@ -61,7 +62,7 @@ async function ingestHandler(event) {
   // encadre donc le corps d'un try/catch qui journalise ok/erreur dans opsLog (comme les callables/planifiés).
   try {
     const [buf] = await getStorage().bucket(bucket).file(name).download();
-    const wb = XLSX.read(buf, { cellDates: true }); // SheetJS tolère dataValidation mal formé (§18.4)
+    const wb = await readWorkbook(buf); // exceljs : dates → Date, cellules fusionnées gérées (parité §18.4)
 
     const { kinds, writes, report } = buildWrites(wb);
     // LIVE écarté du canal ingest (cf. stripLiveOpps) : les opps passent EXCLUSIVEMENT par la synchro
@@ -729,7 +730,7 @@ async function runSalesSync(objectKey) {
   const [exists] = await file.exists();
   if (!exists) { logger.warn("syncSalesData: fichier absent", { key }); return { skipped: true, key }; }
   const [buf] = await file.download();
-  const wb = XLSX.read(buf, { cellDates: true });
+  const wb = await readWorkbook(buf);
   const res = await applySalesSync(db, wb);
   const { recomputeAll } = require("./lib/aggregate");
   await recomputeAll(db); // recalcul complet : une opp gagnée peut devenir commande (CAS/backlog/rentabilité)
@@ -773,7 +774,7 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   // Parsing partagé (XLSX ou ZIP de classeurs, gardes anti-OOM/anti-bombe) — cf. ./lib/reingest.
   // Une IngestError (entrée fatale) est remontée en HttpsError avec son code d'origine.
   let parsed;
-  try { parsed = parseBuffer(buf, filename); }
+  try { parsed = await parseBuffer(buf, filename); }
   catch (e) { throw new HttpsError(e.code || "invalid-argument", e.message || "fichier illisible"); }
   const { kinds, writes, files, rowsIn, rowsOk, rowsSkipped } = parsed;
   if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
@@ -2761,7 +2762,6 @@ exports.patchOpportunity = onCallG("patchOpportunity", { memoryMiB: 256, timeout
 // (seul un rédacteur a besoin du modèle pour le ré-importer). En-têtes EXACTS du parseur (parité). ---
 exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const XLSX = require("xlsx");
   const { buildTemplateAoa } = require("./parsers/oppImport");
   // Scan borné (R1) : lecture à MAX_SCAN+1 → troncature SIGNALÉE si dépassement (jamais silencieuse).
   const snap = await db.collection("opportunities").limit(MAX_SCAN + 1).get();
@@ -2774,10 +2774,7 @@ exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, t
   }
   // Tri lisible : client puis étape (regroupe les lignes à compléter — ex. perdues sans motif).
   opps.sort((a, b) => String(a.client || "").localeCompare(String(b.client || "")) || (Number(a.stage) || 0) - (Number(b.stage) || 0));
-  const ws = XLSX.utils.aoa_to_sheet(buildTemplateAoa(opps));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Opportunités");
-  const fileB64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+  const fileB64 = await aoaToXlsxBase64(buildTemplateAoa(opps), "Opportunités");
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "export_opps", module: "pipeline", entity: "opportunity", entityId: "*",
     detail: { count: opps.length, capped }, ts: FieldValue.serverTimestamp(),
@@ -2792,7 +2789,6 @@ exports.exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, t
 // l'identité, jamais d'effacement). Réservé au droit « pipeline ». Audité + recompute complet. ---
 exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const XLSX = require("xlsx");
   const { fpKey } = require("./lib/ids");
   const { parseOpportunitiesImport } = require("./parsers/oppImport");
   const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("./domain/oppImport");
@@ -2803,7 +2799,7 @@ exports.importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, t
   // Plafond de charge serveur (défense en profondeur, cf. importDelta) : ~30 M car. base64 ≈ 22 Mo.
   if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)");
   let parsed;
-  try { parsed = parseOpportunitiesImport(XLSX.read(Buffer.from(b64, "base64"), { type: "buffer" })); }
+  try { parsed = parseOpportunitiesImport(await readWorkbook(Buffer.from(b64, "base64"))); }
   catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + (e.message || e)); }
   const { rows, report } = parsed;
   if (!rows.length) throw new HttpsError("failed-precondition", "aucune ligne exploitable dans le fichier");

@@ -1,21 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-const XLSX = require("xlsx");
+const { wbFromRows, wbFromAoa, wbMulti } = require("./_wb");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
 const { parseSalesData, normalizeStage } = require("../parsers/salesData");
 const { parseFiche, parseFicheAll } = require("../parsers/ficheAffaire");
-
-// Construit un classeur à partir d'une feuille nommée + lignes d'objets.
-function wbFromRows(sheetName, rows) {
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheetName);
-  return wb;
-}
-function wbFromAoa(sheetName, aoa) {
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), sheetName);
-  return wb;
-}
 
 describe("parsePnl → orders + suppliers (§17.2)", () => {
   const wb = wbFromRows("P&L", [
@@ -261,12 +249,7 @@ describe("parseFicheAll — deux onglets de MÊME FP ne perdent plus de lignes (
     [null, "Cmd", "", desc, frn, "Matériel", "XOF", xof, xof],
     [null, "TOTAL Commandes Frns", null, null, null, null, null, null, xof],
   ];
-  const twoSheets = (a, b) => {
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), "Fiche A");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(b), "Fiche B");
-    return wb;
-  };
+  const twoSheets = (a, b) => wbMulti([{ name: "Fiche A", aoa: a }, { name: "Fiche B", aoa: b }]);
 
   it("lignes DISTINCTES (fournisseurs différents) → ids distincts, aucune perte", () => {
     const fiches = parseFicheAll(twoSheets(fiche("AITEK", "Serveur", 100), fiche("KUKUZA", "Routeur", 200)));

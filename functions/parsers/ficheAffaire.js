@@ -1,7 +1,7 @@
 // Parseur fiche affaire → projectSheets/{fp} + bcLines/{fp}_{i} (BUILD_KIT §17.4).
 // Lecture CELLULAIRE via SheetJS : aucun correctif dataValidation requis
 // (SheetJS tolère les `sqref` mal formés, contrairement à openpyxl). §18.4.
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, noAcc } = require("../lib/ids");
 const { safeId, hashId } = require("../lib/sheets");
 
@@ -11,7 +11,7 @@ const { safeId, hashId } = require("../lib/sheets");
 // alors reclassé « fiche » (exclusive) → perte silencieuse de tout le classeur.
 function sheetIsFiche(ws) {
   if (!ws) return false;
-  const flat = XLSX.utils.sheet_to_json(ws, { header: 1 })
+  const flat = sheetToJson(ws, { header: 1 })
     .flat().filter((v) => typeof v === "string").map(noAcc);
   const hasFp = flat.some((s) => s.includes("n° de fp") || s.includes("n de fp"));
   const hasRevient = flat.some((s) => s.includes("prix de revient"));
@@ -25,7 +25,7 @@ function sheetIsFiche(ws) {
  * @returns {{sheet: object, bcLines: object[]}}
  */
 function parseFicheSheet(ws) {
-  const aoa = XLSX.utils.sheet_to_json(ws, {
+  const aoa = sheetToJson(ws, {
     header: 1,
     raw: true,
     defval: null,

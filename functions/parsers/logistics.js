@@ -1,7 +1,7 @@
 // Parseur « Logistics Follow Up » (suivi BC fournisseurs) → bcLines/{id}.
 // Feuille « PO List » : une ligne = un bon de commande fournisseur rattaché à un N° FP.
 // IDs déterministes (hash des clés métier) ⇒ ré-import idempotent (upsert, pas de doublon).
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanName, noAcc, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, toISO, hashId } = require("../lib/sheets");
 // Rejette les dates-sentinelles (1899/1900/0 des cellules vides) : un ETA « 1899 » positionnerait
@@ -35,7 +35,7 @@ function mapBcStatus(raw) {
  * @returns {{rows: object[], report: {rowsIn:number, rowsOk:number, rowsSkipped:number}}}
  */
 function parseLogistics(wb) {
-  const raw = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const raw = sheetToJson(pickSheet(wb), { defval: null });
   const byId = new Map();
   const dupSeq = new Map(); // clé métier → nb d'occurrences déjà vues (préserve les lignes distinctes)
   let rowsIn = 0;

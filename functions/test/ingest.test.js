@@ -1,17 +1,9 @@
 import { describe, it, expect } from "vitest";
-const XLSX = require("xlsx");
+const { wbFromRows, wbFromAoa, wbMulti } = require("./_wb");
 const { detectKind, detectKinds, buildWrites, fiscalYearFromOrders } = require("../lib/ingest");
 
-function wb(sheetName, rows) {
-  const b = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet(rows), sheetName);
-  return b;
-}
-function wbAoa(sheetName, aoa) {
-  const b = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(aoa), sheetName);
-  return b;
-}
+const wb = wbFromRows;
+const wbAoa = wbFromAoa;
 
 describe("detectKind — signatures de colonnes/cellules (§9)", () => {
   it("P&L", () => {
@@ -82,9 +74,10 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
       [null, "Commande Frns 1", "BC1", "x", frn, "Matériel", "XOF", 500, 500],
       [null, "TOTAL Commandes Frns", null, null, null, null, null, null, 500],
     ];
-    const b = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(fiche("FP/2026/9", "AITEK")), "Fiche A");
-    XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(fiche("FP/2026/10", "WESTCON")), "Fiche B");
+    const b = wbMulti([
+      { name: "Fiche A", aoa: fiche("FP/2026/9", "AITEK") },
+      { name: "Fiche B", aoa: fiche("FP/2026/10", "WESTCON") },
+    ]);
     const { kinds, writes, report } = buildWrites(b);
     expect(kinds).toEqual(["fiche"]);
     expect(report.byKind.fiche.fiches).toBe(2);
@@ -94,10 +87,11 @@ describe("buildWrites — écritures déterministes + idempotence", () => {
     ]);
   });
   it("classeur multi-feuilles (P&L + LIVE + Facturation DF) → toutes les sources", () => {
-    const b = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]), "P&L");
-    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA", IdC: 0.6 }]), "LIVE");
-    XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet([{ "Numéro": "A1", "N° FP": "FP/2026/1", "Montant HT": 600 }]), "Facturation DF");
+    const b = wbMulti([
+      { name: "P&L", rows: [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }] },
+      { name: "LIVE", rows: [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA", IdC: 0.6 }] },
+      { name: "Facturation DF", rows: [{ "Numéro": "A1", "N° FP": "FP/2026/1", "Montant HT": 600 }] },
+    ]);
     const { kinds, writes } = buildWrites(b);
     expect(kinds.sort()).toEqual(["facturationDf", "pnl", "salesData"]);
     expect(writes.some((w) => w.path.startsWith("orders/"))).toBe(true);
