@@ -1099,7 +1099,10 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
 // La sortie du modèle est TOUJOURS re-validée (normalizeSuggestions) — aucune confiance dans le brut.
 exports.aiSuggestCorrections = onCallG(
   "aiSuggestCorrections",
-  { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 120 },
+  // 300 s : deux passes Opus SÉQUENTIELLES (analyse + vérification adverse) avec réflexion adaptative
+  // peuvent frôler 120 s sur un lot de ~60 ; on aligne sur les autres callables lourds pour éviter un
+  // timeout qui couperait la vérification (sinon perte du travail malgré le best-effort côté lib).
+  { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 300 },
   async (req) => {
     await requireWrite(req, "import");
     // Limite anti-abus/coût même pour un utilisateur AUTORISÉ : chaque appel = 2 requêtes Opus (analyse +
@@ -3521,7 +3524,11 @@ async function buildFpIndex(token, listIds) {
     // PAS de swallow (audit F3) : un scan de liste raté (429/timeout) produirait un index PARTIEL →
     // une tâche existante non vue → CRÉATION d'un DOUBLON. On laisse l'erreur remonter pour que
     // l'appelant ANNULE la création plutôt que de dupliquer.
-    all.push(...(await clickup.listTasks(token, lid, { includeClosed: true })));
+    const t = await clickup.listTasks(token, lid, { includeClosed: true });
+    // MÊME logique pour la TRONCATURE : au-delà de 5000 tâches, l'index serait partiel sans erreur →
+    // on refuse (l'appelant annule le push) plutôt que de risquer des doublons silencieux.
+    if (t.truncated) throw new Error(`Liste ClickUp ${lid} tronquée (> 5000 tâches) — index anti-doublon incomplet, push annulé`);
+    all.push(...t);
   }
   return cf.buildTaskFpIndex(all, fpKey);
 }
@@ -3709,11 +3716,11 @@ exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_T
 async function loadCommandeRows() {
   const meta = (await db.doc("summaries/commandes").get()).data() || {};
   const chunks = Number(meta.chunks || 0);
+  // Lecture des chunks EN PARALLÈLE (le nombre est connu via meta.chunks) : sur un gros carnet, 25 chunks
+  // lus en série = 25 aller-retours ; en parallèle → 1 temps de latence. Ordre préservé (map indexé).
+  const snaps = await Promise.all(Array.from({ length: chunks }, (_, i) => db.doc(`commandesRows/${i}`).get()));
   const rows = [];
-  for (let i = 0; i < chunks; i++) {
-    const r = ((await db.doc(`commandesRows/${i}`).get()).data() || {}).rows || [];
-    rows.push(...r);
-  }
+  for (const s of snaps) rows.push(...(((s.data() || {}).rows) || []));
   return rows;
 }
 

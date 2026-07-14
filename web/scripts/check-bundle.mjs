@@ -6,7 +6,8 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const DIR = "dist/assets";
-const BUDGET_KB = 120; // chunk d'entrée — actuel ~68 KB, marge pour l'évolution du shell.
+const BUDGET_KB = 120; // chunk d'entrée — actuel ~118 KB (shell + login + centre d'activité) : marge ~2 KB,
+// tout nouvel import STATIQUE lourd doit passer en lazy (React.lazy) sous peine de dépasser le budget.
 
 let files;
 try {

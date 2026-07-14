@@ -127,12 +127,16 @@ async function getTask(token, taskId) {
 async function listTasks(token, listId, opts) {
   const includeClosed = !opts || opts.includeClosed !== false;
   const tasks = [];
+  let truncated = true; // devient false dès qu'on atteint une fin NATURELLE (dernière page)
   for (let page = 0; page < 50; page++) { // garde-fou : 50 pages × 100 = 5000 tâches max
     const d = await api(token, "GET", `/list/${listId}/task?page=${page}&subtasks=false&include_closed=${includeClosed}`);
     const batch = (d && d.tasks) || [];
     tasks.push(...batch);
-    if (batch.length < 100 || d.last_page) break;
+    if (batch.length < 100 || d.last_page) { truncated = false; break; }
   }
+  // 50 pages PLEINES sans fin naturelle → liste TRONQUÉE (>5000 tâches). On le SIGNALE (drapeau sur le
+  // tableau) plutôt que de rendre une liste partielle silencieuse → l'anti-doublon peut refuser le push.
+  if (truncated) tasks.truncated = true;
   return tasks;
 }
 
