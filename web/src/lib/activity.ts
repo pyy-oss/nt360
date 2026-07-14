@@ -11,6 +11,12 @@ export type ActivityEntry = { id: number; label: string; status: ActivityStatus;
 const LOG_CAP = 40;
 const STORE_KEY = "nt360.activity.v1";
 
+// « Époque » d'écriture : incrémentée à CHAQUE opération terminée avec SUCCÈS. Sert de signal global de
+// RÉACTIVITÉ — les vues alimentées par un callable (qui tiennent leurs données en état local, hors du
+// temps-réel Firestore) s'y abonnent pour se rafraîchir automatiquement après une action, sans que
+// l'utilisateur ait à recharger la page. Une écriture ÉCHOUÉE ne change pas la donnée → n'incrémente pas.
+let writeEpoch = 0;
+
 let entries: ActivityEntry[] = load();
 let seq = entries.reduce((m, e) => Math.max(m, e.id), 0);
 const listeners = new Set<() => void>();
@@ -40,6 +46,11 @@ export function useWriteActivity(): boolean {
 export function useActivityLog(): ActivityEntry[] {
   return useSyncExternalStore(subscribe, () => entries, () => entries);
 }
+/** Compteur d'écritures réussies — change à chaque mutation terminée. À mettre en dépendance d'un effet
+ *  pour rafraîchir une vue callable après action (cf. useReloadOnWrite). */
+export function useWriteEpoch(): number {
+  return useSyncExternalStore(subscribe, () => writeEpoch, () => 0);
+}
 function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
 export function clearActivityLog(): void {
@@ -58,6 +69,7 @@ export async function trackWrite<T>(p: Promise<T>, label = "Opération"): Promis
   upsert({ id, label, status: "running", startedAt });
   try {
     const r = await p;
+    writeEpoch += 1; // mutation réussie → réveille les vues callable abonnées (réactivité)
     upsert({ id, label, status: "done", startedAt, endedAt: Date.now() });
     return r;
   } catch (e: any) {

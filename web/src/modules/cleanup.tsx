@@ -7,7 +7,7 @@
 // non rattachables. Le delta reste prioritaire (une source ré-important le record le recrée).
 import { useState, type FC, type ReactNode } from "react";
 import { orderBy, limit } from "firebase/firestore";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData, useCollectionData, useReloadOnWrite } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
@@ -564,6 +564,9 @@ function ClientReconcileCard() {
 
   const refreshList = async () => { const r = await reconClient(); setList(r.clients || []); setScanned(r.scanned || null); };
   const openClient = async (client: string) => { const r = await reconClient(client); setDossier(r.dossier || null); if (!r.dossier) toast(`Aucun dossier pour « ${client} »`, "err"); };
+  // RÉACTIVITÉ : un dossier ouvert reflète toute mutation de l'app (réconciliation, correction d'une
+  // commande/opp/facture depuis une autre carte…) sans rechargement manuel. Rechargement d'UN client (borné).
+  useReloadOnWrite(() => { if (dossier) openClient(dossier.client); }, !!dossier);
 
   return (
     <Card title="Dossier client — rapprochement Opp / Commande / Facture" actions={
