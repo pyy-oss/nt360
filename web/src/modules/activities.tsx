@@ -103,6 +103,8 @@ export const Activites: FC<Props> = () => {
   const [tasks, setTasks] = useState<Activity[]>([]);
   const [feed, setFeed] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  // Pagination du flux : fenêtre étendue par « Voir plus » (le flux remonte jusqu'à 80 activités).
+  const [feedLimit, setFeedLimit] = useState(25);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -120,9 +122,18 @@ export const Activites: FC<Props> = () => {
           : tasks.length ? <div>{tasks.map((a) => <ActivityRow key={a.id} a={a} canWrite={canWrite} onChange={load} onOpen={openRelated} />)}</div>
           : <Tip>Aucune tâche ouverte. Créez des tâches depuis le <b>Client 360</b> d'un compte (onglet Activités).</Tip>}
       </Card>
-      <Card title="Flux d'activités récentes">
+      <Card title={`Flux d'activités récentes${feed.length ? ` · ${feed.length}` : ""}`}>
         {loading ? <div className="text-[13px] text-muted py-2">Chargement…</div>
-          : feed.length ? <div>{feed.map((a) => <ActivityRow key={a.id} a={a} canWrite={canWrite} onChange={load} onOpen={openRelated} />)}</div>
+          : feed.length ? (
+            <div className="flex flex-col">
+              <div>{feed.slice(0, feedLimit).map((a) => <ActivityRow key={a.id} a={a} canWrite={canWrite} onChange={load} onOpen={openRelated} />)}</div>
+              {feed.length > feedLimit && (
+                <button onClick={() => setFeedLimit((l) => l + 25)} className="mt-2 btn-ghost !py-1.5 text-xs self-center">
+                  Voir plus · {feed.length - feedLimit} restant{feed.length - feedLimit > 1 ? "s" : ""}
+                </button>
+              )}
+            </div>
+          )
           : <div className="text-[13px] text-muted py-2">Aucune activité dans votre périmètre.</div>}
       </Card>
     </div>

@@ -33,6 +33,8 @@ export const Actualite: FC<Props> = () => {
   const { data: cur } = useDocData<NewsCuration>("summaries/newsCuration");
   const isDirection = useClaims().role === "direction";
   const [showAll, setShowAll] = useState(false);
+  // Pagination du fil : on n'affiche qu'une fenêtre, étendue par « Voir plus » (zéro liste interminable).
+  const [limit, setLimit] = useState(20);
   const parts = [data, dFac, dFrn, dBl, dBc, dPl];
   const rankS: Record<string, number> = { high: 0, medium: 1, info: 2 };
   const relOf = (b: NewsBulletin) => cur?.scores?.[b.id]?.relevance ?? 50; // non curé → neutre (affiché)
@@ -81,7 +83,7 @@ export const Actualite: FC<Props> = () => {
         }
       >
         <div className="flex flex-col gap-2">
-          {shown.map((b, i) => {
+          {shown.slice(0, limit).map((b, i) => {
             const clickable = !!b.module && canGo(b.module);
             return (
               <div key={i} className={cx("rounded-lg border p-3",
@@ -103,6 +105,11 @@ export const Actualite: FC<Props> = () => {
             );
           })}
         </div>
+        {shown.length > limit && (
+          <button onClick={() => setLimit((l) => l + 20)} className="mt-1 btn-ghost !py-1.5 text-xs self-center">
+            Voir plus · {shown.length - limit} restant{shown.length - limit > 1 ? "s" : ""}
+          </button>
+        )}
         {mutedCount > 0 && (
           <button onClick={() => setShowAll((v) => !v)} className="mt-1 text-[12px] text-faint hover:text-ink underline underline-offset-2 self-start">
             {showAll ? "Masquer les signaux moins pertinents" : `Afficher ${mutedCount} signal${mutedCount > 1 ? "aux" : ""} moins pertinent${mutedCount > 1 ? "s" : ""}`}

@@ -71,6 +71,8 @@ export const Approvals: FC<Props> = () => {
   const [toDecide, setToDecide] = useState<Approval[]>([]);
   const [mine, setMine] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
+  // Pagination : « Mes demandes » s'accumule dans le temps → fenêtre étendue par « Voir plus ».
+  const [mineLimit, setMineLimit] = useState(15);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -94,7 +96,16 @@ export const Approvals: FC<Props> = () => {
       )}
       <Card title={`Mes demandes${mine.length ? ` · ${mine.length}` : ""}`}>
         {loading ? <div className="text-[13px] text-muted py-2">Chargement…</div>
-          : mine.length ? <div>{mine.map((a) => <ApprovalCard key={a.id} a={a} canDecide={false} onChange={load} />)}</div>
+          : mine.length ? (
+            <div className="flex flex-col">
+              <div>{mine.slice(0, mineLimit).map((a) => <ApprovalCard key={a.id} a={a} canDecide={false} onChange={load} />)}</div>
+              {mine.length > mineLimit && (
+                <button onClick={() => setMineLimit((l) => l + 15)} className="mt-2 btn-ghost !py-1.5 text-xs self-center">
+                  Voir plus · {mine.length - mineLimit} restant{mine.length - mineLimit > 1 ? "s" : ""}
+                </button>
+              )}
+            </div>
+          )
           : <div className="text-[13px] text-muted py-2">Aucune demande soumise.</div>}
       </Card>
     </div>
