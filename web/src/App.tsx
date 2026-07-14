@@ -6,7 +6,7 @@ import { currentTheme, toggleTheme, type Theme } from "./lib/theme";
 import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
 import Login from "./components/Login";
-import { ErrorBoundary, KpiSkeletons, CardSkeleton, WriteActivityBar, cx } from "./design/components";
+import { ErrorBoundary, KpiSkeletons, CardSkeleton, WriteActivityBar, ActivityCenter, cx } from "./design/components";
 import { NavContext, useNav, type NavIntent } from "./lib/nav";
 import { FilterProvider, useFilters } from "./lib/filters";
 import { FilterBar, FreshnessGuard } from "./modules/_shared";
@@ -120,6 +120,8 @@ export default function App() {
     <div className="min-h-screen">
       {/* Indicateur GLOBAL d'écriture en cours (le back recalcule les agrégats — plusieurs secondes). */}
       <WriteActivityBar />
+      {/* Centre d'activité : journal des opérations (en cours / terminées / échouées) — au-delà du toast. */}
+      <ActivityCenter />
       {/* Lien d'évitement (WCAG 2.4.1) : caché jusqu'au focus clavier, saute la navigation → contenu. */}
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded-lg focus:bg-gold focus:text-bg focus:px-3 focus:py-2 focus:text-sm focus:font-semibold">Aller au contenu</a>
       <div className="mx-auto max-w-[1440px] px-4 md:px-6 pb-16">
