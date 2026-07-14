@@ -58,6 +58,10 @@ function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
   //    l'affaire si connu, sinon « Achats » (le fournisseur reste la contrepartie à relancer).
   const bcItems = [];
   for (const b of bcLines || []) {
+    // Lignes de FICHE affaire exclues comme dans l'Exécution BC / l'alerte bc_en_retard (elles n'ont ni
+    // ETA ni statut d'exécution) — alignement EXPLICITE de la population, sinon divergence dès qu'une
+    // ligne de fiche acquiert une ETA (aujourd'hui écartée de fait par `!eta continue`, mais fragile).
+    if (b.source === "fiche") continue;
     if (DELIVERED.has(b.status)) continue;
     const eta = b.etaReel || b.etaContrat; if (!eta) continue;
     const late = daysLate(today, eta); if (!(late > 0)) continue;

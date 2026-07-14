@@ -1,6 +1,7 @@
 // Backlog ancré sur l'année fiscale courante (BUILD_KIT §7, §5).
 // Total + ventilations sur TOUTES les commandes ouvertes (RAF>0), indépendant de la période.
 const { sum } = require("./chaine");
+const { plausibleYear } = require("../lib/ids");
 
 function groupSum(items, keyFn, valFn) {
   const m = {};
@@ -45,7 +46,9 @@ function backlogFy(orders, fy) {
     count: open.length,
     byBu: groupSum(open, (o) => o.bu, raf),
     byClient: groupSum(open, (o) => o.client, raf),
-    byVintage: groupSum(open, (o) => String(o.yearPo || 0), raf),
+    // Millésime BORNÉ (plausibleYear) : sinon des barres 1900/20226 apparaissent au chart « Par
+    // millésime » alors qu'aucun onglet de période ne les liste (filterOrders borne aussi) → cohérence.
+    byVintage: groupSum(open, (o) => String(plausibleYear(o.yearPo) || 0), raf),
     top,
     // Ventilation par fiabilité du RAF (diagnostic backlog).
     totalExcel: sum(excel, raf),

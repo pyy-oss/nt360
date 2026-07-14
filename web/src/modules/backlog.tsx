@@ -405,7 +405,7 @@ export const Prevision: FC<Props> = () => {
               <Kpi label="Encaissements attendus (AR)" value={fmt(cf.arHorizon)} tone="emerald" sub={`${cf.openCount || 0} créances · échéancier`} />
               <Kpi label="Décaissements (facturés)" value={fmt(months.reduce((s, m) => s + (m.decaissement || 0), 0))} tone="clay" sub={`${cf.bcOpenCount || 0} BC facturés · règle SOA`} />
               <Kpi label="Position nette horizon" value={fmt(netHorizon)} tone={netHorizon < 0 ? "clay" : "emerald"} sub="AR attendu − payables facturés" />
-              <Kpi label="Engagement (non facturé)" value={fmt(cf.decaissementEngaged)} tone="steel" sub={`${cf.decaissementEngagedCount || 0} BC en cours · sortie potentielle`} />
+              <Kpi label="Engagement BC (non facturés)" value={fmt(cf.decaissementEngaged)} tone="steel" sub={`${cf.decaissementEngagedCount || 0} BC en cours · sortie potentielle`} />
             </div>
             <GroupedBars
               data={months.map((m) => ({ name: m.month, Encaissements: m.ar || 0, "Décaissements (facturés)": m.decaissement || 0, "Engagement (potentiel)": m.engaged || 0 }))}

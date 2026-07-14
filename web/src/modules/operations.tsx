@@ -17,6 +17,12 @@ import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
+
+// Parités fixes légales (repli quand aucun taux n'est paramétré dans config/fxRates). DOIT rester
+// aligné sur functions/lib/fx.js (peg EUR 655,957). Partagé par l'aperçu d'import ET le correcteur de
+// montant BC, sinon un BC en devise sans taux affiche « 0 » à un endroit et sa contre-valeur ailleurs.
+const FIXED_PEG: Record<string, number> = { EUR: 655.957, XAF: 1 };
+
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
   const m: Record<string, number> = {};
   for (const x of arr) { const k = keyFn(x) || "—"; m[k] = (m[k] || 0) + (valFn(x) || 0); }
@@ -163,7 +169,7 @@ export const Fournisseurs: FC<Props> = () => {
       <div className={grid4}>
         <Kpi label="Exposition totale" value={fmt(data.totalExpo)} />
         <Kpi label="Solde comptes (facturé)" value={fmt(data.soldeTotal ?? data.encoursTotal)} tone="clay" sub="SOA : ouverture + BC facturés" />
-        <Kpi label="Engagement (non facturé)" value={fmt(data.engagementTotal)} tone="steel" sub="BC en cours + prévisionnel" />
+        <Kpi label="Engagement (BC + prévisionnel)" value={fmt(data.engagementTotal)} tone="steel" sub="BC en cours + achat prévisionnel des commandes ouvertes" />
         <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone="steel" />
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
@@ -197,9 +203,8 @@ function BcImport() {
   const [analyzing, setAnalyzing] = useState(false);
   const { data: fx } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
   const toast = useToast();
-  // Aperçu de conversion : devise étrangère × taux (paramétré, sinon parité fixe légale) → XOF ;
-  // une contre-valeur saisie prime. FIXED_PEG doit rester aligné sur functions/lib/fx.js.
-  const FIXED_PEG: Record<string, number> = { EUR: 655.957, XAF: 1 };
+  // Aperçu de conversion : devise étrangère × taux (paramétré, sinon parité fixe légale FIXED_PEG) → XOF ;
+  // une contre-valeur saisie prime.
   const cur = (f.currency || "XOF").toUpperCase();
   const rate = cur !== "XOF" ? (Number((fx?.rates || {})[cur]) || FIXED_PEG[cur] || 0) : 0;
   const previewXof = f.amountXof.trim() !== "" ? Number(f.amountXof) || 0
@@ -400,7 +405,7 @@ function BcAmountFixer({ id, currency, amount }: { id: string; currency?: string
   const cur = (currency || "XOF").toUpperCase();
   const foreign = cur !== "XOF" && (amount || 0) > 0;
   if (foreign) {
-    const cfgRate = Number(fx?.rates?.[cur] || 0);
+    const cfgRate = Number(fx?.rates?.[cur] || 0) || FIXED_PEG[cur] || 0; // repli parité légale (comme l'aperçu d'import)
     const r = rate.trim() !== "" ? (Number(rate.replace(",", ".")) || 0) : cfgRate;
     const preview = r > 0 ? Math.round((amount || 0) * r) : 0;
     return (
@@ -429,7 +434,10 @@ function BcAmountFixer({ id, currency, amount }: { id: string; currency?: string
 // pour les BC en devise étrangère. « à saisir » si devise sans conversion (jamais assimilé à du XOF).
 function BcAmount({ row }: { row: BcLine }) {
   const foreign = !!row.currency && row.currency !== "XOF";
-  const toConvert = foreign && !((row.amountXof || 0) > 0);
+  // « à saisir » dès qu'un BC RÉEL (avec N° BC) est à contre-valeur XOF nulle, quelle que soit la devise —
+  // MÊME prédicat que le signal qualité bc_montant_zero (dataQuality.js) et le flag `unvalued` (SOA).
+  // Sinon un BC en XOF à montant 0 s'affichait « 0 » ici alors qu'il est signalé « montant nul » ailleurs.
+  const toConvert = !((row.amountXof || 0) > 0) && (foreign || !!row.bcNumber);
   return (
     <span className="inline-flex flex-col items-end leading-tight">
       {toConvert ? <span className="text-clay text-[12px]">à saisir</span> : money(row.amountXof)}

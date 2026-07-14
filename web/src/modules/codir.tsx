@@ -133,7 +133,7 @@ function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: n
   const objPos = (objectif / scale) * 100;
   const seg = [
     { v: facture, color: T.emerald, label: "Facturé YTD" },
-    { v: certitudes, color: T.steel, label: "Backlog" },
+    { v: certitudes, color: T.steel, label: "Backlog projetable" },
     { v: forecast, color: T.gold, label: "Certitude (pipeline pondéré)" },
   ].filter((s) => s.v > 0);
   return (
@@ -153,7 +153,7 @@ function TrajectoryBar({ facture, certitudes, forecast, objectif }: { facture: n
         {objectif > 0 && objPos < 99.5 && <div className="absolute -top-1.5 -bottom-1.5 w-px bg-ink/70" style={{ left: `${objPos}%` }} aria-hidden="true" />}
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Backlog" }, { color: T.gold, label: "Certitude" }]} />
+        <Legend items={[{ color: T.emerald, label: "Facturé YTD" }, { color: T.steel, label: "Backlog projetable" }, { color: T.gold, label: "Certitude" }]} />
         {gap > 0
           ? <span className="text-clay">Reste à trouver : <b className="tabnum">{fmt(gap)}</b></span>
           : <span className="text-emerald">Objectif dépassé de <b className="tabnum">{fmt(over)}</b></span>}

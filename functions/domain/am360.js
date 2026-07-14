@@ -5,7 +5,7 @@
 // Module PUR (testable).
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
-const { fpKey } = require("../lib/ids");
+const { fpKey, plausibleYear } = require("../lib/ids");
 
 // AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
 // en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
@@ -42,7 +42,7 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
     .map((am) => {
       const os = (orders || []).filter((o) => normAm(o.am) === am);
       const cas = sum(os, (o) => o.cas);
-      const casFy = sum(os.filter((o) => String(o.yearPo) === String(fy)), (o) => o.cas);
+      const casFy = sum(os.filter((o) => plausibleYear(o.yearPo) === fy), (o) => o.cas);
       const backlog = sum(os, (o) => Math.max(o.raf || 0, 0));
       const facture = sum((invoices || []).filter((i) => normAm(amOfFp[fpKey(i.fp)]) === am), (i) => i.amountHt);
 

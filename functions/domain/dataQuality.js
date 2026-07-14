@@ -2,7 +2,7 @@
 // fiabiliser les imports en continu : lignes en quarantaine implicite, champs manquants, ruptures
 // de rattachement, incohérences. Distinct du « Centre d'alertes » (alertes MÉTIER actionnables).
 // Module PUR (testable).
-const { fpKey, num } = require("../lib/ids");
+const { fpKey, num, plausibleYear } = require("../lib/ids");
 const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
@@ -53,7 +53,9 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     // N° FP ILLISIBLE : ligne P&L à CAS > 0 que fpKey rejette → ÉCARTÉE du carnet fusionné (perte de CA
     // totalement silencieuse sans ce prédicat). Calculée sur les orders BRUTS (rawOrders), pas fusionnés.
     def("commandes_fp_illisible", "high", rawOrders.filter((o) => !fpKey(o.fp) && num(o.cas) > 0), "Commandes P&L au N° FP illisible (exclues du carnet — CA non compté)", (o) => o.fp || o.client || "—"),
-    def("commandes_sans_annee", "medium", orders.filter((o) => !(o.yearPo > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp),
+    // Bornage IDENTIQUE à l'atterrissage (plausibleYear, fenêtre [2015, année+3]) : un millésime
+    // aberrant (1900, 20226) a yearPo>0 mais est « à dater » côté atterrissage → sinon comptes divergents.
+    def("commandes_sans_annee", "medium", orders.filter((o) => !(plausibleYear(o.yearPo) > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp),
     def("commandes_sans_client", "medium", orders.filter((o) => !o.client), "Commandes sans client", (o) => o.fp),
     def("commandes_sans_am", "low", orders.filter((o) => !o.am), "Commandes sans commercial (AM)", (o) => o.fp),
     // AM purement numérique = colonne mal mappée à l'import (ex. « 35 ») → attribution commerciale faussée.
