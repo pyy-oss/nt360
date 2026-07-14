@@ -3183,6 +3183,12 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   // Statuts de la liste → validation du statut initial (omission propre s'il a été renommé).
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("ClickUp: statuts illisibles", { listId, msg: e && e.message }); }
 
+  // VERROU (anti-doublon) : sérialise avec le push en masse et les autres push unitaires → ferme la
+  // fenêtre TOCTOU (deux scans avant qu'une création n'ait lieu) sur double-clic concurrent du même FP.
+  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const lock = await acquireClickupLock(db, "push", req.auth.uid);
+  if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push ClickUp est déjà en cours — patientez (évite les doublons).");
+  try {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const fp = fpKey(order.fp), id = safeId(fp);
   // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
@@ -3203,6 +3209,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   await db.doc("config/clickupLinks").set({ map: { [r.id]: r.taskId } }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_create" : "clickup_update", module: "import", entity: "order", entityId: fpKey(order.fp), detail: { taskId: r.taskId, listId, assigned: r.assigned, fields: r.fields }, ts: FieldValue.serverTimestamp() });
   return { ok: true, taskId: r.taskId, url: r.url, assigned: r.assigned, created: r.created, fields: r.fields };
+  } finally { await releaseClickupLock(db, FieldValue, "push"); }
 });
 
 // pushAllOrdersToClickup : crée/synchronise EN MASSE les tâches des commandes. Par défaut, seules les
@@ -3560,6 +3567,9 @@ async function buildBcClickupIndex(token, listId) {
   const bc = require("./lib/clickupBc");
   const { safeId } = require("./lib/sheets");
   const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
+  // MÊME garde que buildFpIndex : un index TRONQUÉ (> 5000 tâches) rate des adoptions → doublons. On
+  // REFUSE plutôt que de rendre un index partiel silencieux (l'appelant annule la création BC).
+  if (tasks.truncated) throw new Error(`Liste BC ClickUp ${listId} tronquée (> 5000 tâches) — index anti-doublon incomplet, opération annulée`);
   return { index: bc.buildBcIndex(tasks, safeId), tasks };
 }
 
@@ -3588,18 +3598,29 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
   try { fieldDefs = await clickup.listFields(token, listId); }
   catch (e) { logger.warn("BC push: champs illisibles", { listId, msg: e && e.message }); }
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC push: statuts illisibles", { listId, msg: e && e.message }); }
-  const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
-  // ANTI-DOUBLON : si le BC n'a pas de lien mais qu'une tâche porte déjà ce N° de Commande, on l'ADOPTE.
-  if (!links[group.key]) {
-    try { const t = (await buildBcClickupIndex(token, listId)).index[group.key]; if (t) links[group.key] = t; }
-    catch (e) { logger.warn("BC push: réconciliation impossible", { msg: e && e.message }); }
-  }
-  let r;
-  try { r = await pushBcCore({ token, clickup, listId, fieldDefs, statuses, links, group, extra: req.data?.extra || {} }); }
-  catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation BC"}`); }
-  await db.doc("config/clickupBcLinks").set({ map: { [r.key]: r.taskId } }, { merge: true });
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_bc_create" : "clickup_bc_update", module: "bc", entity: "bcLine", entityId: bcNumber, detail: { taskId: r.taskId, listId, fields: r.fields }, ts: FieldValue.serverTimestamp() });
-  return { ok: true, taskId: r.taskId, url: r.url, created: r.created, fields: r.fields };
+  // VERROU (anti-doublon) : sérialise avec le push BC en masse et les autres push BC unitaires — évite la
+  // fenêtre TOCTOU (deux exécutions scannent l'index avant que l'une crée) sur double-clic concurrent.
+  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const lock = await acquireClickupLock(db, "pushBc", req.auth.uid);
+  if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push BC ClickUp est déjà en cours — patientez (évite les doublons).");
+  try {
+    const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
+    // ANTI-DOUBLON : si le BC n'a pas de lien mais qu'une tâche porte déjà ce N° de Commande, on l'ADOPTE.
+    // Échec du scan (429/timeout/troncature) → on ANNULE (throw) plutôt que de risquer un doublon (parité
+    // avec le push commandes ; l'ancien warn silencieux recréait une tâche existante non vue).
+    if (!links[group.key]) {
+      let t;
+      try { t = (await buildBcClickupIndex(token, listId)).index[group.key]; }
+      catch (e) { throw new HttpsError("unavailable", `ClickUp : index anti-doublon indisponible — création BC annulée pour éviter un doublon. ${(e && e.message) || ""}`); }
+      if (t) links[group.key] = t;
+    }
+    let r;
+    try { r = await pushBcCore({ token, clickup, listId, fieldDefs, statuses, links, group, extra: req.data?.extra || {} }); }
+    catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "échec de la synchronisation BC"}`); }
+    await db.doc("config/clickupBcLinks").set({ map: { [r.key]: r.taskId } }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: r.created ? "clickup_bc_create" : "clickup_bc_update", module: "bc", entity: "bcLine", entityId: bcNumber, detail: { taskId: r.taskId, listId, fields: r.fields }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, taskId: r.taskId, url: r.url, created: r.created, fields: r.fields };
+  } finally { await releaseClickupLock(db, FieldValue, "pushBc"); }
 });
 
 // pushAllBcToClickup : crée/synchronise EN MASSE les tâches de tous les BC. force=false : seuls les BC
@@ -3622,7 +3643,11 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
   try {
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("BC bulk: champs illisibles", { msg: e && e.message }); }
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC bulk: statuts illisibles", { msg: e && e.message }); }
-  let bcIndex = {}; try { bcIndex = (await buildBcClickupIndex(token, listId)).index; } catch (e) { logger.warn("BC bulk: réconciliation impossible", { msg: e && e.message }); }
+  // ANTI-DOUBLON : échec du scan d'index (429/timeout/troncature) → on ANNULE le push entier (parité avec
+  // le push commandes). L'ancien `catch → bcIndex = {}` recréait EN MASSE tous les BC non liés (doublons).
+  let bcIndex;
+  try { bcIndex = (await buildBcClickupIndex(token, listId)).index; }
+  catch (e) { throw new HttpsError("unavailable", "ClickUp : index anti-doublon BC indisponible — push en masse annulé pour éviter les doublons. " + ((e && e.message) || "")); }
   const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
   const groups = bc.groupBcByNumber(await loadBcLines(), safeId);
   const newLinks = {};
@@ -3949,6 +3974,13 @@ async function runClickupEnrich() {
   if (cfg.enabled === false) return { disabled: true, enriched: 0, total: 0 };
   const token = CLICKUP_TOKEN.value();
   if (!token) return { enriched: 0, total: 0, note: "token absent" };
+  // VERROU (anti-doublon) : l'enrichissement manuel (bouton) et le scheduler 05:00 peuvent se chevaucher.
+  // Deux passages concurrents liraient les MÊMES sous-tâches (vides) et créeraient tous deux « Jalon i »
+  // → doublons. Un seul enrichissement à la fois ; le concurrent est ignoré proprement.
+  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const lock = await acquireClickupLock(db, "enrich", "runClickupEnrich");
+  if (!lock.acquired) return { enriched: 0, total: 0, skipped: "déjà en cours" };
+  try {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const keys = Object.keys(links);
   if (!keys.length) return { enriched: 0, total: 0 };
@@ -4022,6 +4054,7 @@ async function runClickupEnrich() {
     } catch (e) { failed++; logger.warn("enrich: échec", { key, msg: e && e.message }); }
   }
   return { enriched, failed, tagged, subtasked, checklisted, total: keys.length };
+  } finally { await releaseClickupLock(db, FieldValue, "enrich"); }
 }
 
 // enrichClickup : bouton « Enrichir les tâches ClickUp » (synthèse + tag). Direction.
