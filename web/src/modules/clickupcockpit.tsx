@@ -6,7 +6,7 @@ import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
-import { fmt, pct } from "../design/tokens";
+import { fmt, pct, T } from "../design/tokens";
 import { Card, Kpi, Badge, Tip } from "../design/components";
 import { HBars, Props, grid4 } from "./_shared";
 import type { ClickupHealthSummary, ClickupBcSummary, ClickupDelaysSummary } from "../types";
@@ -64,21 +64,21 @@ export const ClickupCockpit: FC<Props> = () => {
       {(delays?.byPm?.length || 0) > 0 && (
         <Card title="Retard de livraison par Project Manager"
           actions={<button className="btn-ghost !py-1 text-xs" onClick={() => go("backlog")}>Suivi Backlog</button>}>
-          <HBars rows={(delays!.byPm || []).slice(0, 12).map((p) => ({ name: p.pm, v: p.overdue, sub: `${p.active} actifs · ${p.avgDaysLate} j moy.` }))} colorFn={() => "#e0564f"} />
+          <HBars rows={(delays!.byPm || []).slice(0, 12).map((p) => ({ name: p.pm, v: p.overdue, sub: `${p.active} actifs · ${p.avgDaysLate} j moy.` }))} colorFn={() => T.clay} />
         </Card>
       )}
 
       {/* Répartition par statut ClickUp */}
       {(delays?.byStatus?.length || 0) > 0 && (
         <Card title="Projets synchronisés par statut ClickUp">
-          <HBars rows={(delays!.byStatus || []).slice(0, 14).map((s) => ({ name: s.status, v: s.count, sub: s.overdue ? `${s.overdue} en retard` : undefined }))} colorFn={(r: any) => (r.sub ? "#d9a441" : "#4d7cc7")} />
+          <HBars rows={(delays!.byStatus || []).slice(0, 14).map((s) => ({ name: s.status, v: s.count, sub: s.overdue ? `${s.overdue} en retard` : undefined }))} colorFn={(r: any) => (r.sub ? T.gold : T.steel)} />
         </Card>
       )}
 
       {/* Échéancier RAF (quand le backlog devrait se facturer selon ClickUp) */}
       {(delays?.rafByMonth?.length || 0) > 0 && (
         <Card title="RAF échéancé par mois (date prév. de fin ClickUp)">
-          <HBars rows={(delays!.rafByMonth || []).slice(0, 18).map((m) => ({ name: m.month, v: m.raf, sub: `${m.count} projet(s)` }))} colorFn={() => "#3aa675"} max={undefined} />
+          <HBars rows={(delays!.rafByMonth || []).slice(0, 18).map((m) => ({ name: m.month, v: m.raf, sub: `${m.count} projet(s)` }))} colorFn={() => T.emerald} max={undefined} />
           <Tip>Projection indicative : RAF des projets actifs regroupé par mois de leur date prévisionnelle de fin dans ClickUp.</Tip>
         </Card>
       )}
