@@ -11,6 +11,17 @@ import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, C
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
 const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
+// Libellés humains (matrice des droits) : codes techniques → présentation FR. Repli sur le code brut
+// pour un rôle/module non répertorié (rien n'est masqué). Aligné sur guide.ROLE_LABEL.
+const ROLE_LABEL: Record<string, string> = {
+  direction: "Direction", commercial_dir: "Directeur commercial", commercial: "Commercial",
+  pmo: "PMO", achats: "Achats", assistante: "Assistante", lecture: "Lecture",
+};
+const MODULE_LABEL: Record<string, string> = {
+  overview: "Vue d'ensemble", pipeline: "Pipeline", backlog: "Backlog", import: "Imports",
+  bc: "BC fournisseurs", fournisseurs: "Fournisseurs", rentabilite: "Rentabilité",
+  objectifs: "Objectifs", habilitations: "Habilitations", qualite: "Qualité",
+};
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const Habilitations: FC<Props> = () => {
@@ -58,14 +69,14 @@ export const Habilitations: FC<Props> = () => {
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
-            <thead><tr><th className="px-2 py-1 text-left text-muted">Module</th>{roles.map((r) => <th key={r} className="px-2 py-1 text-muted font-medium">{r}</th>)}</tr></thead>
+            <thead><tr><th className="px-2 py-1 text-left text-muted">Module</th>{roles.map((r) => <th key={r} className="px-2 py-1 text-muted font-medium whitespace-nowrap">{ROLE_LABEL[r] || r}</th>)}</tr></thead>
             <tbody>
               {modules.map((m) => (
                 <tr key={m}>
-                  <td className="px-2 py-1">{m}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{MODULE_LABEL[m] || m}</td>
                   {roles.map((r) => (
                     <td key={r} className="px-1 py-1 text-center">
-                      <button disabled={!isDirection} aria-label={`Droit ${r} sur ${m} : ${matrix[r]?.[m] || "aucun"}`} title={`${r} · ${m} : ${matrix[r]?.[m] || "aucun"}`} onClick={() => isDirection && setCell(r, m)} className={cx("w-10 h-9 rounded font-semibold", tone[matrix[r]?.[m]] || "bg-panel2", isDirection && "hover:opacity-80")}>{glyph[matrix[r]?.[m]] ?? "–"}</button>
+                      <button disabled={!isDirection} aria-label={`Droit ${ROLE_LABEL[r] || r} sur ${MODULE_LABEL[m] || m} : ${matrix[r]?.[m] || "aucun"}`} title={`${ROLE_LABEL[r] || r} · ${MODULE_LABEL[m] || m} : ${matrix[r]?.[m] || "aucun"}`} onClick={() => isDirection && setCell(r, m)} className={cx("w-10 h-9 rounded font-semibold", tone[matrix[r]?.[m]] || "bg-panel2", isDirection && "hover:opacity-80")}>{glyph[matrix[r]?.[m]] ?? "–"}</button>
                     </td>
                   ))}
                 </tr>
@@ -562,7 +573,7 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
   if (!health || health.commandesTotal == null) return null;
   const money = (n?: number) => (n ? (n / 1e6).toFixed(1) + " M" : "0");
   const Metric = ({ label, value, tone, sub }: { label: string; value: string | number; tone?: string; sub?: string }) => (
-    <div className="rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2">
+    <div className="rounded-lg bg-panel2 border border-line px-3 py-2">
       <div className="text-[11px] text-muted">{label}</div>
       <div className={cx("font-display tabnum text-lg leading-tight", tone)}>{value}</div>
       {sub && <div className="text-[11px] text-faint">{sub}</div>}
@@ -805,8 +816,8 @@ function ClickupCard() {
         </button>
       </div>
       <ClickupHealthPanel health={health} />
-      {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-amber-400 mt-1">⚠️ {health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
-      <div className="mt-4 pt-3 border-t border-white/5">
+      {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-gold mt-1">{health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
+      <div className="mt-4 pt-3 border-t border-line">
         <div className="text-[13px] font-medium text-ink mb-2">Bons de commande fournisseurs (liste « Commandes Fournisseurs »)</div>
         <div className="flex flex-wrap items-center gap-3 text-[13px]">
           <button type="button" className="btn-ghost !py-1.5" disabled={bcRecBusy} onClick={bcReconcile} title="Rattacher les BC aux tâches ClickUp DÉJÀ existantes (par N° de Commande), sans rien créer. À lancer AVANT tout push en masse.">
@@ -824,10 +835,10 @@ function ClickupCard() {
           <button type="button" className="btn-ghost !py-1.5" disabled={bcImportBusy} onClick={bcImport} title="Créer dans l'app les BC saisis directement dans ClickUp (dédup par N° BC, statut « émis », conversion XOF). L'import Logistics/PDF reste prioritaire.">
             {bcImportBusy ? "Import…" : "Importer les BC depuis ClickUp"}
           </button>
-          {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-amber-400">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
+          {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-clay">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
         </div>
       </div>
-      <div className="mt-4 pt-3 border-t border-white/5">
+      <div className="mt-4 pt-3 border-t border-line">
         <div className="text-[13px] font-medium text-ink mb-2">Temps réel (webhooks) {data?.webhookActive ? <Badge tone="emerald">actif</Badge> : <Badge tone="steel">inactif</Badge>}</div>
         <div className="flex flex-wrap items-center gap-3 text-[13px]">
           <input className="field !py-1.5 w-[26rem] max-w-full font-mono text-[12px]" aria-label="Endpoint du webhook clickupWebhook" value={ep} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…cloudfunctions.net/clickupWebhook" />

@@ -309,7 +309,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         <Table columns={[
           colText("FP", (a) => <FpLink fp={a.fp} />, (a) => a.fp || ""),
           colText("Client", (a) => a.client || "—", (a) => a.client || ""),
-          colText("AM", (a) => a.am || "—", (a) => a.am || ""),
+          colText("Commercial", (a) => a.am || "—", (a) => a.am || ""),
           colNum(baseLbl, (a) => money(a.base), (a) => a.base),
           colNum("MB", (a) => money(a.mb), (a) => a.mb),
           colNum("%MB", (a) => <Badge tone={(a.pmb < MARGIN.LOW ? "clay" : a.pmb < MARGIN.OK ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),

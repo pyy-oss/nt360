@@ -121,7 +121,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
               {(data.closing.staleTop || []).length ? (
                 <Table columns={[
                   colText("Client", (o) => o.client, (o) => o.client),
-                  colText("AM", (o) => o.am, (o) => o.am),
+                  colText("Commercial", (o) => o.am, (o) => o.am),
                   colText("Étape", (o) => o.stageLabel || "—", (o) => o.stageLabel || ""),
                   colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
                   colText("D Prev", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
@@ -196,7 +196,7 @@ export const Am360: FC<Props> = () => {
       <Card title="Classement des commerciaux">
         <Table columns={[
           colText("#", (r) => <span className="text-faint tabnum">{rankOf.get(r.am)}</span>, (r) => rankOf.get(r.am) ?? 999),
-          colText("AM", (r) => (r.am === sel.am ? <b className="text-gold">{r.am}</b> : r.am), (r) => r.am),
+          colText("Commercial", (r) => (r.am === sel.am ? <b className="text-gold">{r.am}</b> : r.am), (r) => r.am),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas),
           // Essentiels EN LIGNE (CAS, Pipeline pond., Transfo., R/O) ; secondaire replié via det().
           det(colNum("Ticket moy.", (r) => (r.orderCount > 0 ? money(r.cas / r.orderCount) : "—"), (r) => (r.orderCount > 0 ? r.cas / r.orderCount : 0))),
@@ -559,7 +559,7 @@ export const OppList: FC<Props> = () => {
             colText("Client", (o) => o.client, (o) => o.client),
             colText("Action", (o) => o.nextStep || "—"),
             colText("Étape", (o) => o.stageLabel || o.stage, (o) => o.stage),
-            colText("AM", (o) => o.am, (o) => o.am),
+            colText("Commercial", (o) => o.am, (o) => o.am),
             ...(canWrite ? [colText("", (o: Opportunity) => <button onClick={() => (o.source === "saisie" ? editOpp(o) : fixOpp(o))} className="text-gold hover:underline text-xs">Éditer</button>)] : []),
           ]} rows={actions.slice(0, 25)} />
           <Tip>Actions commerciales datées à mener sur les opportunités actives. Les <b className="text-clay">en retard</b> (échéance dépassée) sont prioritaires. Renseignées via la fiche opportunité (« Prochaine action » + échéance).</Tip>
@@ -579,8 +579,8 @@ export const OppList: FC<Props> = () => {
         {certitudes.length ? (
           <Table columns={[
             colText("Client", (o) => o.client, (o) => o.client),
-            colText("Désignation", (o) => o.designation || "—", (o) => o.designation || ""),
-            det(colText("AM", (o) => o.am, (o) => o.am)),
+            colText("Affaire", (o) => o.designation || "—", (o) => o.designation || ""),
+            det(colText("Commercial", (o) => o.am, (o) => o.am)),
             det(colText("BU", (o) => buBadge(o.bu), (o) => o.bu)), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
             det(colNum("Proba", (o) => pct(o.probability), (o) => o.probability)),
             colNum("Pondéré", (o) => money(pw(o)), (o) => pw(o)),
@@ -591,7 +591,7 @@ export const OppList: FC<Props> = () => {
       </Card>
       <Card title="Top opportunités (pondéré)">
         <Table columns={[
-          colText("Client", (o) => o.client), colText("Désignation", (o) => o.designation || "—"), colText("AM", (o) => o.am),
+          colText("Client", (o) => o.client), colText("Affaire", (o) => o.designation || "—"), colText("Commercial", (o) => o.am),
           colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(pw(o))),
           colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
@@ -619,8 +619,8 @@ export const OppList: FC<Props> = () => {
             // (FP, BU, Proba, MB prév., DR, Closing, P&L) est replié dans le détail via det().
             det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Client", (r) => r.client, (r) => r.client),
-            colText("Désignation", (r) => r.designation || "—", (r) => r.designation || ""),
-            colText("AM", (r) => r.am, (r) => r.am),
+            colText("Affaire", (r) => r.designation || "—", (r) => r.designation || ""),
+            colText("Commercial", (r) => r.am, (r) => r.am),
             det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),
             colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
@@ -717,7 +717,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
       <div className={cols2}>
         <Card title="Top commerciaux (pipeline pondéré)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
           {topAm.length ? <Table columns={[
-            colText("AM", (r) => r.am, (r) => r.am),
+            colText("Commercial", (r) => r.am, (r) => r.am),
             colNum("Pondéré", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
             colNum("Actif", (r) => r.activeCount, (r) => r.activeCount),
             colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),

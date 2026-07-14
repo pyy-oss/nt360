@@ -63,7 +63,7 @@ export const Relances: FC<Props> = () => {
               colText("Échéance", (r: any) => <span className="tabnum">{r.dueDate}</span>, (r: any) => r.dueDate),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               colText("Client", (r: any) => r.client, (r: any) => r.client),
-              colText("Responsable", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
+              colText("Commercial", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
               colText("N° facture", (r: any) => (r.fp ? <FpLink fp={r.fp} /> : <span className="text-faint">{r.numero}</span>), (r: any) => r.numero),
               colNum("Montant", (r: any) => money(r.amount), (r: any) => r.amount),
             ]} rows={cre.items} colsKey="relances-creances" />
@@ -99,7 +99,7 @@ export const Relances: FC<Props> = () => {
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               det(colText("FP", (r: any) => <FpLink fp={r.fp} />, (r: any) => r.fp)),
               colText("Client", (r: any) => r.client, (r: any) => r.client),
-              colText("Responsable", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
+              colText("Commercial", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
               colNum("Attendu", (r: any) => money(r.expected), (r: any) => r.expected),
               colNum("Facturé", (r: any) => money(r.invoiced), (r: any) => r.invoiced),
               colNum("À émettre", (r: any) => <span className={cx("font-medium", r.gap > 0 && "text-clay")}>{money(r.gap)}</span>, (r: any) => r.gap),

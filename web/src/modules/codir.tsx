@@ -450,7 +450,7 @@ export const Codir: FC<Props> = () => {
 
   const backlogCols = [
     colText("Client", (r: NonNullable<BacklogSummary["top"]>[number]) => r.client || "—", (r: any) => r.client || ""),
-    colText("Description du projet", (r: any) => <span className="truncate max-w-[380px] inline-block align-bottom">{r.affaire || "—"}</span>),
+    colText("Affaire", (r: any) => <span className="truncate max-w-[380px] inline-block align-bottom">{r.affaire || "—"}</span>),
     colNum("RAF total", (r: any) => money(r.raf), (r: any) => r.raf || 0),
   ];
 
