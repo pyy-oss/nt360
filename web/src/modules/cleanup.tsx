@@ -149,6 +149,8 @@ const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "
   factures_sans_date: { kind: "date-invoice", cap: "import" },
   factures_sans_echeance: { kind: "date-invoice-due", cap: "import" },
   surfacturation: { kind: "nav", module: "invoicelist" },
+  // N° FP illisible : la correction (fixer le N° FP) se fait à la source, sur l'écran Commandes pré-filtré.
+  commandes_fp_illisible: { kind: "nav", module: "orderlist" },
   commandes_sans_annee: { kind: "num-order-year", cap: "import" },
   commandes_sans_client: { kind: "text-order-client", cap: "import" },
   commandes_sans_am: { kind: "text-order-am", cap: "import" },

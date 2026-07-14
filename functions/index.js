@@ -1059,14 +1059,17 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   const itemsOfCorr = (snap) => new Set((((snap.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
   const cancelledOrders = itemsOfCorr(cxlODoc), cancelledInvoices = itemsOfCorr(cxlIDoc);
   const casOverrideMap = ((casOvrDoc.data() || {}).map) || {};
-  const mergedOrders = mergeCommandes(orders, opps, sheets, invoices);
+  // Factures annulées EXCLUES AVANT la fusion (comme le recompute, aggregate.js) → o.facture/o.raf(derive)
+  // portés par les commandes fusionnées n'incluent jamais d'annulée (assiette strictement alignée).
+  const invoicesDq = invoices.filter((i) => !cancelledInvoices.has(i.id));
+  const mergedOrders = mergeCommandes(orders, opps, sheets, invoicesDq);
   for (const o of mergedOrders) {
     const ov = Number(casOverrideMap[safeIdCorr(o.fp)]);
     if (Number.isFinite(ov) && ov >= 0) { o.cas = ov; if (o.rafSource === "derive") o.raf = Math.max(ov - (o.facture || 0), 0); }
   }
   const ordersDq = mergedOrders.filter((o) => !cancelledOrders.has(safeIdCorr(o.fp)));
-  const invoicesDq = invoices.filter((i) => !cancelledInvoices.has(i.id));
-  const defs = issueDefs(ordersDq, invoicesDq, opps, bcLines, sheets, thr, staleOpps, agedOpps);
+  // `orders` (P&L BRUTS, avant fusion) passés en dernier → détection des commandes au N° FP illisible.
+  const defs = issueDefs(ordersDq, invoicesDq, opps, bcLines, sheets, thr, staleOpps, agedOpps, orders);
   const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
   const buckets = defs.filter((d) => d.records.length).map((d) => ({
     type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),

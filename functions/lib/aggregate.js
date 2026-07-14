@@ -442,7 +442,7 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/alertsPipeline", data: { items: bucket.pipeline, ...meta } });
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps, agedOpps);
+  const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps, agedOpps, pnlOrders);
   // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
   // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
   const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
@@ -584,10 +584,13 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/trends", data: { points: points.slice(-180), ...stamp } }); // ~6 mois d'historique
   }
 
-  const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(o.yearPo) === p));
+  // Attribution à un exercice via l'année BORNÉE (plausibleYear) — MÊME règle que l'atterrissage : une
+  // commande à yearPo aberrant (1900, 20226) n'apparaît que dans « all », jamais dans un onglet d'année
+  // fantôme (sinon divergence vue périodique ⇄ réalisé/atterrissage).
+  const filterOrders = (arr, p) => (p === "all" ? arr : arr.filter((o) => String(plausibleYear(o.yearPo)) === p));
 
   // Périodes disponibles = "Tout" + chaque année de commande (yearPo), la plus récente d'abord.
-  const years = [...new Set(orders.map((o) => o.yearPo).filter((y) => y > 0))].sort((a, b) => b - a).map(String);
+  const years = [...new Set(orders.map((o) => plausibleYear(o.yearPo)).filter((y) => y > 0))].sort((a, b) => b - a).map(String);
   const periods = ["all", ...years];
   for (const period of periods) {
     const inv = filterInvoices(invoices, period); // factures DATÉES dans la période = CAF figé sur l'exercice

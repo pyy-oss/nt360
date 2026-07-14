@@ -13,7 +13,14 @@
 // est renseigné (source de vérité métier ; le rattachement facture→N° FP est incomplet, donc
 // CAS − facturé SURESTIMERAIT le backlog). Ligne P&L sans RAF → dérivé max(CAS − facturé, 0).
 // Module PUR (testable).
-const { fpKey, plausibleYear } = require("../lib/ids");
+const { fpKey, plausibleYear, num } = require("../lib/ids");
+
+// Lignes P&L au N° FP ILLISIBLE (fpKey null : séquence absente/factice, année à 5 chiffres, libellé non
+// conforme) portant un CAS : mergeCommandes les ÉCARTE silencieusement du carnet → perte de CA invisible
+// (ni au CAS, ni au backlog, ni en anomalie). On les EXPOSE pour qu'elles soient corrigées. PURE.
+function illegibleOrders(orders) {
+  return (orders || []).filter((o) => !fpKey(o && o.fp) && num(o && o.cas) > 0);
+}
 
 const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
 // Année extraite du N° FP, BORNÉE (fenêtre plausible) : un FP mal typé « FP/2099/1 » ne doit pas
@@ -87,4 +94,4 @@ function mergeCommandes(orders, opps, sheets, invoices) {
   });
 }
 
-module.exports = { mergeCommandes };
+module.exports = { mergeCommandes, illegibleOrders };
