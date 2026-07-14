@@ -97,6 +97,10 @@ export const Overview: FC<Props> = ({ period }) => {
   // rester cohérent avec les agrégats serveur (mêmes poids/activation).
   const { data: projCfg } = useDocData<ProjectionConfig>("config/projection");
   const projTiers = normalizeTiers(projCfg || undefined);
+  // Overlay de réconciliation N° FP (config/fpAliases) : passé au recalcul filtré pour redirriger le FP des
+  // opps/factures brutes vers le FP du P&L, EN MIROIR du recompute serveur (sinon la Vue d'ensemble filtrée
+  // diverge de l'agrégat — double-compte pipeline, factures aliasées non rattachées).
+  const { data: fpAliases } = useDocData<{ map?: Record<string, string> }>(active ? "config/fpAliases" : null);
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex gap-2 items-center">
@@ -117,7 +121,7 @@ export const Overview: FC<Props> = ({ period }) => {
   // (parité serveur/finance.tsx) avant recalcul du CAF filtré.
   const cancelledInv = new Set((cxlInv?.items || []).map((e) => e.id));
   const liveInvoices = cancelledInv.size ? allInvoices.filter((i) => !cancelledInv.has(i.id!)) : allInvoices;
-  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers) : null;
+  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases?.map) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).

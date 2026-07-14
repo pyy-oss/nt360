@@ -27,3 +27,18 @@ export function isAgedLost(o: { source?: string; stage?: number; ageDays?: numbe
   if (!Number.isFinite(age) || age < AGE_LOST_DAYS) return false;
   return Number(o.probability) <= AGE_LOST_IDC;
 }
+
+/** Résolveur de RÉCONCILIATION N° FP (miroir EXACT de functions/lib/ids.js buildFpAliasResolver) : la table
+ *  config/fpAliases.map (clé canonique source → N° FP cible P&L) redirige un FP d'opp/facture vers le FP du
+ *  P&L, comme le fait le recompute serveur AVANT l'overview. Sans ce miroir, la Vue d'ensemble filtrée ne
+ *  reconnaît pas qu'une opp/facture partage le FP d'une commande (double-compte pipeline, rattachement raté).
+ *  Canonise l'entrée (fpKey) pour la recherche, renvoie la CIBLE si alias, sinon le FP d'origine INCHANGÉ. */
+export function buildFpAliasResolver(map?: Record<string, string> | null): (fp?: string | null) => string | null {
+  const m = map && typeof map === "object" ? map : {};
+  const hasAny = Object.keys(m).length > 0;
+  return (fp) => {
+    if (!hasAny || fp == null || fp === "") return fp ?? null;
+    const k = fpKey(fp);
+    return (k && m[k]) || fp;
+  };
+}
