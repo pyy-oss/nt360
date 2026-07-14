@@ -2080,12 +2080,15 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
 exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { salesVelocity } = require("./domain/velocity");
-  const snap = await db.collection("opportunities").select("stage", "amount", "weighted", "stale", "visibleTo").get();
+  const { normalizeTiers } = require("./domain/projection");
+  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
+  // probability/ageDays/source nécessaires au pondéré TIÉRÉ et à l'exclusion des périmées (isAgedLost).
+  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "visibleTo").get();
   let opps = snap.docs.map((d) => d.data()).filter((o) => o.stale !== true);
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
-  return { ok: true, ...salesVelocity(opps) };
+  return { ok: true, ...salesVelocity(opps, tiers) };
 });
 
 // === FUZZY MATCHING QUALITÉ (Lot 9) — repère les QUASI-DOUBLONS de noms clients (typos, mot en plus)

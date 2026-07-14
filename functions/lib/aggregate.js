@@ -634,12 +634,12 @@ async function recomputeCore(db, only) {
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec
     // l'accès « Rentabilité » (confidentialité côté serveur) ; le doc de base ne porte que CAS/facturé/backlog.
     if (want("clients")) {
-      const cl = byEntity(ord, inv, (x) => x.client, oppP); // oppP → forecast/projeté par client (Bilan CODIR)
+      const cl = byEntity(ord, inv, (x) => x.client, oppP, tiers); // oppP → forecast/projeté par client (Bilan CODIR)
       w.push({ path: `summaries/clients_${period}`, data: { period, rows: cl.map(({ mb, pmb, ...r }) => r), ...stamp } });
       w.push({ path: `summaries/clientsMargin_${period}`, data: { period, rows: cl.map(({ key, mb, pmb }) => ({ key, mb, pmb })), ...stamp } });
     }
     if (want("domaines")) {
-      const dm = byEntity(ord, inv, (x) => x.bu);
+      const dm = byEntity(ord, inv, (x) => x.bu, undefined, tiers);
       w.push({ path: `summaries/domaines_${period}`, data: { period, rows: dm.map(({ mb, pmb, ...r }) => r), ...stamp } });
       w.push({ path: `summaries/domainesMargin_${period}`, data: { period, rows: dm.map(({ key, mb, pmb }) => ({ key, mb, pmb })), ...stamp } });
     }

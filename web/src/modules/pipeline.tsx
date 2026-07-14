@@ -1,6 +1,7 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
 import { useState, useEffect, type FC, type ReactNode, type ChangeEvent } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
+import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
@@ -391,6 +392,8 @@ export const OppList: FC<Props> = () => {
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
+  // Pondéré TIÉRÉ (config/projection) — SOURCE UNIQUE avec le cockpit, au lieu du champ linéaire persisté.
+  const pw = useProjectionWeight();
   const [f, setF] = useState({ ...EMPTY_OPP });
   const [open, setOpen] = useState(false); // saisie/édition d'opportunité en MODALE
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
@@ -413,12 +416,12 @@ export const OppList: FC<Props> = () => {
   // Changer d'étape pré-remplit la proba par défaut de l'étape si elle est vide (évite un pondéré à 0).
   const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
   if (loading && !allRows.length) return <CardSkeleton />;
-  const top = [...rows].sort((a, b) => (b.weighted || 0) - (a.weighted || 0)).slice(0, 10);
+  const top = [...rows].sort((a, b) => pw(b) - pw(a)).slice(0, 10);
   // Certitudes = opportunités ACTIVES (étapes 1..5) quasi-certaines (IdC ≥ 90 %), pas encore signées.
   const certitudes = rows
     .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9)
-    .sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
-  const certTotal = certitudes.reduce((s, o) => s + (o.weighted || 0), 0);
+    .sort((a, b) => pw(b) - pw(a));
+  const certTotal = certitudes.reduce((s, o) => s + pw(o), 0);
   const today = new Date().toISOString().slice(0, 10);
   // Prochaines actions commerciales échéancées (opps ACTIVES avec date d'action), triées par échéance.
   const actions = rows.filter((o) => o.nextStepDate && (o.stage || 0) >= 1 && (o.stage || 0) <= 5)
@@ -579,7 +582,7 @@ export const OppList: FC<Props> = () => {
             colText("AM", (o) => o.am, (o) => o.am),
             colText("BU", (o) => buBadge(o.bu), (o) => o.bu), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
             colNum("Proba", (o) => pct(o.probability), (o) => o.probability),
-            colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
+            colNum("Pondéré", (o) => money(pw(o)), (o) => pw(o)),
             colText("Closing (D Prev)", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
             colText("P&L", (o: Opportunity) => pnlFlag(o), () => 0),
           ]} rows={certitudes} />
@@ -588,7 +591,7 @@ export const OppList: FC<Props> = () => {
       <Card title="Top opportunités (pondéré)">
         <Table columns={[
           colText("Client", (o) => o.client), colText("Désignation", (o) => o.designation || "—"), colText("AM", (o) => o.am),
-          colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(o.weighted)),
+          colNum("Montant", (o) => money(o.amount)), colNum("Pondéré", (o) => money(pw(o))),
           colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
@@ -619,7 +622,7 @@ export const OppList: FC<Props> = () => {
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),
             colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
             colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
-            colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
+            colNum("Pondéré", (r) => money(pw(r)), (r) => pw(r)),
             // MB prévisionnel (%) + DR — saisis dans la fiche, désormais RÉAFFICHÉS (cf. audit : champs write-only).
             colNum("MB prév.", (r: Opportunity) => (r.mbPrev != null ? `${r.mbPrev} %` : "—"), (r: Opportunity) => (r.mbPrev ?? -1)),
             colText("DR", (r: Opportunity) => (r.dr ? <Badge tone="steel">Oui</Badge> : <span className="text-faint">—</span>), (r: Opportunity) => (r.dr ? 1 : 0)),
@@ -742,11 +745,12 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey, on
 }) {
   const [shown, setShown] = useState(BOARD_PAGE);
   const [over, setOver] = useState(false); // survol de dépôt (drag-and-drop, Lot 8b)
+  const pw = useProjectionWeight(); // pondéré TIÉRÉ (source unique avec le cockpit)
   // Repart au 1er lot UNIQUEMENT quand le FILTRE change (resetKey) — pas sur tout changement de taille de
   // colonne : un move optimiste ou un snapshot d'un autre écrivain fait varier col.length sans que
   // l'utilisateur ait rien filtré, et réinitialiser « Voir plus » lui ferait perdre sa place.
   useEffect(() => { setShown(BOARD_PAGE); }, [resetKey]);
-  const tot = col.reduce((sum, r) => sum + (r.weighted || 0), 0);
+  const tot = col.reduce((sum, r) => sum + pw(r), 0);
   const rest = col.length - shown;
   return (
     <div className={cx("flex flex-col gap-2 rounded-xl border bg-panel2/40 p-2 min-h-[120px] transition-colors", over ? "border-gold bg-gold/5" : "border-line")}
@@ -771,7 +775,7 @@ function BoardColumn({ stage, col, canWrite, movingId, move, today, resetKey, on
             {o.designation && <div className="text-[11px] text-muted truncate" title={o.designation}>{o.designation}</div>}
             <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
               <span className="font-display tabnum text-ink">{fmt(o.amount)}</span>
-              <span className="text-faint">· pond. {fmt(o.weighted)}</span>
+              <span className="text-faint">· pond. {fmt(pw(o))}</span>
               {o.am && <span className="text-faint truncate max-w-[90px]">· {o.am}</span>}
             </div>
             <div className="flex items-center justify-between gap-1.5 mt-1.5">
@@ -819,6 +823,7 @@ export const PipelineBoard: FC<Props> = () => {
   // Abonnement différé jusqu'à résolution de l'OWD (ready) — cf. OppList (re-audit).
   const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { match, f } = useFilters();
+  const pw = useProjectionWeight(); // pondéré TIÉRÉ (source unique avec le cockpit)
   const filterKey = `${f.bu}|${f.am}|${f.client}|${f.pm}`; // identité du filtre → réinitialise la pagination des colonnes
   const canWrite = useCan("pipeline") === "write";
   const toast = useToast();
@@ -870,7 +875,7 @@ export const PipelineBoard: FC<Props> = () => {
     if (!isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5) acc.push(r);
     return acc;
   }, []);
-  const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
+  const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => pw(b) - pw(a));
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / AM / client" />

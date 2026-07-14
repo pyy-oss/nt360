@@ -3,11 +3,11 @@ const { salesVelocity } = require("../domain/velocity");
 
 describe("salesVelocity", () => {
   const opps = [
-    { stage: 6, amount: 1000 },              // gagné
-    { stage: 6, amount: 3000 },              // gagné
-    { stage: 7, amount: 500 },               // perdu
-    { stage: 3, amount: 800, weighted: 400 },// ouvert
-    { stage: 5, amount: 1200, weighted: 900 },// ouvert
+    { stage: 6, amount: 1000 },                        // gagné
+    { stage: 6, amount: 3000 },                        // gagné
+    { stage: 7, amount: 500 },                         // perdu
+    { stage: 3, amount: 800, probability: 0.95 },      // ouvert → certitudes (poids 1) = 800
+    { stage: 5, amount: 1200, probability: 0.7 },      // ouvert → forecast (poids 0,2) = 240
   ];
   it("taux de gain = gagnées / (gagnées + perdues)", () => {
     const v = salesVelocity(opps);
@@ -18,9 +18,15 @@ describe("salesVelocity", () => {
   it("deal moyen = moyenne des gagnées", () => {
     expect(salesVelocity(opps).avgDeal).toBe(2000); // (1000+3000)/2
   });
-  it("pipeline pondéré ouvert = somme des pondérés ouverts", () => {
-    expect(salesVelocity(opps).openWeighted).toBe(1300); // 400 + 900
+  it("pipeline pondéré ouvert = somme des pondérés TIÉRÉS (projectionWeight), pas le champ linéaire", () => {
+    expect(salesVelocity(opps).openWeighted).toBe(1040); // 800 (certitudes ×1) + 240 (forecast ×0,2)
     expect(salesVelocity(opps).openCount).toBe(2);
+  });
+  it("exclut les opportunités périmées par âge (isAgedLost) du pipeline ouvert", () => {
+    const aged = [{ stage: 3, amount: 1000, probability: 0.5, source: "salesData", ageDays: 400 }];
+    const v = salesVelocity(aged);
+    expect(v.openCount).toBe(0);
+    expect(v.openWeighted).toBe(0);
   });
   it("indice de vélocité = openCount × winRate × avgDeal", () => {
     const v = salesVelocity(opps);

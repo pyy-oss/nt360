@@ -307,13 +307,13 @@ describe("reporting — facturation/rentabilité/entités", () => {
   });
   it("byEntity avec opps → forecast (pondéré ouvert) + projeté par client (Bilan CODIR)", () => {
     const opps = [
-      { client: "ACME", stage: 3, weighted: 500 }, // ouverte → forecast
-      { client: "ACME", stage: 6, weighted: 999 }, // GAGNÉE → déjà dans le CAS, exclue du forecast
-      { client: "MTN", stage: 2, weighted: 200 },
+      { client: "ACME", stage: 3, probability: 0.95, amount: 500 }, // ouverte, IdC ≥90 → certitudes ×1 = 500
+      { client: "ACME", stage: 6, probability: 1, amount: 999 },    // GAGNÉE → déjà dans le CAS, exclue du forecast
+      { client: "MTN", stage: 2, probability: 0.6, amount: 4000 },  // pipe ×0,05 = 200
     ];
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client, opps);
     const acme = rows.find((r) => r.key === "ACME");
-    expect(acme.forecast).toBe(500);              // seule l'opp ouverte
+    expect(acme.forecast).toBe(500);              // seule l'opp ouverte, pondérée en TIÉRÉ (certitudes)
     expect(acme.projete).toBe(acme.cas + 500);    // CAS (+ certitudes) + forecast
     // sans opps : projeté = CAS (rétrocompatible).
     const plain = byEntity(ORDERS, INVOICES, (x) => x.client);
