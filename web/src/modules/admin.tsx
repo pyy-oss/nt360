@@ -326,7 +326,6 @@ function EmailNotifyCard() {
   }} />;
 }
 function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
-  const toast = useToast();
   const [enabled, setEnabled] = useState(initial.enabled);
   const [tenantId, setTenantId] = useState(initial.tenantId);
   const [clientId, setClientId] = useState(initial.clientId);
@@ -338,17 +337,19 @@ function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
   const parseList = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
   const cfg = (): EmailNotifyConfig => ({ enabled, tenantId: tenantId.trim(), clientId: clientId.trim(), sender: sender.trim(), recipients: { alerts: parseList(alerts), codir: parseList(codir) }, triggers: trig });
   const save = () => setEmailNotifyConfig(cfg());
+  // Le test lève en cas d'échec → c'est `Busy` qui affiche l'unique toast (succès ou erreur). On NE toaste
+  // PAS ici en plus (sinon double notification au succès).
   const test = async () => {
     const to = testTo.trim();
-    if (!to) { toast("Renseignez une adresse de test.", "err"); return; }
+    if (!to) throw new Error("Renseignez une adresse de test.");
     await setEmailNotifyConfig(cfg()); // enregistre d'abord (le test lit la config serveur)
     const r = await sendTestEmail(to);
-    toast(r.ok ? `Email de test envoyé à ${to}.` : "Test : email non envoyé.", r.ok ? "ok" : "err");
+    if (!r.ok) throw new Error(r.skipped || "email non envoyé");
   };
   return (
     <Card title="Notifications email — Office 365" actions={
       <div className="flex gap-2">
-        <Busy variant="ghost" label="Tester" okMsg="Test traité" errMsg="Échec du test (voir config Azure / secret)" fn={test} />
+        <Busy variant="ghost" label="Tester" okMsg="Email de test envoyé" errMsg="Échec du test (voir config Azure / secret)" fn={test} />
         <Busy label="Enregistrer" okMsg="Config email enregistrée" fn={save} />
       </div>}>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -783,18 +784,20 @@ function ClickupCard() {
     } finally { setBulkBusy(false); }
   };
   // Nettoyage des doublons ClickUp (créés par des push concurrents) : d'abord un APERÇU (dry-run) qui
-  // compte les tâches supprimables du jour, puis confirmation avant suppression réelle. Direction.
+  // compte TOUTES les tâches supprimables (toutes époques — pas seulement celles du jour, sinon les
+  // doublons anciens restent invisibles et non nettoyables), puis confirmation avant suppression réelle.
+  // `windowHours: 0` = toutes époques (intention EXPLICITE). La tâche liée/la plus ancienne est conservée.
   const dedupeTasks = async () => {
     if (dedupeBusy) return;
     setDedupeBusy(true);
     try {
-      const preview = await dedupeClickupTasks({ listId: list, windowHours: 24 });
-      if (!preview.deletable) { toast(`Aucun doublon récent (${preview.duplicates} doublon(s) hors fenêtre 24 h) — rien à nettoyer.`, "ok"); return; }
+      const preview = await dedupeClickupTasks({ listId: list, windowHours: 0 });
+      if (!preview.deletable) { toast(`Aucun doublon à nettoyer (${preview.duplicates} doublon(s) détecté(s)).`, "ok"); return; }
       const ok = await ask(
-        <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> créée(s) dans les dernières 24 h, sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche liée (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
+        <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> (toutes époques), sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche <b>liée</b> (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
         { title: "Nettoyer les doublons ClickUp", confirmLabel: `Supprimer ${preview.deletable}`, tone: "clay" });
       if (!ok) return;
-      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 24 });
+      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 0 });
       toast(`Doublons nettoyés — ${r.deleted} supprimée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} sur ${r.groups} N° FP.`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -907,8 +910,8 @@ function ClickupCard() {
         <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
           {bulkBusy ? "Push…" : "Tout resynchroniser"}
         </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer les tâches ClickUp dupliquées (même N° FP) créées dans les dernières 24 h par des push concurrents. Aperçu puis confirmation ; la tâche liée / la plus ancienne est conservée.">
-          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons du jour"}
+        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer TOUTES les tâches ClickUp dupliquées (même N° FP), toutes époques, créées par des push concurrents. Aperçu (dry-run) puis confirmation ; la tâche liée / la plus ancienne est conservée pour chaque FP.">
+          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons"}
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
           {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
@@ -1127,7 +1130,7 @@ function CustomFieldsCard() {
     <Card title="Champs personnalisés (opportunité)" actions={
       <div className="flex gap-2">
         <button type="button" className="btn-ghost !py-1 text-xs" onClick={add}>+ champ</button>
-        {draft && <Busy label="Enregistrer" okMsg="Champs enregistrés" fn={async () => { await setCustomFields(draft.map((r) => ({ key: r.label, label: r.label, type: r.type, options: r.options, active: r.active }))); setDraft(null); }} />}
+        {draft && <Busy label="Enregistrer" okMsg="Champs enregistrés" fn={async () => { await setCustomFields(draft.map((r) => ({ key: r.key || r.label, label: r.label, type: r.type, options: r.options, active: r.active }))); setDraft(null); }} />}
       </div>}>
       {rows.length ? (
         <div className="flex flex-col gap-2">

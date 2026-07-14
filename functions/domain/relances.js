@@ -69,7 +69,10 @@ function relances(invoices, orders, bcLines, milestonesByFp, asOf) {
     bcItems.push({
       bcNumber: b.bcNumber || "", supplier: b.supplier || "—", fp: b.fp || null,
       customer: b.customer || (bk && clientByFp[bk]) || "—",
-      amount: b.amountXof || b.amount || 0, eta: String(eta).slice(0, 10), daysLate: late,
+      // Montant en PIVOT XOF uniquement (jamais le brut en devise) : `lib/fx.js` interdit de retomber sur
+      // `b.amount` (USD/EUR non convertis) — sinon le KPI « exposé » et `byResp.total` mélangent des devises.
+      // Parité avec `cashflow.decaissements` (`amt = b.amountXof || 0`). Une ligne non convertie compte 0.
+      amount: b.amountXof || 0, eta: String(eta).slice(0, 10), daysLate: late,
       status: b.status || "", am: (bk && amByFp[bk]) || "Achats",
     });
   }

@@ -43,4 +43,12 @@ describe("computeConstat — agrégat constaté", () => {
     expect(c1.tacePct).toBe(100);
     expect(r.global.reportedConsultants).toBe(2);
   });
+
+  it("borne le TACE constaté à 100 % (jours facturés > jours ouvrables du modèle)", () => {
+    // 28 facturés sur un mois modélisé à 20 j ouvrés → 140 % non borné : doit être clampé à 100.
+    const r = computeConstat([{ consultantId: "c1", month: "2026-01", billedDays: 28, leaveDays: 0, internalDays: 0 }], ["2026-01"]);
+    expect(r.rows[0].tacePct).toBe(100);
+    expect(r.rows[0].occupancyPct).toBe(100);
+    expect(r.global.tacePct).toBe(100);
+  });
 });

@@ -9,6 +9,9 @@
 const WORKING_DAYS_PER_MONTH = 20; // cohérent avec activityKpi (jours ouvrés standard)
 
 function ym(v) { const s = String(v || "").trim(); return /^\d{4}-\d{2}$/.test(s) ? s : (/^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 7) : null); }
+// Borne un pourcentage à [0,100] : un mois à > 20 jours facturés (jours ouvrés réels > 20, ou billed=31)
+// donnerait sinon un TACE > 100 % — hors bornes (exigence produit) et divergent de `tace()` clampé.
+const clampPct = (n) => Math.max(0, Math.min(100, Math.round(n)));
 function days(v, max) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.min(max, n) : 0; }
 
 // Normalise + valide un CRA mensuel. billed/leave/internal en JOURS (bornés au mois ouvré).
@@ -50,7 +53,7 @@ function computeConstat(timesheets, months) {
   }
   const list = Object.values(byConsultant).map((c) => {
     const workable = Math.max(1, c.months * WORKING_DAYS_PER_MONTH - c.leaveDays);
-    return { ...c, tacePct: Math.round(c.billedDays / workable * 100), occupancyPct: Math.round((c.billedDays + c.internalDays) / Math.max(1, c.months * WORKING_DAYS_PER_MONTH) * 100) };
+    return { ...c, tacePct: clampPct(c.billedDays / workable * 100), occupancyPct: clampPct((c.billedDays + c.internalDays) / Math.max(1, c.months * WORKING_DAYS_PER_MONTH) * 100) };
   });
   const totBilled = list.reduce((s, c) => s + c.billedDays, 0);
   const totLeave = list.reduce((s, c) => s + c.leaveDays, 0);
@@ -58,8 +61,8 @@ function computeConstat(timesheets, months) {
   const totMonths = list.reduce((s, c) => s + c.months, 0);
   const workable = Math.max(1, totMonths * WORKING_DAYS_PER_MONTH - totLeave);
   const global = {
-    tacePct: Math.round(totBilled / workable * 100),
-    occupancyPct: Math.round((totBilled + totInternal) / Math.max(1, totMonths * WORKING_DAYS_PER_MONTH) * 100),
+    tacePct: clampPct(totBilled / workable * 100),
+    occupancyPct: clampPct((totBilled + totInternal) / Math.max(1, totMonths * WORKING_DAYS_PER_MONTH) * 100),
     billedDays: totBilled, leaveDays: totLeave, internalDays: totInternal, reportedConsultants: list.length,
   };
   return { global, rows: list.sort((a, b) => a.tacePct - b.tacePct) };

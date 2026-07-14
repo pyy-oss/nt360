@@ -23,6 +23,16 @@ describe("consultantKpi (Lot 13)", () => {
     // revenue 0 − (400 × 20 × 2) = −16000 (banc pur)
     expect(k.marginForecast).toBe(-16000);
   });
+  it("le statut INTERCONTRAT compte comme banc : idle + coût de banc (pas exclu des KPI)", () => {
+    const k = consultantKpi({ id: "ic", status: "intercontrat" }, [], months, 400);
+    expect(k.idleMonths).toBe(2);          // au banc → intercontrat, pas « — »
+    expect(k.marginForecast).toBe(-16000); // le banc coûte
+  });
+  it("un consultant en CONGÉ n'est PAS compté comme intercontrat (hors effectif productif)", () => {
+    const k = consultantKpi({ id: "cg", status: "conge" }, [], months, 400);
+    expect(k.idleMonths).toBe(0);          // congé ≠ banc
+    expect(k.marginForecast).toBe(0);      // pas de coût de banc imputé au congé
+  });
   it("plafonne l'occupation à 100 en cas de sur-affectation", () => {
     const a = [
       { consultantId: "c1", startMonth: "2026-01", endMonth: "2026-01", allocationPct: 80 },
@@ -51,5 +61,15 @@ describe("computeActivity — agrégats global + par BU", () => {
     const r = computeActivity(consultants, assignments, months, { c1: 300 }, true);
     expect(r.global.marginForecast).not.toBeNull();
     expect(r.byBu.find((b) => b.bu === "DATA")).toBeTruthy();
+  });
+  it("mettre un consultant au banc FAIT MONTER le taux d'intercontrat", () => {
+    // c1 staffé 100 %, c2 au banc (intercontrat) → effectif 2, intercontrat = c2 idle 2 mois / (2×2) = 50 %.
+    const cons = [
+      { id: "c1", bu: "DATA", status: "active" },
+      { id: "c2", bu: "DATA", status: "intercontrat" },
+    ];
+    const r = computeActivity(cons, assignments, months, {}, false);
+    expect(r.global.active).toBe(2);            // le banc fait partie de l'effectif en activité
+    expect(r.global.intercontratPct).toBe(50);  // et il MONTE le taux (au lieu de le vider)
   });
 });

@@ -5,7 +5,7 @@
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
 import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
-import { fpKey, isAgedLost } from "../lib/ids";
+import { fpKey, isAgedLost, buildFpAliasResolver } from "../lib/ids";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -18,9 +18,18 @@ const DIMS: Dim[] = ["bu", "am", "client"];
 export function computeFilteredOverview(
   cmdRows: Order[], invoices: Invoice[], opps: Opportunity[], period: string,
   match: (row: { bu?: string; am?: string; client?: string }, dims?: Dim[]) => boolean,
-  tiers?: Tier[],
+  tiers?: Tier[], fpAliasMap?: Record<string, string> | null,
 ): FilteredOverview {
   const t = tiers || normalizeTiers();
+  // RÉCONCILIATION N° FP (overlay config/fpAliases) EN MIROIR du serveur (aggregate.js:158-164) : le
+  // recompute redirige le FP des opps/factures BRUTES vers le FP du P&L AVANT l'overview. Les cmdRows sont
+  // déjà canoniques (bakés serveur) ; on aligne ici opps + factures, sinon une opp aliasée n'est pas vue
+  // « déjà au carnet » (double-compte pipeline) et sa facture orpheline n'est pas rattachée.
+  if (fpAliasMap && Object.keys(fpAliasMap).length) {
+    const canonFp = buildFpAliasResolver(fpAliasMap);
+    opps = opps.map((o) => (o.fp != null && o.fp !== "" ? { ...o, fp: canonFp(o.fp) ?? o.fp } : o));
+    invoices = invoices.map((i) => (i.fp != null && i.fp !== "" ? { ...i, fp: canonFp(i.fp) ?? i.fp } : i));
+  }
   const yr = (d?: string) => (d ? String(d).slice(0, 4) : "");
   const inPeriod = (y: string) => period === "all" || y === period;
   const S = (a: any[], f: (x: any) => number) => a.reduce((s, x) => s + (f(x) || 0), 0);

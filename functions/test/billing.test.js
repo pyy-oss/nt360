@@ -33,4 +33,14 @@ describe("billingTrend — tendance de facturation jusqu'au 31/12", () => {
     expect(t.planifieRestant).toBe(700);  // 300 (sept) + 400 (nov)
     expect(t.projeteDec).toBe(1050);      // 350 + 700
   });
+  it("le jalon planifié du MOIS COURANT non encore facturé n'est pas évaporé", () => {
+    // Mois courant = 2026-07, jalon 500 planifié en juillet, seulement 50 facturés → reliquat 450 conservé.
+    const t2 = billingTrend(
+      [{ date: "2026-07-01", amountHt: 50 }],
+      [{ date: "2026-07-01", amount: 500 }],
+      2026, "2026-07-15");
+    const jul = t2.months.find((m) => m.month === "2026-07");
+    expect(jul.retenu).toBe(500);         // max(réalisé 50, planifié 500)
+    expect(t2.projeteDec).toBe(500);      // 50 réalisé + 450 reliquat du plan courant (au lieu de 50)
+  });
 });

@@ -104,11 +104,16 @@ export function Chain({ children }: { children: ReactNode[] }) {
 }
 
 // --- Table triable ---
-type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean };
+type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean; raw?: boolean };
 
 // Marque une colonne comme SECONDAIRE : elle quitte la ligne principale et s'affiche dans le détail
 // déroulant (grille clé/valeur). Sert à garder des tableaux étroits, sans scroll horizontal.
 export const det = (c: Col): Col => ({ ...c, sec: true });
+
+// Marque une colonne dont le rendu est un CONTENU RICHE auto-géré (chips, badges multiples, mini-barres)
+// qui ne doit PAS être coincé dans `.cell-txt` (nowrap + troncature à 34ch écrête les 2e/3e chips et
+// l'indicateur « +N »). La cellule gère sa propre largeur/débordement.
+export const raw = (c: Col): Col => ({ ...c, raw: true });
 
 // Une colonne d'ACTION/contrôle porte un en-tête vide (boutons, menus, éditeurs inline). Elle ne doit
 // JAMAIS partir dans l'accordéon de détail (sinon l'action principale d'un tableau devient invisible).
@@ -119,18 +124,19 @@ const isActionCol = (c: Col): boolean => (c.header || "").trim() === "";
 // Dans les deux cas les colonnes d'action restent EN LIGNE : on ne replie que des colonnes de données.
 const PRIMARY_CAP = 7;
 function splitCols(cols: Col[]): { primary: Col[]; detail: Col[] } {
-  if (cols.some((c) => c.sec)) {
-    return { primary: cols.filter((c) => !c.sec || isActionCol(c)), detail: cols.filter((c) => c.sec && !isActionCol(c)) };
-  }
-  if (cols.length <= PRIMARY_CAP) return { primary: cols, detail: [] };
-  // Repli auto : on garde les PRIMARY_CAP premières colonnes de DONNÉES en ligne + toutes les actions,
-  // le reste des colonnes de données bascule dans le détail (préserve l'ordre relatif).
+  // Repli auto au-delà du plafond : les PRIMARY_CAP premières colonnes de DONNÉES restent en ligne, le
+  // reste bascule au détail. Les colonnes d'action restent TOUJOURS en ligne. `sec` = repli explicite.
+  const explicit = cols.some((c) => c.sec);
+  let kept = 0;
   const primary: Col[] = [], detail: Col[] = [];
-  let keptData = 0;
   for (const c of cols) {
-    if (isActionCol(c)) primary.push(c);
-    else if (keptData < PRIMARY_CAP) { primary.push(c); keptData++; }
-    else detail.push(c);
+    const fold = isActionCol(c) ? false : explicit ? !!c.sec : (cols.length > PRIMARY_CAP && kept++ >= PRIMARY_CAP);
+    (fold ? detail : primary).push(c);
+  }
+  // GARDE-FOU : une ligne ne doit jamais être VIDE (chevron + actions seuls). Si toutes les colonnes de
+  // données ont été repliées, on remonte la première colonne de détail en principale (essentiel visible).
+  if (detail.length && !primary.some((c) => !isActionCol(c))) {
+    primary.unshift(detail.shift() as Col);
   }
   return { primary, detail };
 }
@@ -236,8 +242,11 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
   const paged = pageSize > 0 && total > pageSize;
   const pageCount = paged ? Math.ceil(total / pageSize) : 1;
   const safePage = Math.min(page, pageCount - 1);
-  // Le tri ou un changement du nombre de lignes (filtre) ramène à la première page.
-  useEffect(() => { setPage(0); }, [sort, total, pageSize]);
+  // Le tri ramène à la première page. On NE dépend PAS de `total` : l'app est temps réel (onSnapshot),
+  // et tout changement du nombre de lignes (import delta, ajout optimiste, annulation) ré-exécuterait
+  // l'effet et téléporterait l'utilisateur en page 1 en pleine navigation. Le clamp `safePage` suffit à
+  // rester dans les bornes quand la liste rétrécit (parité avec ListView).
+  useEffect(() => { setPage(0); }, [sort, pageSize]);
   const pageRows = paged ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted;
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
@@ -282,7 +291,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
                     )}
                     {primary.map((c, ci) => (
                       <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
-                        {c.align === "right" || isActionCol(c) ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
+                        {c.align === "right" || isActionCol(c) || c.raw ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
                       </td>
                     ))}
                   </tr>
@@ -461,7 +470,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                     )}
                     {primary.map((c, ci) => (
                       <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
-                        {c.align === "right" || isActionCol(c) ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
+                        {c.align === "right" || isActionCol(c) || c.raw ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
                       </td>
                     ))}
                   </tr>

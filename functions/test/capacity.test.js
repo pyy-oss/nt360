@@ -14,9 +14,11 @@ describe("capacity helpers (Lot 14)", () => {
     expect(avgTjm([{ tjmTarget: 600 }, { tjmTarget: 800 }])).toBe(700);
     expect(avgTjm([{}, { tjmTarget: 0 }], 500)).toBe(500);
   });
-  it("demandDaysOf : montant pondéré ÷ TJM", () => {
-    expect(demandDaysOf({ weighted: 7000 }, 700)).toBe(10);
-    expect(demandDaysOf({ amount: 14000, probability: 0.5 }, 700)).toBe(10); // pas de weighted → amount×proba
+  it("demandDaysOf : pondéré ÷ TJM, priorité au pondéré tiéré `pw`", () => {
+    expect(demandDaysOf({ pw: 7000 }, 700)).toBe(10);                       // pw (tiéré) prioritaire
+    expect(demandDaysOf({ pw: 3500, weighted: 7000 }, 700)).toBe(5);        // pw l'emporte sur weighted
+    expect(demandDaysOf({ weighted: 7000 }, 700)).toBe(10);                 // repli weighted
+    expect(demandDaysOf({ amount: 14000, probability: 0.5 }, 700)).toBe(10);// repli amount×proba
   });
 });
 
@@ -41,5 +43,14 @@ describe("capacityVsPipeline — gap & ETP", () => {
     const r = capacityVsPipeline({ consultants, loadByConsultant, months, opps });
     expect(r.gapDays).toBeLessThan(0);
     expect(r.fteGap).toBeLessThan(0);
+  });
+  it("le BANC (intercontrat) compte comme capacité disponible à 100 %", () => {
+    // c4 intercontrat, aucune charge → 40 j pleinement disponibles ; c5 sorti (inactive) → ignoré.
+    const cons = [
+      { id: "c4", bu: "DATA", status: "intercontrat", tjmTarget: 700 },
+      { id: "c5", bu: "DATA", status: "inactive", tjmTarget: 700 },
+    ];
+    const r = capacityVsPipeline({ consultants: cons, loadByConsultant: {}, months, opps: [] });
+    expect(r.capacityDays).toBe(40); // c4 seul, 40 j ; c5 exclu
   });
 });

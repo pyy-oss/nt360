@@ -17,7 +17,10 @@ function normCell(v) {
   if (v instanceof Date) return v;
   if (typeof v === "object") {
     if (Array.isArray(v.richText)) return v.richText.map((p) => (p && p.text) || "").join("");
-    if ("text" in v && ("hyperlink" in v || Object.keys(v).length <= 2)) return v.text == null ? null : v.text; // hyperlink
+    // Hyperlien : le libellé (`v.text`) peut être une STRING ou lui-même du richText imbriqué
+    // (`{ text: { richText:[…] }, hyperlink }`). On re-normalise récursivement pour ne JAMAIS laisser
+    // fuir un objet vers `num()`/`String()` en aval (qui donnerait "[object Object]" → 0).
+    if ("text" in v && ("hyperlink" in v || Object.keys(v).length <= 2)) return v.text == null ? null : normCell(v.text);
     if ("formula" in v || "sharedFormula" in v) return normCell(v.result); // formule → valeur calculée
     if ("error" in v) return null; // #DIV/0!, #N/A… : pas une donnée exploitable
     if ("result" in v) return normCell(v.result);
@@ -54,7 +57,18 @@ async function readWorkbook(buf) {
   const wb = new ExcelJS.Workbook();
   // exceljs accepte un Buffer Node ou un ArrayBuffer ; on normalise en Buffer.
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-  await wb.xlsx.load(b);
+  // Aiguillage par SIGNATURE (le buffer n'a pas d'extension) : XLSX/ZIP = "PK" (0x50 0x4B) ; le .xls
+  // hérité (BIFF/OLE) = 0xD0 0xCF — non lisible par exceljs → message clair plutôt qu'un échec cryptique ;
+  // sinon on tente le CSV (exceljs `csv.read`), pour conserver le support CSV qu'offrait xlsx@0.18.
+  const isZip = b.length >= 2 && b[0] === 0x50 && b[1] === 0x4b;
+  const isOle = b.length >= 2 && b[0] === 0xd0 && b[1] === 0xcf;
+  if (isOle) throw new Error("Format Excel 97-2003 (.xls) non supporté — ré-enregistrez le fichier au format .xlsx (ou .csv).");
+  if (isZip) {
+    await wb.xlsx.load(b);
+  } else {
+    const { Readable } = require("stream");
+    await wb.csv.read(Readable.from(b.toString("utf8")), { sheetName: "Feuille1" });
+  }
   const SheetNames = [];
   const Sheets = {};
   wb.eachSheet((ws) => {
@@ -89,13 +103,17 @@ function sheetToJson(ws, opts = {}) {
   }
 
   // Mode objets : 1re ligne = en-têtes. Clés dédupliquées (suffixe _N, comme xlsx). Colonnes à en-tête
-  // vide ignorées. Lignes entièrement vides sautées. Cellule vide → defval si fourni, sinon clé omise.
+  // vide nommées `__EMPTY`/`__EMPTY_1`… (PARITÉ xlsx — les DROP silencieusement faisait collisionner la
+  // signature de dédup de `facturationDf` : deux lignes distinguées par une SEULE colonne sans en-tête
+  // produisaient la même signature → 2e ligne perdue → CAF sous-évalué). Lignes vides sautées.
   const headerRow = body[0] || [];
   const keys = [];
   const seen = Object.create(null);
+  let emptyN = 0;
   headerRow.forEach((h, c) => {
-    if (isEmpty(h)) { keys[c] = null; return; }
-    let k = String(h);
+    let k;
+    if (isEmpty(h)) { k = emptyN === 0 ? "__EMPTY" : `__EMPTY_${emptyN}`; emptyN += 1; keys[c] = k; return; }
+    k = String(h);
     if (seen[k] != null) { seen[k] += 1; k = `${k}_${seen[k]}`; } else { seen[k] = 0; }
     keys[c] = k;
   });

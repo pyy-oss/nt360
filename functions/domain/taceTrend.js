@@ -9,6 +9,9 @@
 const WORKING_DAYS_PER_MONTH = 20; // cohérent avec timesheet / activityKpi
 
 function num(v) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; }
+// Borne à [0,100] : jours ouvrés réels > 20 (ou billed > workable) donnerait sinon un TACE > 100 % — hors
+// bornes produit et divergent du TACE constaté clampé (invariant « même métrique = même nombre »).
+const clampPct = (n) => Math.max(0, Math.min(100, Math.round(n)));
 
 // Ordinal de mois calendaire (YYYY-MM → entier monotone) : deux mois adjacents diffèrent de 1, un trou
 // de N mois de N. Base de l'espacement correct de la régression de tendance.
@@ -25,8 +28,8 @@ function monthPoint(rows, workingDays = WORKING_DAYS_PER_MONTH) {
   const capacity = Math.max(0, heads * workingDays);
   return {
     headcount: heads, billedDays: billed, leaveDays: leave, internalDays: internal,
-    tacePct: workable > 0 ? Math.round((billed / workable) * 100) : null,
-    occupancyPct: capacity > 0 ? Math.round(((billed + internal) / capacity) * 100) : null,
+    tacePct: workable > 0 ? clampPct((billed / workable) * 100) : null,
+    occupancyPct: capacity > 0 ? clampPct(((billed + internal) / capacity) * 100) : null,
   };
 }
 

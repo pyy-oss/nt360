@@ -46,4 +46,20 @@ describe("clickupHealth — diagnostic de couverture", () => {
     expect(h.cafGapCount).toBe(1);
     expect(h.cafGapTotal).toBe(300);
   });
+
+  it("doublons rendus visibles : compte les tâches surnuméraires par FP", () => {
+    // FP/1 porté par 3 tâches, FP/2 par 2 → 2 + 1 = 3 tâches surnuméraires, sur 2 FP en double.
+    const dupTasks = [
+      { id: "a1", custom_fields: [{ name: "Opp ID", value: "FP/1" }] },
+      { id: "a2", custom_fields: [{ name: "Opp ID", value: "FP/1" }] },
+      { id: "a3", custom_fields: [{ name: "Opp ID", value: "FP/1" }] },
+      { id: "b1", custom_fields: [{ name: "Opp ID", value: "FP/2" }] },
+      { id: "b2", custom_fields: [{ name: "Opp ID", value: "FP/2" }] },
+      { id: "c1", custom_fields: [{ name: "Opp ID", value: "FP/3" }] }, // unique
+    ];
+    const h = clickupHealth([{ fp: "FP/1" }, { fp: "FP/2" }, { fp: "FP/3" }], dupTasks, {}, {}, fpKey, safeId);
+    expect(h.duplicateTasks).toBe(3);
+    expect(h.duplicateFps).toBe(2);
+    expect(h.duplicateSample.map((d) => d.fp).sort()).toEqual(["fp/1", "fp/2"]);
+  });
 });

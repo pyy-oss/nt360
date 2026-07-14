@@ -86,4 +86,19 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     const r = computeFilteredOverview(ord as any, inv as any, [], "2026", mkMatch({ bu: "ICT" }));
     expect(r.facture).toBe(500); // rattachée à ICT par le BU de la facture, faute de commande
   });
+
+  it("overlay fpAliases : opp/facture saisies sous un FP aliasé sont redirigées vers le FP du P&L", () => {
+    // Commande P&L sous FP/2026/500 ; opp gagnable + facture saisies sous FP/2026/13 → alias → 500.
+    const ord = [{ fp: "FP/2026/500", bu: "ICT", am: "X", client: "ACME", cas: 1000, raf: 0, mb: 200, yearPo: 2026 }];
+    const opps2 = [{ fp: "FP/2026/13", bu: "ICT", am: "X", client: "ACME", amount: 900, stage: 3, probability: 0.95, closingDate: "2026-06-01" }];
+    const inv = [{ fp: "FP/2026/13", bu: "ICT", client: "ACME", amountHt: 400, date: "2026-03-01" }];
+    const alias = { "FP/2026/13": "FP/2026/500" };
+    // SANS alias : l'opp n'est pas vue « au carnet » → comptée en certitude (double-compte).
+    const noAlias = computeFilteredOverview(ord as any, inv as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(noAlias.certitudes).toBe(900);
+    // AVEC alias : l'opp partage le FP de la commande → exclue du pipeline (déjà au carnet).
+    const withAlias = computeFilteredOverview(ord as any, inv as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }), undefined, alias);
+    expect(withAlias.certitudes).toBe(0);
+    expect(withAlias.facture).toBe(400); // facture rattachée à la commande via le FP redirigé
+  });
 });

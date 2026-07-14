@@ -33,4 +33,17 @@ describe("computeResourcePnl — agrégats global / BU / grade", () => {
     expect(r.byBu.find((b) => b.key === "DATA").caReal).toBe(24800);
     expect(r.byGrade.length).toBe(2);
   });
+
+  it("taux de marge NON dilué : dénominateur = CA de la seule population à coût connu", () => {
+    // c1 a coût (CA 14000, marge 6000 → 43%). c4 a du CA mais AUCUN CJM → hors calcul de marge.
+    const cons = [
+      { id: "c1", tjmTarget: 700, cjm: 400, bu: "DATA" }, // CA 14000, coût 8000, marge 6000
+      { id: "c4", tjmTarget: 1000, bu: "DATA" },          // CA 20000, sans coût
+    ];
+    const r = computeResourcePnl(cons, { c1: { billedDays: 20, months: 1 }, c4: { billedDays: 20, months: 1 } });
+    // marginPct = 6000 / 14000 (CA à coût connu) = 43%, PAS 6000 / 34000 = 18% (dilué).
+    expect(r.global.marginPct).toBe(43);
+    expect(r.byBu.find((b) => b.key === "DATA").marginPct).toBe(43);
+    expect(r.rows.find((x) => x.id === "c4").missingCjm).toBe(true);
+  });
 });

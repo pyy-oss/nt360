@@ -330,7 +330,7 @@ export function ImportButton({ label = "Importer un fichier" }: { label?: string
     >
       <Upload size={14} aria-hidden="true" />
       {busy ? (phase === "reading" ? "Lecture…" : "Traitement…") : label}
-      <input type="file" accept=".xlsx,.xls,.zip" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX ou ZIP à importer" />
+      <input type="file" accept=".xlsx,.zip" className="sr-only" onChange={onFile} disabled={busy} aria-label="Choisir un fichier XLSX ou ZIP à importer" />
     </label>
   );
 }
@@ -363,7 +363,7 @@ export function DataImportCard() {
         <Upload size={20} className="text-faint" aria-hidden="true" />
         <div className="text-[13px] text-ink font-semibold">Dépose un fichier <b>Excel</b> ou un <b>ZIP</b>, ou clique pour choisir</div>
         <div className="text-[11px] text-faint">Type détecté automatiquement · ré-importer ne crée jamais de doublon · max ~{MAX_MB} Mo</div>
-        <input type="file" accept=".xlsx,.xls,.zip" className="sr-only" disabled={busy}
+        <input type="file" accept=".xlsx,.zip" className="sr-only" disabled={busy}
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; handle(f); }}
           aria-label="Choisir un fichier XLSX ou ZIP à importer" />
       </label>

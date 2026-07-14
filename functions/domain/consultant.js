@@ -9,6 +9,13 @@ const GRADES = ["junior", "confirme", "senior", "expert", "manager"];
 const STATUSES = ["active", "intercontrat", "conge", "inactive"]; // staffé / intercontrat / congé / sorti
 const CONFIDENTIAL = ["cjm"];                                     // coût → droit « rentabilite » requis
 
+// EFFECTIF « EN ACTIVITÉ » (staffable / facturable) = staffé (active) OU au banc (intercontrat). Le banc
+// EST de la capacité disponible : il compte dans l'occupation (à 0 %), le taux d'intercontrat et le coût
+// de banc — sinon mettre quelqu'un au banc FAIT BAISSER le taux d'intercontrat (contre-sens métier ESN).
+// Les congés (conge) et sortis (inactive) sont HORS effectif productif. Base commune de TOUS les KPI ESN.
+const WORKFORCE_STATUSES = ["active", "intercontrat"];
+const isWorkforce = (status) => WORKFORCE_STATUSES.includes(status || "active");
+
 function num(v) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : null; }
 function isoOrNull(v) { const s = String(v || "").trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.slice(0, 10) : null; }
 
@@ -48,4 +55,4 @@ function dailyMargin(consultant) {
   return t != null && c != null ? t - c : null;
 }
 
-module.exports = { GRADES, STATUSES, CONFIDENTIAL, validateConsultant, stripConfidential, dailyMargin };
+module.exports = { GRADES, STATUSES, WORKFORCE_STATUSES, isWorkforce, CONFIDENTIAL, validateConsultant, stripConfidential, dailyMargin };

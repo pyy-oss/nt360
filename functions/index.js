@@ -231,6 +231,7 @@ const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "as
 
 exports.setUserRole = onCallG("setUserRole", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur les octrois de privilège (parité avec setManager/setRecordAccess)
   const { uid, role } = req.data || {};
   if (!uid || !ROLES.includes(role)) throw new HttpsError("invalid-argument", "uid et role (profil valide) requis");
   // Claim NAMESPACÉ (nt360Role) : le projet Firebase est PARTAGÉ avec une autre app → un claim
@@ -258,6 +259,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 exports.createUser = onCallG("createUser", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur la création de compte (octroi de privilège)
   const d = req.data || {};
   const email = String(d.email || "").trim().toLowerCase();
   const role = d.role;
@@ -289,6 +291,7 @@ exports.createUser = onCallG("createUser", async (req) => {
 // users/{uid}. Ne recrée PAS le compte et NE TOUCHE PAS au mot de passe. Direction uniquement, audité. ---
 exports.attachUser = onCallG("attachUser", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur le rattachement d'un compte (octroi de rôle)
   const d = req.data || {};
   const email = String(d.email || "").trim().toLowerCase();
   const role = d.role;
@@ -320,6 +323,7 @@ exports.attachUser = onCallG("attachUser", async (req) => {
 // rafraîchis, expiration ≤ 1 h). On interdit de désactiver son PROPRE compte (verrouillage). ---
 exports.setUserActive = onCallG("setUserActive", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur l'activation/désactivation d'un compte
   const { uid, active } = req.data || {};
   if (!uid || typeof active !== "boolean") throw new HttpsError("invalid-argument", "uid et active (booléen) requis");
   if (uid === req.auth.uid && active === false) throw new HttpsError("failed-precondition", "impossible de désactiver son propre compte");
@@ -487,6 +491,7 @@ async function sendEmail(cfg, { to, subject, html, cc }, { soft = true } = {}) {
 // Config des notifications email — DIRECTION uniquement. Ne stocke JAMAIS le secret client (Secret Manager).
 exports.setEmailNotifyConfig = onCallG("setEmailNotifyConfig", { timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur la config des notifications (tenant/expéditeur email direction)
   const { normalizeEmailConfig } = require("./domain/emailNotify");
   const cfg = normalizeEmailConfig(req.data);
   await db.doc("config/emailNotify").set(cfg, { merge: true });
@@ -593,6 +598,7 @@ async function requireRead(req, module) {
 // délégataire. Valide le schéma avant écriture (une matrice malformée casserait level() pour tous). ---
 exports.setPermissions = onCallG("setPermissions", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur la réécriture de la matrice de droits (octroi de privilège majeur)
   const { validateMatrix } = require("./domain/authz");
   const matrix = req.data?.matrix;
   const v = validateMatrix(matrix);
@@ -647,13 +653,18 @@ exports.alertDigest = onSchedule({ schedule: "every day 07:00", secrets: [GRAPH_
     await logOps({ kind: "notification", trigger: "planifié", status: "error", error: (e && e.message) || String(e) });
   }
   // Email direction (best-effort, indépendant du webhook).
+  let emailOk = false;
   if (emailOn) {
     const { buildAlertsEmail } = require("./domain/emailNotify");
     const mail = buildAlertsEmail(crit, al.fy);
-    await sendEmail(emailCfg, { to: emailCfg.recipients.alerts, subject: mail.subject, html: mail.html });
+    const r = await sendEmail(emailCfg, { to: emailCfg.recipients.alerts, subject: mail.subject, html: mail.html });
+    emailOk = !!(r && r.ok);
   }
-  // On ne mémorise le hash (anti-répétition) que si au moins un canal a réussi.
-  if (webhookOk || emailOn) await db.doc("config/notifications").set({ lastHash: hash, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+  // On ne mémorise le hash (anti-répétition) que si un canal RÉELLEMENT tenté a RÉUSSI. Tester `emailOn`
+  // (config présente) au lieu du succès d'envoi supprimait silencieusement les alertes : un échec transitoire
+  // Graph mémorisait quand même le hash → l'email n'était jamais renvoyé tant que le jeu d'alertes ne changeait pas.
+  const webhookAttempted = !!(cfg.enabled && cfg.webhookUrl);
+  if ((webhookAttempted && webhookOk) || emailOk) await db.doc("config/notifications").set({ lastHash: hash, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
 });
 
 // Digest EMAIL des RELANCES (quotidien) : à chaque responsable (commercial), la liste de ses créances
@@ -1290,11 +1301,18 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   ]);
   const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-  const activeIds = consultants.filter((c) => (c.status || "active") === "active").map((c) => c.id);
+  const { isWorkforce } = require("./domain/consultant");
+  // Effectif EN ACTIVITÉ (staffé + intercontrat) : le banc compte dans la capacité disponible.
+  const activeIds = consultants.filter((c) => isWorkforce(c.status)).map((c) => c.id);
   const { byConsultant } = buildLoad(assignments, months, activeIds);
-  // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps.
+  // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps. On calcule le
+  // pondéré TIÉRÉ (`pw`, source unique du « pondéré » — CLAUDE.md) et on le passe à la capacité, au lieu de
+  // laisser lire le `weighted` linéaire persisté (interdit à l'affichage).
+  const { projectionWeight, normalizeTiers } = require("./domain/projection");
+  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
   const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage"]);
-  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; });
+  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; })
+    .map((o) => ({ ...o, pw: projectionWeight(o, tiers) }));
   const plan = capacityVsPipeline({ consultants, loadByConsultant: byConsultant, months, opps });
   return { ok: true, months, openOppCount: opps.length, ...plan };
 });
@@ -1829,9 +1847,13 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
 exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { scoreOpportunity, isOpen } = require("./domain/scoring");
+  const { isAgedLost } = require("./domain/oppLifecycle");
   const { calibrate } = require("./domain/scoreCalib");
+  // `source`/`ageDays` chargés pour EXCLURE la MÊME population que pipeline/board/vélocité (parité) :
+  // fantômes `stale` (retirés de LIVE) et affaires périmées par âge (`isAgedLost`). Sans quoi le module
+  // « opportunités OUVERTES » listerait des affaires introuvables ailleurs (incohérence de population).
   const snap = await db.collection("opportunities")
-    .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "visibleTo")
+    .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "source", "ageDays", "visibleTo")
     .limit(MAX_SCAN + 1).get(); // scan borné (R1)
   const all = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   // Calibration EMPIRIQUE (R6) : on dérive base + poids de catégorie du taux de gain HISTORIQUE réel
@@ -1839,13 +1861,16 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   const closed = all.filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7)
     .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: o.forecastCategory }));
   const calib = calibrate(closed);
-  let opps = all.filter(isOpen);
+  // Population IDENTIQUE à pipeline/board/vélocité : ouvertes (1-5), NON `stale`, NON périmées par âge.
+  let opps = all.filter((o) => isOpen(o) && o.stale !== true && !isAgedLost(o));
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   const today = nowISO10();
   const rows = opps.map((o) => {
     const s = scoreOpportunity(o, today, calib);
-    return { id: o.id, client: o.client || null, am: o.am || null, amount: Number(o.amount) || 0, stage: Number(o.stage) || 0, score: s.score, band: s.band, factors: s.factors.slice(0, 3) };
+    // Facteurs COMPLETS (triés par le domaine) : le front tranche l'affichage (top 3 en ligne + « +N »,
+    // liste complète au survol). Tronquer à 3 côté serveur rendait l'explicabilité « additive » mensongère.
+    return { id: o.id, client: o.client || null, am: o.am || null, amount: Number(o.amount) || 0, stage: Number(o.stage) || 0, score: s.score, band: s.band, factors: s.factors };
   }).sort((a, b) => b.score - a.score || b.amount - a.amount);
   const bands = { hot: 0, warm: 0, cold: 0 };
   rows.forEach((r) => { if (bands[r.band] != null) bands[r.band]++; });
@@ -1879,10 +1904,18 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
   const [ord, inv, opp] = await Promise.all([
     db.collection("orders").select("client").get(),
     db.collection("invoices").select("client").get(),
-    db.collection("opportunities").select("client").get(),
+    db.collection("opportunities").select("client", "visibleTo").get(),
   ]);
   const names = new Set();
-  for (const snap of [ord, inv, opp]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  for (const snap of [ord, inv]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  // OWD « private » sur les opportunités : ne PAS divulguer les noms de clients d'opps hors périmètre à un
+  // rôle import:read non-admin (parité avec scopedOpps). Commandes/factures ne sont pas record-level scopées.
+  const oppPrivate = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
+  opp.forEach((d) => {
+    const o = d.data();
+    if (oppPrivate && !(Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid))) return;
+    const c = String(o.client || "").trim(); if (c) names.add(c);
+  });
   const threshold = Math.min(0.95, Math.max(0.7, Number(req.data?.threshold) || 0.84));
   // `scanned` = noms EFFECTIVEMENT comparés (après plafond O(n²)) ; `capped` signale une troncature (au-delà,
   // des quasi-doublons peuvent rester invisibles) — plutôt qu'annoncer names.size en laissant croire à l'exhaustivité.
@@ -1918,6 +1951,7 @@ exports.deleteReport = _reports.deleteReport;
 // read:false+write:false (accès par callables + vérification serveur dans l'endpoint).
 exports.createApiKey = onCallG("createApiKey", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur l'émission d'une clé API (compte de service « voit tout »)
   const { hashApiKey } = require("./domain/apiKey");
   const label = String(req.data?.label || "").trim().slice(0, 120) || "clé API";
   const scopesIn = Array.isArray(req.data?.scopes) ? req.data.scopes : ["read"];
@@ -1934,6 +1968,7 @@ exports.createApiKey = onCallG("createApiKey", async (req) => {
 
 exports.revokeApiKey = onCallG("revokeApiKey", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  await requireStrongAuth(req); // MFA sur la révocation d'une clé API
   const id = assertPlainId(req.data?.id, "id clé");
   await db.doc(`apiKeys/${id}`).set({ active: false, revokedAt: FieldValue.serverTimestamp(), revokedBy: req.auth.uid }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "api_key_revoke", module: "habilitations", entity: "apiKey", entityId: id, ts: FieldValue.serverTimestamp() });
@@ -2099,12 +2134,18 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds:
   if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
   const d = req.data || {};
   const { toISO } = require("./lib/sheets");
+  const { plausibleYear } = require("./lib/ids");
+  // MÊME garde qu'à l'import (parsers/facturationDf) : une date au millésime aberrant (1850, 2206) passe
+  // toISO (format valide) mais corrompt DSO/aging/overdue. On la REFUSE plutôt que de l'accepter en saisie
+  // manuelle alors que l'import la rejette (asymétrie de garde).
+  const plausibleIso = (iso) => (iso && plausibleYear(String(iso).slice(0, 4)) ? iso : null);
+  const chk = (raw, label) => { const iso = toISO(raw); if (raw && !plausibleIso(iso)) throw new HttpsError("invalid-argument", `${label} au millésime invalide (attendu 2015..année+3)`); return iso || null; };
   // NORMALISER en ISO complet (YYYY-MM-DD) comme à l'ingestion : cashflow (échéance en fin de mois si
   // "YYYY-MM") et receivables (Date.parse → 1er du mois) interprètent différemment une date partielle,
   // ce qui désalignait le bucket mensuel d'une facture éditée à la main. toISO garantit une date pleine.
   const patch = { updatedAt: FieldValue.serverTimestamp() };
-  if (d.date !== undefined) patch.date = d.date ? (toISO(d.date) || null) : null;
-  if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? (toISO(d.dueDate) || null) : null;
+  if (d.date !== undefined) patch.date = d.date ? chk(d.date, "Date de facturation") : null;
+  if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? chk(d.dueDate, "Date d'échéance") : null;
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date ou échéance requise)");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({
@@ -3324,10 +3365,20 @@ exports.dedupeClickupTasks = onCallG("dedupeClickupTasks", { secrets: [CLICKUP_T
   const { fpKey } = require("./lib/ids");
   const { planDedupe } = require("./domain/clickupDedupe");
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  // SÉCURITÉ SUPPRESSION : le dédoublonnage groupe par N° FP (Opp ID). Sur une liste NON-commande (ex. BC,
+  // où plusieurs N° BC distincts partagent légitimement un FP), il proposerait de supprimer des tâches
+  // DISTINCTES et valides. On restreint donc aux listes commandes (les seules où « même FP = doublon »).
+  if (!CLICKUP_LISTS_ALL.includes(listId)) throw new HttpsError("invalid-argument", "Le dédoublonnage ne s'applique qu'aux listes de commandes (pas aux BC/autres) — liste refusée.");
   const apply = req.data?.apply === true;
   // Fenêtre de suppression : par défaut les tâches créées dans les dernières 24 h (« doublons du jour »).
-  // 0 = toutes les époques (à utiliser en connaissance de cause). Borné à 8760 h (1 an).
-  const windowHours = req.data?.windowHours != null ? Math.min(8760, Math.max(0, Number(req.data.windowHours) || 0)) : 24;
+  // 0 = toutes les époques (SEULEMENT sur un nombre 0 EXPLICITE). Borné à 8760 h (1 an). Une saisie invalide
+  // ("", "x", NaN) retombe sur le défaut 24 h — JAMAIS sur 0 (qui supprimerait les doublons de toute époque).
+  let windowHours = 24;
+  const rawWH = req.data?.windowHours;
+  if (rawWH != null && rawWH !== "") {
+    const n = Number(rawWH);
+    if (Number.isFinite(n)) windowHours = Math.min(8760, Math.max(0, n));
+  }
   const sinceMs = windowHours > 0 ? Date.now() - windowHours * 3600_000 : 0;
   // Scan SANS swallow (audit F3) : un scan partiel prendrait des tâches manquantes pour des « uniques »
   // et pourrait supprimer à tort → on ANNULE plutôt (l'appelant relance).

@@ -301,7 +301,7 @@ function OppBulkExcel() {
           </button>
           <label className={cx("btn-gold !px-3 !py-1.5 text-sm cursor-pointer", phase === "analyse" && "opacity-60 pointer-events-none")}>
             {phase === "analyse" ? "Analyse…" : "Importer / mettre à jour"}
-            <input type="file" accept=".xlsx,.xls,.csv" className="sr-only" onChange={onFile} disabled={phase !== ""} aria-label="Choisir le fichier Excel des opportunités à importer" />
+            <input type="file" accept=".xlsx,.csv" className="sr-only" onChange={onFile} disabled={phase !== ""} aria-label="Choisir le fichier Excel des opportunités à importer" />
           </label>
         </div>
       </div>
