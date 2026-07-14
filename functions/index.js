@@ -2300,78 +2300,13 @@ exports.runAutomations = _automations.runAutomations;
 // derrière. Le DELTA reste prioritaire : si une future ligne source réintroduit ce record (même
 // clé), il réapparaît — la suppression assainit l'existant, elle ne verrouille pas contre la source.
 // Les identifiants sont des DOC IDS (pas de re-transformation : safeId n'est pas idempotent). ---
-const DELETABLE = { orders: "import", invoices: "import", bcLines: "bc", projectSheets: "rentabilite", opportunities: "pipeline" };
-exports.deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
-  const d = req.data || {};
-  const collection = String(d.collection || "");
-  const module = DELETABLE[collection];
-  if (!module) throw new HttpsError("invalid-argument", "collection non assainissable");
-  await requireWrite(req, module);
-  // Rejette les id vides OU contenant « / » (segments de chemin imbriqués inattendus) avant de bâtir
-  // db.doc(`${collection}/${id}`) — défense en profondeur (cf. assertPlainId).
-  const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter((x) => x && !x.includes("/")).slice(0, 1000);
-  if (!ids.length) throw new HttpsError("invalid-argument", "aucun identifiant fourni");
-  // Taille de fenêtre en fonction du NOMBRE D'OPÉRATIONS par id, pas du nombre d'ids : projectSheets
-  // enfile 2 suppressions par id (fiche + doc marge isolé projectSheetsMargin) → 200×2 = 400 ≤ 500
-  // (limite dure Firestore d'écritures par commit). Sinon 400 ids × 2 = 800 → INVALID_ARGUMENT, tout
-  // le lot échoue (rien supprimé). Cf. audit chemins non testés.
-  const step = collection === "projectSheets" ? 200 : 400;
-  for (let i = 0; i < ids.length; i += step) {
-    const batch = db.batch();
-    for (const id of ids.slice(i, i + step)) {
-      batch.delete(db.doc(`${collection}/${id}`));
-      if (collection === "projectSheets") batch.delete(db.doc(`projectSheetsMargin/${id}`)); // marge isolée liée
-    }
-    await batch.commit();
-  }
-  await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "delete_records", module, entity: collection, entityId: String(ids.length),
-    // Traçabilité au NIVEAU RECORD (cf. audit) : on capture les ids réellement supprimés (bornés à 500
-    // pour rester sous la limite de taille du doc auditLog) — sinon un purge en masse n'était attribuable
-    // qu'au compte, jamais aux FP/numéros retirés.
-    detail: { collection, count: ids.length, ids: ids.slice(0, 500), truncated: ids.length > 500 }, ts: FieldValue.serverTimestamp(),
-  });
-  await requestRecompute();
-  return { ok: true, count: ids.length };
-});
-
-// --- ANNULATION d'une commande / facture (statut « Annulée » persistant). Non destructif : le doc
-// source reste (historique) mais son id est ajouté à l'overlay config/cancellations → le recompute
-// l'EXCLUT de tous les agrégats. Overlay (et non un champ du doc) pour SURVIVRE à un ré-import delta.
-// Gouverné par le même module que la suppression (« import ») ; audité ; recompute complet derrière. ---
-// Docs séparés (et non un doc unique) : chaque overlay est lisible AU NIVEAU DE SON MODULE
-// (cancelOrders → overview, cancelInvoices → facturation) — pas de fuite d'un libellé facturation
-// vers un rôle sans droit facturation. Écriture réservée au callable (rules : write false).
-const CANCELLABLE = { orders: { module: "import", doc: "config/cancelOrders" }, invoices: { module: "import", doc: "config/cancelInvoices" } };
-exports.setCancellation = onCallG("setCancellation", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
-  const d = req.data || {};
-  const collection = String(d.collection || "");
-  const spec = CANCELLABLE[collection];
-  if (!spec) throw new HttpsError("invalid-argument", "objet non annulable");
-  await requireWrite(req, spec.module);
-  const id = String(d.id || "");
-  if (!id) throw new HttpsError("invalid-argument", "identifiant requis");
-  assertPlainId(id, "identifiant");
-  const cancelled = d.cancelled !== false; // défaut = annuler
-  const ref = db.doc(spec.doc);
-  // ATOMIQUE (runTransaction) : le read-modify-write de la liste d'annulations doit être sérialisé —
-  // deux annulations concurrentes en lecture-puis-écriture non transactionnelle en perdraient une (la
-  // 2e écriture écrase la 1re), réinjectant une commande annulée dans TOUS les agrégats. Cf. audit P0-A.
-  await db.runTransaction(async (tx) => {
-    const cur = (await tx.get(ref)).data() || {};
-    const list = (Array.isArray(cur.items) ? cur.items : []).filter((e) => e && e.id !== id);
-    if (cancelled) {
-      list.push({ id, label: String(d.label || "").slice(0, 120), client: String(d.client || "").slice(0, 120), uid: req.auth.uid, ts: Date.now() });
-    }
-    tx.set(ref, { items: list.slice(0, 5000), updatedAt: FieldValue.serverTimestamp() }, { merge: false });
-  });
-  await db.collection("auditLog").add({
-    uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module: spec.module,
-    entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),
-  });
-  await requestRecompute(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
-  return { ok: true, id, cancelled };
-});
+// === ASSAINISSEMENT (suppression d'enregistrements + annulation) — EXTRAIT dans handlers/sanitize.js
+// (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
+// pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
+const { createSanitize } = require("./handlers/sanitize");
+const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
+exports.deleteRecords = _sanitize.deleteRecords;
+exports.setCancellation = _sanitize.setCancellation;
 
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
