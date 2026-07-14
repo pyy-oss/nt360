@@ -267,14 +267,15 @@ function aiProposalText(s: AiSuggestion): string {
 // Proposition IA sous une ligne : confiance + justification + « Appliquer » (écriture gouvernée) / « Ignorer ».
 function AiSuggestionRow({ item, s, canFix, onDone, onDismiss }: { item: CorrectionItem; s: AiSuggestion; canFix: boolean; onDone: () => Promise<void>; onDismiss: () => void }) {
   const conf = Math.round(s.confidence * 100);
-  const tone = s.confidence >= 0.75 ? "emerald" : s.confidence >= 0.5 ? "gold" : "steel";
+  const tone = s.verified ? "emerald" : s.confidence >= 0.75 ? "emerald" : s.confidence >= 0.5 ? "gold" : "steel";
   const applicable = s.action !== "review" && canFix;
   return (
-    <div className="ml-6 mt-0.5 flex items-start gap-2 text-[11px] rounded bg-gold/5 border border-gold/20 px-2 py-1">
+    <div className={cx("ml-6 mt-0.5 flex items-start gap-2 text-[11px] rounded px-2 py-1 border", s.verified ? "bg-emerald/5 border-emerald/25" : "bg-gold/5 border-gold/20")}>
       <span aria-hidden className="shrink-0">🧠</span>
       <div className="flex flex-col gap-0.5 grow min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <Badge tone={tone}>{conf}%</Badge>
+          {s.verified && <span title={s.verifyReason || "Confirmée par une relecture adverse"}><Badge tone="emerald">✓ vérifiée</Badge></span>}
           <span className="text-ink">{aiProposalText(s)}</span>
         </div>
         {s.rationale && <span className="text-faint">{s.rationale}</span>}
@@ -355,27 +356,33 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
   const [confirmBulk, setConfirmBulk] = useState(false);
   // Propositions IA indexées par ref (l'IA propose, l'humain applique via les écritures gouvernées).
   const [sugg, setSugg] = useState<Record<string, AiSuggestion>>({});
-  const [aiInfo, setAiInfo] = useState<{ actionable: number; truncated: boolean } | null>(null);
+  const [aiInfo, setAiInfo] = useState<{ actionable: number; truncated: boolean; verified: boolean; verifiedCount: number } | null>(null);
   const toast = useToast();
   // Génération EN MASSE réservée aux factures non rattachées (crée commande + opp gagnée pour TOUTES les
   // orphelines à FP canonique absentes du carnet — les FP inconnus/déjà présents sont ignorés côté serveur).
   const bulkGen = bucket.type === "factures_orphelines" && canFix;
-  // Analyse IA du lot : propose une correction justifiée par ligne (rapprochement FP, dérivation d'année…).
-  // Réservée aux data-stewards (droit « import », comme le callable) — sinon l'action serait refusée.
+  // Analyse IA du lot : propose une correction justifiée par ligne (rapprochement FP, dérivation d'année…) PUIS
+  // la VÉRIFIE par un 2e passage adverse (fiabilité max). Réservée aux data-stewards (droit « import »).
   const runAi = async () => {
     const r = await aiSuggestCorrections(bucket.type, bucket.items);
     const map: Record<string, AiSuggestion> = {};
     for (const s of r.suggestions) map[s.ref] = s;
     setSugg(map);
-    setAiInfo({ actionable: r.suggestions.filter((s) => s.action !== "review").length, truncated: r.truncated });
+    setAiInfo({ actionable: r.suggestions.filter((s) => s.action !== "review").length, truncated: r.truncated, verified: !!r.verified, verifiedCount: r.verifiedCount || 0 });
     if (!open) onToggle();
   };
-  // Lignes du lot portant une proposition IA actionnable ET très fiable (≥ seuil) — cibles de l'application en lot.
-  const highConfItems = () => bucket.items.filter((it) => { const s = sugg[refKeyOf(it)]; return s && s.action !== "review" && s.confidence >= AI_BULK_CONF; });
-  // Applique EN LOT les propositions fiables : chacune passe par SON écriture gouvernée (RBAC/audit/recalcul
-  // inchangés), séquentiellement, tolérant aux échecs par ligne (une correction refusée n'annule pas les autres).
-  const applyHighConf = async () => {
-    const targets = highConfItems();
+  // Cibles de l'application en lot « effort minimal » : quand la vérification adverse a tourné, on n'applique
+  // QUE les propositions VÉRIFIÉES (fiabilité max) ; sinon, repli sur les propositions à haute confiance (≥ seuil).
+  const verifRan = !!aiInfo?.verified;
+  const bulkItems = () => bucket.items.filter((it) => {
+    const s = sugg[refKeyOf(it)];
+    if (!s || s.action === "review") return false;
+    return verifRan ? !!s.verified : s.confidence >= AI_BULK_CONF;
+  });
+  // Applique EN LOT : chacune passe par SON écriture gouvernée (RBAC/audit/recalcul inchangés), séquentiellement,
+  // tolérant aux échecs par ligne (une correction refusée n'annule pas les autres).
+  const applyBulk = async () => {
+    const targets = bulkItems();
     let ok = 0; const fails: string[] = [];
     for (const it of targets) {
       const s = sugg[refKeyOf(it)];
@@ -413,12 +420,13 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
           {aiInfo && (
             <div className="flex items-center gap-2 flex-wrap text-[11px] text-faint">
               <span>
-                🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""} applicable{aiInfo.actionable > 1 ? "s" : ""} — <b>vérifiez</b> puis « Appliquer » (l'écriture reste gouvernée).
+                🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""}
+                {aiInfo.verified ? <> — <b className="text-emerald">{aiInfo.verifiedCount} vérifiée{aiInfo.verifiedCount > 1 ? "s" : ""}</b> par relecture adverse</> : <> applicable{aiInfo.actionable > 1 ? "s" : ""}</>}. <b>Vérifiez</b> puis « Appliquer » (écriture gouvernée).
                 {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
               </span>
-              {canFix && highConfItems().length > 0 && (
-                <Busy variant="ghost" label={`⚡ Appliquer les fiables (${highConfItems().length})`}
-                  okMsg="Propositions fiables appliquées" errMsg="Application refusée" fn={applyHighConf} />
+              {canFix && bulkItems().length > 0 && (
+                <Busy variant="ghost" label={`⚡ Appliquer les ${verifRan ? "vérifiées" : "fiables"} (${bulkItems().length})`}
+                  okMsg="Propositions appliquées" errMsg="Application refusée" fn={applyBulk} />
               )}
             </div>
           )}

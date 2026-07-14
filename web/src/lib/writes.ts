@@ -398,9 +398,11 @@ export type AiCorrectionAction =
 export type AiSuggestion = {
   ref: string; action: AiCorrectionAction; fields: Record<string, string | number>;
   confidence: number; rationale: string;
+  verified?: boolean; verifyReason?: string; // 2e passage adverse (fiabilité max)
 };
 export type AiSuggestResult = {
   ok: boolean; type: string; suggestions: AiSuggestion[]; model: string;
+  verified?: boolean; verifiedCount?: number; // vérification adverse activée + nb de propositions vérifiées
   truncated: boolean; analyzed: number; total: number;
 };
 /** Demande à l'assistant IA des propositions de correction pour un lot d'anomalies d'un même type. */

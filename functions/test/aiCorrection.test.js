@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { buildCorrectionPrompt, normalizeSuggestions, redactRecord, refOf, sanitizeField } = require("../domain/aiCorrection");
+const { buildCorrectionPrompt, normalizeSuggestions, redactRecord, refOf, sanitizeField, buildVerificationPrompt, applyVerdicts } = require("../domain/aiCorrection");
 
 describe("aiCorrection — assistant IA du Centre de correction (l'IA propose, on ne fait pas confiance)", () => {
   describe("redactRecord / refOf", () => {
@@ -111,6 +111,42 @@ describe("aiCorrection — assistant IA du Centre de correction (l'IA propose, o
     it("entrée malformée (pas de tableau) → []", () => {
       expect(normalizeSuggestions({}, records, "factures_orphelines")).toEqual([]);
       expect(normalizeSuggestions(null, records, "factures_orphelines")).toEqual([]);
+    });
+  });
+
+  describe("buildVerificationPrompt / applyVerdicts — vérification adverse (fiabilité max)", () => {
+    const records = [{ id: "inv1", fp: "FP/2026/7", client: "ACME", numero: "F1" }, { id: "inv2", fp: "FP/2026/8", client: "BETA", numero: "F2" }];
+    const suggestions = [
+      { ref: "inv1", action: "set_invoice_fp", fields: { fp: "FP/2026/7" }, confidence: 0.9, rationale: "client concordant" },
+      { ref: "inv2", action: "review", fields: {}, confidence: 0.4, rationale: "à vérifier" },
+    ];
+    it("ne soumet à vérification QUE les propositions actionnables (pas les « review »)", () => {
+      const { user, targets } = buildVerificationPrompt("factures_orphelines", suggestions, records, {});
+      expect(targets.map((t) => t.ref)).toEqual(["inv1"]); // seul l'actionnable est une cible (inv2 = review)
+      expect(user).toMatch(/RELECTEUR|vérifier/i);
+      // La section « Propositions à vérifier » ne contient QUE inv1 (inv2 n'apparaît qu'en contexte records).
+      const propsBlock = user.slice(user.indexOf("Propositions à vérifier"));
+      expect(propsBlock).toMatch(/"ref":"inv1"/);
+      expect(propsBlock).not.toMatch(/"ref":"inv2"/);
+    });
+    it("confirmed=true → verified ; confiance ramenée au min(1er passage, relecteur)", () => {
+      const out = applyVerdicts(suggestions, { verdicts: [{ ref: "inv1", confirmed: true, confidence: 0.7, reason: "ok" }] });
+      const s1 = out.find((s) => s.ref === "inv1");
+      expect(s1.verified).toBe(true);
+      expect(s1.confidence).toBe(0.7);           // min(0.9, 0.7)
+      expect(s1.verifyReason).toBe("ok");
+    });
+    it("confirmed=false (réfutée) → NON vérifiée, confiance du 1er passage conservée", () => {
+      const out = applyVerdicts(suggestions, { verdicts: [{ ref: "inv1", confirmed: false, confidence: 0.9, reason: "client ne concorde pas" }] });
+      expect(out.find((s) => s.ref === "inv1").verified).toBe(false);
+    });
+    it("proposition NON couverte par un verdict → non vérifiée (prudence)", () => {
+      const out = applyVerdicts(suggestions, { verdicts: [] });
+      expect(out.find((s) => s.ref === "inv1").verified).toBe(false);
+    });
+    it("les propositions « review » sont toujours verified=false (rien à appliquer)", () => {
+      const out = applyVerdicts(suggestions, { verdicts: [{ ref: "inv2", confirmed: true, confidence: 1 }] });
+      expect(out.find((s) => s.ref === "inv2").verified).toBe(false);
     });
   });
 

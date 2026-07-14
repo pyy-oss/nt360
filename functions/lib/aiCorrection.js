@@ -3,7 +3,7 @@
 // rapprochement). Réflexion ADAPTATIVE (le modèle dose son analyse). La sortie brute est TOUJOURS
 // re-validée par domain/aiCorrection.normalizeSuggestions (l'IA propose, on ne fait pas confiance).
 
-const { buildCorrectionPrompt, normalizeSuggestions } = require("../domain/aiCorrection");
+const { buildCorrectionPrompt, normalizeSuggestions, buildVerificationPrompt, applyVerdicts } = require("../domain/aiCorrection");
 const { parseJson } = require("./anthropic");
 
 const DEFAULT_MODEL = "claude-opus-4-8";
@@ -43,8 +43,30 @@ async function suggestCorrections(apiKey, args, opts = {}) {
 
   const text = (res.content || []).filter((c) => c && c.type === "text").map((c) => c.text).join("");
   const parsed = parseJson(text);
-  const suggestions = normalizeSuggestions(parsed, records || [], type);
-  return { suggestions, model, usage: res.usage || null };
+  let suggestions = normalizeSuggestions(parsed, records || [], type);
+
+  // 2e PASSAGE — VÉRIFICATION ADVERSE (fiabilité max) : sauf si opts.verify === false. On ne l'exécute que
+  // s'il existe des propositions actionnables (les « review » n'ont rien à appliquer). Best-effort : si la
+  // vérification échoue, on renvoie les propositions NON vérifiées (verified=false) plutôt que d'échouer tout.
+  let usageVerify = null;
+  const actionable = suggestions.filter((s) => s.action !== "review");
+  if (opts.verify !== false && actionable.length) {
+    try {
+      const vp = buildVerificationPrompt(type, suggestions, records || [], context || {});
+      const vres = await client.messages.create({
+        model, max_tokens: 12000, thinking: { type: "adaptive" },
+        system: vp.system, messages: [{ role: "user", content: vp.user }],
+      });
+      if (vres.stop_reason !== "refusal") {
+        const vtext = (vres.content || []).filter((c) => c && c.type === "text").map((c) => c.text).join("");
+        suggestions = applyVerdicts(suggestions, parseJson(vtext));
+        usageVerify = vres.usage || null;
+      }
+    } catch (_) { /* best-effort : propositions renvoyées non vérifiées */ }
+  }
+
+  const verifiedCount = suggestions.filter((s) => s.verified).length;
+  return { suggestions, model, usage: res.usage || null, usageVerify, verifiedCount, verified: opts.verify !== false };
 }
 
 module.exports = { suggestCorrections, DEFAULT_MODEL };
