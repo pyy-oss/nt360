@@ -1,10 +1,10 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
-import { Component, createContext, Fragment, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, Fragment, lazy, Suspense, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download, Activity, Loader2 } from "lucide-react";
 import { fmt, pct } from "./tokens";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
-import { trackWrite, useWriteActivity } from "../lib/activity";
+import { trackWrite, useWriteActivity, useActivityLog } from "../lib/activity";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -585,7 +585,7 @@ export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Ac
     <button
       className={variant === "gold" ? "btn-gold" : "btn-ghost"}
       disabled={s === "busy"}
-      onClick={async () => { setS("busy"); try { await trackWrite(fn()); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
+      onClick={async () => { setS("busy"); try { await trackWrite(fn(), label); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
     >
       {s === "busy" ? "…" : label}
     </button>
@@ -608,6 +608,34 @@ export function WriteActivityBar() {
   );
 }
 
+// Le panneau (portail + liste) est chargé en LAZY à la 1re ouverture → hors chunk d'entrée (check-bundle).
+const ActivityDrawer = lazy(() => import("./ActivityDrawer"));
+
+/** CENTRE D'ACTIVITÉ : lanceur flottant + panneau (lazy) listant les opérations (en cours / terminées /
+ *  échouées) avec horodatage et détail — au-delà du toast éphémère, l'utilisateur SAIT ce qui se passe et
+ *  s'est passé. Alimenté par trackWrite (tous les boutons Busy/DangerBtn). Monté une fois au niveau App. */
+export function ActivityCenter() {
+  const log = useActivityLog();
+  const [open, setOpen] = useState(false);
+  const running = log.filter((e) => e.status === "running").length;
+  const errors = log.filter((e) => e.status === "error").length;
+  return (
+    <>
+      <button
+        type="button" onClick={() => setOpen((o) => !o)}
+        aria-label={`Centre d'activité${running ? ` — ${running} en cours` : ""}`} aria-expanded={open}
+        className="fixed bottom-4 left-4 z-[80] flex items-center gap-1.5 rounded-full border border-line bg-panel2 px-3 py-1.5 text-[11px] text-ink shadow-lg hover:border-gold/50 transition-colors"
+      >
+        {running ? <Loader2 size={13} className="animate-spin text-gold" /> : <Activity size={13} className={errors ? "text-clay" : "text-faint"} />}
+        <span>Activité</span>
+        {running > 0 && <span className="rounded-full bg-gold/15 text-gold px-1.5 leading-tight">{running}</span>}
+        {running === 0 && errors > 0 && <span className="rounded-full bg-clay/15 text-clay px-1.5 leading-tight">{errors}</span>}
+      </button>
+      {open && <Suspense fallback={null}><ActivityDrawer onClose={() => setOpen(false)} /></Suspense>}
+    </>
+  );
+}
+
 /** Bouton d'action DESTRUCTIVE : confirmation obligatoire avant exécution (annulation silencieuse),
  *  puis état + toast. Sert à l'assainissement (suppression d'enregistrements). */
 export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "Suppression refusée", tone = "clay", confirmLabel }: { label: string; confirm: string; fn: () => Promise<any>; okMsg?: string; errMsg?: string; tone?: "clay" | "gold" | "steel"; confirmLabel?: string }) {
@@ -619,7 +647,7 @@ export function DangerBtn({ label, confirm, fn, okMsg = "Supprimé", errMsg = "S
   const confirmBtnCls = tone === "clay" ? "btn bg-clay text-bg hover:bg-clay/90" : tone === "steel" ? "btn bg-steel text-bg hover:bg-steel/90" : "btn-gold";
   const run = async () => {
     setOpen(false); setS("busy");
-    try { await trackWrite(fn()); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
+    try { await trackWrite(fn(), label); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); }
   };
   return (
     <>
