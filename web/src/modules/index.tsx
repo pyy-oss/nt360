@@ -104,5 +104,16 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "domaines"] },
-  { label: "Admin", ids: ["cleanup", "habilitations"] },
+  { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },
 ];
+
+// Garde-fou de navigation : tout onglet déclaré dans MODULES doit apparaître dans exactement un
+// groupe, sinon il est injoignable depuis la barre latérale (seuls les liens profonds y mènent).
+// En dev, on le signale bruyamment plutôt que de laisser un écran orphelin passer inaperçu.
+if (import.meta.env.DEV) {
+  const grouped = new Set(GROUPS.flatMap((g) => g.ids));
+  const orphans = MODULES.filter((m) => !grouped.has(m.id)).map((m) => m.id);
+  if (orphans.length) console.error(`[nav] onglets orphelins (absents de GROUPS) : ${orphans.join(", ")}`);
+  const unknown = [...grouped].filter((id) => !MODULES.some((m) => m.id === id));
+  if (unknown.length) console.error(`[nav] ids de GROUPS sans module : ${unknown.join(", ")}`);
+}
