@@ -3,6 +3,8 @@
 // self-service : les vues étaient toutes figées). Fonction PURE (aucun I/O) → partagée par le
 // constructeur de rapport (client) et la validation (callable de sauvegarde) ; testable.
 
+const { projectionWeight, normalizeTiers } = require("./projection");
+
 const GROUP_FIELDS = ["bu", "am", "stage", "client", "forecastCategory"];
 const MEASURES = ["count", "amount", "weighted"];
 
@@ -38,7 +40,8 @@ function passes(o, f) {
 
 // Applique un rapport à un jeu d'opportunités → lignes groupées (count / Σ montant / Σ pondéré) triées
 // par la mesure choisie, décroissant, + totaux.
-function applyReport(def, opps) {
+function applyReport(def, opps, tiers) {
+  const t = tiers || normalizeTiers();
   const v = validateReportDef(def);
   const d = v.ok ? v.value : { groupBy: "bu", measure: "count", filters: {} };
   const groups = new Map();
@@ -48,7 +51,8 @@ function applyReport(def, opps) {
     const raw = o[d.groupBy];
     const key = raw == null || raw === "" ? "(non renseigné)" : String(raw);
     const amount = Number(o.amount) || 0;
-    const weighted = Number.isFinite(Number(o.weighted)) ? Number(o.weighted) : amount * (Number(o.probability) || 0);
+    // Pondéré TIÉRÉ (projectionWeight) — SOURCE UNIQUE avec le cockpit, plus le champ linéaire persisté.
+    const weighted = projectionWeight(o, t);
     const g = groups.get(key) || { key, count: 0, amount: 0, weighted: 0 };
     g.count++; g.amount += amount; g.weighted += weighted;
     groups.set(key, g);

@@ -50,9 +50,10 @@ describe("applyReport", () => {
     expect(r.totals.count).toBe(1);
     expect(r.rows[0].key).toBe("MTN");
   });
-  it("mesure weighted utilise le pondéré (ou amount*proba à défaut)", () => {
+  it("mesure weighted = pondéré TIÉRÉ (projectionWeight), pas le champ linéaire persisté", () => {
     const r = applyReport({ groupBy: "bu", measure: "weighted" }, OPPS);
     const ict = r.rows.find((x) => x.key === "ICT");
-    expect(ict.weighted).toBe(230); // 50 + 180
+    // ORANGE (proba 0,5 → palier Pipe ×0,05 = 5) + MTN (proba 0,9 → Certitudes ×1 = 200) = 205.
+    expect(ict.weighted).toBe(205);
   });
 });
