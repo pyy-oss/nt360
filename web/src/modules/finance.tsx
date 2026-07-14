@@ -238,7 +238,12 @@ export const InvoiceList: FC<Props> = () => {
 function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
   const { steps } = marginWaterfall(byBu);
   if (steps.length <= 1) return null;
-  const scale = Math.max(1, ...steps.map((s) => s.end));
+  // Domaine COMPLET [lo, hi] incluant les valeurs NÉGATIVES (une marge cumulée qui passe sous zéro) : sinon
+  // une contribution négative donnait un `left` négatif écrêté (barre indiscernable d'une grosse positive).
+  const lo = Math.min(0, ...steps.map((s) => s.start));
+  const hi = Math.max(...steps.map((s) => s.end));
+  const span = Math.max(1, hi - lo);
+  const x = (v: number) => ((v - lo) / span) * 100;
   const color = (k: string) => (k === "total" ? T.gold : k === "neg" ? T.clay : T.emerald);
   return (
     <Card title="Waterfall de marge — contribution par domaine">
@@ -247,7 +252,7 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
           <div key={s.label} className="flex items-center gap-2 text-[12px]">
             <div className="w-28 truncate text-right text-muted" title={s.label}>{s.label}</div>
             <div className="relative grow h-4 rounded bg-panel2 overflow-hidden">
-              <div className="absolute top-0 bottom-0 rounded" style={{ left: `${(s.start / scale) * 100}%`, width: `${Math.max(0.5, ((s.end - s.start) / scale) * 100)}%`, backgroundColor: color(s.kind) }} />
+              <div className="absolute top-0 bottom-0 rounded" style={{ left: `${x(s.start)}%`, width: `${Math.max(0.5, x(s.end) - x(s.start))}%`, backgroundColor: color(s.kind) }} />
             </div>
             <div className={cx("w-28 text-right tabnum", s.value < 0 && "text-clay", s.kind === "total" && "font-semibold")}>{money(s.value)}</div>
           </div>

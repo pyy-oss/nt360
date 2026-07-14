@@ -1904,10 +1904,18 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
   const [ord, inv, opp] = await Promise.all([
     db.collection("orders").select("client").get(),
     db.collection("invoices").select("client").get(),
-    db.collection("opportunities").select("client").get(),
+    db.collection("opportunities").select("client", "visibleTo").get(),
   ]);
   const names = new Set();
-  for (const snap of [ord, inv, opp]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  for (const snap of [ord, inv]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  // OWD « private » sur les opportunités : ne PAS divulguer les noms de clients d'opps hors périmètre à un
+  // rôle import:read non-admin (parité avec scopedOpps). Commandes/factures ne sont pas record-level scopées.
+  const oppPrivate = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
+  opp.forEach((d) => {
+    const o = d.data();
+    if (oppPrivate && !(Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid))) return;
+    const c = String(o.client || "").trim(); if (c) names.add(c);
+  });
   const threshold = Math.min(0.95, Math.max(0.7, Number(req.data?.threshold) || 0.84));
   // `scanned` = noms EFFECTIVEMENT comparés (après plafond O(n²)) ; `capped` signale une troncature (au-delà,
   // des quasi-doublons peuvent rester invisibles) — plutôt qu'annoncer names.size en laissant croire à l'exhaustivité.
@@ -2126,12 +2134,18 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds:
   if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
   const d = req.data || {};
   const { toISO } = require("./lib/sheets");
+  const { plausibleYear } = require("./lib/ids");
+  // MÊME garde qu'à l'import (parsers/facturationDf) : une date au millésime aberrant (1850, 2206) passe
+  // toISO (format valide) mais corrompt DSO/aging/overdue. On la REFUSE plutôt que de l'accepter en saisie
+  // manuelle alors que l'import la rejette (asymétrie de garde).
+  const plausibleIso = (iso) => (iso && plausibleYear(String(iso).slice(0, 4)) ? iso : null);
+  const chk = (raw, label) => { const iso = toISO(raw); if (raw && !plausibleIso(iso)) throw new HttpsError("invalid-argument", `${label} au millésime invalide (attendu 2015..année+3)`); return iso || null; };
   // NORMALISER en ISO complet (YYYY-MM-DD) comme à l'ingestion : cashflow (échéance en fin de mois si
   // "YYYY-MM") et receivables (Date.parse → 1er du mois) interprètent différemment une date partielle,
   // ce qui désalignait le bucket mensuel d'une facture éditée à la main. toISO garantit une date pleine.
   const patch = { updatedAt: FieldValue.serverTimestamp() };
-  if (d.date !== undefined) patch.date = d.date ? (toISO(d.date) || null) : null;
-  if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? (toISO(d.dueDate) || null) : null;
+  if (d.date !== undefined) patch.date = d.date ? chk(d.date, "Date de facturation") : null;
+  if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? chk(d.dueDate, "Date d'échéance") : null;
   if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date ou échéance requise)");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({
