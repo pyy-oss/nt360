@@ -4,7 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
@@ -199,23 +199,30 @@ export const InvoiceList: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
           columns={[
+            // Essentiels EN LIGNE (Numéro, Client, Échéance, Montant, Statut) ; le secondaire (FP, BU,
+            // Rattachement, Date d'émission) est replié dans le détail via det() → tableau étroit, lisible.
             colText("Numéro", (r) => r.numero, (r) => r.numero),
-            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
+            det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Client", (r) => r.client, (r) => r.client),
-            colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
-            colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1)),
-            colText("Date", (r) => frDate(r.date), (r) => r.date || ""),
+            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
+            det(colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1))),
+            det(colText("Date", (r) => frDate(r.date), (r) => r.date || "")),
             colText("Échéance", (r) => frDate(r.dueDate), (r) => r.dueDate || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
             colText("Statut", (r) => (cancelled.has(r.id!) ? <Badge tone="clay">Annulée</Badge> : (r.paymentStatus || "—")), (r) => (cancelled.has(r.id!) ? "zzz" : r.paymentStatus || "")),
-            ...(canImport ? [colText("Rattacher", (r: Invoice) => (r.linked !== true && r.id && !cancelled.has(r.id) ? <FpFixer id={r.id} /> : null), () => 0)] : []),
-            ...(canImport ? [colText("Dates", (r: Invoice) => (cancelled.has(r.id!) ? null : <InvoiceDateFixer inv={r} />), () => 0)] : []),
-            ...(canImport ? [colText("Assainir", (r: Invoice) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la facture ${r.numero || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("invoices", r.id!)} /> : null), () => 0)] : []),
-            // Annulation (statut « Annulée » persistant) : la facture sort de la facturation/cash/créances
-            // mais reste conservée (rétablissable). Survit à un ré-import delta (overlay).
-            ...(canImport ? [colText("Annuler", (r: Invoice) => (r.id ? (cancelled.has(r.id)
-              ? <DangerBtn label="Rétablir" tone="steel" okMsg="Facture rétablie" errMsg="Rétablissement refusé" confirm={`Rétablir la facture ${r.numero || r.id} ? Elle réintègre la facturation et le cash.`} fn={() => setCancellation("invoices", r.id!, false)} />
-              : <DangerBtn label="Annuler" tone="gold" okMsg="Facture annulée" errMsg="Annulation refusée" confirm={`Annuler la facture ${r.numero || r.id} ? Elle sort de la facturation, du cash et des créances (conservée, rétablissable). L'annulation survit à un ré-import.`} fn={() => setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client })} />
+            // Actions groupées en UNE colonne (entête vide → jamais repliée) : rattacher, dates, assainir,
+            // annuler/rétablir. Reste toujours visible en ligne (cf. socle design : colonnes d'action).
+            ...(canImport ? [colText("", (r: Invoice) => (r.id ? (
+              <div className="flex items-center justify-end gap-1.5">
+                {r.linked !== true && !cancelled.has(r.id) && <FpFixer id={r.id} />}
+                {!cancelled.has(r.id) && <InvoiceDateFixer inv={r} />}
+                <DangerBtn label="Suppr." confirm={`Supprimer la facture ${r.numero || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("invoices", r.id!)} />
+                {/* Annulation (statut « Annulée » persistant) : la facture sort de la facturation/cash/créances
+                    mais reste conservée (rétablissable). Survit à un ré-import delta (overlay). */}
+                {cancelled.has(r.id)
+                  ? <DangerBtn label="Rétablir" tone="steel" okMsg="Facture rétablie" errMsg="Rétablissement refusé" confirm={`Rétablir la facture ${r.numero || r.id} ? Elle réintègre la facturation et le cash.`} fn={() => setCancellation("invoices", r.id!, false)} />
+                  : <DangerBtn label="Annuler" tone="gold" okMsg="Facture annulée" errMsg="Annulation refusée" confirm={`Annuler la facture ${r.numero || r.id} ? Elle sort de la facturation, du cash et des créances (conservée, rétablissable). L'annulation survit à un ré-import.`} fn={() => setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client })} />}
+              </div>
             ) : null), () => 0)] : []),
           ]}
         />

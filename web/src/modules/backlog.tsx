@@ -67,17 +67,18 @@ export const Backlog: FC<Props> = () => {
       {deriveRows.length > 0 && (
         <Card title={`Commandes à RAF dérivé (suspectes) · ${deriveRows.length}`}>
           <Table columns={[
+            // Essentiels + action EN LIGNE ; BU / Source / Année (secondaires) repliés via det().
             colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp),
             colText("Client", (t) => t.client),
             colText("Affaire", (t) => t.affaire || "—"),
-            colText("BU", (t) => t.bu),
-            colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—"),
-            colNum("Année", (t) => t.yearPo || "—"),
+            det(colText("BU", (t) => t.bu)),
+            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—")),
+            det(colNum("Année", (t) => t.yearPo || "—")),
             colNum("CAS", (t) => money(t.cas)),
             colNum("Facturé", (t) => money(t.facture)),
             colNum("RAF dérivé", (t) => money(t.raf)),
-            ...(canImport ? [colText("Intégration", (t) => <RafValidator row={t} />)] : []),
-          ]} rows={deriveRows} />
+            ...(canImport ? [colText("", (t) => <RafValidator row={t} />)] : []),
+          ]} rows={deriveRows} colsKey="backlog-derive" />
           <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code> (potentiellement surévalué). {canImport
             ? <>Après vérification, cliquez « <b>intégrer</b> » pour <b>valider le RAF</b> (le figer comme curaté → la commande rejoint le backlog fiable et quitte ce lot), ou « <b>Solder</b> » (RAF = 0) si l'affaire est livrée/facturée.</>
             : <>Vérifiez si elles devraient déjà être soldées, ou s'il manque un rattachement N° FP à des factures.</>}</Tip>

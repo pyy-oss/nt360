@@ -7,7 +7,7 @@ import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
@@ -160,9 +160,9 @@ export const Fournisseurs: FC<Props> = () => {
     colNum("Solde compte", (s: SupplierRow) => money(s.solde), (s: SupplierRow) => s.solde),
     colNum("Engagement", (s: SupplierRow) => money(s.engagement), (s: SupplierRow) => s.engagement),
     colNum("Disponible", (s: SupplierRow) => (s.authorized ? <span className={cx((s.disponible ?? 0) < 0 && "text-clay font-medium")}>{money(s.disponible)}</span> : "—"), (s: SupplierRow) => s.disponible ?? 0),
-    colNum("Util. %", (s: SupplierRow) => (s.authorized ? pct(s.util) : "—"), (s: SupplierRow) => s.util || 0),
+    det(colNum("Util. %", (s: SupplierRow) => (s.authorized ? pct(s.util) : "—"), (s: SupplierRow) => s.util || 0)),
     colNum("État", (s: SupplierRow) => <Badge tone={(badge[s.state || ""] || "neutral") as any}>{SUP_LABEL[s.state || ""] || s.state}</Badge>, (s: SupplierRow) => s.state || ""),
-    ...(canWrite ? [colNum("Ligne crédit (autorisé · ouverture)", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} opening={s.opening || 0} openingDate={s.openingDate || ""} />)] : []),
+    ...(canWrite ? [colNum("Crédit (autorisé · ouverture)", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} opening={s.opening || 0} openingDate={s.openingDate || ""} />)] : []),
   ];
   return (
     <div className="flex flex-col gap-4">
@@ -337,18 +337,25 @@ export const BC: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           columns={[
+            // Essentiels EN LIGNE (N° BC, Fournisseur, XOF, Retard, Statut) ; le secondaire (FP, Type,
+            // ETA contrat/réel) est replié dans le détail via det() → tableau étroit, sans scroll.
             colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
-            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
+            det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
-            colText("Type", (r) => r.expenseType, (r) => r.expenseType),
+            det(colText("Type", (r) => r.expenseType, (r) => r.expenseType)),
             colNum("XOF", (r) => <BcAmount row={r} />, (r) => r.amountXof || 0),
-            colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || ""),
-            colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || ""),
+            det(colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || "")),
+            det(colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || "")),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
             colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
-            ...(cuOn ? [colText("ClickUp", (r: BcLine) => <BcClickupBtn bcNumber={r.bcNumber} linked={!!(r.bcNumber && bcLinks?.map?.[fpDocId(r.bcNumber)])} />, () => 0)] : []),
-            ...(canWrite ? [colText("Fiabiliser", (r: BcLine) => <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} currency={r.currency} amount={r.amount} />, () => 0)] : []),
-            ...(canWrite ? [colText("Assainir", (r: BcLine) => (r.id ? <DangerBtn label="Suppr." confirm={`Supprimer la ligne BC ${r.bcNumber || r.supplier || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("bcLines", r.id!)} /> : null), () => 0)] : []),
+            // Actions groupées en UNE colonne (entête vide → toujours en ligne) : ClickUp, fiabiliser, assainir.
+            ...((cuOn || canWrite) ? [colText("", (r: BcLine) => (
+              <div className="flex items-center justify-end gap-1.5">
+                {cuOn && <BcClickupBtn bcNumber={r.bcNumber} linked={!!(r.bcNumber && bcLinks?.map?.[fpDocId(r.bcNumber)])} />}
+                {canWrite && <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} currency={r.currency} amount={r.amount} />}
+                {canWrite && r.id && <DangerBtn label="Suppr." confirm={`Supprimer la ligne BC ${r.bcNumber || r.supplier || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("bcLines", r.id!)} />}
+              </div>
+            ), () => 0)] : []),
           ]}
         />
         {planned > 0 && <Tip>{planned.toLocaleString("fr-FR")} ligne(s) d'achat planifiées par les fiches affaire sont suivies en P&amp;L Projet / FP 360°, pas ici. L'Exécution BC n'est alimentée que par l'import BC (Logistics / PDF).</Tip>}
@@ -500,10 +507,11 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
           // Marges masquées pour les rôles sans accès « Rentabilité ».
           ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0), colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0)] : []),
           // R/O (Réalisé / Objectif) au périmètre — affiché si un objectif existe pour l'exercice.
+          // R/O (Réalisé / Objectif) : comparaison secondaire → repliée dans le détail (det).
           ...(hasObj ? [
-            colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas)),
-            colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced)),
-            ...(canMargin ? [colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin))] : []),
+            det(colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas))),
+            det(colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced))),
+            ...(canMargin ? [det(colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin)))] : []),
           ] : []),
         ]} rows={rows} colsKey={`entity-${kind}`} />
         {hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre {kind === "domaines" ? "BU" : "client"}. Les objectifs se définissent dans « Objectifs ».</Tip>}

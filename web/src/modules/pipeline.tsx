@@ -4,7 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, det, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
@@ -198,13 +198,14 @@ export const Am360: FC<Props> = () => {
           colText("#", (r) => <span className="text-faint tabnum">{rankOf.get(r.am)}</span>, (r) => rankOf.get(r.am) ?? 999),
           colText("AM", (r) => (r.am === sel.am ? <b className="text-gold">{r.am}</b> : r.am), (r) => r.am),
           colNum("CAS", (r) => money(r.cas), (r) => r.cas),
-          colNum("Ticket moy.", (r) => (r.orderCount > 0 ? money(r.cas / r.orderCount) : "—"), (r) => (r.orderCount > 0 ? r.cas / r.orderCount : 0)),
-          colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
-          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
+          // Essentiels EN LIGNE (CAS, Pipeline pond., Transfo., R/O) ; secondaire replié via det().
+          det(colNum("Ticket moy.", (r) => (r.orderCount > 0 ? money(r.cas / r.orderCount) : "—"), (r) => (r.orderCount > 0 ? r.cas / r.orderCount : 0))),
+          det(colNum("Facturé", (r) => money(r.facture), (r) => r.facture)),
+          det(colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog)),
           colNum("Pipeline pond.", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
           colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
-        ]} rows={rows} />
+        ]} rows={rows} colsKey="pipeline-am360" />
       </Card>
       <Tip>Vue par commercial <b>sans marge</b> (la rentabilité par AM reste dans « Rentabilité »). Le <b>facturé</b> est rattaché au commercial via la clé N° FP de ses commandes. Le <b>R/O</b> compare le CAS de l'exercice à l'objectif CAS « commercial » de l'année.</Tip>
     </div>
@@ -579,13 +580,13 @@ export const OppList: FC<Props> = () => {
           <Table columns={[
             colText("Client", (o) => o.client, (o) => o.client),
             colText("Désignation", (o) => o.designation || "—", (o) => o.designation || ""),
-            colText("AM", (o) => o.am, (o) => o.am),
-            colText("BU", (o) => buBadge(o.bu), (o) => o.bu), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
-            colNum("Proba", (o) => pct(o.probability), (o) => o.probability),
+            det(colText("AM", (o) => o.am, (o) => o.am)),
+            det(colText("BU", (o) => buBadge(o.bu), (o) => o.bu)), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
+            det(colNum("Proba", (o) => pct(o.probability), (o) => o.probability)),
             colNum("Pondéré", (o) => money(pw(o)), (o) => pw(o)),
             colText("Closing (D Prev)", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
-            colText("P&L", (o: Opportunity) => pnlFlag(o), () => 0),
-          ]} rows={certitudes} />
+            det(colText("P&L", (o: Opportunity) => pnlFlag(o), () => 0)),
+          ]} rows={certitudes} colsKey="pipeline-certitudes" />
         ) : <EmptyState label="Aucune opportunité IdC ≥ 90 %." />}
       </Card>
       <Card title="Top opportunités (pondéré)">
@@ -614,20 +615,22 @@ export const OppList: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
           columns={[
-            colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || ""),
+            // Essentiels EN LIGNE (Client, Désignation, AM, Montant, Étape, Pondéré) ; le secondaire
+            // (FP, BU, Proba, MB prév., DR, Closing, P&L) est replié dans le détail via det().
+            det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Client", (r) => r.client, (r) => r.client),
             colText("Désignation", (r) => r.designation || "—", (r) => r.designation || ""),
             colText("AM", (r) => r.am, (r) => r.am),
-            colText("BU", (r) => buBadge(r.bu), (r) => r.bu),
+            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),
             colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
-            colNum("Proba", (r) => pct(r.probability), (r) => r.probability),
+            det(colNum("Proba", (r) => pct(r.probability), (r) => r.probability)),
             colNum("Pondéré", (r) => money(pw(r)), (r) => pw(r)),
             // MB prévisionnel (%) + DR — saisis dans la fiche, désormais RÉAFFICHÉS (cf. audit : champs write-only).
-            colNum("MB prév.", (r: Opportunity) => (r.mbPrev != null ? `${r.mbPrev} %` : "—"), (r: Opportunity) => (r.mbPrev ?? -1)),
-            colText("DR", (r: Opportunity) => (r.dr ? <Badge tone="steel">Oui</Badge> : <span className="text-faint">—</span>), (r: Opportunity) => (r.dr ? 1 : 0)),
-            colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || ""),
-            colText("P&L", (r: Opportunity) => pnlFlag(r), (r: Opportunity) => (isBooked(r) ? 2 : r.stage === 6 ? 1 : 0)),
+            det(colNum("MB prév.", (r: Opportunity) => (r.mbPrev != null ? `${r.mbPrev} %` : "—"), (r: Opportunity) => (r.mbPrev ?? -1))),
+            det(colText("DR", (r: Opportunity) => (r.dr ? <Badge tone="steel">Oui</Badge> : <span className="text-faint">—</span>), (r: Opportunity) => (r.dr ? 1 : 0))),
+            det(colText("Closing", (r) => r.closingDate || "—", (r) => r.closingDate || "")),
+            det(colText("P&L", (r: Opportunity) => pnlFlag(r), (r: Opportunity) => (isBooked(r) ? 2 : r.stage === 6 ? 1 : 0))),
             ...(canWrite ? [colText("", (r: Opportunity) => (r.source === "saisie" ? (
               <span className="inline-flex gap-2">
                 <button onClick={() => editOpp(r)} className="text-gold hover:underline text-xs">Éditer</button>

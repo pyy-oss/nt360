@@ -4,7 +4,7 @@
 // Le COÛT (CJM) n'est visible que si l'utilisateur a le droit « rentabilité » (confidentialité serveur).
 import { useState, useEffect, useCallback, type FC, type ReactNode } from "react";
 import { useCan } from "../lib/rbac";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, det, cx } from "../design/components";
 import { PctLine } from "../design/charts";
 import { T } from "../design/tokens";
 import { Select } from "../design/inputs";
@@ -559,14 +559,14 @@ export const Staffing: FC<Props> = () => {
               colNum("TJM cible", (c: Consultant) => (c.tjmTarget != null ? money(c.tjmTarget) : "—"), (c: Consultant) => c.tjmTarget ?? 0),
               ...(canCost ? [colNum("CJM", (c: Consultant) => (c.cjm != null ? money(c.cjm) : "—"), (c: Consultant) => c.cjm ?? 0),
                 colNum("Marge/j", (c: Consultant) => (c.tjmTarget != null && c.cjm != null ? money(c.tjmTarget - c.cjm) : "—"), (c: Consultant) => (c.tjmTarget != null && c.cjm != null ? c.tjmTarget - c.cjm : 0))] : []),
-              colText("Compétences", (c: Consultant) => (c.skills && c.skills.length ? c.skills.join(", ") : "—")),
+              det(colText("Compétences", (c: Consultant) => (c.skills && c.skills.length ? c.skills.join(", ") : "—"))),
               ...(canWrite ? [colText("", (c: Consultant) => (
                 <span className="inline-flex gap-2">
                   <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEditing(editing === c.id ? null : c.id!)}>{editing === c.id ? "fermer" : "éditer"}</button>
                   <DangerBtn label="Suppr." okMsg="Consultant supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteConsultant(c.id!); await load(); }} />
                 </span>
               ))] : []),
-            ]} rows={rows} />
+            ]} rows={rows} colsKey="staffing-consultants" />
             {canWrite && rows.map((c) => editing === c.id && (
               <div key={`edit-${c.id}`} className={cx("border-t border-hair pt-2 mt-2")}><ConsultantForm initial={c} canCost={canCost} onDone={() => { setEditing(null); load(); }} /></div>
             ))}
