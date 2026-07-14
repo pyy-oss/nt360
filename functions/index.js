@@ -21,6 +21,9 @@ const CLICKUP_TOKEN = defineSecret("CLICKUP_TOKEN");
 // Clé API Anthropic (Secret Manager) — utilisée seulement par la CURATION de la veille (curateNews).
 // Absente → la curation no-op proprement (pas d'échec du scheduler). À provisionner avant activation.
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
+// Secret client de l'app Azure AD (Office 365 / Microsoft Graph) pour l'envoi d'emails. Absent → les
+// notifications email no-op proprement (pas d'échec des schedulers). À provisionner avant activation.
+const GRAPH_CLIENT_SECRET = defineSecret("GRAPH_CLIENT_SECRET");
 // Défauts d'intégration ClickUp (surchargés par config/clickup) : workspace + liste « Côte d'Ivoire ».
 const CLICKUP_TEAM = "90121503678";
 const CLICKUP_LIST_CI = "901215917683";
@@ -458,6 +461,56 @@ async function postWebhook(url, text) {
   if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
 }
 
+// --- NOTIFICATIONS EMAIL (Office 365 / Microsoft Graph). config/emailNotify (direction) + secret client
+// dans Secret Manager (GRAPH_CLIENT_SECRET). Envoi BEST-EFFORT (n'échoue jamais l'action appelante). ---
+async function loadEmailCfg() {
+  const { normalizeEmailConfig } = require("./domain/emailNotify");
+  return normalizeEmailConfig((await db.doc("config/emailNotify").get()).data());
+}
+// Envoie un email via Graph si la config est prête ET le secret présent. Retourne un statut (jamais throw
+// si `soft`). `to` : string|liste. Journalise les échecs dans opsLog (observabilité).
+async function sendEmail(cfg, { to, subject, html, cc }, { soft = true } = {}) {
+  const { canSend } = require("./domain/emailNotify");
+  const secret = GRAPH_CLIENT_SECRET.value();
+  if (!canSend(cfg) || !secret) return { ok: false, skipped: "not-configured" };
+  const { sendMail } = require("./lib/graphMail");
+  try {
+    return await sendMail({ tenant: cfg.tenantId, clientId: cfg.clientId, clientSecret: secret, sender: cfg.sender, to, subject, html, cc });
+  } catch (e) {
+    logger.error("email: envoi échoué", { message: e && e.message });
+    await logOps({ kind: "email", trigger: "envoi", status: "error", error: (e && e.message) || String(e) });
+    if (soft) return { ok: false, error: (e && e.message) || String(e) };
+    throw e;
+  }
+}
+
+// Config des notifications email — DIRECTION uniquement. Ne stocke JAMAIS le secret client (Secret Manager).
+exports.setEmailNotifyConfig = onCallG("setEmailNotifyConfig", { timeoutSeconds: 30 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { normalizeEmailConfig } = require("./domain/emailNotify");
+  const cfg = normalizeEmailConfig(req.data);
+  await db.doc("config/emailNotify").set(cfg, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "email_config", module: "habilitations", entity: "config", entityId: "emailNotify",
+    detail: { enabled: cfg.enabled, sender: cfg.sender, tenant: !!cfg.tenantId, alerts: cfg.recipients.alerts.length, codir: cfg.recipients.codir.length }, ts: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+});
+
+// Envoi d'un email de TEST (valide l'app Azure + le secret de bout en bout). Direction. Remonte l'échec.
+exports.sendTestEmail = onCallG("sendTestEmail", { secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const { isEmail } = require("./domain/emailNotify");
+  const cfg = await loadEmailCfg();
+  const to = String(req.data?.to || "").trim();
+  if (!isEmail(to)) throw new HttpsError("invalid-argument", "adresse de test invalide");
+  if (!cfg.tenantId || !cfg.clientId || !cfg.sender) throw new HttpsError("failed-precondition", "config incomplète (tenant / client / émetteur)");
+  if (!GRAPH_CLIENT_SECRET.value()) throw new HttpsError("failed-precondition", "secret GRAPH_CLIENT_SECRET absent (Secret Manager)");
+  const r = await sendEmail({ ...cfg, enabled: true }, { to, subject: "nt360 — test de notification email", html: "<p>✅ La configuration email Office 365 fonctionne. Cet email confirme que nt360 peut envoyer via Microsoft Graph.</p>" }, { soft: false });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "email_test", module: "habilitations", entity: "config", entityId: "emailNotify", detail: { to }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, ...r };
+});
+
 // Codes HttpsError « attendus » (rejets de validation/autorisation) : ne PAS les traiter comme des
 // incidents. Tout le reste = échec inattendu → journalisé dans opsLog + alerte webhook.
 const EXPECTED_ERR = new Set(["invalid-argument", "permission-denied", "unauthenticated", "failed-precondition", "not-found", "already-exists"]);
@@ -571,24 +624,77 @@ exports.setNotificationConfig = onCallG("setNotificationConfig", { timeoutSecond
 // Digest quotidien : pousse les alertes ≥ seuil vers le webhook, dédupliqué (n'envoie que si
 // l'ensemble des alertes a changé depuis le dernier envoi).
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
-exports.alertDigest = onSchedule({ schedule: "every day 07:00", timeoutSeconds: 60 }, async () => {
+exports.alertDigest = onSchedule({ schedule: "every day 07:00", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 60 }, async () => {
   const cfg = (await db.doc("config/notifications").get()).data() || {};
-  if (!cfg.enabled || !cfg.webhookUrl) return;
   const al = (await db.doc("summaries/alerts").get()).data() || {};
-  const minRank = cfg.minSeverity === "medium" ? 1 : 0;
+  const emailCfg = await loadEmailCfg();
+  const emailOn = emailCfg.enabled && emailCfg.triggers.alerts && emailCfg.recipients.alerts.length;
+  // Rien à faire si NI webhook NI email ne sont configurés.
+  if ((!cfg.enabled || !cfg.webhookUrl) && !emailOn) return;
+  const minRank = (cfg.minSeverity === "medium") ? 1 : 0;
   const crit = (al.items || []).filter((a) => (SEV_RANK[a.severity] ?? 9) <= minRank);
   if (!crit.length) return;
   const hash = crit.map((a) => `${a.type}:${a.count}`).join("|");
-  if (hash === cfg.lastHash) return; // déjà notifié, rien de nouveau
+  if (hash === cfg.lastHash) return; // déjà notifié (webhook ET email), rien de nouveau
   const text = `⚠️ nt360 — Alertes (exercice ${al.fy || ""})\n` + crit.map((a) => `• ${a.message}`).join("\n");
+  let webhookOk = true;
   try {
-    await postWebhook(cfg.webhookUrl, text);
-    await db.doc("config/notifications").set({ lastHash: hash, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (cfg.enabled && cfg.webhookUrl) await postWebhook(cfg.webhookUrl, text);
     await logOps({ kind: "notification", trigger: "planifié", status: "ok", detail: { count: crit.length } });
   } catch (e) {
-    logger.error("alertDigest a échoué", { message: e && e.message });
+    webhookOk = false;
+    logger.error("alertDigest webhook a échoué", { message: e && e.message });
     await logOps({ kind: "notification", trigger: "planifié", status: "error", error: (e && e.message) || String(e) });
   }
+  // Email direction (best-effort, indépendant du webhook).
+  if (emailOn) {
+    const { buildAlertsEmail } = require("./domain/emailNotify");
+    const mail = buildAlertsEmail(crit, al.fy);
+    await sendEmail(emailCfg, { to: emailCfg.recipients.alerts, subject: mail.subject, html: mail.html });
+  }
+  // On ne mémorise le hash (anti-répétition) que si au moins un canal a réussi.
+  if (webhookOk || emailOn) await db.doc("config/notifications").set({ lastHash: hash, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+});
+
+// Digest EMAIL des RELANCES (quotidien) : à chaque responsable (commercial), la liste de ses créances
+// échues / BC en retard / jalons non facturés. Best-effort par destinataire. Nécessite l'annuaire (email).
+exports.emailRelancesDigest = onSchedule({ schedule: "every day 07:15", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
+  const cfg = await loadEmailCfg();
+  if (!cfg.enabled || !cfg.triggers.relances) return;
+  const { buildRelancesEmail, emailForName } = require("./domain/emailNotify");
+  const [cre, bc, jal] = await Promise.all([
+    db.doc("summaries/relancesCreances").get(), db.doc("summaries/relancesBc").get(), db.doc("summaries/relancesJalons").get(),
+  ]);
+  const items = (snap) => ((snap.data() || {}).items) || [];
+  // Regroupe par responsable (champ `am`).
+  const byWho = new Map();
+  const push = (arr, key) => { for (const it of arr) { const who = it.am || ""; if (!who) continue; if (!byWho.has(who)) byWho.set(who, { creances: [], bc: [], jalons: [] }); byWho.get(who)[key].push(it); } };
+  push(items(cre), "creances"); push(items(bc), "bc"); push(items(jal), "jalons");
+  if (!byWho.size) return;
+  // Annuaire nom→email (normalisé).
+  const usersByName = {};
+  (await db.collection("users").select("name", "email").get()).forEach((d) => { const n = (d.data().name || "").toLowerCase().trim(); if (n) usersByName[n] = { email: d.data().email }; });
+  let sent = 0, skipped = 0;
+  for (const [who, g] of byWho) {
+    const to = emailForName(who, usersByName);
+    if (!to) { skipped++; continue; }
+    const mail = buildRelancesEmail(who, g);
+    const r = await sendEmail(cfg, { to, subject: mail.subject, html: mail.html });
+    if (r.ok) sent++; else skipped++;
+  }
+  await logOps({ kind: "email", trigger: "relances", status: "ok", detail: { sent, skipped, responsables: byWho.size } });
+});
+
+// Digest EMAIL du bulletin CODIR (hebdomadaire, lundi) : faits marquants de la veille → direction.
+exports.emailCodirDigest = onSchedule({ schedule: "every monday 08:00", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
+  const cfg = await loadEmailCfg();
+  if (!cfg.enabled || !cfg.triggers.codir || !cfg.recipients.codir.length) return;
+  const { buildCodirEmail } = require("./domain/emailNotify");
+  const news = (await db.doc("summaries/news").get()).data() || {};
+  const bulletins = (news.bulletins || []).filter((b) => b.severity !== "info"); // faits marquants (hors info)
+  const mail = buildCodirEmail(bulletins, `Synthèse hebdomadaire — ${bulletins.length} fait(s) marquant(s).`);
+  const r = await sendEmail(cfg, { to: cfg.recipients.codir, subject: mail.subject, html: mail.html });
+  await logOps({ kind: "email", trigger: "codir", status: r.ok ? "ok" : "error", detail: { bulletins: bulletins.length, recipients: cfg.recipients.codir.length }, error: r.error });
 });
 
 // --- CURATION DE LA VEILLE (agent LLM) — score la PERTINENCE de chaque TYPE de bulletin d'actualité
@@ -1613,7 +1719,7 @@ async function anyDirectionUid(exceptUid) {
   return cand.length ? cand[0].id : null;
 }
 
-exports.submitForApproval = onCallG("submitForApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIENT_SECRET], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
   const { validateApprovalRequest, approverFor } = require("./domain/approval");
   const { ownerChain } = require("./domain/hierarchy");
@@ -1633,6 +1739,18 @@ exports.submitForApproval = onCallG("submitForApproval", { memoryMiB: 256, timeo
   };
   const ref = await db.collection("approvals").add(doc);
   await db.collection("auditLog").add({ uid: requester, action: "approval_submit", module: "pipeline", entity: "approval", entityId: ref.id, detail: { kind: v.value.kind, entityId: v.value.entityId, approverUid }, ts: FieldValue.serverTimestamp() });
+  // Email au décideur (best-effort — n'échoue jamais la soumission). Résout son adresse dans l'annuaire.
+  try {
+    const emailCfg = await loadEmailCfg();
+    if (emailCfg.enabled && emailCfg.triggers.approvals) {
+      const approver = (await db.doc(`users/${approverUid}`).get()).data() || {};
+      if (approver.email) {
+        const { buildApprovalEmail } = require("./domain/emailNotify");
+        const mail = buildApprovalEmail({ type: v.value.kind, typeLabel: v.value.kind, label: v.value.label || v.value.entityId, amount: v.value.amount, note: v.value.note, requester: doc.requestedByName || "Un collaborateur" });
+        await sendEmail(emailCfg, { to: approver.email, subject: mail.subject, html: mail.html });
+      }
+    }
+  } catch (e) { logger.warn("approval email: non envoyé", { msg: e && e.message }); }
   return { ok: true, id: ref.id, approverUid };
 });
 

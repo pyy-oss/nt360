@@ -54,6 +54,8 @@ deleteObjective
 deleteOpportunity
 deleteRecords
 deleteReport
+emailCodirDigest
+emailRelancesDigest
 enrichClickup
 exportOpportunities
 fuzzyDuplicateClients
@@ -109,6 +111,8 @@ setFpAlias
 setFxRates
 setInvoiceFp
 setManager
+setEmailNotifyConfig
+sendTestEmail
 setNotificationConfig
 setOrderPm
 setOutboundWebhook
