@@ -1933,6 +1933,42 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
   return { ok: true, pairs, scanned, total: names.size, capped, threshold };
 });
 
+// === ATELIER DE NORMALISATION CLIENTS — INVENTAIRE de tous les noms de clients (commandes + factures +
+// opportunités) avec leur COMPTE et leur CIBLE CANONIQUE effective (règles + alias config/clientAliases).
+// Donne à voir, en UN endroit, les graphies qui se regroupent déjà et celles à aliaser. Lecture « import ».
+// La correction (poser un alias) reste gouvernée par setClientAliases (direction). Scan borné (R1).
+exports.clientNames = onCallG("clientNames", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireRead(req, "import");
+  const { groupClientNames } = require("./domain/clientName");
+  const [ord, inv, opp, aliasDoc] = await Promise.all([
+    db.collection("orders").select("client").limit(MAX_SCAN + 1).get(),
+    db.collection("invoices").select("client").limit(MAX_SCAN + 1).get(),
+    db.collection("opportunities").select("client", "visibleTo").limit(MAX_SCAN + 1).get(),
+    db.doc("config/clientAliases").get(),
+  ]);
+  const capped = ord.size > MAX_SCAN || inv.size > MAX_SCAN || opp.size > MAX_SCAN;
+  // Comptes par nom BRUT (tous docs). OWD « private » sur opps : un rôle import:read non-admin ne compte
+  // que son périmètre (parité fuzzyDuplicateClients). Commandes/factures non record-level scopées.
+  const counts = new Map();
+  const bump = (raw) => { const c = String(raw || "").trim(); if (c) counts.set(c, (counts.get(c) || 0) + 1); };
+  sliceCapped(ord.docs).docs.forEach((d) => bump(d.data().client));
+  sliceCapped(inv.docs).docs.forEach((d) => bump(d.data().client));
+  const oppPrivate = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
+  sliceCapped(opp.docs).docs.forEach((d) => { const o = d.data(); if (oppPrivate && !(Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid))) return; bump(o.client); });
+  const names = [...counts.entries()].map(([name, count]) => ({ name, count }));
+  const pairs = ((aliasDoc.data() || {}).pairs) || [];
+  const groups = groupClientNames(names, pairs);
+  // Payload borné : on renvoie les 400 plus gros groupes (couvre l'essentiel du volume) + totaux exacts.
+  return {
+    ok: true, capped,
+    distinctNames: names.length,
+    distinctCanon: groups.length,
+    toReview: groups.filter((g) => g.hasVariants).length, // groupes à ≥ 2 graphies (déjà fusionnées)
+    aliasCount: pairs.length,
+    groups: groups.slice(0, 400),
+  };
+});
+
 // === REPORTING SELF-SERVICE (Lot 6) — moteur de rapport sur les opportunités (filtres + regroupement +
 // mesure, domain/report.js) exécuté sur le périmètre VISIBLE de l'appelant, + définitions de rapport
 // sauvegardées/partagées (reports/*, callable-only). Comble l'écart #6 (aucun reporting self-service).
