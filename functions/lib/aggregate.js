@@ -741,7 +741,14 @@ async function runSerialized(db, only, core) {
   if (acq.role === "enqueued") return { written: [], coalesced: true };
 
   const ref = db.doc(RECOMPUTE_LOCK_PATH);
-  const release = () => ref.set({ holder: FieldValue.delete(), acquiredAtMs: FieldValue.delete(), expiresAtMs: FieldValue.delete() }, { merge: true });
+  // Libération CONDITIONNELLE : ne supprime le verrou QUE si on le détient encore (holder inchangé). Si le
+  // bail avait expiré et qu'un autre holder a repris, on ne lui vole pas son verrou (cohérent avec la boucle
+  // de drain, qui teste déjà d.holder===acq.holder). Couvre le chemin d'échec du core (catch).
+  const release = () => db.runTransaction(async (tx) => {
+    const d = (await tx.get(ref)).data() || {};
+    if (d.holder && d.holder !== acq.holder) return; // repris par un autre → ne pas toucher
+    tx.set(ref, { holder: FieldValue.delete(), acquiredAtMs: FieldValue.delete(), expiresAtMs: FieldValue.delete() }, { merge: true });
+  });
   // Portée initiale = celle renvoyée par l'acquisition (peut inclure une file résiduelle absorbée à la
   // reprise d'un bail expiré, cf. acquireOrEnqueue) ; repli sur `only` pour toute forme ancienne.
   let runOnly = acq.only !== undefined ? acq.only : only;
