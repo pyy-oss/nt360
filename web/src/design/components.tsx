@@ -110,13 +110,29 @@ type Col = { header: string; align?: "left" | "right"; render: (row: any) => Rea
 // déroulant (grille clé/valeur). Sert à garder des tableaux étroits, sans scroll horizontal.
 export const det = (c: Col): Col => ({ ...c, sec: true });
 
+// Une colonne d'ACTION/contrôle porte un en-tête vide (boutons, menus, éditeurs inline). Elle ne doit
+// JAMAIS partir dans l'accordéon de détail (sinon l'action principale d'un tableau devient invisible).
+const isActionCol = (c: Col): boolean => (c.header || "").trim() === "";
+
 // Répartit les colonnes VISIBLES en principales (ligne) + détail (déroulé). Priorité au marquage
 // explicite `sec` ; sinon repli automatique de l'excédent au-delà d'un plafond (zéro scroll partout).
+// Dans les deux cas les colonnes d'action restent EN LIGNE : on ne replie que des colonnes de données.
 const PRIMARY_CAP = 7;
 function splitCols(cols: Col[]): { primary: Col[]; detail: Col[] } {
-  if (cols.some((c) => c.sec)) return { primary: cols.filter((c) => !c.sec), detail: cols.filter((c) => c.sec) };
+  if (cols.some((c) => c.sec)) {
+    return { primary: cols.filter((c) => !c.sec || isActionCol(c)), detail: cols.filter((c) => c.sec && !isActionCol(c)) };
+  }
   if (cols.length <= PRIMARY_CAP) return { primary: cols, detail: [] };
-  return { primary: cols.slice(0, PRIMARY_CAP), detail: cols.slice(PRIMARY_CAP) };
+  // Repli auto : on garde les PRIMARY_CAP premières colonnes de DONNÉES en ligne + toutes les actions,
+  // le reste des colonnes de données bascule dans le détail (préserve l'ordre relatif).
+  const primary: Col[] = [], detail: Col[] = [];
+  let keptData = 0;
+  for (const c of cols) {
+    if (isActionCol(c)) primary.push(c);
+    else if (keptData < PRIMARY_CAP) { primary.push(c); keptData++; }
+    else detail.push(c);
+  }
+  return { primary, detail };
 }
 
 // Grille clé/valeur du détail d'une ligne (colonnes secondaires). Responsive, lisible, premium.
@@ -265,7 +281,9 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
                       </td>
                     )}
                     {primary.map((c, ci) => (
-                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>
+                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
+                        {c.align === "right" || isActionCol(c) ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
+                      </td>
                     ))}
                   </tr>
                   {hasDetail && isOpen && (
@@ -441,7 +459,11 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                         ) : null}
                       </td>
                     )}
-                    {primary.map((c, ci) => <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum", c.align === "right" ? "text-right" : "text-left")}>{c.render(r)}</td>)}
+                    {primary.map((c, ci) => (
+                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
+                        {c.align === "right" || isActionCol(c) ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
+                      </td>
+                    ))}
                   </tr>
                   {isOpen && detail && (
                     <tr className="bg-panel2/40">

@@ -7,7 +7,7 @@ import { type FC, type ReactNode } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, colText, colNum, money, cx } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, colText, colNum, money, det, cx } from "../design/components";
 import { Props, grid4, bcLabel, FpLink } from "./_shared";
 import type { RelanceCreances, RelanceBc, RelanceJalons, RelanceResp } from "../types";
 
@@ -63,10 +63,10 @@ export const Relances: FC<Props> = () => {
               colText("Échéance", (r: any) => <span className="tabnum">{r.dueDate}</span>, (r: any) => r.dueDate),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               colText("Client", (r: any) => r.client, (r: any) => r.client),
-              colText("Responsable", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
+              colText("Commercial", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
               colText("N° facture", (r: any) => (r.fp ? <FpLink fp={r.fp} /> : <span className="text-faint">{r.numero}</span>), (r: any) => r.numero),
               colNum("Montant", (r: any) => money(r.amount), (r: any) => r.amount),
-            ]} rows={cre.items} />
+            ]} rows={cre.items} colsKey="relances-creances" />
           ) : <EmptyState label="Aucune créance échue — rien à relancer." />}
           <Tip>Factures ouvertes dont l'échéance est dépassée, triées par ancienneté. <button className="text-gold underline underline-offset-2 hover:opacity-80" onClick={() => go("invoicelist", { segment: "orphan" })}>Ouvrir les factures</button> pour agir (rattachement, dates).</Tip>
         </Card>
@@ -84,7 +84,7 @@ export const Relances: FC<Props> = () => {
               colText("FP", (r: any) => <FpLink fp={r.fp} />, (r: any) => r.fp || ""),
               colText("Statut", (r: any) => <Badge tone="neutral">{bcLabel(r.status)}</Badge>, (r: any) => r.status),
               colNum("Montant", (r: any) => money(r.amount), (r: any) => r.amount),
-            ]} rows={bc.items} />
+            ]} rows={bc.items} colsKey="relances-bc" />
           ) : <EmptyState label="Aucun BC en retard — livraisons à jour." />}
           <Tip>BC dont l'ETA (réelle sinon contractuelle) est dépassée et non livrés. <button className="text-gold underline underline-offset-2 hover:opacity-80" onClick={() => go("bc", { segment: "late" })}>Ouvrir l'exécution BC</button> pour mettre à jour le statut.</Tip>
         </Card>
@@ -97,13 +97,13 @@ export const Relances: FC<Props> = () => {
             <Table columns={[
               colText("Échéance", (r: any) => <span className="tabnum">{r.dueDate}</span>, (r: any) => r.dueDate),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
-              colText("FP", (r: any) => <FpLink fp={r.fp} />, (r: any) => r.fp),
+              det(colText("FP", (r: any) => <FpLink fp={r.fp} />, (r: any) => r.fp)),
               colText("Client", (r: any) => r.client, (r: any) => r.client),
-              colText("Responsable", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
+              colText("Commercial", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
               colNum("Attendu", (r: any) => money(r.expected), (r: any) => r.expected),
               colNum("Facturé", (r: any) => money(r.invoiced), (r: any) => r.invoiced),
               colNum("À émettre", (r: any) => <span className={cx("font-medium", r.gap > 0 && "text-clay")}>{money(r.gap)}</span>, (r: any) => r.gap),
-            ]} rows={jal.items} />
+            ]} rows={jal.items} colsKey="relances-jalons" />
           ) : <EmptyState label="Aucun jalon échu non facturé — facturation à jour." />}
           <Tip>Projets dont la somme des jalons échus dépasse le facturé à date (retard de facturation). L'écart est le montant à facturer pour rattraper la trajectoire.</Tip>
         </Card>

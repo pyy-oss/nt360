@@ -80,6 +80,9 @@ export const Reports: FC<Props> = () => {
 
       {res && (
         <Card title="Résultat" actions={<Badge tone="steel">{res.totals.count} opp. · {money(res.totals.amount)}</Badge>}>
+          {/* Aperçu visuel : Top 20 par la mesure choisie (le tableau ci-dessous liste TOUS les groupes,
+              paginés) — l'aperçu est explicitement borné, plus de troncature silencieuse. */}
+          {res.rows.length > 20 && <div className="text-[11px] uppercase tracking-wider text-faint mb-2">Aperçu · top 20 sur {res.rows.length}</div>}
           <div className="flex flex-col gap-2 mb-3">
             {res.rows.slice(0, 20).map((r) => (
               <div key={r.key} className="flex items-center gap-2 text-[13px]">

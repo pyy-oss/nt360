@@ -6,7 +6,7 @@ import { useState, useEffect, type FC } from "react";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, money, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, Eyebrow, colText, money, cx } from "../design/components";
 import { accountView, upsertAccount, upsertContact, deleteContact, type Account, type Contact, type AccountView } from "../lib/writes";
 import { ActivityTimeline } from "./activities";
 import type { Props } from "./_shared";
@@ -82,7 +82,7 @@ export const Client360: FC<Props> = ({ period }) => {
 
             {/* Métadonnées éditables du compte */}
             <div className="flex flex-col gap-2">
-              <div className="text-[11px] text-muted uppercase tracking-wide">Fiche compte</div>
+              <Eyebrow>Fiche compte</Eyebrow>
               {canWrite ? (
                 <div className="flex flex-wrap items-end gap-2 text-[13px]">
                   <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Secteur</span>
@@ -105,7 +105,7 @@ export const Client360: FC<Props> = ({ period }) => {
 
             {/* Contacts */}
             <div className="flex flex-col gap-2">
-              <div className="text-[11px] text-muted uppercase tracking-wide">Contacts</div>
+              <Eyebrow>Contacts</Eyebrow>
               {view.contacts.length > 0 && (
                 <Table columns={[
                   colText("Nom", (c: Contact) => <span className="inline-flex items-center gap-1">{c.name}{c.primary && <Badge tone="emerald">principal</Badge>}</span>, (c: Contact) => c.name || ""),

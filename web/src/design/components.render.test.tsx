@@ -74,3 +74,24 @@ describe("ListView — recherche, détail extensible, colonnes", () => {
     expect(cb.disabled).toBe(true);
   });
 });
+
+// Socle premium (design) : le repli auto au-delà de 7 colonnes ne doit JAMAIS cacher une colonne
+// d'action (entête vide) — les boutons/menus restent toujours en ligne, pas sous le chevron de détail.
+describe("Table — colonne d'action jamais repliée (repli auto > 7 colonnes)", () => {
+  it("garde le bouton d'action EN LIGNE quand il y a plus de 7 colonnes de données", () => {
+    const wide = [
+      colText("C1", (r: any) => r.fp), colText("C2", (r: any) => r.fp), colText("C3", (r: any) => r.fp),
+      colText("C4", (r: any) => r.fp), colText("C5", (r: any) => r.fp), colText("C6", (r: any) => r.fp),
+      colText("C7", (r: any) => r.fp), colText("C8", (r: any) => r.fp),
+      // Colonne d'action : entête vide, déclarée EN DERNIER (donc au-delà du plafond de repli).
+      colText("", () => <button type="button">Éditer</button>),
+    ];
+    render(<Table columns={wide} rows={[rows[0]]} />);
+    // Le bouton est rendu directement (aucun détail ouvert) → il est resté dans la ligne principale.
+    expect(screen.getByRole("button", { name: "Éditer" })).toBeTruthy();
+    // Une colonne de donnée excédentaire (C8) est, elle, repliée dans le détail (absente au repos).
+    expect(screen.queryByRole("columnheader", { name: "C8" })).toBeNull();
+    // Le tableau est donc bien extensible (chevron de détail présent).
+    expect(screen.getAllByRole("button", { name: "Afficher le détail" }).length).toBeGreaterThan(0);
+  });
+});

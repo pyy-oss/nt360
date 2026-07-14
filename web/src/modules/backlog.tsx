@@ -67,17 +67,18 @@ export const Backlog: FC<Props> = () => {
       {deriveRows.length > 0 && (
         <Card title={`Commandes à RAF dérivé (suspectes) · ${deriveRows.length}`}>
           <Table columns={[
+            // Essentiels + action EN LIGNE ; BU / Source / Année (secondaires) repliés via det().
             colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp),
             colText("Client", (t) => t.client),
             colText("Affaire", (t) => t.affaire || "—"),
-            colText("BU", (t) => t.bu),
-            colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—"),
-            colNum("Année", (t) => t.yearPo || "—"),
+            det(colText("BU", (t) => t.bu)),
+            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—")),
+            det(colNum("Année", (t) => t.yearPo || "—")),
             colNum("CAS", (t) => money(t.cas)),
             colNum("Facturé", (t) => money(t.facture)),
             colNum("RAF dérivé", (t) => money(t.raf)),
-            ...(canImport ? [colText("Intégration", (t) => <RafValidator row={t} />)] : []),
-          ]} rows={deriveRows} />
+            ...(canImport ? [colText("", (t) => <RafValidator row={t} />)] : []),
+          ]} rows={deriveRows} colsKey="backlog-derive" />
           <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code> (potentiellement surévalué). {canImport
             ? <>Après vérification, cliquez « <b>intégrer</b> » pour <b>valider le RAF</b> (le figer comme curaté → la commande rejoint le backlog fiable et quitte ce lot), ou « <b>Solder</b> » (RAF = 0) si l'affaire est livrée/facturée.</>
             : <>Vérifiez si elles devraient déjà être soldées, ou s'il manque un rattachement N° FP à des factures.</>}</Tip>
@@ -965,8 +966,8 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
         // ce qui empêche le rapprochement avec la commande P&L. La correction repatche l'opp (recalcul).
         colText("FP", (o: Opportunity) => <WonOppFpFixer o={o} />, (o: Opportunity) => o.fp || ""),
         colText("Client", (o: Opportunity) => o.client || "—", (o: Opportunity) => o.client || ""),
-        colText("Désignation", (o: Opportunity) => o.designation || "—", (o: Opportunity) => o.designation || ""),
-        colText("AM", (o: Opportunity) => o.am || "—", (o: Opportunity) => o.am || ""),
+        colText("Affaire", (o: Opportunity) => o.designation || "—", (o: Opportunity) => o.designation || ""),
+        colText("Commercial", (o: Opportunity) => o.am || "—", (o: Opportunity) => o.am || ""),
         colNum("Montant", (o: Opportunity) => money(o.amount || 0), (o: Opportunity) => o.amount || 0),
         colText("", (o: Opportunity) => (o.amount && o.amount > 0
           ? <Busy label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Inscription refusée" fn={() => createOrder({ fp: o.fp!, cas: o.amount!, client: o.client, am: o.am, bu: o.bu })} />
@@ -1127,7 +1128,7 @@ export const OrderList: FC<Props> = () => {
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
           det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
-          det(colText("AM", (r) => r.am, (r) => r.am)),
+          det(colText("Commercial", (r) => r.am, (r) => r.am)),
           // Affectation à un Project Manager (PMO) — éditable en place pour le droit « import ».
           det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "")),
           // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans

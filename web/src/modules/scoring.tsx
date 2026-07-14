@@ -4,7 +4,7 @@
 // périmètre suit la sécurité par enregistrement (Lot 2). Rebond vers le pipeline via le filtre client.
 import { useState, useEffect, useCallback, type FC } from "react";
 import { useNav } from "../lib/nav";
-import { Card, Tip, Badge, Table, colText, colNum, money, cx } from "../design/components";
+import { Card, Tip, Badge, Table, Segmented, colText, colNum, money, cx } from "../design/components";
 import { scoreOpportunities, type ScoredOpp } from "../lib/writes";
 import type { Props } from "./_shared";
 
@@ -30,14 +30,16 @@ export const Scoring: FC<Props> = () => {
   }, []);
   useEffect(() => { load().catch(() => {}); }, [load]);
   const shown = filter === "all" ? rows : rows.filter((r) => r.band === filter);
-  const chip = (b: "all" | "hot" | "warm" | "cold", label: string, n?: number) => (
-    <button type="button" onClick={() => setFilter(b)} className={cx("rounded px-2 py-1 text-xs", filter === b ? "bg-gold text-bg" : "bg-panel2 text-muted hover:text-ink")}>{label}{n != null ? ` · ${n}` : ""}</button>
-  );
   return (
     <div className="flex flex-col gap-4">
       <Card title="Scoring IA — probabilité de gain" actions={
-        <div className="flex items-center gap-1.5">
-          {chip("all", "Tout", rows.length)}{chip("hot", "Chaud", bands.hot)}{chip("warm", "Tiède", bands.warm)}{chip("cold", "Froid", bands.cold)}
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <Segmented value={filter} onChange={setFilter} ariaLabel="Filtrer par bande de score" options={[
+            { value: "all", label: "Tout", count: rows.length },
+            { value: "hot", label: "Chaud", count: bands.hot },
+            { value: "warm", label: "Tiède", count: bands.warm },
+            { value: "cold", label: "Froid", count: bands.cold },
+          ]} />
           {scoped && <Badge tone="steel">mon périmètre</Badge>}
           {calib?.calibrated
             ? <span title={`Base = taux de gain observé (${calib.baseWinRate}%) sur ${calib.sample} opportunités fermées`}><Badge tone="emerald">calibré · {calib.baseWinRate}% · n={calib.sample}</Badge></span>
@@ -51,16 +53,20 @@ export const Scoring: FC<Props> = () => {
               colText("Client", (o: ScoredOpp) => (
                 canGo("opplist") ? <button type="button" className="text-gold hover:underline" onClick={() => go("opplist", { search: o.client || "" })}>{o.client || "—"}</button> : (o.client || "—")
               ), (o: ScoredOpp) => o.client || ""),
-              colText("AM", (o: ScoredOpp) => o.am || "—"),
+              colText("Commercial", (o: ScoredOpp) => o.am || "—"),
               colNum("Montant", (o: ScoredOpp) => money(o.amount), (o: ScoredOpp) => o.amount),
               colNum("Étape", (o: ScoredOpp) => `${o.stage}/6`, (o: ScoredOpp) => o.stage),
               colText("Score", (o: ScoredOpp) => <span className="inline-flex items-center gap-2"><ScoreBadge score={o.score} band={o.band} /><span className="text-[11px] text-muted">{bandLabel[o.band]}</span></span>, (o: ScoredOpp) => o.score),
+              // Top 3 facteurs EN LIGNE (hauteur de ligne uniforme) ; la liste complète est dans le détail.
               colText("Principaux facteurs", (o: ScoredOpp) => (
-                <span className="inline-flex flex-wrap gap-1">{o.factors.map((f, i) => (
-                  <span key={i} className={cx("rounded px-1.5 py-0.5 text-[10px]", f.impact >= 0 ? "bg-emerald/15 text-emerald" : "bg-clay/15 text-clay")}>{f.label} {f.impact >= 0 ? "+" : ""}{f.impact}</span>
-                ))}</span>
+                <span className="inline-flex items-center gap-1" title={o.factors.map((f) => `${f.label} ${f.impact >= 0 ? "+" : ""}${f.impact}`).join(" · ")}>
+                  {o.factors.slice(0, 3).map((f, i) => (
+                    <span key={i} className={cx("rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap", f.impact >= 0 ? "bg-emerald/15 text-emerald" : "bg-clay/15 text-clay")}>{f.label} {f.impact >= 0 ? "+" : ""}{f.impact}</span>
+                  ))}
+                  {o.factors.length > 3 && <span className="text-[10px] text-faint">+{o.factors.length - 3}</span>}
+                </span>
               ), (o: ScoredOpp) => o.factors.map((f) => f.label).join(" ")),
-            ]} rows={shown} />
+            ]} rows={shown} colsKey="scoring" />
             <Tip>Score <b>explicable</b> (0–100) : modèle additif transparent — étape, indice de confiance, catégorie de prévision, prochaine action, DR, dormance, marge. Chaque badge de facteur montre sa contribution (± points). Concentrez l'effort sur les opportunités <b>chaudes</b> à fort montant ; requalifiez les <b>froides</b>.</Tip>
           </>
         )}

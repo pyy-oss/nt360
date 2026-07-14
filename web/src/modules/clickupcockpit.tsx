@@ -7,7 +7,7 @@ import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { fmt, pct, T } from "../design/tokens";
-import { Card, Kpi, Badge, Tip } from "../design/components";
+import { Card, Kpi, Badge, Tip, Table, colText } from "../design/components";
 import { HBars, Props, grid4 } from "./_shared";
 import type { ClickupHealthSummary, ClickupBcSummary, ClickupDelaysSummary } from "../types";
 
@@ -89,21 +89,16 @@ export const ClickupCockpit: FC<Props> = () => {
       {(bc?.overdue?.length || 0) > 0 && (
         <Card title={`Bons de commande en retard (ETA ClickUp) · ${bc!.overdue!.length}`}
           actions={<button className="btn-ghost !py-1 text-xs" onClick={() => go("bc", { segment: "late" })}>Exécution BC</button>}>
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm rtable">
-              <thead><tr className="text-muted"><th className="px-3 py-2 text-left font-medium text-xs">N° BC</th><th className="px-3 py-2 text-left font-medium text-xs">Fournisseur</th><th className="px-3 py-2 text-left font-medium text-xs">Statut</th><th className="px-3 py-2 text-left font-medium text-xs">ETA</th></tr></thead>
-              <tbody>
-                {bc!.overdue!.slice(0, 20).map((r) => (
-                  <tr key={r.bcNumber} className="odd:bg-ink/[.03]">
-                    <td className="px-3 py-1.5">{r.bcNumber}</td>
-                    <td className="px-3 py-1.5">{r.supplier || "—"}</td>
-                    <td className="px-3 py-1.5">{r.status ? <Badge tone="steel">{r.status}</Badge> : "—"}</td>
-                    <td className="px-3 py-1.5 tabnum">{r.eta || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table
+            colsKey="clickup-bc-late"
+            rows={bc!.overdue!}
+            columns={[
+              colText("N° BC", (r) => r.bcNumber, (r) => r.bcNumber || ""),
+              colText("Fournisseur", (r) => r.supplier || "—", (r) => r.supplier || ""),
+              colText("Statut", (r) => (r.status ? <Badge tone="steel">{r.status}</Badge> : "—"), (r) => r.status || ""),
+              colText("ETA", (r) => <span className="tabnum">{r.eta || "—"}</span>, (r) => r.eta || ""),
+            ]}
+          />
         </Card>
       )}
 
