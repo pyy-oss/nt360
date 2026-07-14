@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, ShieldCheck, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, FileCheck2, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, FileCheck2, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -45,7 +45,6 @@ const SalesForecast = from(() => import("./salesforecast"), "SalesForecast");
 const Scoring = from(() => import("./scoring"), "Scoring");
 const Staffing = from(() => import("./staffing"), "Staffing");
 const Reports = from(() => import("./reports"), "Reports");
-const DataQuality = from(() => import("./operations"), "DataQuality");
 const Habilitations = from(() => import("./admin"), "Habilitations");
 const Cleanup = from(() => import("./cleanup"), "Cleanup");
 const Fiches = from(() => import("./fiches"), "Fiches");
@@ -88,9 +87,8 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "client360", key: "overview", label: "Client 360", icon: Contact, Component: Client360 },
   { id: "clients", key: "clients", label: "Clients", icon: Users, Component: Clients },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
-  { id: "dataquality", key: "overview", label: "Qualité données", icon: ShieldCheck, Component: DataQuality },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
-  { id: "cleanup", key: "import", label: "Assainissement", icon: Eraser, Component: Cleanup },
+  { id: "cleanup", key: "import", label: "Qualité & correction", icon: Eraser, Component: Cleanup },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
   { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
   { id: "clickupcockpit", key: "overview", label: "Cockpit ClickUp", icon: Radar, Component: ClickupCockpit },
@@ -105,6 +103,6 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
-  { label: "Référentiels", ids: ["client360", "clients", "domaines", "dataquality"] },
+  { label: "Référentiels", ids: ["client360", "clients", "domaines"] },
   { label: "Admin", ids: ["cleanup", "habilitations"] },
 ];
