@@ -392,6 +392,9 @@ const DEDUPE_LABEL: Record<string, string> = { invoices: "Factures", opportuniti
 function DedupeCard() {
   const [res, setRes] = useState<DedupeResult | null>(null);
   const totalDup = res ? Object.values(res.result).reduce((s, r) => s + r.duplicates, 0) : 0;
+  // `capped` = collection trop volumineuse pour être scannée intégralement → l'analyse est PARTIELLE.
+  // Sans le signaler, un totalDup=0 sur une collection cappée afficherait « Aucun doublon » à tort.
+  const cappedCols = res ? Object.entries(res.result).filter(([, s]) => (s as { capped?: boolean }).capped).map(([col]) => DEDUPE_LABEL[col] || col) : [];
   return (
     <Card title="Dédoublonnage" actions={
       <div className="flex gap-2">
@@ -412,10 +415,14 @@ function DedupeCard() {
             colNum("Total", (r: any) => r.total.toLocaleString("fr-FR")),
             colNum("Groupes en doublon", (r: any) => r.duplicateGroups),
             colNum("À supprimer", (r: any) => r.duplicates),
+            colText("", (r: any) => (r.capped ? <Badge tone="gold">scan partiel</Badge> : null)),
           ]} rows={Object.entries(res.result).map(([col, s]) => ({ col, ...s }))} />
+          {cappedCols.length > 0 && (
+            <Tip><b>Analyse partielle</b> : {cappedCols.join(", ")} — collection(s) trop volumineuse(s) pour un scan intégral. Des doublons peuvent rester non détectés.</Tip>
+          )}
           <Tip>{res.applied
             ? "Doublons supprimés — le meilleur enregistrement de chaque groupe (source figée, plus récent) est conservé ; agrégats recalculés."
-            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — cliquez « Supprimer » pour nettoyer.` : "Aucun doublon détecté."}</Tip>
+            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — cliquez « Supprimer » pour nettoyer.` : cappedCols.length > 0 ? "Aucun doublon dans la partie scannée (voir l'avertissement ci-dessus)." : "Aucun doublon détecté."}</Tip>
         </div>
       ) : (
         <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement.</Tip>

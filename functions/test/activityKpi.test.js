@@ -41,6 +41,17 @@ describe("consultantKpi (Lot 13)", () => {
     const k = consultantKpi({ id: "c1", status: "active" }, a, ["2026-01"], null);
     expect(k.occupancyPct).toBe(100);
   });
+  it("sur-affectation : jours facturables ET CA plafonnés à la capacité (cohérents avec l'occupation)", () => {
+    // 80 % + 60 % = 140 % sur un mois → occupation 100 %, mais jours facturables = 20 (pas 28) et CA proraté.
+    const a = [
+      { consultantId: "c1", startMonth: "2026-01", endMonth: "2026-01", allocationPct: 80, tjmBilled: 1000 },
+      { consultantId: "c1", startMonth: "2026-01", endMonth: "2026-01", allocationPct: 60, tjmBilled: 1000 },
+    ];
+    const k = consultantKpi({ id: "c1", status: "active" }, a, ["2026-01"], null);
+    expect(k.occupancyPct).toBe(100);
+    expect(k.billableDays).toBe(20);            // 28 j bruts → plafonnés à la capacité (20)
+    expect(k.revenueForecast).toBe(20 * 1000);  // CA sur 20 j facturés, pas 28
+  });
 });
 
 describe("computeActivity — agrégats global + par BU", () => {

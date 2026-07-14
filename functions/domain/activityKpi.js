@@ -19,11 +19,16 @@ function consultantKpi(consultant, assignments, months, cost) {
   let occSum = 0, idleMonths = 0, billableDays = 0, revenue = 0;
   for (const m of months) {
     const covering = mine.filter((a) => coversMonth(a, m));
-    const alloc = Math.min(100, covering.reduce((s, a) => s + (Number(a.allocationPct) || 0), 0));
+    const rawAlloc = covering.reduce((s, a) => s + (Number(a.allocationPct) || 0), 0);
+    const alloc = Math.min(100, rawAlloc);
     occSum += alloc;
     if (work && alloc === 0) idleMonths += 1;
+    // COHÉRENCE occupation ⇄ CA : jours facturables et CA prévisionnel plafonnés à la CAPACITÉ du mois
+    // (un consultant sur-staffé > 100 % ne peut pas facturer > 20 j). On PRORATE la sur-allocation entre
+    // les affectations — sinon occupation=100 % mais CA sur 24 j/mois (deux chiffres contradictoires).
+    const capFactor = rawAlloc > 100 ? 100 / rawAlloc : 1;
     for (const a of covering) {
-      const days = (Number(a.allocationPct) || 0) / 100 * WORKING_DAYS_PER_MONTH;
+      const days = (Number(a.allocationPct) || 0) / 100 * WORKING_DAYS_PER_MONTH * capFactor;
       billableDays += days;
       if (a.tjmBilled != null) revenue += days * Number(a.tjmBilled);
     }
