@@ -23,7 +23,7 @@ import {
 // Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
 // d'abord d'une correction du N° FP. Aligné sur fpKey côté serveur (validation finale par le callable).
 const looksCanonicalFp = (fp?: string) => /FP\/?\s*\d{4}(?!\d)\/?\s*\d+/i.test(String(fp || ""));
-import { Props, relTime, AnomaliesList } from "./_shared";
+import { Props, relTime } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, BcLine, Opportunity } from "../types";
 
 // Sparkline SVG minimaliste (aucune dépendance chart dans ce chunk admin). points ∈ [0,1].
@@ -165,6 +165,10 @@ const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "
   fiches_sans_vente: { kind: "num-sheet-sale", cap: "rentabilite" },
   opps_doublons: { kind: "dedupe" },
   bc_doublons: { kind: "dedupe" },
+  // Incohérences ClickUp ↔ app (rapatriées ici — source unique). Non corrigeables en une valeur : drill vers
+  // l'écran commandes pré-filtré (rattacher la facture / solder le RAF selon le cas).
+  clickup_facture_sans_caf: { kind: "nav", module: "orderlist" },
+  clickup_cloture_avec_raf: { kind: "nav", module: "orderlist" },
 };
 
 // Éditeur générique une valeur → un bouton (texte / nombre).
@@ -388,7 +392,7 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
           <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
           <span className="text-ink truncate">{bucket.label}</span>
         </button>
-        {canFix && (
+        {canFix && cfg.kind !== "nav" && (
           <Busy variant="ghost" label="🧠 IA" okMsg="Propositions IA prêtes" errMsg="Analyse IA refusée" fn={runAi} />
         )}
         {bulkGen && !confirmBulk && (
@@ -431,6 +435,22 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
   );
 }
 
+// Export CSV des anomalies listées (à corriger dans l'app, ou à la source puis ré-importer). Rapatrié
+// depuis l'ancien cockpit Qualité (operations) → le Centre de correction reste le point unique.
+function exportBucketsCsv(buckets: CorrectionBucket[]) {
+  const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+  const refOfItem = (it: CorrectionItem) => it.numero || it.fp || it.bcNumber || it.client || "";
+  const rows = [["type", "severite", "compte", "libelle", "references"].join(",")].concat(
+    buckets.map((b) => [b.type, b.severity, String(b.count), esc(b.label), esc(b.items.map(refOfItem).filter(Boolean).join(" | "))].join(",")),
+  );
+  const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "anomalies_donnees.csv"; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function CorrectionCenter() {
   const [buckets, setBuckets] = useState<CorrectionBucket[] | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -439,10 +459,13 @@ function CorrectionCenter() {
   const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
   return (
     <Card title="Centre de correction" actions={
-      <Busy variant="ghost" label={buckets ? "Rafraîchir" : "Analyser"} okMsg="Analyse terminée" errMsg="Analyse refusée" fn={load} />
+      <div className="flex items-center gap-2">
+        {buckets && buckets.length > 0 && <button type="button" onClick={() => exportBucketsCsv(buckets)} className="btn-ghost !px-2.5 !py-1 text-xs">Exporter (CSV)</button>}
+        <Busy variant="ghost" label={buckets ? "Rafraîchir" : "Analyser"} okMsg="Analyse terminée" errMsg="Analyse refusée" fn={load} />
+      </div>
     }>
       <div className="flex flex-col gap-2">
-        {buckets == null && <Tip>Liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…). Cliquez <b>Analyser</b>.</Tip>}
+        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…) et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
         {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine. 🎉</div>}
         {buckets && buckets.map((b) => (
           <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} onDone={load} />
@@ -626,7 +649,6 @@ export const Cleanup: FC<Props> = () => {
   const junkBcIds = bcLines.filter((b) => b.id && !b.fp && !b.supplier && !b.bcNumber && !((b.amountXof || 0) > 0)).map((b) => b.id!) as string[];
   // Opportunités PERDUES (7) / ANNULÉES (9) : mortes. Purge OPTIONNELLE (retire de l'historique).
   const deadOppIds = opps.filter((o) => (o.stage === 7 || o.stage === 9) && o.id).map((o) => o.id!) as string[];
-  const issues = data?.issues || [];
   const days = (qh?.days || []).slice(-30);
   const score = data?.score;
   const totalAnomalies = (data?.issues || []).reduce((s, i) => s + i.count, 0);
@@ -684,11 +706,6 @@ export const Cleanup: FC<Props> = () => {
       {canImport && <FpReconcileCard />}
 
       {isDirection && <DedupeCard />}
-
-      <Card title={`Anomalies à corriger · ${issues.length}`}>
-        <AnomaliesList issues={issues} emptyLabel="Aucune anomalie — base saine." />
-        <Tip>Cliquez une anomalie pour ouvrir l'écran <b>pré-filtré sur la ligne</b> : vous pouvez y <b>corriger</b> (champ manquant/erroné) ou <b>supprimer</b> l'enregistrement. Les corrections & suppressions relancent le recalcul ; les anomalies se résorbent en direct.</Tip>
-      </Card>
 
       {isDirection && <CleanupJournal />}
     </div>

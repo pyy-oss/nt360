@@ -11,7 +11,7 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { Select, DateField } from "../design/inputs";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink, AnomaliesList } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
@@ -568,27 +568,16 @@ export const Fp360: FC<Props> = () => {
   );
 };
 
-// Cockpit QUALITÉ DES DONNÉES : hygiène d'ingestion (champs manquants, rattachements, incohérences).
-// La liste d'anomalies + drill-through est le composant PARTAGÉ `AnomaliesList` (source unique
-// summaries/dataQuality) — même widget que l'Assainissement (cleanup), plus de copie divergente.
+// Cockpit QUALITÉ DES DONNÉES : synthèse d'hygiène d'ingestion (score de complétude + volumes). Le
+// DÉTAIL des anomalies et leur correction (éditeur inline + IA + export) sont consolidés dans le Centre
+// de correction (Assainissement) — point unique ; ici on ne garde que la vue de santé + un renvoi.
 export const DataQuality: FC<Props> = () => {
   const { data, loading } = useDocData<DataQualitySummary>("summaries/dataQuality");
   if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
-  const issues = data.issues || [];
   const c = data.counts || {};
   const score = data.score ?? 1;
-  // Export CSV des anomalies (à corriger à la source puis ré-importer).
-  const exportCsv = () => {
-    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
-    const rows = [["type", "severite", "compte", "libelle", "references"].join(",")]
-      .concat(issues.map((i) => [i.type, i.severity, String(i.count), esc(i.label), esc((i.refs || []).join(" | "))].join(",")));
-    const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "anomalies_donnees.csv"; a.click();
-    URL.revokeObjectURL(url);
-  };
+  const totalAnomalies = (data.issues || []).reduce((s, i) => s + i.count, 0);
   return (
     <div className="flex flex-col gap-4">
       <div className={cols2}>
@@ -605,10 +594,7 @@ export const DataQuality: FC<Props> = () => {
           </div>
         </Card>
       </div>
-      <Card title={`Anomalies de données · ${issues.length}`} actions={issues.length ? <button onClick={exportCsv} className="btn-ghost !px-2.5 !py-1 text-xs">Exporter (CSV)</button> : undefined}>
-        <AnomaliesList issues={issues} />
-      </Card>
-      <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> (champs manquants, rattachements rompus, incohérences) pour fiabiliser les données — distinct du Centre d'alertes (alertes métier). <b>Clique une anomalie</b> pour ouvrir l'écran où la corriger directement dans l'app (rattacher, corriger l'opp/la commande/le BC/la facture, saisir le prix de vente…) ; les anomalies se recalculent automatiquement. Un ré-import reste possible pour les corrections de masse.</Tip>
+      <Tip>Ce cockpit cible l'<b>hygiène d'ingestion</b> — distinct du Centre d'alertes (alertes métier). Le <b>détail des {totalAnomalies.toLocaleString("fr-FR")} anomalies</b> et leur correction guidée (éditeur inline, assistant <b>🧠 IA</b>, export CSV) sont désormais réunis en un point unique : <b>Assainissement → Centre de correction</b>. Un ré-import reste possible pour les corrections de masse.</Tip>
     </div>
   );
 };

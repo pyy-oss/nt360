@@ -14,7 +14,7 @@ import { Card, Badge, EmptyState, cx, useToast } from "../design/components";
 import { Gauge } from "../design/charts";
 import { Select } from "../design/inputs";
 import { callImportDelta, callReingest, type ImportDeltaResult } from "../lib/writes";
-import type { AlertsSummary, AmsSummary, PmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order, QualityIssue } from "../types";
+import type { AlertsSummary, AmsSummary, PmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
 
 // --- R/O (Réalisé / Objectif) — partagé par les vues qui pilotent un périmètre ---
 // Normalisation de périmètre pour le rapprochement objectif ↔ entité : trim + majuscules + SANS
@@ -57,48 +57,10 @@ export function buildStageFunnel(byStage?: Record<number, { amount?: number; wei
 }
 
 // --- Anomalies « qualité des données » — table de correction UNIQUE et partagée ---
-// Le cockpit Qualité (operations) ET l'Assainissement (cleanup) affichaient la MÊME liste
-// (summaries/dataQuality) avec deux copies du rendu ET deux tables type→module qui avaient déjà
-// DIVERGÉ (cleanup gérait `clickup*` et le segment `factures_orphelines:orphan`, pas operations).
-// On centralise ici : une seule table (issueFix) + un seul composant (AnomaliesList).
-export function issueFix(type: string): { module: string; segment?: string } | null {
-  if (type === "factures_orphelines") return { module: "invoicelist", segment: "orphan" };
-  if (type.startsWith("factures")) return { module: "invoicelist" };
-  if (type.startsWith("commandes") || type === "am_invalide" || type === "surfacturation" || type.startsWith("clickup")) return { module: "orderlist" };
-  if (type.startsWith("opps")) return { module: "opplist" };
-  if (type.startsWith("bc_")) return { module: "bc" };
-  if (type.startsWith("fiches")) return { module: "pnlprojet" };
-  return null;
-}
-const ISSUE_TONE: Record<string, string> = { high: "clay", medium: "gold", low: "steel" };
-/** Liste d'anomalies avec drill-through pré-filtré sur la 1re référence à corriger. `emptyLabel`
- *  laisse chaque contexte garder sa formulation d'état vide. */
-export function AnomaliesList({ issues, emptyLabel = "Aucune anomalie détectée — données propres." }: { issues: QualityIssue[]; emptyLabel?: string }) {
-  const { go, canGo } = useNav();
-  if (!issues.length) return <EmptyState label={emptyLabel} />;
-  return (
-    <div className="flex flex-col gap-2">
-      {issues.map((it, i) => {
-        const fix = issueFix(it.type);
-        const actionable = !!fix && canGo(fix.module);
-        return (
-          <div key={i} className="flex items-start gap-2 text-[13px]">
-            <Badge tone={(ISSUE_TONE[it.severity] || "neutral") as any}>{it.count}</Badge>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              {actionable
-                ? <button onClick={() => go(fix!.module, { ...(fix!.segment ? { segment: fix!.segment } : {}), search: it.refs?.[0] })} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir l'écran pré-filtré sur la 1re ligne à corriger">{it.label}</button>
-                : <span>{it.label}</span>}
-              {(it.refs || []).slice(0, 6).map((r, j) => (
-                <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>
-              ))}
-              {(it.refs || []).length > 6 && <span className="text-[11px] text-faint">+{(it.refs || []).length - 6}</span>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+// La liste d'anomalies (summaries/dataQuality) et son drill-through ont été CONSOLIDÉS dans le
+// Centre de correction (Assainissement), point UNIQUE : éditeur inline + assistant IA + export CSV,
+// et les incohérences ClickUp y sont rapatriées côté serveur (correctionQueue). L'ancien composant
+// partagé AnomaliesList a donc été retiré (plus aucun écran ne l'affichait).
 
 /** Objectifs de l'année {fy} indexés par périmètre. `.get(scope, scopeValue)` → objectif ou undefined.
  *  Les objectifs étant ANNUELS, le R/O n'a de sens que si la période sélectionnée est cette année-là. */

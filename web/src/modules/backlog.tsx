@@ -1,5 +1,5 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
-import { useState, useMemo, type FC, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
@@ -11,7 +11,7 @@ import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, type BillingMilestone } from "../lib/writes";
+import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, peekOrderAmount, type BillingMilestone, type AmountPeek } from "../lib/writes";
 import { defaultMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
@@ -747,6 +747,20 @@ function AmountSyncBtn({ row }: { row: Order }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [peek, setPeek] = useState<AmountPeek | null>(null);
+  const [peekErr, setPeekErr] = useState<string | null>(null);
+  // À l'ouverture : lit le montant de l'opp liée (lecture seule) pour AFFICHER les deux valeurs et laisser
+  // décider du sens. Rechargé si le CAS change (après une synchro appliquée hors fermeture).
+  useEffect(() => {
+    if (!open || !row.fp) return;
+    let alive = true;
+    setPeek(null); setPeekErr(null);
+    peekOrderAmount(row.fp)
+      .then((p) => { if (alive) setPeek(p); })
+      .catch((e) => { if (alive) setPeekErr(String(e?.message || e?.code || "").replace(/^functions\//, "") || "lecture impossible"); });
+    return () => { alive = false; };
+  }, [open, row.fp, row.cas]);
+
   const run = async (direction: "toOpp" | "toOrder" | "clear") => {
     if (busy || !row.fp) return;
     setBusy(true);
@@ -760,6 +774,23 @@ function AmountSyncBtn({ row }: { row: Order }) {
       toast("Synchro refusée — " + String(e?.message || e?.code || "").replace(/^functions\//, ""), "err");
     } finally { setBusy(false); }
   };
+
+  const oppAmt = peek?.oppAmount ?? null;
+  const delta = oppAmt != null ? Math.round(row.cas || 0) - oppAmt : null;
+  const aligned = delta === 0;
+  const noOpp = peek != null && !peek.oppFound;
+  const ambiguous = !!peek?.ambiguous;
+  const hasLines = !!peek?.oppHasLines;
+  const canToOpp = !!peek?.oppFound && !ambiguous && !hasLines;   // écrit l'opp (refusé si opp chiffrée par lignes)
+  const canToOrder = !!peek?.oppFound && !ambiguous && (oppAmt ?? 0) > 0; // surcharge la commande depuis l'opp
+  const valueBox = (label: string, val: ReactNode, hint?: string, tone = "") => (
+    <div className="flex-1 rounded-lg border border-line bg-white/[0.03] px-3 py-2">
+      <div className="text-[11px] text-faint uppercase tracking-wide">{label}</div>
+      <div className={cx("font-display tabnum text-base leading-tight", tone)}>{val}</div>
+      {hint && <div className="mt-0.5 text-[10px] text-faint">{hint}</div>}
+    </div>
+  );
+
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-1 text-xs" title="Synchroniser le montant avec l'opportunité liée">
@@ -769,15 +800,37 @@ function AmountSyncBtn({ row }: { row: Order }) {
         title={<>Montant (CA Signé) — <span className="text-gold">{row.fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
         <div className="flex flex-col gap-3 text-[13px]">
-          <div className="rounded-lg border border-line bg-white/[0.03] px-3 py-2">
-            CA Signé actuel : <b className="text-ink">{money(row.cas)}</b>
-            {row.casSource === "override" && <div className="mt-1 text-[11px] text-gold">Surchargé depuis l'opportunité (prioritaire, survit aux ré-imports P&L).</div>}
+          {/* Les DEUX valeurs, côte à côte, pour comparer et choisir le sens. */}
+          <div className="flex gap-2 items-stretch">
+            {valueBox("Commande (CAS)", money(row.cas), row.casSource === "override" ? "surchargé depuis l'opp" : undefined, "text-ink")}
+            <div className="self-center text-faint text-lg">⇄</div>
+            {valueBox("Opportunité",
+              peek == null && !peekErr ? <span className="text-faint text-sm">…</span>
+                : peekErr ? <span className="text-clay text-sm">—</span>
+                : oppAmt != null ? money(oppAmt)
+                : <span className="text-faint text-sm">—</span>,
+              peek == null ? undefined : peekErr ? "lecture impossible" : noOpp ? "aucune opp liée" : ambiguous ? `${peek?.count} opps — ambigu` : peek?.oppWon ? "opp gagnée" : "opp en cours",
+              peek?.oppWon ? "text-emerald" : "text-ink")}
           </div>
-          <p className="text-[12px] text-muted">Aligne le montant avec l'<b>opportunité de même N° FP</b> (priorité à l'opp gagnée).</p>
+
+          {/* Verdict de comparaison. */}
+          {peek != null && !peekErr && peek.oppFound && !ambiguous && (
+            aligned
+              ? <div className="text-[12px] text-emerald">✓ Montants alignés — rien à synchroniser.</div>
+              : delta != null && <div className="text-[12px] text-gold">Écart de <b>{money(Math.abs(delta))}</b> ({delta > 0 ? "commande > opp" : "opp > commande"}). Choisissez la valeur qui fait foi.</div>
+          )}
+          {noOpp && <div className="text-[12px] text-clay">Aucune opportunité de même N° FP — la synchronisation est impossible (rien à comparer).</div>}
+          {ambiguous && <div className="text-[12px] text-clay">Plusieurs opportunités portent ce N° FP — désambiguïsez (n'en garder qu'une gagnée) avant de synchroniser.</div>}
+          {peekErr && <div className="text-[12px] text-clay">Lecture du montant de l'opp impossible — {peekErr}.</div>}
+
           <div className="flex flex-col gap-2">
-            <button type="button" disabled={busy} onClick={() => run("toOpp")} className="btn-ghost !py-1.5 text-xs text-left">Commande → Opportunité <span className="text-faint">· pose le CAS sur l'opp</span></button>
-            <button type="button" disabled={busy} onClick={() => run("toOrder")} className="btn-ghost !py-1.5 text-xs text-left">Opportunité → Commande <span className="text-faint">· surcharge le CAS (persistant)</span></button>
-            {row.casSource === "override" && <button type="button" disabled={busy} onClick={() => run("clear")} className="btn-ghost !py-1.5 text-xs text-left text-clay">Retirer la surcharge</button>}
+            <button type="button" disabled={busy || !canToOpp} onClick={() => run("toOpp")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
+              Commande → Opportunité <span className="text-faint">· pose {money(row.cas)} sur l'opp{hasLines ? " (refusé : opp chiffrée par lignes)" : ""}</span>
+            </button>
+            <button type="button" disabled={busy || !canToOrder} onClick={() => run("toOrder")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
+              Opportunité → Commande <span className="text-faint">· surcharge le CAS à {oppAmt != null ? money(oppAmt) : "—"} (persistant)</span>
+            </button>
+            {row.casSource === "override" && <button type="button" disabled={busy} onClick={() => run("clear")} className="btn-ghost !py-1.5 text-xs text-left text-clay">Retirer la surcharge {row.casSource === "override" && <span className="text-faint">· la commande reprend son CAS d'origine</span>}</button>}
           </div>
         </div>
       </Modal>
