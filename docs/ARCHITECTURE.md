@@ -28,7 +28,7 @@ structurants : (1) claims d'auth **namespacés** `nt360Role` ; (2) déploiement 
 
 - `src/App.tsx` — shell : navigation à deux niveaux (Domaines → Onglets), skip-link, `<main>`,
   `ErrorBoundary` par module, `Suspense` (lazy-load par module → code-splitting).
-- `src/modules/*.tsx` — **19 écrans** (overview, pipeline, accounts, activities, approvals,
+- `src/modules/*.tsx` — **~35 onglets** lazy-loadés (overview, pipeline, accounts, activities, approvals,
   salesforecast, scoring, reports, cleanup, backlog, operations, admin, finance…). Enregistrés dans
   `src/modules/index.tsx`.
 - `src/design/` — design system (composants `Card`/`Table`/`Badge`…, tokens de thème clair/sombre).
@@ -42,7 +42,7 @@ structurants : (1) claims d'auth **namespacés** `nt360Role` ; (2) déploiement 
 
 ## 3. Backend (`functions/`)
 
-- `index.js` — point d'entrée : **102 fonctions** exportées (callables `onCall`, planifiées
+- `index.js` — point d'entrée : **~132 fonctions** exportées (callables `onCall`, planifiées
   `onSchedule`, HTTP `onRequest`, trigger de recompute). Chaque callable est enveloppé par `guarded()`
   (observabilité : Cloud Logging + `opsLog` + alerte webhook + latence).
 - `functions/domain/*.js` — **modules PURS testables** (aucun I/O) portant la logique métier : sécurité
@@ -56,7 +56,7 @@ structurants : (1) claims d'auth **namespacés** `nt360Role` ; (2) déploiement 
   C'est le **patron d'amincissement** progressif d'`index.js`.
 - `functions/parsers/`, `functions/lib/` — parseurs d'ingestion (SheetJS) et utilitaires (ids, fx,
   sheets, config).
-- **Tests** : `functions/test/*.test.js` (vitest, 600+), `functions/test-rules/*.test.js` (règles via
+- **Tests** : `functions/test/*.test.js` (vitest, 760+), `functions/test-rules/*.test.js` (règles via
   émulateur).
 
 ### Pipeline de calcul
