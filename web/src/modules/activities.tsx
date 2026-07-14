@@ -9,15 +9,17 @@ import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { Card, Tip, Badge, Busy, DangerBtn, cx } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { Phone, Mail, CalendarDays, StickyNote, CheckSquare, type LucideIcon } from "lucide-react";
 import { listActivities, upsertActivity, deleteActivity, type Activity, type ActivityType } from "../lib/writes";
 import type { Props } from "./_shared";
 
-const TYPE_META: Record<ActivityType, { label: string; icon: string }> = {
-  call: { label: "Appel", icon: "📞" },
-  email: { label: "E-mail", icon: "✉️" },
-  meeting: { label: "RDV", icon: "🗓️" },
-  note: { label: "Note", icon: "📝" },
-  task: { label: "Tâche", icon: "✅" },
+// Iconographie lucide (cohérente avec le reste de l'app) au lieu d'emojis.
+const TYPE_META: Record<ActivityType, { label: string; Icon: LucideIcon }> = {
+  call: { label: "Appel", Icon: Phone },
+  email: { label: "E-mail", Icon: Mail },
+  meeting: { label: "RDV", Icon: CalendarDays },
+  note: { label: "Note", Icon: StickyNote },
+  task: { label: "Tâche", Icon: CheckSquare },
 };
 
 // Composeur : journalise une action ou crée une tâche rattachée à l'enregistrement fourni.
@@ -31,7 +33,7 @@ function ActivityComposer({ relatedType, relatedId, relatedName, onDone }: { rel
     <div className="flex flex-wrap items-end gap-2 text-[13px]">
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Type</span>
         <Select ariaLabel="Type d'activité" className="!py-1 w-28" value={type} onChange={(v) => setType(v as ActivityType)}
-          options={(Object.keys(TYPE_META) as ActivityType[]).map((t) => ({ value: t, label: `${TYPE_META[t].icon} ${TYPE_META[t].label}` }))} /></label>
+          options={(Object.keys(TYPE_META) as ActivityType[]).map((t) => ({ value: t, label: TYPE_META[t].label }))} /></label>
       <label className="flex flex-col gap-0.5 grow"><span className="text-[11px] text-muted">Sujet</span>
         <input className="field !py-1 w-full" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Sujet" placeholder={type === "task" ? "À faire…" : "Compte rendu…"} /></label>
       {type === "task" && (
@@ -52,7 +54,7 @@ function ActivityRow({ a, canWrite, onChange, onOpen }: { a: Activity; canWrite:
   const openTask = a.type === "task" && a.done !== true;
   return (
     <div className={cx("flex items-start gap-2 border-t border-hair py-2 text-[13px]", a.done && "opacity-60")}>
-      <span className="text-base leading-5" aria-hidden>{meta.icon}</span>
+      <meta.Icon size={15} className="text-muted mt-0.5 shrink-0" aria-hidden />
       <div className="min-w-0 grow">
         <div className="flex flex-wrap items-center gap-2">
           <span className={cx("font-medium", a.done && "line-through")}>{a.subject}</span>

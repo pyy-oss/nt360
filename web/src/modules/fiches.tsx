@@ -119,34 +119,56 @@ function Journal({ history }: { history: FicheEvent[] }) {
   );
 }
 
+// Petit bloc champ étiqueté (éditeur de lignes) : label + contenu, largeur fluide qui se replie.
+function LineField({ label, className, right, children }: { label: string; className?: string; right?: boolean; children: ReactNode }) {
+  return (
+    <div className={cx("flex flex-col gap-0.5 min-w-0", className)}>
+      <span className={cx("text-[10px] uppercase tracking-wider text-faint", right && "text-right")}>{label}</span>
+      <div className={cx("text-[12.5px] text-ink", right && "text-right")}>{children}</div>
+    </div>
+  );
+}
+
 // Éditeur de lignes fournisseur. mode: "edit" (étape 0, tout éditable sauf BC) · "bc" (étape 3, BC
 // uniquement) · "ro" (lecture seule). En "bc" le montant/type peuvent être masqués si non habilité.
+// Rendu en CARTES à champs fluides (flex-wrap) : plus de <table> à largeurs fixes → zéro scroll
+// horizontal, y compris dans une modale étroite. Les champs se replient sur plusieurs lignes.
 function LinesEditor({ lignes, mode, onChange, showMontant }: { lignes: FicheLine[]; mode: "edit" | "bc" | "ro"; onChange?: (l: FicheLine[]) => void; showMontant: boolean }) {
   const set = (i: number, patch: Partial<FicheLine>) => onChange?.(lignes.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const editable = mode === "edit";
+  const bcEdit = mode === "bc";
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[12.5px]">
-        <thead><tr className="text-faint text-left">
-          <th className="py-1 pr-2">Description</th><th className="py-1 pr-2">Fournisseur</th><th className="py-1 pr-2">Type</th>
-          <th className="py-1 pr-2">Devise</th>{showMontant && <th className="py-1 pr-2 text-right">Montant</th>}<th className="py-1 pr-2">N° BC</th>
-          {editable && <th className="py-1"></th>}
-        </tr></thead>
-        <tbody>
-          {lignes.map((l, i) => (
-            <tr key={i} className="border-t border-line/60 align-top">
-              <td className="py-1 pr-2">{editable ? <TxtField value={l.description} onChange={(v) => set(i, { description: v })} aria={`Description ligne ${i + 1}`} w="w-44" /> : l.description}</td>
-              <td className="py-1 pr-2">{editable ? <TxtField value={l.fournisseur} onChange={(v) => set(i, { fournisseur: v })} aria={`Fournisseur ligne ${i + 1}`} w="w-36" /> : l.fournisseur}</td>
-              <td className="py-1 pr-2">{editable ? <Select className="!py-1 w-32" ariaLabel={`Type ligne ${i + 1}`} value={l.type_charge} onChange={(v) => set(i, { type_charge: v })} options={TYPES_CHARGE.map((t) => ({ value: t, label: t.replace("_", " ") }))} /> : l.type_charge?.replace("_", " ")}</td>
-              <td className="py-1 pr-2">{editable ? <Select className="!py-1 w-20" ariaLabel={`Devise ligne ${i + 1}`} value={l.devise} onChange={(v) => set(i, { devise: v as FicheLine["devise"] })} options={DEVISES.map((d) => ({ value: d, label: d }))} /> : l.devise}</td>
-              {showMontant && <td className="py-1 pr-2 text-right">{editable ? <NumField value={l.montant} onChange={(n) => set(i, { montant: n })} aria={`Montant ligne ${i + 1}`} w="w-28" /> : <span className="tabnum">{fmt(l.montant)}</span>}</td>}
-              <td className="py-1 pr-2">{mode === "bc" ? <TxtField value={l.numero_bc || ""} onChange={(v) => set(i, { numero_bc: v })} aria={`N° BC ligne ${i + 1}`} w="w-28" placeholder="N° BC" /> : (l.numero_bc || <span className="text-faint">—</span>)}</td>
-              {editable && <td className="py-1"><button type="button" className="text-clay hover:underline text-[11px]" onClick={() => onChange?.(lignes.filter((_, j) => j !== i))} disabled={lignes.length <= 1}>Suppr.</button></td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {editable && <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs mt-2" onClick={() => onChange?.([...lignes, EMPTY_LINE()])}>+ Ajouter une ligne</button>}
+    <div className="flex flex-col gap-2">
+      {lignes.map((l, i) => (
+        <div key={i} className="rounded-lg border border-line/60 bg-ink/[.02] p-2.5">
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+            <LineField label="Description" className="flex-[2] basis-40">
+              {editable ? <TxtField value={l.description} onChange={(v) => set(i, { description: v })} aria={`Description ligne ${i + 1}`} w="w-full" /> : <span className="break-words">{l.description || "—"}</span>}
+            </LineField>
+            <LineField label="Fournisseur" className="flex-1 basis-32">
+              {editable ? <TxtField value={l.fournisseur} onChange={(v) => set(i, { fournisseur: v })} aria={`Fournisseur ligne ${i + 1}`} w="w-full" /> : <span className="break-words">{l.fournisseur || "—"}</span>}
+            </LineField>
+            <LineField label="Type" className="basis-32 grow">
+              {editable ? <Select className="!py-1 w-full" ariaLabel={`Type ligne ${i + 1}`} value={l.type_charge} onChange={(v) => set(i, { type_charge: v })} options={TYPES_CHARGE.map((t) => ({ value: t, label: t.replace("_", " ") }))} /> : (l.type_charge?.replace("_", " ") || "—")}
+            </LineField>
+            <LineField label="Devise" className="basis-20">
+              {editable ? <Select className="!py-1 w-full" ariaLabel={`Devise ligne ${i + 1}`} value={l.devise} onChange={(v) => set(i, { devise: v as FicheLine["devise"] })} options={DEVISES.map((d) => ({ value: d, label: d }))} /> : l.devise}
+            </LineField>
+            {showMontant && (
+              <LineField label="Montant" className="basis-28 grow" right>
+                {editable ? <NumField value={l.montant} onChange={(n) => set(i, { montant: n })} aria={`Montant ligne ${i + 1}`} w="w-full" /> : <span className="tabnum">{fmt(l.montant)}</span>}
+              </LineField>
+            )}
+            <LineField label="N° BC" className="basis-28 grow">
+              {bcEdit ? <TxtField value={l.numero_bc || ""} onChange={(v) => set(i, { numero_bc: v })} aria={`N° BC ligne ${i + 1}`} w="w-full" placeholder="N° BC" /> : (l.numero_bc || <span className="text-faint">—</span>)}
+            </LineField>
+            {editable && (
+              <button type="button" className="text-clay hover:underline text-[11px] shrink-0 self-end pb-1.5" onClick={() => onChange?.(lignes.filter((_, j) => j !== i))} disabled={lignes.length <= 1}>Suppr.</button>
+            )}
+          </div>
+        </div>
+      ))}
+      {editable && <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs mt-1 self-start" onClick={() => onChange?.([...lignes, EMPTY_LINE()])}>+ Ajouter une ligne</button>}
     </div>
   );
 }

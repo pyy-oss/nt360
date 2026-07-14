@@ -80,7 +80,7 @@ function ActivityCockpit() {
         {stat("CA staffé prév.", money(g.revenueForecast))}
         {k.canCost && g.marginForecast != null && stat("Marge prév.", money(g.marginForecast), g.marginForecast >= 0 ? "text-emerald" : "text-clay")}
       </div>
-      {!!k.belowTargetCount && <div className="mt-3 text-[13px] rounded px-3 py-2 bg-clay/15 text-clay">⚠️ <b>{k.belowTargetCount}</b> ressource(s) active(s) <b>sous l'objectif</b> d'occupation → repositionner / avant-vente. Objectifs paramétrables dans Habilitations.</div>}
+      {!!k.belowTargetCount && <div className="mt-3 text-[13px] rounded px-3 py-2 bg-clay/15 text-clay"><b>{k.belowTargetCount}</b> ressource(s) active(s) <b>sous l'objectif</b> d'occupation → repositionner / avant-vente. Objectifs paramétrables dans Habilitations.</div>}
       {k.byBu.length > 1 && (
         <div className="mt-4 border-t border-hair pt-3">
           <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par business unit</div>
@@ -415,7 +415,7 @@ function CapacityPipeline() {
       </div>
       <div className={cx("mt-3 text-[13px] rounded px-3 py-2", under ? "bg-clay/15 text-clay" : "bg-emerald/15 text-emerald")}>
         {under
-          ? <>⚠️ <b>Sous-capacité</b> : ~{Math.abs(c.fteGap)} ETP manquant(s) pour délivrer le pipeline pondéré → anticiper le <b>recrutement</b> / la sous-traitance.</>
+          ? <><b>Sous-capacité</b> : ~{Math.abs(c.fteGap)} ETP manquant(s) pour délivrer le pipeline pondéré → anticiper le <b>recrutement</b> / la sous-traitance.</>
           : <>✓ <b>Capacité suffisante</b> : ~{c.fteGap} ETP disponible(s) au-delà du pipeline pondéré → risque de <b>banc</b>, pousser l'avant-vente.</>}
       </div>
       {c.byBu.length > 1 && (
@@ -477,17 +477,23 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
             fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.startMonth || !f.endMonth) throw new Error("période requise"); await upsertAssignment(f); setF({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null }); setAdding(false); load(); }} />
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="text-[12px] border-collapse">
-          <thead><tr><th className="text-left px-2 py-1 sticky left-0 bg-bg">Consultant</th>{plan.months.map((m) => <th key={m} className="px-2 py-1 text-center tabnum whitespace-nowrap">{monthLabel(m)}</th>)}</tr></thead>
+      {/* Matrice consultant × mois : le défilement horizontal (inévitable pour N mois) est CONTENU —
+          hauteur bornée + entête de mois collée en haut + colonne Consultant collée à gauche (ombre de
+          séparation) pour rester lisible pendant le scroll. */}
+      <div className="relative overflow-auto max-h-[70vh] rounded-lg border border-line/60">
+        <table className="text-[12px] border-collapse w-max min-w-full">
+          <thead><tr>
+            <th className="text-left px-2 py-1.5 sticky left-0 top-0 z-20 bg-panel shadow-[2px_0_0_rgb(var(--line))]">Consultant</th>
+            {plan.months.map((m) => <th key={m} className="px-2 py-1.5 text-center tabnum whitespace-nowrap sticky top-0 z-10 bg-panel">{monthLabel(m)}</th>)}
+          </tr></thead>
           <tbody>
             {consuls.map((c) => {
               const active = (c.status || "active") === "active";
               return (
                 <tr key={c.id} className="border-t border-hair">
-                  <td className="px-2 py-1 sticky left-0 bg-bg whitespace-nowrap">{c.name || c.id}{c.bu ? <span className="text-[10px] text-muted"> · {c.bu}</span> : null}</td>
+                  <td className="px-2 py-1 sticky left-0 z-10 bg-bg whitespace-nowrap shadow-[2px_0_0_rgb(var(--line)/0.6)]">{c.name || c.id}{c.bu ? <span className="text-[10px] text-muted"> · {c.bu}</span> : null}</td>
                   {plan.months.map((m) => { const pct = (plan.byConsultant[c.id] && plan.byConsultant[c.id][m]) || 0; return (
-                    <td key={m} className={cx("px-2 py-1 text-center tabnum rounded", loadTone(pct, active))}>{pct > 0 ? `${pct}%` : (active ? "IC" : "—")}</td>
+                    <td key={m} className={cx("px-2 py-1 text-center tabnum", loadTone(pct, active))}>{pct > 0 ? `${pct}%` : (active ? "IC" : "—")}</td>
                   ); })}
                 </tr>
               );
