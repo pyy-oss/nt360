@@ -1823,21 +1823,29 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
 exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { rollupForecast } = require("./domain/forecast");
+  const { plausibleYear } = require("./lib/ids");
   const [oppSnap, fiscalDoc] = await Promise.all([
-    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "stale", "ownerUid", "visibleTo").get(),
+    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "ownerUid", "visibleTo").get(),
     db.doc("config/fiscal").get(),
   ]);
   let opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true);
   // Visibilité par enregistrement : sous OWD « private », un non-admin ne prévoit que son périmètre.
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
-  const rollup = rollupForecast(opps);
-  // Quota = objectif CAS annuel (config/fiscal.currentFy, périmètre global) — référence d'atteinte.
   const currentFy = (fiscalDoc.data() || {}).currentFy || new Date().getUTCFullYear();
-  const objSnap = await db.collection("objectives").where("fiscalYear", "==", currentFy).where("scope", "==", "global").get();
+  // EXERCICE SÉLECTIONNÉ : filtre la prévision par ANNÉE DE CLÔTURE (closingDate), en miroir de l'assiette
+  // d'opps du cockpit (overviewCalc : inPeriod(yr(closingDate))). Sans ce filtre, la carte affichait le
+  // CUMUL toutes années alors qu'un exercice précis est choisi → incohérent avec le sélecteur de période.
+  // `period` = année ("2026") ou "all"/absent (cumul, référence quota = exercice courant).
+  const periodYear = plausibleYear(String(req.data?.period || ""));
+  const targetFy = periodYear || currentFy;
+  if (periodYear) opps = opps.filter((o) => String(o.closingDate || "").slice(0, 4) === String(periodYear));
+  const rollup = rollupForecast(opps);
+  // Quota = objectif CAS annuel (périmètre global) de l'EXERCICE affiché — référence d'atteinte cohérente.
+  const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
   const quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
   return {
-    ok: true, fiscalYear: currentFy, scoped, quota,
+    ok: true, fiscalYear: targetFy, allPeriods: !periodYear, scoped, quota,
     ...rollup,
     attainment: quota > 0 ? { closed: rollup.closed / quota, commit: rollup.commit / quota, bestCase: rollup.bestCase / quota } : null,
   };

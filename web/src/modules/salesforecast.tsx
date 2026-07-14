@@ -17,13 +17,14 @@ function Bar({ label, value, max, tone, sub }: { label: string; value: number; m
   );
 }
 
-export const SalesForecast: FC<Props> = () => {
+export const SalesForecast: FC<Props> = ({ period }) => {
   const [r, setR] = useState<ForecastRollup | null>(null);
   const [loading, setLoading] = useState(true);
+  // Filtre la prévision sur l'EXERCICE sélectionné (sinon la carte affichait le cumul toutes années).
   const load = useCallback(async () => {
     setLoading(true);
-    try { setR(await forecastRollup()); } catch { setR(null); } finally { setLoading(false); }
-  }, []);
+    try { setR(await forecastRollup(period)); } catch { setR(null); } finally { setLoading(false); }
+  }, [period]);
   useEffect(() => { load().catch(() => {}); }, [load]);
   // Échelle des barres = max(pipeline, quota) → le quota reste lisible même si le pipe le dépasse.
   const max = r ? Math.max(r.pipeline, r.quota, 1) : 1;
@@ -34,7 +35,7 @@ export const SalesForecast: FC<Props> = () => {
         {loading ? <div className="text-[13px] text-muted py-2">Chargement…</div> : !r ? <Tip>Prévision indisponible.</Tip> : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap gap-x-8 gap-y-2">
-              <div><div className="text-[11px] text-muted">Exercice</div><div className="font-display text-lg">{r.fiscalYear}</div></div>
+              <div><div className="text-[11px] text-muted">Exercice</div><div className="font-display text-lg">{r.allPeriods ? "Tout" : r.fiscalYear}</div></div>
               <div><div className="text-[11px] text-muted">Quota (objectif CAS)</div><div className="font-display tabnum text-lg">{r.quota ? money(r.quota) : "—"}</div></div>
               <div><div className="text-[11px] text-muted">Gagné / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.closed)}</div></div>
               <div><div className="text-[11px] text-muted">Commit / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.commit)}</div></div>
