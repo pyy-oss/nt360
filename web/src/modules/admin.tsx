@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
@@ -631,6 +631,7 @@ function ClickupCard() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [dedupeBusy, setDedupeBusy] = useState(false);
   const [enrichBusy, setEnrichBusy] = useState(false);
   const [bcRecBusy, setBcRecBusy] = useState(false);
   const [bcBulkBusy, setBcBulkBusy] = useState(false);
@@ -701,6 +702,25 @@ function ClickupCard() {
       // Un timeout client est possible sur un gros volume : le traitement se poursuit côté serveur.
       toast(detail.includes("deadline") || detail.includes("timeout") ? "Push lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Push refusé — ${detail}` : "Push : échec"), detail.includes("deadline") ? "ok" : "err");
     } finally { setBulkBusy(false); }
+  };
+  // Nettoyage des doublons ClickUp (créés par des push concurrents) : d'abord un APERÇU (dry-run) qui
+  // compte les tâches supprimables du jour, puis confirmation avant suppression réelle. Direction.
+  const dedupeTasks = async () => {
+    if (dedupeBusy) return;
+    setDedupeBusy(true);
+    try {
+      const preview = await dedupeClickupTasks({ listId: list, windowHours: 24 });
+      if (!preview.deletable) { toast(`Aucun doublon récent (${preview.duplicates} doublon(s) hors fenêtre 24 h) — rien à nettoyer.`, "ok"); return; }
+      const ok = await ask(
+        <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> créée(s) dans les dernières 24 h, sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche liée (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
+        { title: "Nettoyer les doublons ClickUp", confirmLabel: `Supprimer ${preview.deletable}`, tone: "clay" });
+      if (!ok) return;
+      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 24 });
+      toast(`Doublons nettoyés — ${r.deleted} supprimée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} sur ${r.groups} N° FP.`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail.includes("deadline") || detail.includes("timeout") ? "Nettoyage lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Nettoyage refusé — ${detail}` : "Nettoyage : échec"), detail.includes("deadline") ? "ok" : "err");
+    } finally { setDedupeBusy(false); }
   };
   const enrich = async () => {
     if (enrichBusy) return;
@@ -807,6 +827,9 @@ function ClickupCard() {
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
           {bulkBusy ? "Push…" : "Tout resynchroniser"}
+        </button>
+        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer les tâches ClickUp dupliquées (même N° FP) créées dans les dernières 24 h par des push concurrents. Aperçu puis confirmation ; la tâche liée / la plus ancienne est conservée.">
+          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons du jour"}
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
           {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}

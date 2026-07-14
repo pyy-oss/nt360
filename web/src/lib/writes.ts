@@ -611,6 +611,13 @@ export async function reconcileClickupLinks(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "reconcileClickupLinks", { timeout: 300_000 })({ listId: opts?.listId });
   return res.data as { ok: boolean; matched: number; already: number; total: number; tasksWithFp: number };
 }
+/** Nettoyage des tâches ClickUp DUPLIQUÉES (même N° FP) — créées par des push concurrents. Deux temps :
+ *  apply=false → aperçu (ne supprime rien), apply=true → supprime. `windowHours` borne aux doublons
+ *  récents (défaut 24 h = « du jour »). Conserve la tâche liée / la plus ancienne. Admin. */
+export async function dedupeClickupTasks(opts?: { apply?: boolean; listId?: string; windowHours?: number }) {
+  const res = await httpsCallable(functions, "dedupeClickupTasks", { timeout: 540_000 })({ apply: opts?.apply, listId: opts?.listId, windowHours: opts?.windowHours });
+  return res.data as { ok: boolean; dryRun: boolean; groups: number; duplicates: number; deletable: number; deleted: number; failed: number; windowHours: number; samples: { fp: string; keptId: string; toDelete: number }[] };
+}
 /** Enrichit les tâches ClickUp liées : commentaire de synthèse idempotent (CA/RAF, jalons, BC, qualité)
  *  + tag « à risque ». Admin. Peut être long. */
 export async function enrichClickup() {
