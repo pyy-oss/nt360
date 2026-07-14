@@ -3112,6 +3112,13 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   // ANTI-DOUBLON : index des tâches existantes par FP (Opp ID) → adopter au lieu de dupliquer.
   // Audit F3 : un index PARTIEL (scan en échec) dupliquerait EN MASSE → on ANNULE le push entier
   // plutôt que de créer des doublons sur toutes les commandes non liées.
+  // VERROU DE CONCURRENCE : deux clics rapprochés (le traitement long fait croire à un échec) lançaient
+  // des push PARALLÈLES → index anti-doublon figé avant les créations des autres → tâches TRIPLÉES. Un
+  // seul push en masse à la fois ; les concurrents sont refusés proprement.
+  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const lock = await acquireClickupLock(db, "push", req.auth.uid);
+  if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push ClickUp en masse est déjà en cours — patientez qu'il se termine (évite les doublons). Suivez l'avancement dans ClickUp.");
+  try {
   let fpIndex;
   try { fpIndex = await buildFpIndex(token, allScanLists(listId)); }
   catch (e) { throw new HttpsError("unavailable", "ClickUp : index anti-doublon indisponible — push en masse annulé pour éviter les doublons. " + ((e && e.message) || "")); }
@@ -3143,6 +3150,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   const res = { created, updated, adopted, failed, skipped, total: orders.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bulk_push", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
+  } finally { await releaseClickupLock(db, FieldValue, "push"); }
 });
 
 // reconcileClickupLinks : RATTACHE les commandes aux tâches ClickUp DÉJÀ existantes (Opp ID = FP),
@@ -3174,6 +3182,53 @@ exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLI
   const res = { matched, already, total: orders.length, tasksWithFp: Object.keys(fpIndex).length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_reconcile", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
+});
+
+// dedupeClickupTasks : NETTOYAGE des tâches ClickUp DUPLIQUÉES (même N° FP) — typiquement créées par des
+// push concurrents avant le verrou. Deux temps : apply=false → APERÇU (ne supprime RIEN), apply=true →
+// supprime. Conserve la tâche LIÉE (ou la plus ancienne) et ne supprime que les doublons créés dans la
+// fenêtre (défaut 24 h = « doublons du jour »). Direction. Audité.
+exports.dedupeClickupTasks = onCallG("dedupeClickupTasks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const clickup = require("./lib/clickup");
+  const cf = require("./lib/clickupFields");
+  const { fpKey } = require("./lib/ids");
+  const { planDedupe } = require("./domain/clickupDedupe");
+  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  const apply = req.data?.apply === true;
+  // Fenêtre de suppression : par défaut les tâches créées dans les dernières 24 h (« doublons du jour »).
+  // 0 = toutes les époques (à utiliser en connaissance de cause). Borné à 8760 h (1 an).
+  const windowHours = req.data?.windowHours != null ? Math.min(8760, Math.max(0, Number(req.data.windowHours) || 0)) : 24;
+  const sinceMs = windowHours > 0 ? Date.now() - windowHours * 3600_000 : 0;
+  // Scan SANS swallow (audit F3) : un scan partiel prendrait des tâches manquantes pour des « uniques »
+  // et pourrait supprimer à tort → on ANNULE plutôt (l'appelant relance).
+  const tasks = [];
+  for (const lid of allScanLists(listId)) {
+    let t;
+    try { t = await clickup.listTasks(token, lid, { includeClosed: true }); }
+    catch (e) { throw new HttpsError("unavailable", `ClickUp : liste ${lid} illisible — dédoublonnage annulé (aucune suppression). ${(e && e.message) || ""}`); }
+    if (t.truncated) throw new HttpsError("failed-precondition", `Liste ClickUp ${lid} tronquée (> 5000 tâches) — dédoublonnage annulé pour éviter des suppressions à tort.`);
+    for (const task of t) { const fp = fpKey(cf.taskFp(task)); if (fp) tasks.push({ id: task.id, fp, dateCreatedMs: Number(task.date_created) || 0, name: task.name }); }
+  }
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const linkedIds = new Set(Object.values(links));
+  const plan = planDedupe(tasks, linkedIds, sinceMs);
+  const samples = plan.groups.slice(0, 50).map((g) => ({ fp: g.fp, keptId: g.keepId, toDelete: g.deleteIds.length }));
+  let deleted = 0, failed = 0;
+  if (apply) {
+    for (const g of plan.groups) {
+      for (const id of g.deleteIds) {
+        try { await clickup.deleteTask(token, id); deleted++; }
+        catch (e) { failed++; logger.warn("dedupe ClickUp: suppression échouée", { id, msg: e && e.message }); }
+      }
+    }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_dedupe", module: "habilitations", entity: "config", entityId: "clickupTasks", detail: { deleted, failed, groups: plan.groups.length, duplicates: plan.duplicates, windowHours, listId }, ts: FieldValue.serverTimestamp() });
+  }
+  return { ok: true, dryRun: !apply, groups: plan.groups.length, duplicates: plan.duplicates, deletable: plan.deletable, deleted, failed, windowHours, samples };
 });
 
 // clickupHealth : diagnostic de QUALITÉ de l'intégration (couverture, tâches orphelines, écarts CAF,
@@ -3442,6 +3497,11 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const force = req.data?.force === true;
   const listId = bcListIdOf(cfg, req.data?.listId);
+  // Même verrou de concurrence que le push commandes : évite la triple création sur clics rapprochés.
+  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const lock = await acquireClickupLock(db, "pushBc", req.auth.uid);
+  if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push BC ClickUp est déjà en cours — patientez qu'il se termine (évite les doublons).");
+  try {
   let fieldDefs = []; try { fieldDefs = await clickup.listFields(token, listId); } catch (e) { logger.warn("BC bulk: champs illisibles", { msg: e && e.message }); }
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC bulk: statuts illisibles", { msg: e && e.message }); }
   let bcIndex = {}; try { bcIndex = (await buildBcClickupIndex(token, listId)).index; } catch (e) { logger.warn("BC bulk: réconciliation impossible", { msg: e && e.message }); }
@@ -3468,6 +3528,7 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
   const res = { created, updated, adopted, failed, skipped, total: groups.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_bulk_push", module: "habilitations", entity: "config", entityId: "clickupBcLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
+  } finally { await releaseClickupLock(db, FieldValue, "pushBc"); }
 });
 
 // reconcileBcLinks : RATTACHE les BC aux tâches ClickUp DÉJÀ existantes (par N° de Commande) sans rien

@@ -30,6 +30,7 @@ activityKpis
 aiSuggestCorrections
 capacityPlan
 dedupe
+dedupeClickupTasks
 deleteActivity
 generateFromInvoices
 deleteAssignment
