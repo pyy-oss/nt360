@@ -1071,6 +1071,19 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   const buckets = defs.filter((d) => d.records.length).map((d) => ({
     type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),
   }));
+  // SOURCE UNIQUE — on rapatrie ICI les incohérences ClickUp ↔ app (statut « facturé » sans CAF, « clôturé »
+  // avec RAF) : MÊME calcul que le cockpit Qualité (clickupSignals sur l'assiette commandes fusionnée), pour
+  // que le Centre de correction couvre TOUTES les anomalies (plus de liste dupliquée ailleurs). Ces cas ne se
+  // corrigent pas en une valeur → buckets « drill-through » (la ligne renvoie à l'écran commandes pré-filtré).
+  const cuSyncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+  if (Object.keys(cuSyncMap).length) {
+    const { clickupSignals } = require("./domain/clickupSignals");
+    const asOf = new Date().toISOString().slice(0, 10);
+    const clientByFp = new Map(ordersDq.map((o) => [o.fp, o.client || ""]));
+    for (const iss of clickupSignals(ordersDq, cuSyncMap, safeIdCorr, asOf).issues) {
+      buckets.push({ type: iss.type, severity: iss.severity, label: iss.label, count: iss.count, items: (iss.refs || []).map((fp) => ({ fp, client: clientByFp.get(fp) || "" })) });
+    }
+  }
   return { ok: true, buckets, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
