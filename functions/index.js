@@ -2661,11 +2661,13 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
     const client = p.client || "Client à préciser"; // placeholder si aucune facture ne porte de client
     const bu = p.bu || "AUTRE";                      // BU depuis la facture, sinon placeholder « AUTRE »
     const designation = genDesignation(p);
-    // COMMANDE (source « manuel », marquée genFromInvoice). RAF null → dérivé (CAS − facturé = 0, soldée).
-    // merge:true : idempotent si le FP a été créé entre-temps ; le P&L Excel reste prioritaire au ré-import.
+    // COMMANDE (source « manuel », marquée genFromInvoice). RAF = 0 EXPLICITE (curaté) : la commande est
+    // intégralement couverte par ses propres factures → SOLDÉE, aucun backlog. (Un RAF dérivé « CAS − facturé »
+    // créerait un backlog fantôme si le montant facture est lu différemment côté fusion.) Rattachement
+    // comptable par yearPo (exercice). merge:true : idempotent ; le P&L Excel reste prioritaire au ré-import.
     batch.set(db.doc(`orders/${oid}`), {
       _id: oid, fp: p.fp, client, designation, bu, am: PH_AM,
-      yearPo: p.yearPo, cas: p.cas, raf: null, suppliers: [],
+      yearPo: p.yearPo, cas: p.cas, raf: 0, suppliers: [],
       source: "manuel", genFromInvoice: true, createdBy: req.auth.uid,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });

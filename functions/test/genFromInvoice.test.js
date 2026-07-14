@@ -63,6 +63,10 @@ describe("genFromInvoice — générer commande+opp depuis factures non rattach�
     const { plan } = planFromInvoices([{ id: "a", fp: "FP/2026/4", amountHt: 500, date: "2026-01-01" }], new Set());
     expect(plan[0].bu).toBe("");
   });
+  it("année de PO robuste : repli sur l'année du N° FP quand les factures n'ont pas de date", () => {
+    const { plan } = planFromInvoices([{ id: "a", fp: "FP/2023/12", client: "ACME", amountHt: 900 }], new Set()); // pas de date
+    expect(plan[0].yearPo).toBe(2023); // dérivée du N° FP → rattachement comptable correct (pas 0)
+  });
   it("entrées vides → plan vide, compteurs cohérents", () => {
     const r = planFromInvoices([], new Set());
     expect(r.plan).toEqual([]);
