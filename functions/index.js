@@ -1074,6 +1074,59 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   return { ok: true, buckets, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
+// ASSISTANT IA DU CENTRE DE CORRECTION — « l'IA PROPOSE, l'humain VALIDE ». Reçoit un lot d'anomalies
+// d'un même type (déjà affiché par le Centre de correction) et renvoie des PROPOSITIONS de correction
+// { ref, action, fields, confidence, rationale } que le front applique UNIQUEMENT sur clic, via les mêmes
+// écritures gouvernées (setInvoiceFp, patchOrder…). Ce callable N'ÉCRIT RIEN. Gouverné « import » (write) :
+// il transmet des données à une API externe (Claude) → réservé aux data-stewards. Confidentialité : seuls
+// les champs de la liste blanche (domain/aiCorrection) partent à l'API, jamais d'objet Firestore brut.
+// La sortie du modèle est TOUJOURS re-validée (normalizeSuggestions) — aucune confiance dans le brut.
+exports.aiSuggestCorrections = onCallG(
+  "aiSuggestCorrections",
+  { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 120 },
+  async (req) => {
+    await requireWrite(req, "import");
+    const apiKey = ANTHROPIC_API_KEY.value();
+    if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+
+    const type = String(req.data?.type || "").trim().slice(0, 60);
+    if (!type) throw new HttpsError("invalid-argument", "type d'anomalie requis");
+    const records = Array.isArray(req.data?.records) ? req.data.records : [];
+    if (!records.length) throw new HttpsError("invalid-argument", "aucun enregistrement à analyser");
+    // Lot BORNÉ (coût + latence + garde-fou d'exfiltration) : au-delà, on analyse les 60 premiers et on le
+    // SIGNALE (truncated) plutôt que d'envoyer un volume non borné à l'API. Le steward relance après correction.
+    const MAX_AI_RECORDS = 60;
+    const truncated = records.length > MAX_AI_RECORDS;
+    const batch = records.slice(0, MAX_AI_RECORDS);
+
+    // Contexte de RAPPROCHEMENT (candidats) — chargé uniquement pour les types où une correspondance FP/
+    // client aide le modèle. Borné, dé-identifié au strict nécessaire ({ fp, client, cas }).
+    const FP_MATCH_TYPES = new Set(["factures_orphelines", "opps_gagnees_sans_fp", "bc_sans_fp", "commandes_sans_client"]);
+    let context = {};
+    if (FP_MATCH_TYPES.has(type)) {
+      const ordSnap = await db.collection("orders").select("fp", "client", "cas").limit(800).get();
+      context = { orders: ordSnap.docs.map((d) => { const o = d.data() || {}; return { fp: o.fp, client: o.client, cas: o.cas }; }).filter((o) => o.fp) };
+    }
+
+    const { suggestCorrections } = require("./lib/aiCorrection");
+    let out;
+    try {
+      out = await suggestCorrections(apiKey, { type, records: batch, context });
+    } catch (e) {
+      if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+      logger.error("aiSuggestCorrections a échoué", { message: e && e.message, type });
+      throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de propositions (réessayez).");
+    }
+
+    // Audit : on journalise l'USAGE (type, tailles, modèle) — jamais le contenu des enregistrements.
+    await logOps({
+      kind: "ai", action: "suggestCorrections", status: "ok", uid: req.auth.uid,
+      detail: { type, records: batch.length, suggestions: out.suggestions.length, actionable: out.suggestions.filter((s) => s.action !== "review").length, model: out.model, usage: out.usage },
+    });
+    return { ok: true, type, suggestions: out.suggestions, model: out.model, truncated, analyzed: batch.length, total: records.length };
+  },
+);
+
 // === CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes de l'ESN,
 // fondation du plan de charge (Lot 12) et des KPI d'activité (Lot 13). ACCÈS 100% PAR CALLABLE (Admin
 // SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps

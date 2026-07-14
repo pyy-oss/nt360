@@ -16,7 +16,8 @@ import { pct } from "../design/tokens";
 import {
   deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
-  type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem,
+  aiSuggestCorrections,
+  type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type AiSuggestion,
 } from "../lib/writes";
 
 // Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
@@ -209,17 +210,97 @@ function BcConvertFix({ item, onDone }: { item: CorrectionItem; onDone: () => Pr
   );
 }
 
+// APPLICATION d'une proposition IA → route vers l'écriture GOUVERNÉE idoine (jamais d'écriture directe :
+// mêmes callables que la correction manuelle, donc mêmes droits/audit/recalcul). L'IA ne fait que
+// pré-remplir l'action ; c'est ce clic humain qui exécute. Une action « review » n'applique rien.
+async function applyAiSuggestion(item: CorrectionItem, s: AiSuggestion): Promise<void> {
+  const f = s.fields || {};
+  switch (s.action) {
+    case "set_invoice_fp":
+      if (!item.id || !f.fp) throw new Error("proposition incomplète");
+      return void (await setInvoiceFp(item.id, String(f.fp)));
+    case "generate_from_invoice":
+      if (!item.id) throw new Error("facture sans identifiant");
+      return void (await generateFromInvoices({ ids: [item.id] }));
+    case "patch_order": {
+      if (!item.fp) throw new Error("commande sans N° FP");
+      const patch: { fp: string; yearPo?: number; client?: string; am?: string } = { fp: item.fp };
+      if (f.yearPo != null) patch.yearPo = Number(f.yearPo);
+      if (f.client != null) patch.client = String(f.client);
+      if (f.am != null) patch.am = String(f.am);
+      return void (await patchOrder(patch));
+    }
+    case "patch_opportunity":
+      if (!item.id || !f.fp) throw new Error("proposition incomplète");
+      return void (await patchOpportunity({ id: item.id, fp: String(f.fp) }));
+    case "patch_bc_line": {
+      if (!item.id) throw new Error("ligne BC sans identifiant");
+      const patch: { id: string; fp?: string; supplier?: string } = { id: item.id };
+      if (f.fp != null) patch.fp = String(f.fp);
+      if (f.supplier != null) patch.supplier = String(f.supplier);
+      return void (await patchBcLine(patch));
+    }
+    default:
+      throw new Error("cette proposition est informative (à traiter manuellement)");
+  }
+}
+
+// Libellé lisible d'une proposition IA (ce que « Appliquer » va écrire) — pour que l'humain valide en connaissance.
+const AI_ACTION_LABEL: Record<string, string> = {
+  set_invoice_fp: "Rattacher au N° FP",
+  generate_from_invoice: "Générer commande + opp",
+  patch_order: "Corriger la commande",
+  patch_opportunity: "Poser le N° FP",
+  patch_bc_line: "Corriger la ligne BC",
+  review: "À vérifier",
+};
+function aiProposalText(s: AiSuggestion): string {
+  const f = s.fields || {};
+  const vals = Object.entries(f).map(([k, v]) => `${k} = ${v}`).join(", ");
+  return AI_ACTION_LABEL[s.action] + (vals ? ` (${vals})` : "");
+}
+
+// Proposition IA sous une ligne : confiance + justification + « Appliquer » (écriture gouvernée) / « Ignorer ».
+function AiSuggestionRow({ item, s, canFix, onDone, onDismiss }: { item: CorrectionItem; s: AiSuggestion; canFix: boolean; onDone: () => Promise<void>; onDismiss: () => void }) {
+  const conf = Math.round(s.confidence * 100);
+  const tone = s.confidence >= 0.75 ? "emerald" : s.confidence >= 0.5 ? "gold" : "steel";
+  const applicable = s.action !== "review" && canFix;
+  return (
+    <div className="ml-6 mt-0.5 flex items-start gap-2 text-[11px] rounded bg-gold/5 border border-gold/20 px-2 py-1">
+      <span aria-hidden className="shrink-0">🧠</span>
+      <div className="flex flex-col gap-0.5 grow min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge tone={tone}>{conf}%</Badge>
+          <span className="text-ink">{aiProposalText(s)}</span>
+        </div>
+        {s.rationale && <span className="text-faint">{s.rationale}</span>}
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {applicable && (
+          <Busy variant="ghost" label="Appliquer" okMsg="Appliqué (recalcul lancé)" errMsg="Application refusée"
+            fn={async () => { await applyAiSuggestion(item, s); await onDone(); }} />
+        )}
+        <button type="button" className="text-faint hover:underline" onClick={onDismiss}>Ignorer</button>
+      </div>
+    </div>
+  );
+}
+
 // Une ligne à corriger : réf + client + le contrôle idoine selon le type. `canFix` = droit d'écriture
-// sur le module de la donnée (sinon la ligne reste visible, mais en lecture avec une note).
-function ItemFix({ item, kind, module, canFix, onDone }: { item: CorrectionItem; kind: string; module?: string; canFix: boolean; onDone: () => Promise<void> }) {
+// sur le module de la donnée (sinon la ligne reste visible, mais en lecture avec une note). `suggestion`
+// (optionnelle) = proposition IA à afficher sous la ligne (appliquée uniquement sur clic humain).
+function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSuggestion }: { item: CorrectionItem; kind: string; module?: string; canFix: boolean; onDone: () => Promise<void>; suggestion?: AiSuggestion; onDismissSuggestion?: () => void }) {
   const { go, canGo } = useNav();
   const ref = item.numero || item.fp || item.bcNumber || item.client || "—";
   const done = () => onDone();
   const row = (control: ReactNode) => (
-    <div className="flex items-center gap-2 flex-wrap text-[13px]">
-      <span className="tabnum text-faint">{ref}</span>
-      {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
-      {control}
+    <div>
+      <div className="flex items-center gap-2 flex-wrap text-[13px]">
+        <span className="tabnum text-faint">{ref}</span>
+        {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
+        {control}
+      </div>
+      {suggestion && <AiSuggestionRow item={item} s={suggestion} canFix={canFix} onDone={onDone} onDismiss={() => onDismissSuggestion?.()} />}
     </div>
   );
   // Renvois (drill) — pas d'écriture, gouvernés par canGo.
@@ -258,12 +339,29 @@ function ItemFix({ item, kind, module, canFix, onDone }: { item: CorrectionItem;
 }
 
 // Bloc d'un type d'anomalie : entête (sévérité, libellé, compte) repliable → lignes corrigeables.
+// Clé stable d'un enregistrement — MÊME priorité que le serveur (domain/aiCorrection.refOf : id d'abord)
+// pour apparier les propositions IA (indexées par « ref ») aux lignes affichées.
+const refKeyOf = (it: CorrectionItem) => String(it.id || it.numero || it.fp || it.bcNumber || it.client || "");
+
 function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; onDone: () => Promise<void> }) {
   const cfg = FIX[bucket.type] || { kind: "" };
   const [confirmBulk, setConfirmBulk] = useState(false);
+  // Propositions IA indexées par ref (l'IA propose, l'humain applique via les écritures gouvernées).
+  const [sugg, setSugg] = useState<Record<string, AiSuggestion>>({});
+  const [aiInfo, setAiInfo] = useState<{ actionable: number; truncated: boolean } | null>(null);
   // Génération EN MASSE réservée aux factures non rattachées (crée commande + opp gagnée pour TOUTES les
   // orphelines à FP canonique absentes du carnet — les FP inconnus/déjà présents sont ignorés côté serveur).
   const bulkGen = bucket.type === "factures_orphelines" && canFix;
+  // Analyse IA du lot : propose une correction justifiée par ligne (rapprochement FP, dérivation d'année…).
+  // Réservée aux data-stewards (droit « import », comme le callable) — sinon l'action serait refusée.
+  const runAi = async () => {
+    const r = await aiSuggestCorrections(bucket.type, bucket.items);
+    const map: Record<string, AiSuggestion> = {};
+    for (const s of r.suggestions) map[s.ref] = s;
+    setSugg(map);
+    setAiInfo({ actionable: r.suggestions.filter((s) => s.action !== "review").length, truncated: r.truncated });
+    if (!open) onToggle();
+  };
   return (
     <div className="border-t border-hair pt-2">
       <div className="w-full flex items-center gap-2 text-[13px] py-0.5">
@@ -271,6 +369,9 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
           <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
           <span className="text-ink truncate">{bucket.label}</span>
         </button>
+        {canFix && (
+          <Busy variant="ghost" label="🧠 IA" okMsg="Propositions IA prêtes" errMsg="Analyse IA refusée" fn={runAi} />
+        )}
         {bulkGen && !confirmBulk && (
           <button type="button" className="text-gold hover:underline text-[11px] shrink-0" onClick={() => setConfirmBulk(true)} title="Créer commande + opp gagnée pour toutes les factures non rattachées (FP canonique)">⚡ tout générer</button>
         )}
@@ -286,8 +387,15 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
       </div>
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5 pl-1">
+          {aiInfo && (
+            <div className="text-[11px] text-faint">
+              🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""} applicable{aiInfo.actionable > 1 ? "s" : ""} — <b>vérifiez</b> puis « Appliquer » (l'écriture reste gouvernée).
+              {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
+            </div>
+          )}
           {bucket.items.map((it, i) => (
-            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} canFix={canFix} onDone={onDone} />
+            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} canFix={canFix} onDone={onDone}
+              suggestion={sugg[refKeyOf(it)]} onDismissSuggestion={() => setSugg((m) => { const n = { ...m }; delete n[refKeyOf(it)]; return n; })} />
           ))}
           {bucket.count > bucket.items.length && (
             <div className="text-[11px] text-faint">… {bucket.count - bucket.items.length} de plus — corrigez ceux-ci puis « Rafraîchir ».</div>

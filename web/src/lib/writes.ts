@@ -388,6 +388,27 @@ export async function correctionQueue(): Promise<CorrectionQueueResult> {
   return res.data as CorrectionQueueResult;
 }
 
+// ASSISTANT IA DU CENTRE DE CORRECTION (Phase 1 : « l'IA propose, l'humain valide »). Renvoie, pour un
+// lot d'anomalies d'un même type, des PROPOSITIONS de correction justifiées et notées en confiance. Le
+// serveur ne fait qu'analyser (aucune écriture) ; l'application passe par les écritures gouvernées
+// habituelles sur clic. Lecture-analyse gouvernée « import ». Réessaie sur codes transitoires (déploiement).
+export type AiCorrectionAction =
+  | "review" | "set_invoice_fp" | "generate_from_invoice"
+  | "patch_order" | "patch_opportunity" | "patch_bc_line";
+export type AiSuggestion = {
+  ref: string; action: AiCorrectionAction; fields: Record<string, string | number>;
+  confidence: number; rationale: string;
+};
+export type AiSuggestResult = {
+  ok: boolean; type: string; suggestions: AiSuggestion[]; model: string;
+  truncated: boolean; analyzed: number; total: number;
+};
+/** Demande à l'assistant IA des propositions de correction pour un lot d'anomalies d'un même type. */
+export async function aiSuggestCorrections(type: string, records: CorrectionItem[]): Promise<AiSuggestResult> {
+  const res = await withTransientRetry(() => httpsCallable(functions, "aiSuggestCorrections", { timeout: 120_000 })({ type, records }));
+  return res.data as AiSuggestResult;
+}
+
 /** Génère commande P&L + opp gagnée depuis des factures NON RATTACHÉES (unitaire via ids, ou masse via all).
  *  Skip les factures sans FP canonique et les FP déjà au carnet (aucun doublon). Droit « import ». */
 export type GenFromInvoiceResult = {
