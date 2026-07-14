@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
-const XLSX = require("xlsx");
+const { wbFromRows } = require("./_wb");
 const { parseSalesData } = require("../parsers/salesData");
 
-function wb(rows) {
-  const b = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet(rows), "LIVE");
-  return b;
-}
+const wb = (rows) => wbFromRows("LIVE", rows);
 const deal = (over) => ({ Client: "MTN CI", Statut: "3-Proposition", IdC: 0.6, "N° FP": "FP/2026/5", "D Prev": "2026-06-30", AM: "Awa", Montant: 100, ...over });
 
 describe("parseSalesData — identité d'opportunité STABLE (cf. audit P0-E : pipeline fantôme)", () => {

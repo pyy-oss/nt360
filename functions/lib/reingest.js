@@ -3,7 +3,7 @@
 // Utile après une évolution de parseur (ex. nouvel en-tête reconnu) : `applyWrites` faisant un
 // upsert `merge:true`, un re-passage ÉCRASE les champs recalculés (ex. désignation) sur les
 // enregistrements existants. Partagé par le callable `reingest` et le script GHA.
-const XLSX = require("xlsx");
+const { readWorkbook } = require("./xlsxRead");
 const { buildWrites, fiscalYearFromOrders } = require("./ingest");
 const { applyWrites, stripLiveOpps } = require("./apply");
 
@@ -25,7 +25,7 @@ class IngestError extends Error {
  * reconnue est simplement reporté dans `files[].error` (kinds peut être vide → le caller décide).
  * @returns {{kinds:string[], writes:object[], files:object[], rowsIn:number, rowsOk:number, rowsSkipped:number}}
  */
-function parseBuffer(buf, filename) {
+async function parseBuffer(buf, filename) {
   const kindsSet = new Set();
   const writes = [];
   const files = [];
@@ -61,7 +61,7 @@ function parseBuffer(buf, filename) {
     if (!names.length) throw new IngestError("failed-precondition", "aucun classeur XLSX dans le ZIP");
     for (const n of names) {
       let wb;
-      try { wb = XLSX.read(Buffer.from(entries[n]), { cellDates: true }); }
+      try { wb = await readWorkbook(Buffer.from(entries[n])); }
       catch (e) { files.push({ file: n, error: "classeur illisible" }); continue; }
       // Isolation PAR FICHIER : un classeur au format inattendu ne casse pas l'import entier.
       try { processWb(wb, n); }
@@ -69,7 +69,7 @@ function parseBuffer(buf, filename) {
     }
   } else {
     let wb;
-    try { wb = XLSX.read(buf, { cellDates: true }); }
+    try { wb = await readWorkbook(buf); }
     catch (e) { throw new IngestError("invalid-argument", "fichier illisible (XLSX ou ZIP attendu)"); }
     processWb(wb, filename);
   }
@@ -117,7 +117,7 @@ async function reingestBucket({ db, storage, bucketName, prefix }) {
   for (const obj of targets) {
     try {
       const [buf] = await obj.download();
-      const r = parseBuffer(buf, obj.name);
+      const r = await parseBuffer(buf, obj.name);
       if (!r.kinds.length) { fileReports.push({ object: obj.name, error: "aucune source reconnue" }); failed++; continue; }
       r.kinds.forEach((k) => kindsSet.add(k));
       allWrites.push(...r.writes);

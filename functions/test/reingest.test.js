@@ -1,47 +1,43 @@
 import { describe, it, expect } from "vitest";
-const XLSX = require("xlsx");
 const { zipSync } = require("fflate");
+const { bufFromRows } = require("./_wb");
 const { parseBuffer, isSourceObject, reingestBucket, IngestError } = require("../lib/reingest");
 
-function xlsxBuf(sheetName, rows) {
-  const b = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet(rows), sheetName);
-  return XLSX.write(b, { type: "buffer", bookType: "xlsx" });
-}
+const xlsxBuf = (sheetName, rows) => bufFromRows(sheetName, rows); // tampon .xlsx réel (exceljs)
 
 describe("parseBuffer — XLSX / ZIP partagé (importDelta + reingest)", () => {
-  it("XLSX P&L → écritures orders/{fp} + kinds", () => {
-    const buf = xlsxBuf("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]);
-    const r = parseBuffer(buf, "pnl.xlsx");
+  it("XLSX P&L → écritures orders/{fp} + kinds", async () => {
+    const buf = await xlsxBuf("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 10, Customer: "ACME" }]);
+    const r = await parseBuffer(buf, "pnl.xlsx");
     expect(r.kinds).toEqual(["pnl"]);
     expect(r.writes.some((w) => w.path === "orders/FP_2026_1")).toBe(true);
     expect(r.rowsOk).toBeGreaterThan(0);
   });
 
-  it("« Description du Projet » alimente la désignation (le fix ré-appliqué à la ré-ingestion)", () => {
-    const buf = xlsxBuf("P&L", [{ "Opp ID": "FP/2026/2", CAS: 100, "RAF TOTAL": 0, Customer: "ACME", "Description du Projet": "Refonte réseau" }]);
-    const r = parseBuffer(buf, "pnl.xlsx");
+  it("« Description du Projet » alimente la désignation (le fix ré-appliqué à la ré-ingestion)", async () => {
+    const buf = await xlsxBuf("P&L", [{ "Opp ID": "FP/2026/2", CAS: 100, "RAF TOTAL": 0, Customer: "ACME", "Description du Projet": "Refonte réseau" }]);
+    const r = await parseBuffer(buf, "pnl.xlsx");
     const order = r.writes.find((w) => w.path === "orders/FP_2026_2");
     expect(order.data.designation).toBe("Refonte réseau");
   });
 
-  it("ZIP de classeurs → agrège toutes les fiches", () => {
-    const a = xlsxBuf("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 0, Customer: "A" }]);
-    const b = xlsxBuf("P&L", [{ "Opp ID": "FP/2026/2", CAS: 200, "RAF TOTAL": 0, Customer: "B" }]);
+  it("ZIP de classeurs → agrège toutes les fiches", async () => {
+    const a = await xlsxBuf("P&L", [{ "Opp ID": "FP/2026/1", CAS: 100, "RAF TOTAL": 0, Customer: "A" }]);
+    const b = await xlsxBuf("P&L", [{ "Opp ID": "FP/2026/2", CAS: 200, "RAF TOTAL": 0, Customer: "B" }]);
     const zip = Buffer.from(zipSync({ "a.xlsx": new Uint8Array(a), "b.xlsx": new Uint8Array(b) }));
-    const r = parseBuffer(zip, "lot.zip");
+    const r = await parseBuffer(zip, "lot.zip");
     expect(r.kinds).toEqual(["pnl"]);
     expect(r.writes.filter((w) => w.path.startsWith("orders/")).length).toBe(2);
     expect(r.files.length).toBe(2);
   });
 
-  it("ZIP illisible → IngestError", () => {
-    expect(() => parseBuffer(Buffer.from("pas un zip du tout"), "x.zip")).toThrow(IngestError);
+  it("ZIP illisible → IngestError", async () => {
+    await expect(parseBuffer(Buffer.from("pas un zip du tout"), "x.zip")).rejects.toThrow(IngestError);
   });
 
-  it("classeur sans source reconnue → kinds vide (pas d'exception)", () => {
-    const buf = xlsxBuf("Divers", [{ Foo: 1, Bar: 2 }]);
-    const r = parseBuffer(buf, "divers.xlsx");
+  it("classeur sans source reconnue → kinds vide (pas d'exception)", async () => {
+    const buf = await xlsxBuf("Divers", [{ Foo: 1, Bar: 2 }]);
+    const r = await parseBuffer(buf, "divers.xlsx");
     expect(r.kinds).toEqual([]);
     expect(r.files[0].error).toBe("aucune source reconnue");
   });
@@ -84,7 +80,7 @@ describe("reingestBucket — orchestration (bucket simulé)", () => {
   }
 
   it("ne re-parse que les sources, applique les écritures, remonte le rapport", async () => {
-    const good = xlsxBuf("P&L", [{ "Opp ID": "FP/2026/9", CAS: 50, "RAF TOTAL": 0, Customer: "Z" }]);
+    const good = await xlsxBuf("P&L", [{ "Opp ID": "FP/2026/9", CAS: 50, "RAF TOTAL": 0, Customer: "Z" }]);
     const storage = fakeStorage([
       ["pnl.xlsx", good],
       ["backups/old.xlsx", good], // ignoré par le filtre de préfixe

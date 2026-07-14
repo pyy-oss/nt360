@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
-const XLSX = require("xlsx");
+const { wbFromAoa } = require("./_wb");
 const { parseLogistics } = require("../parsers/logistics");
 
-function wbFrom(rows) {
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "PO List");
-  return wb;
-}
+const wbFrom = (rows) => wbFromAoa("PO List", rows); // « rows » est ici une AOA
 const byBc = (rows, n) => rows.find((r) => r.bcNumber === n);
 
 describe("parseLogistics — contre-valeur XOF robuste (cf. audit P0-B)", () => {

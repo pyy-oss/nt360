@@ -2,7 +2,7 @@
 // des écritures déterministes. Un classeur peut contenir PLUSIEURS sources
 // (PIPELINE_NT_CI_Inventory.xlsx regroupe P&L + LIVE + Facturation DF). Sans dépendance
 // Firebase ⇒ testable (tests de non-régression §18).
-const XLSX = require("xlsx");
+const { sheetToJson } = require("./xlsxRead");
 const { noAcc } = require("./ids");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
@@ -14,7 +14,7 @@ const PARSERS = { pnl: parsePnl, facturationDf: parseFacturationDf, fiche: parse
 
 function headerSet(ws) {
   if (!ws) return new Set();
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 });
+  const aoa = sheetToJson(ws, { header: 1, range: 0 });
   // Array.from densifie les tableaux creux (les trous → undefined → "" via noAcc),
   // sinon new Set(sparse) matérialiserait des undefined et casserait h.includes().
   return new Set(Array.from(aoa[0] || [], (v) => noAcc(v).trim()));

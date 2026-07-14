@@ -1,14 +1,10 @@
 import { describe, it, expect } from "vitest";
-const XLSX = require("xlsx");
+const { wbFromAoa: mkWb } = require("./_wb");
 const { buildTemplateAoa, parseOpportunitiesImport, TEMPLATE_HEADERS } = require("../parsers/oppImport");
 const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("../domain/oppImport");
 
-// Classeur en mémoire depuis une matrice (aoa) — évite toute I/O disque.
-function wbFromAoa(aoa) {
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Opportunités");
-  return wb;
-}
+// Classeur en mémoire depuis une matrice (aoa) — feuille « Opportunités ».
+const wbFromAoa = (aoa) => mkWb("Opportunités", aoa);
 // Index {byId, byFp} depuis une liste d'opps (comme le callable).
 function indexes(opps) {
   const byId = new Map(), byFp = new Map();

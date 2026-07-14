@@ -4,7 +4,7 @@
 // L'export écrit les en-têtes EXACTS ci-dessous ; `val()` (lib/sheets) les rapproche d'abord par égalité
 // normalisée → un aller-retour SANS édition ne produit AUCUN changement (cf. domain/oppImport sameField).
 // Seules les cellules RENSEIGNÉES peuplent `values` (mise à jour non effaçante côté domaine).
-const XLSX = require("xlsx");
+const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanBu, cleanName, cleanPerson } = require("../lib/ids");
 const { headerKeys, val, valLabel, toISO } = require("../lib/sheets");
 const { normalizeStage } = require("./salesData");
@@ -71,11 +71,11 @@ function pickSheet(wb) {
 }
 
 /**
- * @param {import('xlsx').WorkBook} wb classeur (xlsx OU csv — XLSX.read gère les deux)
+ * @param {{SheetNames:string[], Sheets:object}} wb classeur lu par lib/xlsxRead.readWorkbook (exceljs)
  * @returns {{rows: {oppId:string, fp:string, values:object, line:number}[], report:{rowsIn:number, rowsParsed:number}}}
  */
 function parseOpportunitiesImport(wb) {
-  const raw = XLSX.utils.sheet_to_json(pickSheet(wb), { defval: null });
+  const raw = sheetToJson(pickSheet(wb), { defval: null });
   const rows = [];
   let rowsIn = 0;
   raw.forEach((r, i) => {
