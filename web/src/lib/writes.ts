@@ -58,14 +58,15 @@ export async function patchOpportunity(data: { id: string; fp?: string; closingD
 
 // PRÉVISION COMMERCIALE GOUVERNABLE (Lot 5) — roll-up des catégories de prévision sur le périmètre visible.
 export type ForecastRollup = {
-  ok: boolean; fiscalYear: number; scoped: boolean; quota: number;
+  ok: boolean; fiscalYear: number; allPeriods?: boolean; scoped: boolean; quota: number;
   closed: number; commit: number; bestCase: number; pipeline: number;
   counts: { closed: number; commit: number; bestCase: number; pipeline: number; omitted: number };
   attainment: { closed: number; commit: number; bestCase: number } | null;
 };
-/** Roll-up de la prévision commerciale (catégories Commit/Best Case/Pipeline/Closed) + atteinte du quota. */
-export async function forecastRollup() {
-  const res = await httpsCallable(functions, "forecastRollup")({});
+/** Roll-up de la prévision commerciale (catégories Commit/Best Case/Pipeline/Closed) + atteinte du quota,
+ *  filtré sur l'EXERCICE sélectionné (année de clôture) ; `period` = "2026" ou "all"/absent (cumul). */
+export async function forecastRollup(period?: string) {
+  const res = await httpsCallable(functions, "forecastRollup")({ period: period || "all" });
   return res.data as ForecastRollup;
 }
 
