@@ -105,6 +105,23 @@
   .tabnum {
     font-variant-numeric: tabular-nums;
   }
+  /* Cellule texte de tableau : une seule ligne, troncature « … » au-delà d'une largeur premium
+     (fin des retours à la ligne dans les tableaux + zéro débordement horizontal des textes libres
+     type client / affaire / désignation). Le contenu court n'est pas affecté. */
+  .cell-txt {
+    display: block;
+    max-width: 34ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  @media (max-width: 639px) {
+    /* En mode carte (rtable), la valeur s'aligne à droite face à son étiquette, largeur adaptée. */
+    .cell-txt {
+      max-width: 60vw;
+      text-align: right;
+    }
+  }
   /* Table responsive : sous le point de rupture sm, chaque ligne devient une carte étiquetée
      (fin du scroll horizontal sur mobile). Les <td> portent data-label = en-tête de colonne, rendu
      en préfixe via ::before. Au-dessus de sm, table classique (les classes ci-dessous ne s'appliquent pas). */
