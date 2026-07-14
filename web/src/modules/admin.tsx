@@ -7,6 +7,7 @@ import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, 
 import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
+import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
@@ -57,6 +58,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <ProjectionConfigCard />}
       {isDirection && <AlertThresholdsCard />}
       {isDirection && <NotificationCard />}
+      {isDirection && <EmailNotifyCard />}
       {isDirection && <DedupeCard />}
       {isDirection && <ClientAliasCard />}
       {isDirection && <FuzzyDuplicatesCard />}
@@ -302,6 +304,83 @@ function NotificationForm({ initial }: { initial: NotificationConfig }) {
         </label>
       </div>
       <Tip>Un webhook entrant Slack/Teams reçoit un message quand l'ensemble des alertes change. L'URL n'est lisible que par les habilitations. « Tester » envoie un ping immédiat.</Tip>
+    </Card>
+  );
+}
+
+// Notifications EMAIL (Office 365 / Microsoft Graph). Le secret client vit dans Secret Manager
+// (GRAPH_CLIENT_SECRET), jamais dans l'app. « Tester » valide l'app Azure + le secret de bout en bout.
+const EMAIL_TRIGGERS: { key: keyof EmailNotifyConfig["triggers"]; label: string }[] = [
+  { key: "approvals", label: "Demandes d'approbation (au manager)" },
+  { key: "relances", label: "Relances échues (au responsable, quotidien)" },
+  { key: "alerts", label: "Alertes critiques (à la direction)" },
+  { key: "codir", label: "Bulletin CODIR (hebdomadaire)" },
+];
+function EmailNotifyCard() {
+  const { data, loading } = useDocData<EmailNotifyConfig>("config/emailNotify");
+  if (loading && !data) return null;
+  return <EmailNotifyForm key={JSON.stringify({ e: data?.enabled, s: data?.sender, t: data?.tenantId })} initial={{
+    enabled: !!data?.enabled, tenantId: data?.tenantId || "", clientId: data?.clientId || "", sender: data?.sender || "",
+    recipients: { alerts: data?.recipients?.alerts || [], codir: data?.recipients?.codir || [] },
+    triggers: { approvals: data?.triggers?.approvals !== false, relances: data?.triggers?.relances !== false, alerts: data?.triggers?.alerts !== false, codir: data?.triggers?.codir !== false },
+  }} />;
+}
+function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [tenantId, setTenantId] = useState(initial.tenantId);
+  const [clientId, setClientId] = useState(initial.clientId);
+  const [sender, setSender] = useState(initial.sender);
+  const [alerts, setAlerts] = useState(initial.recipients.alerts.join(", "));
+  const [codir, setCodir] = useState(initial.recipients.codir.join(", "));
+  const [trig, setTrig] = useState(initial.triggers);
+  const [testTo, setTestTo] = useState("");
+  const parseList = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+  const cfg = (): EmailNotifyConfig => ({ enabled, tenantId: tenantId.trim(), clientId: clientId.trim(), sender: sender.trim(), recipients: { alerts: parseList(alerts), codir: parseList(codir) }, triggers: trig });
+  const save = () => setEmailNotifyConfig(cfg());
+  const test = async () => {
+    const to = testTo.trim();
+    if (!to) { toast("Renseignez une adresse de test.", "err"); return; }
+    await setEmailNotifyConfig(cfg()); // enregistre d'abord (le test lit la config serveur)
+    const r = await sendTestEmail(to);
+    toast(r.ok ? `Email de test envoyé à ${to}.` : "Test : email non envoyé.", r.ok ? "ok" : "err");
+  };
+  return (
+    <Card title="Notifications email — Office 365" actions={
+      <div className="flex gap-2">
+        <Busy variant="ghost" label="Tester" okMsg="Test traité" errMsg="Échec du test (voir config Azure / secret)" fn={test} />
+        <Busy label="Enregistrer" okMsg="Config email enregistrée" fn={save} />
+      </div>}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex items-center gap-2 text-[13px] text-ink sm:col-span-2">
+          <Toggle checked={enabled} onChange={setEnabled} ariaLabel="Activer les notifications email" />
+          Activer l'envoi d'emails via Office 365 (Microsoft Graph)
+        </div>
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-ink font-medium">Tenant (annuaire) Azure AD</span>
+          <input className="field !py-1 font-mono" placeholder="contoso.onmicrosoft.com ou GUID" value={tenantId} onChange={(e) => setTenantId(e.target.value)} aria-label="Tenant Azure AD" /></label>
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-ink font-medium">Client ID (app enregistrée)</span>
+          <input className="field !py-1 font-mono" placeholder="GUID de l'application" value={clientId} onChange={(e) => setClientId(e.target.value)} aria-label="Client ID Azure AD" /></label>
+        <label className="flex flex-col gap-1 text-[13px] sm:col-span-2"><span className="text-ink font-medium">Boîte émettrice (sender)</span>
+          <input className="field !py-1" type="email" placeholder="no-reply@votredomaine.com" value={sender} onChange={(e) => setSender(e.target.value)} aria-label="Boîte émettrice" /></label>
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-ink font-medium">Destinataires « alertes » (direction)</span>
+          <input className="field !py-1" placeholder="a@x.com, b@x.com" value={alerts} onChange={(e) => setAlerts(e.target.value)} aria-label="Destinataires alertes" /></label>
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-ink font-medium">Destinataires « CODIR »</span>
+          <input className="field !py-1" placeholder="a@x.com, b@x.com" value={codir} onChange={(e) => setCodir(e.target.value)} aria-label="Destinataires CODIR" /></label>
+        <div className="sm:col-span-2 flex flex-col gap-1.5">
+          <span className="text-ink font-medium text-[13px]">Déclencheurs</span>
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {EMAIL_TRIGGERS.map((t) => (
+              <label key={t.key} className="flex items-center gap-2 text-[13px] text-muted">
+                <input type="checkbox" className="accent-gold" checked={trig[t.key]} onChange={(e) => setTrig((s) => ({ ...s, [t.key]: e.target.checked }))} aria-label={t.label} />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="flex flex-col gap-1 text-[13px] sm:col-span-2"><span className="text-ink font-medium">Adresse pour l'email de test</span>
+          <input className="field !py-1" type="email" placeholder="vous@votredomaine.com" value={testTo} onChange={(e) => setTestTo(e.target.value)} aria-label="Adresse de test" /></label>
+      </div>
+      <Tip>Le <b>secret client</b> de l'app Azure AD n'est jamais saisi ici : il est stocké dans Secret Manager (<code>GRAPH_CLIENT_SECRET</code>). L'app doit avoir la permission <b>d'application</b> <code>Mail.Send</code> (consentement admin). « Tester » enregistre la config puis envoie un email de vérification à l'adresse indiquée — valide l'app + le secret de bout en bout.</Tip>
     </Card>
   );
 }
