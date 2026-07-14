@@ -49,6 +49,20 @@ describe("genFromInvoice — générer commande+opp depuis factures non rattach�
     const { plan } = planFromInvoices(invoices, new Set());
     expect(plan.map((p) => p.fp)).toEqual(["FP/2026/2"]); // FP/2026/1 (CAS 0) écarté
   });
+  it("montant ROBUSTE au nom de colonne (montant/montantHt) + BU majoritaire de la facture", () => {
+    const invoices = [
+      { id: "a", fp: "FP/2026/3", client: "GAMMA", bu: "ICT", montant: 700, date: "2026-01-01", numero: "F1" }, // « montant » (pas amountHt)
+      { id: "b", fp: "FP/2026/3", client: "GAMMA", bu: "ICT", montantHt: 300, date: "2026-02-01", numero: "F2" }, // « montantHt »
+    ];
+    const { plan } = planFromInvoices(invoices, new Set());
+    expect(plan.length).toBe(1);
+    expect(plan[0].cas).toBe(1000);   // 700 + 300 malgré des noms de colonne différents
+    expect(plan[0].bu).toBe("ICT");   // BU dérivée des factures (plus de « AUTRE » figé)
+  });
+  it("BU absente sur les factures → plan.bu vide (l'appelant posera « AUTRE »)", () => {
+    const { plan } = planFromInvoices([{ id: "a", fp: "FP/2026/4", amountHt: 500, date: "2026-01-01" }], new Set());
+    expect(plan[0].bu).toBe("");
+  });
   it("entrées vides → plan vide, compteurs cohérents", () => {
     const r = planFromInvoices([], new Set());
     expect(r.plan).toEqual([]);
