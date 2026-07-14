@@ -2967,8 +2967,31 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
   const fp = fpKey(d.fp);
   const direction = String(d.direction || "");
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
-  if (!["toOpp", "toOrder", "clear"].includes(direction)) throw new HttpsError("invalid-argument", "sens de synchronisation invalide");
+  if (!["toOpp", "toOrder", "clear", "peek"].includes(direction)) throw new HttpsError("invalid-argument", "sens de synchronisation invalide");
   const id = safeId(fp);
+
+  // PEEK (lecture seule) : renvoie le montant de l'opportunité liée + son état, pour AFFICHER les deux
+  // valeurs (CAS commande vs montant opp) côté modal et laisser l'humain DÉCIDER du sens. N'écrit rien.
+  if (direction === "peek") {
+    await requireRead(req, "import");
+    const snap = await db.collection("opportunities").select("fp", "amount", "stage", "lines", "visibleTo").limit(MAX_SCAN + 1).get();
+    let matches = sliceCapped(snap.docs).docs.map((x) => ({ id: x.id, ...x.data() })).filter((o) => fpKey(o.fp) === fp);
+    // OWD privé : ne pas divulguer le montant d'une opp hors périmètre (mêmes règles que les écritures).
+    if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
+      matches = matches.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+    }
+    const wonP = matches.filter((o) => Number(o.stage) === 6);
+    const poolP = wonP.length ? wonP : matches;
+    const oppP = poolP.length === 1 ? poolP[0] : null;
+    return {
+      ok: true, fp, direction,
+      oppFound: matches.length > 0, count: matches.length, ambiguous: poolP.length > 1,
+      oppId: oppP ? oppP.id : null,
+      oppAmount: oppP ? Math.round(Number(oppP.amount) || 0) : null,
+      oppHasLines: oppP ? !!(Array.isArray(oppP.lines) && oppP.lines.length) : false,
+      oppWon: oppP ? Number(oppP.stage) === 6 : false,
+    };
+  }
 
   // Retrait de la surcharge : la commande reprend son CAS d'origine (P&L / opp gagnée / fiche).
   if (direction === "clear") {

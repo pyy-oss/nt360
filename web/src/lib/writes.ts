@@ -554,6 +554,16 @@ export async function syncOrderAmount(fp: string, direction: "toOpp" | "toOrder"
   const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 120_000 })({ fp, direction, cas });
   return res.data as { ok: boolean; fp: string; direction: string; oppId?: string; cas: number | null };
 }
+export type AmountPeek = {
+  ok: boolean; fp: string; direction: "peek";
+  oppFound: boolean; count: number; ambiguous: boolean;
+  oppId: string | null; oppAmount: number | null; oppHasLines: boolean; oppWon: boolean;
+};
+/** Lecture seule : montant de l'opportunité liée (même N° FP) + état, pour comparer avant de synchroniser. */
+export async function peekOrderAmount(fp: string): Promise<AmountPeek> {
+  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 120_000 })({ fp, direction: "peek" });
+  return res.data as AmountPeek;
+}
 
 /** Enregistre la table des taux de change (XOF par unité de devise) — admin. Remplace l'ensemble. */
 export async function setFxRates(rates: Record<string, number>) {
