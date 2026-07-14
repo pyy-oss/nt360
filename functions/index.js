@@ -1301,11 +1301,18 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   ]);
   const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-  const activeIds = consultants.filter((c) => (c.status || "active") === "active").map((c) => c.id);
+  const { isWorkforce } = require("./domain/consultant");
+  // Effectif EN ACTIVITÉ (staffé + intercontrat) : le banc compte dans la capacité disponible.
+  const activeIds = consultants.filter((c) => isWorkforce(c.status)).map((c) => c.id);
   const { byConsultant } = buildLoad(assignments, months, activeIds);
-  // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps.
+  // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps. On calcule le
+  // pondéré TIÉRÉ (`pw`, source unique du « pondéré » — CLAUDE.md) et on le passe à la capacité, au lieu de
+  // laisser lire le `weighted` linéaire persisté (interdit à l'affichage).
+  const { projectionWeight, normalizeTiers } = require("./domain/projection");
+  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
   const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage"]);
-  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; });
+  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; })
+    .map((o) => ({ ...o, pw: projectionWeight(o, tiers) }));
   const plan = capacityVsPipeline({ consultants, loadByConsultant: byConsultant, months, opps });
   return { ok: true, months, openOppCount: opps.length, ...plan };
 });

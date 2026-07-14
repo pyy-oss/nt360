@@ -7,6 +7,7 @@
 // Fonctions PURES (aucun I/O) → testables. WORKING_DAYS réutilisé de activityKpi (cohérence des hypothèses).
 
 const { WORKING_DAYS_PER_MONTH } = require("./activityKpi");
+const { isWorkforce } = require("./consultant");
 
 // Jours-homme disponibles d'un consultant actif sur la plage = Σ mois (1 − occupation) × jours ouvrés.
 function availableDays(consultantId, loadByConsultant, months) {
@@ -16,16 +17,19 @@ function availableDays(consultantId, loadByConsultant, months) {
   return d;
 }
 
-// TJM moyen cible de l'effectif (fallback si aucun renseigné), pour convertir un montant en jours.
-function avgTjm(consultants, fallback = 600) {
-  const v = (consultants || []).map((c) => Number(c.tjmTarget)).filter((n) => Number.isFinite(n) && n > 0);
+// TJM moyen cible de l'effectif EN ACTIVITÉ (fallback si aucun renseigné), pour convertir un montant en
+// jours. Fallback en PIVOT XOF (≈ 380 €/j au peg) : l'ancien 600 XOF (~1 €/j) faisait exploser demandDays.
+function avgTjm(consultants, fallback = 250000) {
+  const v = (consultants || []).filter((c) => isWorkforce(c.status)).map((c) => Number(c.tjmTarget)).filter((n) => Number.isFinite(n) && n > 0);
   return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : fallback;
 }
 
-// Demande pipeline en jours de delivery : montant pondéré (weighted = montant×proba) ÷ TJM moyen.
+// Demande pipeline en jours de delivery : pondéré ÷ TJM moyen. On privilégie `pw` (pondéré TIÉRÉ, source
+// unique du « pondéré » — CLAUDE.md) fourni par l'appelant ; repli `weighted` linéaire puis montant×proba.
 function demandDaysOf(opp, tjm) {
+  const pw = Number(opp.pw);
   const weighted = Number(opp.weighted);
-  const w = Number.isFinite(weighted) ? weighted : (Number(opp.amount) || 0) * (Number(opp.probability) || 0);
+  const w = Number.isFinite(pw) ? pw : Number.isFinite(weighted) ? weighted : (Number(opp.amount) || 0) * (Number(opp.probability) || 0);
   return tjm > 0 ? w / tjm : 0;
 }
 
@@ -33,7 +37,8 @@ function demandDaysOf(opp, tjm) {
 // équivalents ETP (jours ÷ (mois × jours ouvrés)).
 function capacityVsPipeline({ consultants, loadByConsultant, months, opps }) {
   const tjm = avgTjm(consultants);
-  const active = (consultants || []).filter((c) => (c.status || "active") === "active");
+  // Capacité disponible = effectif EN ACTIVITÉ = staffé + intercontrat (le banc EST 100 % disponible).
+  const active = (consultants || []).filter((c) => isWorkforce(c.status));
   const horizonDays = Math.max(1, months.length) * WORKING_DAYS_PER_MONTH;
 
   const capById = {};

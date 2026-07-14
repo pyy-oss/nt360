@@ -102,7 +102,7 @@ function ActivityCockpit() {
           colNum("Occupation", (r) => `${r.occupancyPct}%`, (r) => r.occupancyPct),
           colNum("Objectif", (r) => (r.targetPct != null ? `${r.targetPct}%` : "—"), (r) => r.targetPct ?? 0),
           colNum("Mois IC", (r) => String(r.idleMonths), (r) => r.idleMonths),
-        ]} rows={k.rows.filter((r) => r.status === "active").slice(0, 8)} />
+        ]} rows={k.rows.filter((r) => ["active", "intercontrat"].includes(r.status || "active")).slice(0, 8)} />
       </div>
       <Tip>KPI <b>prévisionnels</b> dérivés du plan de charge (affectations planifiées, ~20 j ouvrés/mois) — pas un CRA réel. Le CA/marge staffés supposent le coût de <b>banc</b> (un actif non staffé coûte). Confidentialité : la marge n'apparaît qu'avec le droit « rentabilité ».</Tip>
     </Card>
@@ -488,7 +488,9 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
           </tr></thead>
           <tbody>
             {consuls.map((c) => {
-              const active = (c.status || "active") === "active";
+              // « En activité » = staffé OU au banc (intercontrat) : les deux affichent « IC » quand 0 %
+              // (le banc EST de l'intercontrat) ; seuls congés/sortis affichent « — ».
+              const active = ["active", "intercontrat"].includes(c.status || "active");
               return (
                 <tr key={c.id} className="border-t border-hair">
                   <td className="px-2 py-1 sticky left-0 z-10 bg-bg whitespace-nowrap shadow-[2px_0_0_rgb(var(--line)/0.6)]">{c.name || c.id}{c.bu ? <span className="text-[10px] text-muted"> · {c.bu}</span> : null}</td>

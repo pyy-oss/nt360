@@ -79,7 +79,9 @@ function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, req
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
     const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-    const activeIds = consultants.filter((c) => (c.status || "active") === "active").map((c) => c.id);
+    const { isWorkforce } = require("../domain/consultant");
+    // Effectif EN ACTIVITÉ (staffé + intercontrat) : le banc doit apparaître en intercontrat (IC), pas « — ».
+    const activeIds = consultants.filter((c) => isWorkforce(c.status)).map((c) => c.id);
     const { byConsultant, flags } = buildLoad(assignments, months, activeIds);
     return { ok: true, months, consultants: consultants.map((c) => ({ id: c.id, name: c.name || null, status: c.status || "active", bu: c.bu || null })), assignments, byConsultant, flags };
   });

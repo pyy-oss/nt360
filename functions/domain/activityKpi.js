@@ -6,19 +6,22 @@
 // Fonctions PURES (aucun I/O) → testables.
 
 const WORKING_DAYS_PER_MONTH = 20; // hypothèse standard de jours ouvrés facturables par mois (paramétrable)
+const { isWorkforce } = require("./consultant");
 
 function coversMonth(a, m) { return a && a.startMonth <= m && a.endMonth >= m; }
 
 // KPI d'un consultant sur la plage `months`. `cost` = CJM connu et autorisé (sinon null → pas de marge).
 function consultantKpi(consultant, assignments, months, cost) {
-  const active = (consultant.status || "active") === "active";
+  // « En activité » = staffé OU au banc (intercontrat) : les deux comptent dans occupation/intercontrat/coût
+  // de banc. Un intercontrat à 0 % est précisément du banc → il DOIT gonfler le taux d'intercontrat.
+  const work = isWorkforce(consultant.status);
   const mine = (assignments || []).filter((a) => a.consultantId === consultant.id);
   let occSum = 0, idleMonths = 0, billableDays = 0, revenue = 0;
   for (const m of months) {
     const covering = mine.filter((a) => coversMonth(a, m));
     const alloc = Math.min(100, covering.reduce((s, a) => s + (Number(a.allocationPct) || 0), 0));
     occSum += alloc;
-    if (active && alloc === 0) idleMonths += 1;
+    if (work && alloc === 0) idleMonths += 1;
     for (const a of covering) {
       const days = (Number(a.allocationPct) || 0) / 100 * WORKING_DAYS_PER_MONTH;
       billableDays += days;
@@ -27,8 +30,8 @@ function consultantKpi(consultant, assignments, months, cost) {
   }
   const nMonths = Math.max(1, months.length);
   const occupancyPct = Math.round(occSum / nMonths);
-  // Coût de BANC : un consultant actif coûte tous les mois, staffé ou non (CJM × jours ouvrés).
-  const marginForecast = cost != null ? Math.round(revenue - (active ? cost * WORKING_DAYS_PER_MONTH * nMonths : 0)) : null;
+  // Coût de BANC : un consultant EN ACTIVITÉ (staffé OU au banc) coûte tous les mois (CJM × jours ouvrés).
+  const marginForecast = cost != null ? Math.round(revenue - (work ? cost * WORKING_DAYS_PER_MONTH * nMonths : 0)) : null;
   return {
     id: consultant.id, name: consultant.name || null, bu: consultant.bu || null, status: consultant.status || "active",
     occupancyPct, idleMonths, billableDays: Math.round(billableDays), revenueForecast: Math.round(revenue), marginForecast,
@@ -38,13 +41,14 @@ function consultantKpi(consultant, assignments, months, cost) {
 // Agrège les KPI de tout l'effectif + par BU + global. `canCost` gouverne l'exposition marge/coût.
 function computeActivity(consultants, assignments, months, costById, canCost) {
   const rows = (consultants || []).map((c) => consultantKpi(c, assignments, months, canCost ? (costById && costById[c.id]) ?? null : null));
-  const activeRows = rows.filter((r) => r.status === "active");
+  // Effectif « en activité » = staffé + intercontrat (base des taux) ; congés/sortis exclus.
+  const activeRows = rows.filter((r) => isWorkforce(r.status));
   const nActive = activeRows.length || 1;
   const global = {
     headcount: rows.length,
     active: activeRows.length,
     occupancyPct: Math.round(activeRows.reduce((s, r) => s + r.occupancyPct, 0) / nActive),
-    // Taux d'intercontrat : part des mois-consultants actifs non staffés sur la plage.
+    // Taux d'intercontrat : part des mois-consultants EN ACTIVITÉ non staffés sur la plage.
     intercontratPct: Math.round(activeRows.reduce((s, r) => s + r.idleMonths, 0) / (nActive * Math.max(1, months.length)) * 100),
     revenueForecast: rows.reduce((s, r) => s + (r.revenueForecast || 0), 0),
     marginForecast: canCost ? rows.reduce((s, r) => s + (r.marginForecast || 0), 0) : null,
