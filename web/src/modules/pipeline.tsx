@@ -878,7 +878,12 @@ export const PipelineBoard: FC<Props> = () => {
     if (!isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5) acc.push(r);
     return acc;
   }, []);
-  const byStage = (s: number) => rows.filter((r) => (r.stage || 0) === s).sort((a, b) => pw(b) - pw(a));
+  // Groupement par étape en UN seul passage (puis tri par colonne) plutôt que 5 `filter` complets sur
+  // `rows` à chaque rendu — le board est temps réel (snapshot/drag/frappe re-rendent souvent).
+  const byStageMap = new Map<number, Opportunity[]>();
+  for (const r of rows) { const s = r.stage || 0; const arr = byStageMap.get(s); if (arr) arr.push(r); else byStageMap.set(s, [r]); }
+  for (const arr of byStageMap.values()) arr.sort((a, b) => pw(b) - pw(a));
+  const byStage = (s: number) => byStageMap.get(s) || [];
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / AM / client" />
