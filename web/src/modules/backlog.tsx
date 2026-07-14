@@ -9,6 +9,7 @@ import { DateField } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
+import { fpKey } from "../lib/ids";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, peekOrderAmount, type BillingMilestone, type AmountPeek } from "../lib/writes";
@@ -952,7 +953,10 @@ function OrderPmFixer({ row }: { row: Order }) {
 function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
   const oppScope = useRecordScope("opportunities");
   const { rows: opps, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
-  const won = opps.filter((o) => o.stage === 6 && o.fp && !commandeFps.has(o.fp));
+  // FP CANONIQUE des deux côtés (comme dataQuality.opps_gagnees_sans_pnl) : sinon une opp au FP
+  // formaté autrement (zéros de tête, espaces) est réconciliée par mergeCommandes côté serveur mais
+  // reste listée « sans commande P&L » ici → action « Inscrire au P&L » redondante/trompeuse.
+  const won = opps.filter((o) => { const k = fpKey(o.fp); return o.stage === 6 && k && !commandeFps.has(k); });
   if (loading || !won.length) return null;
   return (
     <Card title={`Opportunités gagnées sans commande P&L · ${won.length}`}>
@@ -1074,7 +1078,7 @@ export const OrderList: FC<Props> = () => {
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
   const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
-  const commandeFps = useMemo(() => new Set(all.map((r) => r.fp).filter(Boolean) as string[]), [all]);
+  const commandeFps = useMemo(() => new Set(all.map((r) => fpKey(r.fp)).filter(Boolean) as string[]), [all]);
   // Suggestions d'affectation PM (datalist) = référentiel Admin ∪ PM déjà affectés.
   const pmRef = useProjectManagers();
   const pmOptions = useMemo(() => [...new Set([...pmRef, ...(all.map((r) => r.pm).filter(Boolean) as string[])])].sort((a, b) => a.localeCompare(b)), [all, pmRef]);

@@ -60,8 +60,8 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
   });
 
   it("perspective Facturé : marge reconnue = taux × min(facturé, CAS) (plafond surfacturation)", () => {
-    const ord = [{ fp: "FP/1", bu: "ICT", am: "X", client: "A", cas: 1000, raf: 0, mb: 200, yearPo: 2026 }]; // taux 20 %
-    const inv = [{ fp: "FP/1", bu: "ICT", client: "A", amountHt: 1500, date: "2026-03-01" }]; // surfacturé
+    const ord = [{ fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", cas: 1000, raf: 0, mb: 200, yearPo: 2026 }]; // taux 20 %
+    const inv = [{ fp: "FP/2026/1", bu: "ICT", client: "A", amountHt: 1500, date: "2026-03-01" }]; // surfacturé
     const r = computeFilteredOverview(ord as any, inv as any, [] as any, "2026", mkMatch({ bu: "ICT" }));
     expect(r.facture).toBe(1500);          // assiette facturé = facturé réel
     expect(r.factureMb).toBe(200);         // 0,20 × min(1500, 1000) = 200 (pas 300)
