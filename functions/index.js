@@ -1102,6 +1102,9 @@ exports.aiSuggestCorrections = onCallG(
   { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 120 },
   async (req) => {
     await requireWrite(req, "import");
+    // Limite anti-abus/coût même pour un utilisateur AUTORISÉ : chaque appel = 2 requêtes Opus (analyse +
+    // vérification adverse). 20 lots/min/compte suffisent au travail humain et plafonnent le coût API.
+    if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
     const apiKey = ANTHROPIC_API_KEY.value();
     if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
 
@@ -2833,6 +2836,7 @@ exports.createFiche = onCallG("createFiche", { memoryMiB: 256 }, async (req) => 
 // updateFiche : édite les champs autorisés À L'ÉTAPE COURANTE (verrou serveur porté par applyEdit).
 exports.updateFiche = onCallG("updateFiche", { memoryMiB: 256 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!req.auth.token?.nt360Role) throw new HttpsError("permission-denied", "compte nt360 requis"); // projet partagé : pas d'accès par l'app sœur (+ pas de lecture Firestore inutile)
   const { applyEdit } = require("./domain/ficheAffaire");
   const id = String((req.data || {}).id || "");
   if (!id) throw new HttpsError("invalid-argument", "identifiant de fiche requis");
@@ -2848,6 +2852,7 @@ exports.updateFiche = onCallG("updateFiche", { memoryMiB: 256 }, async (req) => 
 // À la validation finale (CDG/DF), alimente le P&L + déclenche le recompute différé.
 exports.ficheAdvance = onCallG("ficheAdvance", { memoryMiB: 256 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!req.auth.token?.nt360Role) throw new HttpsError("permission-denied", "compte nt360 requis");
   const { advance, presentFor } = require("./domain/ficheAffaire");
   const d = req.data || {};
   const id = String(d.id || "");
@@ -2866,6 +2871,7 @@ exports.ficheAdvance = onCallG("ficheAdvance", { memoryMiB: 256 }, async (req) =
 // ficheReject : REJETTE une étape de validation (motif obligatoire) → retour édition AC, vide DC + BC.
 exports.ficheReject = onCallG("ficheReject", { memoryMiB: 256 }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!req.auth.token?.nt360Role) throw new HttpsError("permission-denied", "compte nt360 requis");
   const { reject, presentFor } = require("./domain/ficheAffaire");
   const d = req.data || {};
   const id = String(d.id || "");
