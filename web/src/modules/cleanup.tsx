@@ -342,6 +342,9 @@ function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSugg
 // Clé stable d'un enregistrement — MÊME priorité que le serveur (domain/aiCorrection.refOf : id d'abord)
 // pour apparier les propositions IA (indexées par « ref ») aux lignes affichées.
 const refKeyOf = (it: CorrectionItem) => String(it.id || it.numero || it.fp || it.bcNumber || it.client || "");
+// Seuil de confiance pour l'application EN LOT : on n'auto-applique que les propositions très fiables ;
+// en dessous, elles restent visibles pour un arbitrage ligne à ligne. Réglé prudent (l'IA propose).
+const AI_BULK_CONF = 0.85;
 
 function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; onDone: () => Promise<void> }) {
   const cfg = FIX[bucket.type] || { kind: "" };
@@ -349,6 +352,7 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
   // Propositions IA indexées par ref (l'IA propose, l'humain applique via les écritures gouvernées).
   const [sugg, setSugg] = useState<Record<string, AiSuggestion>>({});
   const [aiInfo, setAiInfo] = useState<{ actionable: number; truncated: boolean } | null>(null);
+  const toast = useToast();
   // Génération EN MASSE réservée aux factures non rattachées (crée commande + opp gagnée pour TOUTES les
   // orphelines à FP canonique absentes du carnet — les FP inconnus/déjà présents sont ignorés côté serveur).
   const bulkGen = bucket.type === "factures_orphelines" && canFix;
@@ -361,6 +365,21 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
     setSugg(map);
     setAiInfo({ actionable: r.suggestions.filter((s) => s.action !== "review").length, truncated: r.truncated });
     if (!open) onToggle();
+  };
+  // Lignes du lot portant une proposition IA actionnable ET très fiable (≥ seuil) — cibles de l'application en lot.
+  const highConfItems = () => bucket.items.filter((it) => { const s = sugg[refKeyOf(it)]; return s && s.action !== "review" && s.confidence >= AI_BULK_CONF; });
+  // Applique EN LOT les propositions fiables : chacune passe par SON écriture gouvernée (RBAC/audit/recalcul
+  // inchangés), séquentiellement, tolérant aux échecs par ligne (une correction refusée n'annule pas les autres).
+  const applyHighConf = async () => {
+    const targets = highConfItems();
+    let ok = 0; const fails: string[] = [];
+    for (const it of targets) {
+      const s = sugg[refKeyOf(it)];
+      try { await applyAiSuggestion(it, s); ok++; }
+      catch { fails.push(refKeyOf(it)); }
+    }
+    await onDone();
+    toast(`${ok} correction${ok > 1 ? "s" : ""} IA appliquée${ok > 1 ? "s" : ""}${fails.length ? ` — ${fails.length} refusée${fails.length > 1 ? "s" : ""} (à traiter à la main)` : ""}`, fails.length ? "err" : "ok");
   };
   return (
     <div className="border-t border-hair pt-2">
@@ -388,9 +407,15 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5 pl-1">
           {aiInfo && (
-            <div className="text-[11px] text-faint">
-              🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""} applicable{aiInfo.actionable > 1 ? "s" : ""} — <b>vérifiez</b> puis « Appliquer » (l'écriture reste gouvernée).
-              {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
+            <div className="flex items-center gap-2 flex-wrap text-[11px] text-faint">
+              <span>
+                🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""} applicable{aiInfo.actionable > 1 ? "s" : ""} — <b>vérifiez</b> puis « Appliquer » (l'écriture reste gouvernée).
+                {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
+              </span>
+              {canFix && highConfItems().length > 0 && (
+                <Busy variant="ghost" label={`⚡ Appliquer les fiables (${highConfItems().length})`}
+                  okMsg="Propositions fiables appliquées" errMsg="Application refusée" fn={applyHighConf} />
+              )}
             </div>
           )}
           {bucket.items.map((it, i) => (
