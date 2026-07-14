@@ -2,7 +2,7 @@
 // fiabiliser les imports en continu : lignes en quarantaine implicite, champs manquants, ruptures
 // de rattachement, incohérences. Distinct du « Centre d'alertes » (alertes MÉTIER actionnables).
 // Module PUR (testable).
-const { fpKey } = require("../lib/ids");
+const { fpKey, num } = require("../lib/ids");
 const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
@@ -10,9 +10,10 @@ const SEV_RANK = { high: 0, medium: 1, low: 2 };
 // Définitions des anomalies (prédicat + libellé + réf) — SOURCE UNIQUE partagée par dataQuality()
 // (comptes + échantillon) et par le Centre de correction (records complets à corriger). Ordre libre :
 // dataQuality re-trie par sévérité puis compte. Chaque def : { type, severity, label, records, ref }.
-function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps) {
+function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps, rawOrders) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
   bcLines = bcLines || []; sheets = sheets || []; staleOpps = staleOpps || []; agedOpps = agedOpps || [];
+  rawOrders = rawOrders || []; // lignes P&L BRUTES (avant fusion) → détection des N° FP illisibles
   // Number.isFinite → un seuil configuré à 0 (valide) n'est PAS écrasé par le défaut (le `||` le ferait,
   // en contradiction avec alerts.js). Cf. audit P2.
   const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
@@ -49,6 +50,9 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     def("factures_sans_echeance", "low", invoices.filter((i) => !i.dueDate), "Factures sans date d'échéance (prévision cash imprécise)", (i) => i.numero),
     def("surfacturation", "high", orders.filter((o) => (o.cas || 0) > 0 && (billed[fpKey(o.fp)] || 0) > (o.cas || 0) * (1 + surfacPct)), "Commandes surfacturées (Σ factures > CAS)", (o) => o.fp),
     // Commandes
+    // N° FP ILLISIBLE : ligne P&L à CAS > 0 que fpKey rejette → ÉCARTÉE du carnet fusionné (perte de CA
+    // totalement silencieuse sans ce prédicat). Calculée sur les orders BRUTS (rawOrders), pas fusionnés.
+    def("commandes_fp_illisible", "high", rawOrders.filter((o) => !fpKey(o.fp) && num(o.cas) > 0), "Commandes P&L au N° FP illisible (exclues du carnet — CA non compté)", (o) => o.fp || o.client || "—"),
     def("commandes_sans_annee", "medium", orders.filter((o) => !(o.yearPo > 0)), "Commandes sans année de PO (atterrissage faussé)", (o) => o.fp),
     def("commandes_sans_client", "medium", orders.filter((o) => !o.client), "Commandes sans client", (o) => o.fp),
     def("commandes_sans_am", "low", orders.filter((o) => !o.am), "Commandes sans commercial (AM)", (o) => o.fp),
@@ -70,7 +74,9 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     def("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier),
     def("bc_sans_fournisseur", "low", bcLines.filter((b) => !b.supplier), "Lignes BC sans fournisseur", (b) => b.bcNumber),
     // BC RÉEL (avec N° BC) à montant XOF nul : souvent une devise étrangère non convertie.
-    def("bc_montant_zero", "medium", bcLines.filter((b) => b.bcNumber && !((b.amountXof || 0) > 0)), "BC émis à montant XOF nul (devise étrangère à convertir ?)", (b) => b.bcNumber),
+    // BC RÉEL à montant XOF nul = HAUT : il compte pour 0 dans le SOLDE/l'engagement fournisseur (SOA) →
+    // disponible surévalué, saturation masquée (intégrité du relevé compromise tant que non converti).
+    def("bc_montant_zero", "high", bcLines.filter((b) => b.bcNumber && !((b.amountXof || 0) > 0)), "BC émis à montant XOF nul (fausse le solde fournisseur — devise à convertir)", (b) => b.bcNumber),
     // Fiches affaire
     def("fiches_sans_vente", "low", sheets.filter((s) => !(s.saleTotal > 0)), "Fiches affaire sans prix de vente", (s) => s.fp),
     // Doublons
@@ -79,12 +85,12 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
   ];
 }
 
-function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps) {
+function dataQuality(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps, rawOrders) {
   orders = orders || []; invoices = invoices || []; opps = opps || [];
   bcLines = bcLines || []; sheets = sheets || [];
 
   const issues = [];
-  for (const d of issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps)) {
+  for (const d of issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, agedOpps, rawOrders)) {
     if (d.records.length) issues.push({ type: d.type, severity: d.severity, count: d.records.length, label: d.label, refs: d.records.slice(0, 10).map(d.ref).map((x) => String(x || "—")) });
   }
   issues.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || (b.count - a.count));

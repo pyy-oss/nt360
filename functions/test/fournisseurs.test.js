@@ -4,6 +4,32 @@ const { suppliers } = require("../domain/fournisseurs");
 // Récupère l'agrégat d'un fournisseur par nom (normalisé majuscules dans le domaine).
 const sup = (res, name) => res.bySupplier.find((s) => s.name === name.toUpperCase());
 
+describe("suppliers — BC en devise non convertie (SOA indéterminé)", () => {
+  it("BC réel (N° BC) à montant XOF nul → fournisseur `unvalued` + état « indetermine » (pas « ok » à tort)", () => {
+    const orders = [];
+    const bcLines = [{ bcNumber: "BC-USD-1", supplier: "DELL", amountXof: 0, status: "emis" }]; // devise non convertie
+    const credit = [{ id: "DELL", authorized: 100_000, openingBalance: 0 }];
+    const r = suppliers(orders, bcLines, credit);
+    const c = sup(r, "DELL");
+    expect(c.unvalued).toBe(true);
+    expect(c.state).toBe("indetermine"); // le disponible « ok » ne doit pas rassurer à tort
+    expect(r.indeterminate).toContain("DELL");
+  });
+  it("BC valorisé → PAS de flag ; état normal", () => {
+    const r = suppliers([], [{ bcNumber: "BC1", supplier: "DELL", amountXof: 50_000, status: "emis" }], [{ id: "DELL", authorized: 100_000, openingBalance: 0 }]);
+    const c = sup(r, "DELL");
+    expect(c.unvalued).toBe(false);
+    expect(c.state).toBe("ok");
+  });
+  it("saturation réelle prime sur « indetermine » (état pire conservé)", () => {
+    const r = suppliers([], [
+      { bcNumber: "BC1", supplier: "DELL", amountXof: 120_000, status: "facture" }, // dépasse déjà le plafond
+      { bcNumber: "BC2", supplier: "DELL", amountXof: 0, status: "emis" },           // + un non converti
+    ], [{ id: "DELL", authorized: 100_000, openingBalance: 0 }]);
+    expect(sup(r, "DELL").state).toBe("saturation");
+  });
+});
+
 describe("suppliers — netting BC ↔ achat commande (anti double-compte)", () => {
   it("BC du même FP+fournisseur : l'achat commande est netté (pas de double engagement)", () => {
     const orders = [{ fp: "FP/2026/1", raf: 10, suppliers: [{ name: "CISCO", amount: 40000 }] }];

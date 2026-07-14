@@ -1,6 +1,24 @@
 import { describe, it, expect } from "vitest";
-const { mergeCommandes } = require("../domain/commandes");
+const { mergeCommandes, illegibleOrders } = require("../domain/commandes");
 const { buildFpAliasResolver } = require("../lib/ids");
+
+describe("illegibleOrders — lignes P&L au N° FP illisible (perte de CA autrement invisible)", () => {
+  it("retient les lignes à FP non canonique ET CAS>0 ; écarte les FP valides et les lignes vides", () => {
+    const raw = [
+      { fp: "FP/2024/7", client: "OK", cas: 1000 },       // canonique → écarté (pas une perte)
+      { fp: "FP/2024", client: "A", cas: 50000 },         // séquence absente → retenu
+      { fp: "FP/20244/3", client: "B", cas: 999 },        // année à 5 chiffres → retenu
+      { fp: "FP/2024/0000", client: "C", cas: 1 },        // séquence factice → retenu
+      { fp: "SANS-FP", client: "D", cas: 0 },             // illisible mais CAS 0 → écarté (ligne vide)
+    ];
+    const out = illegibleOrders(raw);
+    expect(out.map((o) => o.client)).toEqual(["A", "B", "C"]);
+  });
+  it("ces lignes sont RÉELLEMENT écartées du carnet par mergeCommandes (d'où l'anomalie)", () => {
+    const merged = mergeCommandes([{ fp: "FP/2024", client: "A", cas: 50000 }], [], [], []);
+    expect(merged).toEqual([]); // la ligne à FP illisible n'entre pas dans le carnet
+  });
+});
 
 describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réconcilient", () => {
   const orders = [

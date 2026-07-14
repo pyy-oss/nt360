@@ -25,7 +25,7 @@ function suppliers(orders, bcLines, creditLines) {
   const acc = {}; // name → agrégat par fournisseur
   const get = (name) => (acc[name] = acc[name] || {
     name, expo: 0, open: 0, engagementBc: 0, facture: 0,
-    authorized: 0, opening: 0, hasCredit: false,
+    authorized: 0, opening: 0, hasCredit: false, unvalued: false,
   });
 
   // BC : ventile facturé (→ solde) vs engagé (→ engagement) ; les soldés (payés) sont exclus.
@@ -39,6 +39,10 @@ function suppliers(orders, bcLines, creditLines) {
     const amt = b.amountXof || 0;
     if (b.status === INVOICED) a.facture += amt;       // facturé non payé → SOLDE
     else if (COMMITTED.has(b.status)) a.engagementBc += amt; // commandé non facturé → ENGAGEMENT
+    // BC RÉEL (N° BC émis) non payé mais à montant XOF nul = devise étrangère non convertie : il compte
+    // pour 0 → le solde/l'engagement du fournisseur est SOUS-estimé, le disponible SURévalué. On le
+    // signale (`unvalued`) pour que l'état ne rassure pas à tort tant que la conversion n'est pas posée.
+    if (b.bcNumber && !(amt > 0)) a.unvalued = true;
     const fpk = fpKey(b.fp) || "";
     bcByKey[fpk + "|" + sup] = (bcByKey[fpk + "|" + sup] || 0) + amt;
     if (!fpk) bcNoFpBySup[sup] = (bcNoFpBySup[sup] || 0) + amt; // BC sans FP → pool fournisseur
@@ -95,13 +99,16 @@ function suppliers(orders, bcLines, creditLines) {
       const util = a.authorized > 0 ? (solde + engagement) / a.authorized : 0;
       // Sans ligne de crédit saisie (authorized=0), on ne statue pas (évite un faux positif
       // systématique sur les fournisseurs P&L sans creditLines, §18.6).
-      const state = a.authorized > 0
+      let state = a.authorized > 0
         ? (disponible < 0 ? "saturation" : util >= 0.9 ? "tension" : "ok")
         : "non_suivi";
+      // Solde/disponible NON FIABLES tant qu'un BC réel n'est pas converti : on ne laisse pas afficher
+      // « ok » rassurant (on remonte « indetermine »), sauf si déjà en saturation (état pire, conservé).
+      if (a.unvalued && state !== "saturation") state = "indetermine";
       return {
         name: a.name, expo: a.expo, open: a.open, engagement, solde,
         opening: a.opening, facture: a.facture, authorized: a.authorized, openingDate: a.openingDate || null,
-        disponible, coverage: disponible, util, state, hasCredit: a.hasCredit,
+        disponible, coverage: disponible, util, state, hasCredit: a.hasCredit, unvalued: a.unvalued,
         // Ligne recommandée : couvrir le solde + l'engagement avec 10 % de marge.
         reco: solde + engagement * 1.1,
         // Rétro-compat : `encours` désigne désormais le SOLDE du compte (facturé), non plus tous les BC.
@@ -120,6 +127,8 @@ function suppliers(orders, bcLines, creditLines) {
     // fournisseurs saturés/en tension, y compris à faible exposition (hors du top 50 affiché).
     saturated: bySupplier.filter((x) => x.state === "saturation").map((x) => x.name),
     tension: bySupplier.filter((x) => x.state === "tension").map((x) => x.name),
+    // Fournisseurs dont le SOA est INDÉTERMINÉ (BC réel non converti) — à fiabiliser avant décision de crédit.
+    indeterminate: bySupplier.filter((x) => x.unvalued).map((x) => x.name),
     bySupplier: bySupplier.slice(0, 50),
   };
 }

@@ -2,7 +2,7 @@
 // ligne fournisseur saturée, concentration client, BC en attente. Fonction pure.
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
-const { fpKey } = require("../lib/ids");
+const { fpKey, plausibleYear } = require("../lib/ids");
 // Seuils d'alerte PAR DÉFAUT (source unique domain/thresholds ; surchargés par config/alerts).
 const { ALERT_DEFAULTS } = require("./thresholds");
 
@@ -58,7 +58,9 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   });
   if (rafIncoh.length) out.push({ type: "raf_incoherent", severity: "medium", count: rafIncoh.length, message: `${rafIncoh.length} commande(s) où le RAF s'écarte de >${(T.rafEcartPct * 100).toFixed(0)} % de (CAS − Facturé)`, refs: rafIncoh.slice(0, 10).map((o) => o.fp) });
 
-  const dormant = orders.filter((o) => (o.raf || 0) > 0 && (o.yearPo || 0) > 0 && o.yearPo <= fy - T.dormantYears);
+  // Millésime BORNÉ (plausibleYear) : un yearPo aberrant (sentinelle 1900, faute 20226) ne doit ni
+  // déclencher un faux « dormant » ni échapper au test — même bornage que l'atterrissage/le sélecteur.
+  const dormant = orders.filter((o) => { const py = plausibleYear(o.yearPo); return (o.raf || 0) > 0 && py > 0 && py <= fy - T.dormantYears; });
   if (dormant.length) out.push({ type: "backlog_dormant", severity: "medium", count: dormant.length, message: `${dormant.length} commande(s) ouverte(s) d'un millésime ≤ ${fy - T.dormantYears}`, refs: dormant.slice(0, 10).map((o) => o.fp) });
 
   // Listes COMPLÈTES (non tronquées au top 50 affiché) : un fournisseur saturé à faible exposition

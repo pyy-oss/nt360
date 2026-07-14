@@ -44,9 +44,23 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(byType.factures_sans_echeance.count).toBe(2); // A2 + OR
     expect(byType.bc_sans_fp.count).toBe(1);
     expect(byType.fiches_sans_vente.count).toBe(1);
-    // BC1 a un N° BC mais aucun montant XOF → BC émis à montant nul (devise à convertir ?).
+    // BC1 a un N° BC mais aucun montant XOF → BC émis à montant nul (fausse le solde fournisseur → HAUT).
     expect(byType.bc_montant_zero.count).toBe(1);
-    expect(byType.bc_montant_zero.severity).toBe("medium");
+    expect(byType.bc_montant_zero.severity).toBe("high");
+  });
+  it("commandes P&L au N° FP ILLISIBLE (rawOrders) → anomalie haute (CA autrement perdu)", () => {
+    // Lignes P&L brutes : FP illisibles à CAS>0 doivent être signalées ; l'illisible sans CAS ou le FP
+    // canonique valide ne le sont pas.
+    const raw = [
+      { fp: "FP/2024", client: "ACME", cas: 50000000 },   // séquence absente → illisible + CAS → signalé
+      { fp: "FP/2024/0000", client: "X", cas: 10 },        // séquence factice → illisible → signalé
+      { fp: "FP/2026/5", client: "OK", cas: 999 },         // canonique valide → NON signalé
+      { fp: "n'importe quoi", client: "Y", cas: 0 },       // illisible mais CAS 0 → NON signalé (ligne vide)
+    ];
+    const qq = dataQuality([], [], [], [], [], undefined, [], [], raw);
+    const bt = Object.fromEntries(qq.issues.map((i) => [i.type, i]));
+    expect(bt.commandes_fp_illisible.count).toBe(2);
+    expect(bt.commandes_fp_illisible.severity).toBe("high");
   });
   it("opp GAGNÉE avec FP mais SANS ligne P&L → à réconcilier (sévérité haute)", () => {
     // FP/2026/1 est une commande (P&L) ; FP/2026/8 ne l'est pas → réconciliation à faire.
