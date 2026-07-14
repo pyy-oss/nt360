@@ -2,6 +2,7 @@
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
 const { fpKey } = require("../lib/ids");
+const { projectionWeight, normalizeTiers } = require("./projection");
 
 const topN = (obj, n = 10) =>
   Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ key: k, value: v }));
@@ -105,7 +106,11 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
  *  `opps` (optionnel) ajoute par entité le FORECAST = Σ pondéré des opps OUVERTES (étapes 1..5) et la
  *  valeur PROJETÉE = CAS + forecast (les opps GAGNÉES sont déjà repliées dans le CAS via mergeCommandes
  *  → « certitudes »). Alimente le Bilan CODIR (Top clients « Commandes & Certitudes & Forecast »). */
-function byEntity(orders, invoices, keyFn, opps) {
+function byEntity(orders, invoices, keyFn, opps, tiers) {
+  const t = tiers || normalizeTiers();
+  // FP déjà au carnet : une opp active dont le FP porte déjà une commande est comptée dans `cas` ;
+  // l'ajouter au forecast la double-compterait dans `projete = cas + forecast` (parité chaine.js).
+  const booked = new Set((orders || []).map((o) => fpKey(o.fp)).filter(Boolean));
   const m = {};
   const get = (k) => (m[k] = m[k] || { key: k, cas: 0, facture: 0, backlog: 0, mb: 0, forecast: 0 });
   for (const o of orders) {
@@ -120,7 +125,9 @@ function byEntity(orders, invoices, keyFn, opps) {
   }
   for (const o of opps || []) {
     const s = Number(o.stage) || 0;
-    if (s >= 1 && s <= 5) get(keyFn(o) || "AUTRE").forecast += o.weighted || 0; // pipeline pondéré ouvert
+    const k = o.fp ? fpKey(o.fp) : "";
+    // Pondéré TIÉRÉ (projectionWeight), hors opps déjà au carnet → source unique avec le cockpit/atterrissage.
+    if (s >= 1 && s <= 5 && !(k && booked.has(k))) get(keyFn(o) || "AUTRE").forecast += projectionWeight(o, t);
   }
   const all = Object.values(m)
     .map((a) => ({ ...a, pmb: a.cas > 0 ? a.mb / a.cas : 0, projete: a.cas + a.forecast }))
