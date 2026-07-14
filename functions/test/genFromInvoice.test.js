@@ -67,6 +67,21 @@ describe("genFromInvoice — générer commande+opp depuis factures non rattach�
     const { plan } = planFromInvoices([{ id: "a", fp: "FP/2023/12", client: "ACME", amountHt: 900 }], new Set()); // pas de date
     expect(plan[0].yearPo).toBe(2023); // dérivée du N° FP → rattachement comptable correct (pas 0)
   });
+  it("INVARIANT : N factures d'un MÊME FP → UNE seule commande/opp, CAS = Σ exacte des factures", () => {
+    const invoices = [
+      { id: "1", fp: "FP/2021/4687", client: "CORIS", amountHt: 1500000, date: "2021-03-10", numero: "F1" },
+      { id: "2", fp: "FP/2021/04687", client: "CORIS", amountHt: 500000, date: "2021-05-02", numero: "F2" }, // même FP (zéro de tête)
+      { id: "3", fp: "FP/2021/4687", client: "CORIS", amountHt: 250000, date: "2021-06-01", numero: "F3" },
+      { id: "4", fp: "FP/2021/5005", client: "ONECI", amountHt: 900000, date: "2021-04-01", numero: "F4" },
+    ];
+    const { plan } = planFromInvoices(invoices, new Set());
+    expect(plan.length).toBe(2); // 3 factures d'un FP + 1 d'un autre → 2 commandes, pas 4
+    const g = plan.find((p) => p.fp === "FP/2021/4687");
+    expect(g.invoiceCount).toBe(3);
+    expect(g.cas).toBe(2250000); // 1 500 000 + 500 000 + 250 000 (le zéro de tête est fusionné)
+    // Le callable dérive des IDs DÉTERMINISTES du FP (safeId(fp) / saisie_geninv_…) → 1 doc order + 1 doc
+    // opp par FP, idempotent en ré-exécution : jamais de doublon de commande/opportunité pour un même FP.
+  });
   it("entrées vides → plan vide, compteurs cohérents", () => {
     const r = planFromInvoices([], new Set());
     expect(r.plan).toEqual([]);
