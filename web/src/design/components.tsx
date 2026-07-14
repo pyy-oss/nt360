@@ -530,6 +530,12 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
   { open: boolean; onClose: () => void; title?: ReactNode; children?: ReactNode; actions?: ReactNode; size?: "sm" | "md" }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // `onClose` capturé par REF : les appelants passent une lambda inline (identité neuve à chaque rendu).
+  // Si l'effet de gestion du focus dépendait de `onClose`, il se ré-exécuterait à CHAQUE frappe (le
+  // parent re-rend sur saisie) → son cleanup rend le focus au déclencheur puis le ré-effet refocalise la
+  // carte, faisant PERDRE le focus du champ à chaque lettre. On ne dépend donc que de `open`.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const card = ref.current;
@@ -538,7 +544,7 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
       card?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])') || [],
     ).filter((el) => el.offsetParent !== null || el === document.activeElement);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { onCloseRef.current(); return; }
       if (e.key !== "Tab") return;
       const els = focusables();
       if (!els.length) { e.preventDefault(); card?.focus(); return; }
@@ -558,7 +564,7 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
       document.body.style.overflow = prev;
       previouslyFocused?.focus?.(); // restitution du focus au déclencheur
     };
-  }, [open, onClose]);
+  }, [open]); // volontairement PAS `onClose` (cf. onCloseRef ci-dessus) — sinon perte de focus par frappe
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[100] grid place-items-center p-4">
