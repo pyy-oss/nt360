@@ -28,6 +28,8 @@ export const ClickupCockpit: FC<Props> = () => {
   const linked = health?.linked ?? 0;
   const total = health?.commandesTotal ?? 0;
   const orphans = health?.orphanTasks ?? 0;
+  const dups = health?.duplicateTasks ?? 0;
+  const dupFps = health?.duplicateFps ?? 0;
   const cafGap = health?.cafGapCount ?? 0;
   const overdueProjets = delays?.overdueTotal ?? 0;
   const avgLate = delays?.avgDaysLate ?? 0;
@@ -56,9 +58,23 @@ export const ClickupCockpit: FC<Props> = () => {
         <Kpi label="Projets en retard" value={fmt(overdueProjets)} sub={overdueProjets ? `retard moyen ${avgLate} j` : "livraison à l'heure"} tone={overdueProjets ? "clay" : "emerald"} />
       </div>
       <div className={grid4}>
+        <Kpi label="Doublons ClickUp" value={fmt(dups)} sub={dups ? `${fmt(dupFps)} N° FP porté(s) par ≥ 2 tâches` : "aucune tâche en double"} tone={dups ? "clay" : "emerald"} />
         <Kpi label="BC liés à ClickUp" value={`${fmt(bcLinked)} / ${fmt(bcTotal)}`} sub="bons de commande" tone="steel" />
         <Kpi label="BC en retard (ETA ClickUp)" value={fmt(bcOverdue)} sub="ETA ClickUp dépassée, non livré" tone={bcOverdue ? "clay" : "emerald"} />
       </div>
+      {dups > 0 && (
+        <Card title={`Doublons ClickUp détectés · ${fmt(dups)} tâche(s) en trop`}
+          actions={canGo("habilitations") ? <button className="btn-ghost !py-1 text-xs" onClick={() => go("habilitations")}>Nettoyer</button> : undefined}>
+          <p className="text-sm text-muted">{fmt(dupFps)} N° FP {dupFps > 1 ? "sont portés" : "est porté"} par plusieurs tâches ClickUp — {fmt(dups)} tâche(s) surnuméraire(s) à supprimer. Va dans <b>Habilitations → Intégration ClickUp → Nettoyer les doublons</b> (aperçu avant suppression ; conserve la tâche liée ou la plus ancienne).</p>
+          {(health?.duplicateSample?.length || 0) > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {health!.duplicateSample!.slice(0, 12).map((d, i) => (
+                <Badge key={i} tone="clay">{d.fp} · ×{d.count}</Badge>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Retards de livraison par PM */}
       {(delays?.byPm?.length || 0) > 0 && (

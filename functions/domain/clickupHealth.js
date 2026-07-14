@@ -22,12 +22,31 @@ function taskNumField(task, name) {
 function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
   const L = links || {}, S = syncMap || {};
   const cmdFpSet = new Set();
-  // Index tâche par FP (Opp ID) → { id, caf }.
+  // Index tâche par FP (Opp ID) → { id, caf }. On COMPTE aussi les tâches par FP pour rendre VISIBLES les
+  // doublons (plusieurs tâches ClickUp pour un même N° FP) — l'ancien index silencieux (« garde la 1re »)
+  // masquait totalement les doublons créés avant le verrou anti-concurrence (« zéro visibilité »).
   const taskByFp = {};
+  const countByFp = {};        // FP canonique → nb de tâches ClickUp portant ce FP
   let tasksWithFp = 0;
   for (const t of tasks || []) {
     const raw = taskFp(t);
-    if (raw) { tasksWithFp++; const k = fpKey(raw); if (k && !(k in taskByFp)) taskByFp[k] = { id: t.id, caf: taskNumField(t, "CA Facturé") }; }
+    if (raw) {
+      tasksWithFp++;
+      const k = fpKey(raw);
+      if (k) {
+        countByFp[k] = (countByFp[k] || 0) + 1;
+        if (!(k in taskByFp)) taskByFp[k] = { id: t.id, caf: taskNumField(t, "CA Facturé") };
+      }
+    }
+  }
+  // Doublons : pour chaque FP porté par ≥ 2 tâches, les tâches SURNUMÉRAIRES (count − 1) sont des doublons.
+  let duplicateTasks = 0, duplicateFps = 0; const duplicateSample = [];
+  for (const k of Object.keys(countByFp)) {
+    if (countByFp[k] > 1) {
+      duplicateFps++;
+      duplicateTasks += countByFp[k] - 1;
+      if (duplicateSample.length < 12) duplicateSample.push({ fp: k, count: countByFp[k] });
+    }
   }
 
   let commandesTotal = 0, linked = 0, synced = 0, cafGapCount = 0, cafGapTotal = 0;
@@ -65,11 +84,14 @@ function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
     tasksTotal: (tasks || []).length,
     tasksWithFp,
     orphanTasks,                // tâches sans commande correspondante
+    duplicateTasks,             // tâches EN TROP (surnuméraires) partageant un FP déjà porté par une autre
+    duplicateFps,               // nb de N° FP portés par ≥ 2 tâches
     cafGapCount,                // commandes liées dont le CAF diffère de la tâche
     cafGapTotal,
     coverage: commandesTotal ? Math.round((linked / commandesTotal) * 100) : 0,
     unlinkedSample: unlinked.slice(0, 12),
     orphanSample,
+    duplicateSample,            // échantillon [{ fp, count }] pour la carte de monitoring
   };
 }
 

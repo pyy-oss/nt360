@@ -783,18 +783,20 @@ function ClickupCard() {
     } finally { setBulkBusy(false); }
   };
   // Nettoyage des doublons ClickUp (créés par des push concurrents) : d'abord un APERÇU (dry-run) qui
-  // compte les tâches supprimables du jour, puis confirmation avant suppression réelle. Direction.
+  // compte TOUTES les tâches supprimables (toutes époques — pas seulement celles du jour, sinon les
+  // doublons anciens restent invisibles et non nettoyables), puis confirmation avant suppression réelle.
+  // `windowHours: 0` = toutes époques (intention EXPLICITE). La tâche liée/la plus ancienne est conservée.
   const dedupeTasks = async () => {
     if (dedupeBusy) return;
     setDedupeBusy(true);
     try {
-      const preview = await dedupeClickupTasks({ listId: list, windowHours: 24 });
-      if (!preview.deletable) { toast(`Aucun doublon récent (${preview.duplicates} doublon(s) hors fenêtre 24 h) — rien à nettoyer.`, "ok"); return; }
+      const preview = await dedupeClickupTasks({ listId: list, windowHours: 0 });
+      if (!preview.deletable) { toast(`Aucun doublon à nettoyer (${preview.duplicates} doublon(s) détecté(s)).`, "ok"); return; }
       const ok = await ask(
-        <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> créée(s) dans les dernières 24 h, sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche liée (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
+        <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> (toutes époques), sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche <b>liée</b> (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
         { title: "Nettoyer les doublons ClickUp", confirmLabel: `Supprimer ${preview.deletable}`, tone: "clay" });
       if (!ok) return;
-      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 24 });
+      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 0 });
       toast(`Doublons nettoyés — ${r.deleted} supprimée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} sur ${r.groups} N° FP.`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -907,8 +909,8 @@ function ClickupCard() {
         <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
           {bulkBusy ? "Push…" : "Tout resynchroniser"}
         </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer les tâches ClickUp dupliquées (même N° FP) créées dans les dernières 24 h par des push concurrents. Aperçu puis confirmation ; la tâche liée / la plus ancienne est conservée.">
-          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons du jour"}
+        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer TOUTES les tâches ClickUp dupliquées (même N° FP), toutes époques, créées par des push concurrents. Aperçu (dry-run) puis confirmation ; la tâche liée / la plus ancienne est conservée pour chaque FP.">
+          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons"}
         </button>
         <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
           {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}

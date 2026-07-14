@@ -117,9 +117,10 @@ export interface ClickupBcSummary {
 // Diagnostic qualité de l'intégration ClickUp (summaries/clickupHealth).
 export interface ClickupHealthSummary {
   commandesTotal?: number; linked?: number; unlinked?: number; unlinkedMatchable?: number; synced?: number;
-  tasksTotal?: number; tasksWithFp?: number; orphanTasks?: number; cafGapCount?: number; cafGapTotal?: number; coverage?: number;
+  tasksTotal?: number; tasksWithFp?: number; orphanTasks?: number; duplicateTasks?: number; duplicateFps?: number; cafGapCount?: number; cafGapTotal?: number; coverage?: number;
   unlinkedSample?: { fp?: string; client?: string; matchable?: boolean }[];
   orphanSample?: { id?: string; name?: string; fp?: string | null }[];
+  duplicateSample?: { fp?: string; count?: number }[];
   listId?: string; at?: any;
 }
 export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; fy?: number };
