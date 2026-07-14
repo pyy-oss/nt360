@@ -13,13 +13,17 @@ function consultantPnl(consultant, agg) {
   const monthsN = Math.max(0, Number(agg && agg.months) || 0);
   const tjm = Number(consultant && consultant.tjmTarget);
   const cjm = Number(consultant && consultant.cjm);
-  const caReal = Number.isFinite(tjm) ? Math.round(billed * tjm) : 0;
-  const cost = Number.isFinite(cjm) ? Math.round(monthsN * WORKING_DAYS_PER_MONTH * cjm) : null;
+  const missingTjm = !Number.isFinite(tjm);
+  const missingCjm = !Number.isFinite(cjm);
+  const caReal = missingTjm ? 0 : Math.round(billed * tjm);
+  const cost = missingCjm ? null : Math.round(monthsN * WORKING_DAYS_PER_MONTH * cjm);
   const margin = cost != null ? caReal - cost : null;
   const marginPct = cost != null && caReal > 0 ? Math.round(margin / caReal * 100) : null;
   return {
     id: consultant.id, name: consultant.name || null, bu: consultant.bu || null, grade: consultant.grade || null,
-    billedDays: billed, caReal, cost, margin, marginPct,
+    // `missingTjm`/`missingCjm` EXPOSÉS pour signaler « TJM/CJM à définir » (sinon un consultant à coût sans
+    // TJM apparaît en perte sans explication et tire la marge globale vers le bas silencieusement).
+    billedDays: billed, caReal, cost, margin, marginPct, missingTjm, missingCjm,
   };
 }
 
@@ -27,14 +31,17 @@ function sumBy(rows, keyFn) {
   const map = {};
   for (const r of rows) {
     const k = keyFn(r) || "—";
-    const g = map[k] || (map[k] = { key: k, headcount: 0, billedDays: 0, caReal: 0, cost: 0, margin: 0, _hasCost: false });
+    const g = map[k] || (map[k] = { key: k, headcount: 0, billedDays: 0, caReal: 0, caCost: 0, cost: 0, margin: 0, _hasCost: false });
     g.headcount += 1; g.billedDays += r.billedDays; g.caReal += r.caReal;
-    if (r.cost != null) { g.cost += r.cost; g.margin += (r.margin || 0); g._hasCost = true; }
+    // `caCost` = CA de la SEULE population à coût connu → dénominateur du taux de marge (cohérence des
+    // populations : numérateur `margin` et dénominateur doivent porter sur le MÊME sous-ensemble, sinon
+    // le taux est dilué par le CA de consultants sans CJM).
+    if (r.cost != null) { g.cost += r.cost; g.margin += (r.margin || 0); g.caCost += r.caReal; g._hasCost = true; }
   }
   return Object.values(map).map((g) => ({
     key: g.key, headcount: g.headcount, billedDays: g.billedDays, caReal: g.caReal,
     cost: g._hasCost ? g.cost : null, margin: g._hasCost ? g.margin : null,
-    marginPct: g._hasCost && g.caReal > 0 ? Math.round(g.margin / g.caReal * 100) : null,
+    marginPct: g._hasCost && g.caCost > 0 ? Math.round(g.margin / g.caCost * 100) : null,
   })).sort((a, b) => (b.margin || 0) - (a.margin || 0));
 }
 
@@ -48,11 +55,14 @@ function computeResourcePnl(consultants, constatByConsultant) {
   const withCost = rows.filter((r) => r.cost != null);
   const totCost = withCost.reduce((s, r) => s + r.cost, 0);
   const totMargin = withCost.reduce((s, r) => s + (r.margin || 0), 0);
+  // Taux de marge global : dénominateur = CA de la SEULE population à coût connu (parité numérateur/
+  // dénominateur), pas le CA de TOUT l'effectif — sinon le taux est sous-estimé (dilué).
+  const caWithCost = withCost.reduce((s, r) => s + r.caReal, 0);
   const global = {
     headcount: rows.length, billedDays: rows.reduce((s, r) => s + r.billedDays, 0),
     caReal: totCa, cost: withCost.length ? totCost : null,
     margin: withCost.length ? totMargin : null,
-    marginPct: withCost.length && totCa > 0 ? Math.round(totMargin / totCa * 100) : null,
+    marginPct: withCost.length && caWithCost > 0 ? Math.round(totMargin / caWithCost * 100) : null,
   };
   return { global, byBu: sumBy(rows, (r) => r.bu), byGrade: sumBy(rows, (r) => r.grade), rows };
 }

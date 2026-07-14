@@ -33,6 +33,7 @@ function suppliers(orders, bcLines, creditLines) {
   const bcByKey = {};
   const bcNoFpBySup = {}; // Σ BC NON soldés SANS N° FP renseigné, par fournisseur → repli de netting.
   for (const b of bcLines) {
+    if (b.source === "fiche") continue; // achats PLANIFIÉS de fiche (a_emettre) : pas des BC commandés → hors SOA/engagement (parité)
     if (b.status === PAID) continue; // payé → hors compte et hors engagement
     const sup = String(b.supplier || "").toUpperCase();
     const a = get(sup);

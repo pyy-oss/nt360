@@ -103,7 +103,9 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       const v = validateTimesheet(r);
       if (!v.ok) { errors.push({ line: 0, reason: v.error }); continue; }
       const id = `${v.value.consultantId}_${v.value.month}`;
-      batch.set(db.doc(`timesheets/${id}`), { ...v.value, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      // `source:"manual"` INDISPENSABLE (parité avec l'upsert unitaire) : sans lui, `syncClickupTimesheets`
+      // (qui ne préserve que `source==="manual"`) ÉCRASE les CRA importés en masse par le temps ClickUp.
+      batch.set(db.doc(`timesheets/${id}`), { ...v.value, source: "manual", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       imported++; if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); n = 0; }
     }
     if (n) await batch.commit();

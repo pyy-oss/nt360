@@ -4,7 +4,7 @@
 // périmètre suit la sécurité par enregistrement (Lot 2). Rebond vers le pipeline via le filtre client.
 import { useState, useEffect, useCallback, type FC } from "react";
 import { useNav } from "../lib/nav";
-import { Card, Tip, Badge, Table, Segmented, colText, colNum, money, cx } from "../design/components";
+import { Card, Tip, Badge, Table, Segmented, colText, colNum, raw, money, cx } from "../design/components";
 import { scoreOpportunities, type ScoredOpp } from "../lib/writes";
 import type { Props } from "./_shared";
 
@@ -57,15 +57,16 @@ export const Scoring: FC<Props> = () => {
               colNum("Montant", (o: ScoredOpp) => money(o.amount), (o: ScoredOpp) => o.amount),
               colNum("Étape", (o: ScoredOpp) => `${o.stage}/6`, (o: ScoredOpp) => o.stage),
               colText("Score", (o: ScoredOpp) => <span className="inline-flex items-center gap-2"><ScoreBadge score={o.score} band={o.band} /><span className="text-[11px] text-muted">{bandLabel[o.band]}</span></span>, (o: ScoredOpp) => o.score),
-              // Top 3 facteurs EN LIGNE (hauteur de ligne uniforme) ; la liste complète est dans le détail.
-              colText("Principaux facteurs", (o: ScoredOpp) => (
-                <span className="inline-flex items-center gap-1" title={o.factors.map((f) => `${f.label} ${f.impact >= 0 ? "+" : ""}${f.impact}`).join(" · ")}>
+              // Top 3 facteurs EN LIGNE (chips) + « +N ». Contenu riche → `raw` (jamais coincé dans `.cell-txt`
+              // qui écrêterait les 2e/3e chips et le « +N ») ; le survol donne la liste complète.
+              raw(colText("Principaux facteurs", (o: ScoredOpp) => (
+                <span className="inline-flex flex-wrap items-center gap-1" title={o.factors.map((f) => `${f.label} ${f.impact >= 0 ? "+" : ""}${f.impact}`).join(" · ")}>
                   {o.factors.slice(0, 3).map((f, i) => (
                     <span key={i} className={cx("rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap", f.impact >= 0 ? "bg-emerald/15 text-emerald" : "bg-clay/15 text-clay")}>{f.label} {f.impact >= 0 ? "+" : ""}{f.impact}</span>
                   ))}
                   {o.factors.length > 3 && <span className="text-[10px] text-faint">+{o.factors.length - 3}</span>}
                 </span>
-              ), (o: ScoredOpp) => o.factors.map((f) => f.label).join(" ")),
+              ), (o: ScoredOpp) => o.factors.map((f) => f.label).join(" "))),
             ]} rows={shown} colsKey="scoring" />
             <Tip>Score <b>explicable</b> (0–100) : modèle additif transparent — étape, indice de confiance, catégorie de prévision, prochaine action, DR, dormance, marge. Chaque badge de facteur montre sa contribution (± points). Concentrez l'effort sur les opportunités <b>chaudes</b> à fort montant ; requalifiez les <b>froides</b>.</Tip>
           </>

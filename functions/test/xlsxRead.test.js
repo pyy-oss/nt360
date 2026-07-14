@@ -46,9 +46,11 @@ describe("xlsxRead — aller-retour exceljs (lecture binaire)", () => {
     expect(sheetToJson(wb.Sheets.F1)).toEqual([{ X: 1, X_1: 2 }]);
   });
 
-  it("colonne à en-tête vide ignorée", async () => {
-    const wb = await roundtrip([["A", null, "B"], [1, 9, 2]]);
-    expect(sheetToJson(wb.Sheets.F1)).toEqual([{ A: 1, B: 2 }]);
+  it("colonne à en-tête vide → clé __EMPTY (parité xlsx, données conservées)", async () => {
+    // xlsx nomme les colonnes sans en-tête __EMPTY/__EMPTY_1… et conserve leurs valeurs. Les DROP
+    // faisait collisionner la signature de dédup de facturationDf (sous-comptage CAF) → on rétablit la parité.
+    const wb = await roundtrip([["A", null, "B", null], [1, 9, 2, 8]]);
+    expect(sheetToJson(wb.Sheets.F1)).toEqual([{ A: 1, __EMPTY: 9, B: 2, __EMPTY_1: 8 }]);
   });
 
   it("dates → objets Date (cellDates)", async () => {
@@ -81,5 +83,27 @@ describe("xlsxRead — aller-retour exceljs (lecture binaire)", () => {
     const rd = await readWorkbook(buf);
     expect(rd.Sheets.F1._aoa[0][0]).toBe("Refonte");
     expect(rd.Sheets.F1._aoa[0][1]).toBe("Lien");
+  });
+
+  it("hyperlink à libellé richText → texte plat (pas d'objet qui fuit)", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("F1");
+    // exceljs peut produire { text: { richText:[…] }, hyperlink } : normCell doit re-normaliser récursivement.
+    ws.getCell("A1").value = { text: { richText: [{ text: "Fac" }, { text: "ture" }] }, hyperlink: "https://x" };
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const rd = await readWorkbook(buf);
+    expect(rd.Sheets.F1._aoa[0][0]).toBe("Facture");
+  });
+
+  it("CSV (buffer sans signature ZIP) → lu comme classeur (support conservé)", async () => {
+    const csv = "A,B\n1,2\n3,4\n";
+    const rd = await readWorkbook(Buffer.from(csv, "utf8"));
+    expect(rd.SheetNames.length).toBe(1);
+    expect(sheetToJson(rd.Sheets[rd.SheetNames[0]])).toEqual([{ A: 1, B: 2 }, { A: 3, B: 4 }]);
+  });
+
+  it(".xls hérité (OLE) → erreur claire plutôt qu'échec cryptique", async () => {
+    const ole = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    await expect(readWorkbook(ole)).rejects.toThrow(/\.xls/);
   });
 });

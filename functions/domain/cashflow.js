@@ -114,6 +114,10 @@ function decaissements(bcLines, asOf, opts = {}) {
   let etaKnown = 0, noEtaCount = 0; // fiabilité de la prévision : part du payable à ETA connue
 
   for (const b of bcLines || []) {
+    // Lignes de FICHE (achats planifiés, statut `a_emettre`) EXCLUES : ce ne sont pas des BC réellement
+    // commandés → elles ne doivent ni gonfler l'engagement ni le scénario pessimiste de trésorerie. Parité
+    // avec tous les autres consommateurs (alerts/relances/news/loadBcLines/vue Exécution BC).
+    if (b.source === "fiche") continue;
     const amt = b.amountXof || 0;
     if (amt <= 0) continue;
     const eta = b.etaReel || b.etaContrat;

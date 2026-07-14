@@ -1127,7 +1127,7 @@ function CustomFieldsCard() {
     <Card title="Champs personnalisés (opportunité)" actions={
       <div className="flex gap-2">
         <button type="button" className="btn-ghost !py-1 text-xs" onClick={add}>+ champ</button>
-        {draft && <Busy label="Enregistrer" okMsg="Champs enregistrés" fn={async () => { await setCustomFields(draft.map((r) => ({ key: r.label, label: r.label, type: r.type, options: r.options, active: r.active }))); setDraft(null); }} />}
+        {draft && <Busy label="Enregistrer" okMsg="Champs enregistrés" fn={async () => { await setCustomFields(draft.map((r) => ({ key: r.key || r.label, label: r.label, type: r.type, options: r.options, active: r.active }))); setDraft(null); }} />}
       </div>}>
       {rows.length ? (
         <div className="flex flex-col gap-2">
