@@ -443,49 +443,12 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
 // creditLines / billingMilestones. L'écriture directe SDK est fermée → plus de donnée d'objectif posée
 // sans contrôle ni journal. Droit « objectifs ». Recompute des summaries qui lisent objectives (needObj :
 // atterrissage / ams / pipeline / news / alerts) → R/O et écarts d'objectif se rafraîchissent. ---
-const OBJ_SCOPES = new Set(["global", "bu", "commercial", "client"]);
-const objectiveKey = (o) => `${o.fiscalYear}_${o.scope}_${o.scopeValue}`;
-exports.upsertObjective = onCallG("upsertObjective", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
-  await requireWrite(req, "objectifs");
-  const d = req.data || {};
-  const fiscalYear = Math.trunc(Number(d.fiscalYear) || 0);
-  if (fiscalYear < 2000) throw new HttpsError("invalid-argument", "année d'objectif invalide (ex. 2026)");
-  const scope = String(d.scope || "global");
-  if (!OBJ_SCOPES.has(scope)) throw new HttpsError("invalid-argument", "périmètre invalide (global|bu|commercial|client)");
-  // Périmètre global → une seule valeur « all » ; sinon valeur de périmètre requise (BU / AM / client).
-  const scopeValue = scope === "global" ? "all" : String(d.scopeValue || "").trim();
-  if (!scopeValue) throw new HttpsError("invalid-argument", "valeur de périmètre requise (BU / commercial / client)");
-  const nn = (v) => Math.max(0, Number(v) || 0); // cibles jamais négatives
-  const obj = {
-    fiscalYear, scope, scopeValue,
-    label: d.label ? String(d.label).trim().slice(0, 200) : null,
-    targetCas: nn(d.targetCas), targetInvoiced: nn(d.targetInvoiced),
-    targetMargin: nn(d.targetMargin), targetMarginPct: nn(d.targetMarginPct),
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  const id = objectiveKey(obj);
-  await db.doc(`objectives/${id}`).set(obj, { merge: true });
-  await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "upsert_objective", module: "objectifs", entity: "objective", entityId: id,
-    detail: { fiscalYear, scope, scopeValue, targetCas: obj.targetCas, targetInvoiced: obj.targetInvoiced, targetMargin: obj.targetMargin }, ts: FieldValue.serverTimestamp(),
-  });
-  await requestRecompute(["atterrissage", "ams", "pipeline", "news", "alerts"]);
-  return { ok: true, id };
-});
-
-exports.deleteObjective = onCallG("deleteObjective", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
-  await requireWrite(req, "objectifs");
-  const id = String(req.data?.id || "").trim();
-  if (!id) throw new HttpsError("invalid-argument", "id objectif requis");
-  assertPlainId(id, "id objectif");
-  await db.doc(`objectives/${id}`).delete();
-  await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "delete_objective", module: "objectifs", entity: "objective", entityId: id,
-    detail: {}, ts: FieldValue.serverTimestamp(),
-  });
-  await requestRecompute(["atterrissage", "ams", "pipeline", "news", "alerts"]);
-  return { ok: true, id };
-});
+// Objectifs (R/O CODIR) EXTRAITS dans handlers/objectives.js (patron R3). Deps injectées ; exports
+// déclarés ici (garde-fou de déploiement par nom).
+const { createObjectives } = require("./handlers/objectives");
+const _objectives = createObjectives({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
+exports.upsertObjective = _objectives.upsertObjective;
+exports.deleteObjective = _objectives.deleteObjective;
 
 // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
 // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
