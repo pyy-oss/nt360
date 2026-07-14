@@ -289,6 +289,11 @@ async function recomputeCore(db, only) {
   // sur les données lues, pour que les agrégats/alertes ne dépendent pas de drapeaux
   // pré-persistés potentiellement obsolètes (recompute sans réingestion).
   enrichBu({ orders, invoices, opportunities: opps });
+  // Snapshot du drapeau `linked` PERSISTÉ avant recalcul : le frontal (liste Factures) lit ce champ
+  // stocké, pas l'agrégat serveur — s'il n'est jamais réécrit, le KPI « Factures non rattachées »
+  // reste figé sur une valeur d'import obsolète (divergence observée : 364 côté liste vs 72 côté
+  // Qualité/Alertes, qui calculent frais). On réconcilie en réécrivant `linked` (diff seulement).
+  const priorLinked = new Map(invoices.map((i) => [i.id, i.linked === true]));
   enrichLinks({ orders, invoices });
 
   const want = (k) => !only || only.includes(k);
@@ -296,6 +301,16 @@ async function recomputeCore(db, only) {
   const asOf = new Date().toISOString().slice(0, 10); // aujourd'hui : borne basse fenêtre D Prev (atterrissage)
   const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
   const w = []; // écritures {path, data}
+
+  // Réconciliation du drapeau `linked` persisté sur les factures (source du KPI « non rattachées »
+  // côté liste). On ne réécrit QUE les factures dont l'état a changé depuis le dernier calcul (diff),
+  // pour éviter des milliers d'écritures inutiles à chaque recalcul. Après le 1er auto-rattrapage,
+  // le volume retombe à ~0 (seules les nouvelles factures ou les rattachements récents bougent).
+  for (const inv of invoices) {
+    if (!inv.id) continue;
+    const now = inv.linked === true;
+    if (now !== priorLinked.get(inv.id)) w.push({ path: `invoices/${inv.id}`, data: { linked: now } });
+  }
 
   // Migration DOUCE : d'anciennes fiches (importées avant l'isolation) portent la marge INLINE dans
   // projectSheets → on la déplace vers projectSheetsMargin et on purge les champs de base au 1er
@@ -416,7 +431,11 @@ async function recomputeCore(db, only) {
     const truncated = histSnap.size >= OPP_HISTORY_WINDOW; // borne atteinte → funnel = fenêtre glissante
     w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(histSnap.docs.map((d) => d.data())), truncated, windowSize: histSnap.size, ...stamp } });
   }
-  if (want("alerts")) {
+  // Gate ALIGNÉ sur l'écriture de summaries/dataQuality (`want("alerts") || want("dataQuality")`) :
+  // les alertes et le cockpit Qualité partagent des métriques identiques (surfacturation, factures non
+  // rattachées) sur les MÊMES entrées. Des gates divergents laissaient un recalcul partiel rafraîchir
+  // l'un sans l'autre → comptes incohérents entre les deux panneaux (ex. 61 vs 65 surfacturées).
+  if (want("alerts") || want("dataQuality")) {
     // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte
     // porte des données du module dont elle relève (noms fournisseurs saturés, montant de créances
     // orphelines, réfs BC en retard…). Chaque alerte est routée vers le summary gaté au bon niveau par

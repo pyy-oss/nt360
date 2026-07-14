@@ -5,6 +5,7 @@
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
 import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
+import { fpKey, isAgedLost } from "../lib/ids";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -23,22 +24,29 @@ export function computeFilteredOverview(
   const yr = (d?: string) => (d ? String(d).slice(0, 4) : "");
   const inPeriod = (y: string) => period === "all" || y === period;
   const S = (a: any[], f: (x: any) => number) => a.reduce((s, x) => s + (f(x) || 0), 0);
-  // Dédup inter-source (miroir de recomputeAll) : une opp SAISIE dont le FP est aussi couvert par
-  // une opp SALESDATA est écartée (la version importée fait foi) — sinon double-compte du pipeline
-  // dans la vue filtrée (certitudes / conversion gonflées vs le cockpit global).
-  const cf = (s?: string) => (s || "").trim().toUpperCase();
-  const salesFps = new Set(opps.filter((o) => o.source === "salesData" && o.fp).map((o) => cf(o.fp)));
-  opps = opps.filter((o) => !(o.source === "saisie" && o.fp && salesFps.has(cf(o.fp))));
+  // Assiette d'opps EN MIROIR du serveur (aggregate.js:239-249) : sinon la vue filtrée compte des opps
+  // que le cockpit global exclut → certitudes/conversion divergents dès qu'un filtre est actif.
+  // FP CANONIQUE (fpKey) partout, comme le serveur — un FP zero-paddé/espacé autrement doit rapprocher.
+  // 1) salesFps calculé AVANT l'exclusion stale/aged (parité serveur) : sinon un FP salesData devenu
+  //    fantôme/périmé cesserait de masquer son jumeau 'saisie', qui ressusciterait au pipeline.
+  const salesFps = new Set<string>();
+  for (const o of opps) { if (o.source === "salesData") { const k = fpKey(o.fp); if (k) salesFps.add(k); } }
+  // 2) Exclusion des FANTÔMES (stale, retirées de LIVE sans clôture) et des PÉRIMÉES par âge (isAgedLost) —
+  //    hors agrégats pipeline actifs, exactement comme le serveur.
+  const oppsActive = opps.filter((o) => o.stale !== true && !isAgedLost(o));
+  // 3) Dédup inter-source : une opp 'saisie' dont le FP est couvert par une 'salesData' est écartée.
+  opps = oppsActive.filter((o) => { if (o.source !== "saisie") return true; const k = fpKey(o.fp); return !(k && salesFps.has(k)); });
   // Commandes du périmètre = cohorte par année de PO ; backlog GLISSANT = toutes les commandes
   // ouvertes du périmètre (indépendant de la période).
   const ordP = cmdRows.filter((o) => inPeriod(String(o.yearPo || "")) && match(o, DIMS));
   const ordAll = cmdRows.filter((o) => match(o, DIMS));
-  // Attribution des factures au périmètre via leur commande (fp) ; repli sur bu/client de la facture.
+  // Attribution des factures au périmètre via leur commande (FP CANONIQUE) ; repli bu/client de la facture.
   const byFp = new Map<string, Order>();
-  for (const o of cmdRows) if (o.fp) byFp.set(o.fp, o);
+  for (const o of cmdRows) { const k = fpKey(o.fp); if (k) byFp.set(k, o); }
   const invP = invoices.filter((i) => {
     if (!inPeriod(yr(i.date))) return false;
-    const o = i.fp ? byFp.get(i.fp) : undefined;
+    const k = fpKey(i.fp);
+    const o = k ? byFp.get(k) : undefined;
     return match({ bu: o?.bu ?? i.bu, am: o?.am, client: o?.client ?? i.client }, DIMS);
   });
   const oppP = opps.filter((o) => inPeriod(yr(o.closingDate)) && match(o, DIMS));
@@ -50,13 +58,18 @@ export function computeFilteredOverview(
   // Perspective FACTURÉ : marge reconnue = taux(mb/CAS) de la commande × min(facturé_FP, CAS_FP)
   // (plafond au CAS = pas de marge sur la surfacturation, miroir reporting.factureLines).
   const rateByFp = new Map<string, { rate: number; cas: number }>();
-  for (const o of cmdRows) if (o.fp) rateByFp.set(o.fp, { rate: (o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : 0, cas: o.cas || 0 });
+  for (const o of cmdRows) { const k = fpKey(o.fp); if (k) rateByFp.set(k, { rate: (o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : 0, cas: o.cas || 0 }); }
   const facByFp = new Map<string, number>();
-  for (const i of invP) { const k = i.fp || ""; facByFp.set(k, (facByFp.get(k) || 0) + (i.amountHt || 0)); }
+  for (const i of invP) { const k = fpKey(i.fp); if (k) facByFp.set(k, (facByFp.get(k) || 0) + (i.amountHt || 0)); }
   let factureMb = 0;
   for (const [fp, base] of facByFp) { const r = rateByFp.get(fp); if (r && r.cas > 0) factureMb += r.rate * Math.min(base, r.cas); }
   const facturePmb = facture > 0 ? factureMb / facture : 0;
-  const active = oppP.filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5);
+  // Exclusion « déjà au carnet » (miroir chaine.js) : une opp active dont le FP porte déjà une commande
+  // est comptée dans `commandes` (CAS) ; la garder au pipeline la double-compterait au dénominateur de
+  // conversion. FP CANONIQUE des deux côtés.
+  const bookedFps = new Set<string>();
+  for (const o of cmdRows) { const k = fpKey(o.fp); if (k) bookedFps.add(k); }
+  const active = oppP.filter((o) => { const st = o.stage || 0; if (st < 1 || st > 5) return false; const k = fpKey(o.fp); return !(k && bookedFps.has(k)); });
   // Pipeline projeté = Σ des niveaux ACTIFS (moteur configurable, miroir serveur). Certitudes =
   // contribution pondérée du niveau ≥90 (0 si désactivé).
   const pipelineProjete = S(active, (o) => projectionWeight(o, t));

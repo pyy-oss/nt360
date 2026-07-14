@@ -12,7 +12,7 @@ import { callRecompute, callExportReport } from "../lib/writes";
 import { Props, cols2, AlertsBanner, useObjectives, roBadge, AtterrissageGauge, relTime, useCommandesRows } from "./_shared";
 import { computeFilteredOverview } from "./overviewCalc";
 import { normalizeTiers, type ProjectionConfig } from "../lib/projection";
-import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice, RentabiliteSummary } from "../types";
+import type { OverviewSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Opportunity, Invoice, RentabiliteSummary, CancellationsDoc } from "../types";
 
 // Bloc « atterrissage » : jauge du TAUX D'ATTEINTE (projeté / objectif, plafonné à 100 %) + Réalisé /
 // Projeté / Objectif / Écart, avec le R/O (Réalisé / Objectif) mis en avant dans le coin. Ce n'est PAS
@@ -80,6 +80,10 @@ export const Overview: FC<Props> = ({ period }) => {
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
   const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { rows: allInvoices } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
+  // Overlay des factures ANNULÉES : le serveur les EXCLUT des agrégats (aggregate.js splice) ; sans la
+  // même exclusion ici, le CAF de la vue FILTRÉE inclut les annulées → supérieur à l'agrégat serveur et
+  // à la liste Factures (qui les exclut aussi, finance.tsx). Miroir de finance.tsx.
+  const { data: cxlInv } = useDocData<CancellationsDoc>(active && canFac ? "config/cancelInvoices" : null);
   // Marge agrégée isolée dans overviewMargin_* (accès « Rentabilité ») : lue seulement hors filtre et
   // si le rôle a le droit marge ; en vue filtrée elle vient du recalcul (cmdRows a la marge fusionnée).
   const canMargin = useCanSeeMargin();
@@ -109,8 +113,11 @@ export const Overview: FC<Props> = ({ period }) => {
   const points = (trends?.points || []).map((p) => ({
     name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
   }));
-  // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur.
-  const filtered = active ? computeFilteredOverview(cmdRows, allInvoices, allOpps, period, match, projTiers) : null;
+  // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur. Factures annulées retirées
+  // (parité serveur/finance.tsx) avant recalcul du CAF filtré.
+  const cancelledInv = new Set((cxlInv?.items || []).map((e) => e.id));
+  const liveInvoices = cancelledInv.size ? allInvoices.filter((i) => !cancelledInv.has(i.id!)) : allInvoices;
+  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).

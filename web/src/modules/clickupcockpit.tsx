@@ -57,7 +57,7 @@ export const ClickupCockpit: FC<Props> = () => {
       </div>
       <div className={grid4}>
         <Kpi label="BC liés à ClickUp" value={`${fmt(bcLinked)} / ${fmt(bcTotal)}`} sub="bons de commande" tone="steel" />
-        <Kpi label="BC en retard (ETA)" value={fmt(bcOverdue)} sub="ETA dépassée, non livré" tone={bcOverdue ? "clay" : "emerald"} />
+        <Kpi label="BC en retard (ETA ClickUp)" value={fmt(bcOverdue)} sub="ETA ClickUp dépassée, non livré" tone={bcOverdue ? "clay" : "emerald"} />
       </div>
 
       {/* Retards de livraison par PM */}

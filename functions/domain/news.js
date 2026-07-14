@@ -27,6 +27,7 @@ const DEFAULT_THR = {
   qualiteMin: 0.85,            // score qualité de données plancher
   concentrationClient: 0.4,    // un client > 40 % du backlog = concentration
   dormantBacklogPct: 0.15,     // > 15 % du backlog sur des millésimes anciens = dormant
+  dormantYears: 2,             // ancienneté « dormant » (exercice − N) — ALIGNÉ sur ALERT_DEFAULTS (alerts.js)
   clientErrors24h: 5,          // ≥ N erreurs JS clientes sur 24 h = régression à investiguer
 };
 
@@ -174,15 +175,18 @@ function buildNews(x) {
     refs: clTop ? [clTop[0]] : [],
     action: "Diversifier le carnet : sécuriser d'autres comptes pour réduire la dépendance.",
   });
-  // Backlog dormant : RAF porté par des commandes de millésimes anciens (≤ exercice − 2).
+  // Backlog dormant : RAF porté par des commandes de millésimes anciens (≤ exercice − dormantYears).
+  // Seuil ALIGNÉ sur l'alerte backlog_dormant (alerts.js, thr.dormantYears) : un cutoff codé en dur ici
+  // divergeait de l'alerte dès que config/alerts change le seuil. byVintage est déjà borné (plausibleYear).
   const byVintage = bk.byVintage || {};
+  const dormantCut = (Number(fy) || 0) - thr.dormantYears;
   const dormant = Object.entries(byVintage)
-    .filter(([y]) => Number(y) > 0 && Number(y) <= (Number(fy) || 0) - 2)
+    .filter(([y]) => Number(y) > 0 && Number(y) <= dormantCut)
     .reduce((s, [, v]) => s + num(v), 0);
   pushIf(B, bkTotal > 0 && dormant > 0 && PCT(dormant, bkTotal) > thr.dormantBacklogPct, {
     id: "backlog_dormant", domain: "backlog", severity: "medium", module: "backlog",
     title: "Backlog dormant (millésimes anciens)",
-    detail: `${fmt(dormant)} de backlog sur des commandes d'un millésime ≤ ${(Number(fy) || 0) - 2} — soit ${pctTxt(PCT(dormant, bkTotal))} du carnet, à solder ou clôturer.`,
+    detail: `${fmt(dormant)} de backlog sur des commandes d'un millésime ≤ ${dormantCut} — soit ${pctTxt(PCT(dormant, bkTotal))} du carnet, à solder ou clôturer.`,
     action: "Revoir les commandes anciennes : soldées ? factures manquantes ? à clôturer ?",
   });
 

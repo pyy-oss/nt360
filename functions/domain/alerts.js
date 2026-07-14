@@ -82,7 +82,10 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   // d'exécution — les compter ici surévaluerait l'alerte et contredirait la vue Exécution BC
   // (qui les exclut), rendant le compte de l'alerte ≠ du compte de la vue au drill-through.
   const execBc = (bcLines || []).filter((b) => b.source !== "fiche");
-  const pending = execBc.filter((b) => b.status && b.status !== "solde").length;
+  // Statut ABSENT traité comme « a_emettre » (donc non soldé) — MÊME convention que la vue Exécution BC
+  // (operations.tsx : `(r.status || "a_emettre") !== "solde"`). Exiger un statut renseigné sous-comptait
+  // ici les lignes importées sans statut mappé → compte de l'alerte ≠ compte du segment « Non soldés ».
+  const pending = execBc.filter((b) => (b.status || "a_emettre") !== "solde").length;
   if (pending) out.push({ type: "bc_en_attente", severity: "low", count: pending, message: `${pending} ligne(s) BC non soldée(s)` });
 
   // BC en retard : ETA (réelle sinon contractuelle) dépassée alors que non encore livré.
