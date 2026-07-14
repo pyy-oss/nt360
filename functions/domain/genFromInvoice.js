@@ -5,7 +5,16 @@
 // FP canonique (rien à créer — elles relèvent de « corriger le N° FP ») et les FP DÉJÀ au carnet (aucun
 // doublon). Fonction PURE (aucun I/O) → testable.
 
-const { fpKey, cleanName, plausibleYear } = require("../lib/ids");
+const { fpKey, cleanName, cleanBu, plausibleYear, num } = require("../lib/ids");
+
+// Montant HT d'une facture, ROBUSTE au nom de colonne (imports variés / anciens) : premier champ
+// numérique non nul parmi les alias connus. Sans ça, une facture dont le montant est stocké sous
+// « montant »/« montantHt » (et non « amountHt ») donnait 0 → commande générée SANS montant.
+const AMOUNT_KEYS = ["amountHt", "montantHt", "montant", "amount", "amountTtc", "totalHt"];
+function invoiceAmount(inv) {
+  for (const k of AMOUNT_KEYS) { const v = num(inv && inv[k]); if (v) return v; }
+  return 0;
+}
 
 // Valeur majoritaire d'un histogramme { valeur: occurrences } (départage déterministe par clé).
 function majority(hist) {
@@ -29,11 +38,13 @@ function planFromInvoices(invoices, existingOrderFps) {
     if (!k) { skippedNoFp++; continue; }             // pas de FP exploitable → pas de commande à créer
     if (existing.has(k)) { skippedExisting++; continue; } // déjà au carnet → on ne double pas
     let g = byFp.get(k);
-    if (!g) byFp.set(k, (g = { fp: k, cas: 0, invoiceCount: 0, clients: {}, years: {}, numeros: [], latestDate: "" }));
-    g.cas += Number(inv.amountHt) || 0;
+    if (!g) byFp.set(k, (g = { fp: k, cas: 0, invoiceCount: 0, clients: {}, bus: {}, years: {}, numeros: [], latestDate: "" }));
+    g.cas += invoiceAmount(inv);
     g.invoiceCount++;
     const cl = cleanName(inv.client);
     if (cl) g.clients[cl] = (g.clients[cl] || 0) + 1;
+    const bu = cleanBu(inv.bu);
+    if (bu && bu !== "AUTRE") g.bus[bu] = (g.bus[bu] || 0) + 1; // BU depuis la facture (au lieu de « AUTRE » figé)
     const y = inv.date ? plausibleYear(String(inv.date).slice(0, 4)) : 0;
     if (y) g.years[y] = (g.years[y] || 0) + 1;
     if (inv.numero) g.numeros.push(String(inv.numero));
@@ -45,7 +56,8 @@ function planFromInvoices(invoices, existingOrderFps) {
       fp: g.fp,
       cas: Math.round(g.cas),
       invoiceCount: g.invoiceCount,
-      client: majority(g.clients) || "",
+      client: majority(g.clients) || "",   // "" → l'appelant pose un placeholder
+      bu: majority(g.bus) || "",           // BU majoritaire des factures ("" si aucune → placeholder « AUTRE »)
       yearPo: Number(majority(g.years)) || 0,
       closingDate: g.latestDate || null,
       numeros: g.numeros.slice(0, 20),

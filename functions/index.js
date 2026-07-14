@@ -2632,7 +2632,9 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
   if (!wantAll && !ids.length) throw new HttpsError("invalid-argument", "sélection de factures requise (ou all:true)");
 
   const [invSnap, ordSnap, aliasDoc] = await Promise.all([
-    db.collection("invoices").select("fp", "client", "amountHt", "date", "numero").get(),
+    // bu + alias de montant (montant/montantHt/…) : requis pour dériver TOUS les champs de la facture —
+    // sans bu, la commande générée retombait sur « AUTRE » ; sans les alias, un montant hors « amountHt » = 0.
+    db.collection("invoices").select("fp", "client", "bu", "amountHt", "montantHt", "montant", "amount", "amountTtc", "totalHt", "date", "numero").get(),
     db.collection("orders").select("fp").get(),
     db.doc("config/fpAliases").get(),
   ]);
@@ -2647,13 +2649,22 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
   if (plan.length > 500) throw new HttpsError("invalid-argument", "trop de commandes à générer d'un coup (max 500) — affinez la sélection");
 
   const visibleTo = await visibleToFor(req.auth.uid);
+  // PLACEHOLDERS pour les champs SANS source sur la facture : le carnet ne comporte jamais de champ vide
+  // (à qualifier ensuite), et le montant vient TOUJOURS de la facture (Σ HT, garanti > 0 par le plan).
+  const PH_AM = "À affecter";
+  const genDesignation = (p) => (p.numeros && p.numeros.length
+    ? `Régularisation — facture ${p.numeros[0]}${p.numeros.length > 1 ? ` (+${p.numeros.length - 1})` : ""}`
+    : "Généré depuis facture — à qualifier");
   let batch = db.batch(), pending = 0, createdOrders = 0, createdOpps = 0;
   for (const p of plan) {
     const oid = safeId(p.fp);
+    const client = p.client || "Client à préciser"; // placeholder si aucune facture ne porte de client
+    const bu = p.bu || "AUTRE";                      // BU depuis la facture, sinon placeholder « AUTRE »
+    const designation = genDesignation(p);
     // COMMANDE (source « manuel », marquée genFromInvoice). RAF null → dérivé (CAS − facturé = 0, soldée).
     // merge:true : idempotent si le FP a été créé entre-temps ; le P&L Excel reste prioritaire au ré-import.
     batch.set(db.doc(`orders/${oid}`), {
-      _id: oid, fp: p.fp, client: p.client, designation: "", bu: "AUTRE", am: "",
+      _id: oid, fp: p.fp, client, designation, bu, am: PH_AM,
       yearPo: p.yearPo, cas: p.cas, raf: null, suppliers: [],
       source: "manuel", genFromInvoice: true, createdBy: req.auth.uid,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
@@ -2663,7 +2674,7 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
     const opId = `saisie_geninv_${oid}`;
     batch.set(db.doc(`opportunities/${opId}`), {
       oppId: opId, source: "saisie", genFromInvoice: true,
-      client: p.client, am: "", bu: "AUTRE", fp: p.fp,
+      client, am: PH_AM, bu, fp: p.fp, designation,
       amount: p.cas, stage: 6, stageLabel: STAGE_LABEL[6] || "6",
       probability: 1, weighted: oppWeighted(p.cas, 1),
       closingDate: p.closingDate, ownerUid: req.auth.uid, visibleTo,
