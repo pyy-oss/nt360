@@ -1131,12 +1131,12 @@ exports.aiSuggestCorrections = onCallG(
       throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de propositions (réessayez).");
     }
 
-    // Audit : on journalise l'USAGE (type, tailles, modèle) — jamais le contenu des enregistrements.
+    // Audit : on journalise l'USAGE (type, tailles, modèle, vérifiées) — jamais le contenu des enregistrements.
     await logOps({
       kind: "ai", action: "suggestCorrections", status: "ok", uid: req.auth.uid,
-      detail: { type, records: batch.length, suggestions: out.suggestions.length, actionable: out.suggestions.filter((s) => s.action !== "review").length, model: out.model, usage: out.usage },
+      detail: { type, records: batch.length, suggestions: out.suggestions.length, actionable: out.suggestions.filter((s) => s.action !== "review").length, verified: out.verifiedCount, model: out.model, usage: out.usage, usageVerify: out.usageVerify },
     });
-    return { ok: true, type, suggestions: out.suggestions, model: out.model, truncated, analyzed: batch.length, total: records.length };
+    return { ok: true, type, suggestions: out.suggestions, model: out.model, verified: out.verified, verifiedCount: out.verifiedCount, truncated, analyzed: batch.length, total: records.length };
   },
 );
 

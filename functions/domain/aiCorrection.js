@@ -216,6 +216,70 @@ function normalizeSuggestions(parsed, records, type) {
     (Number(b.action !== "review") - Number(a.action !== "review")) || (b.confidence - a.confidence));
 }
 
+// ————————————————————————————————————————————————————————————————————————————————————————————————
+// VÉRIFICATION ADVERSE (2e passage) — pour la FIABILITÉ MAXIMALE avant toute auto-application. On
+// redemande au modèle, en position de RELECTEUR SCEPTIQUE, de tenter de RÉFUTER chaque proposition
+// actionnable : elle n'est marquée « vérifiée » que si le relecteur la CONFIRME explicitement. C'est ce
+// drapeau (et non la seule confiance du 1er passage) qui autorise l'application en lot « effort minimal ».
+
+/**
+ * Construit le prompt de vérification adverse d'un lot de propositions actionnables. PURE.
+ * @param {string} type
+ * @param {object[]} suggestions  propositions (issues de normalizeSuggestions ; on ne vérifie que les actionnables)
+ * @param {object[]} records      enregistrements du lot (contexte)
+ * @param {object} [context]      { orders?: [...] }
+ * @returns {{system:string, user:string, targets:object[]}}  targets = propositions à vérifier (actionnables)
+ */
+function buildVerificationPrompt(type, suggestions, records, context = {}) {
+  const targets = (suggestions || []).filter((s) => s && s.action && s.action !== "review");
+  const redacted = (records || []).map(redactRecord).filter((r) => r.ref);
+  const orders = (context.orders || []).slice(0, 400).map((o) => ({ fp: o.fp, client: o.client || "", cas: Number(o.cas) || 0 }));
+  const items = targets.map((s) => ({ ref: s.ref, action: s.action, fields: s.fields || {}, rationale: s.rationale || "" }));
+
+  const system =
+    "Tu es un RELECTEUR SCEPTIQUE de corrections de données (ESN). On te soumet des propositions de correction " +
+    "déjà générées. Ta mission : tenter de les RÉFUTER. Ne confirme une proposition que si elle est manifestement " +
+    "correcte au vu des enregistrements et des candidats fournis (rapprochement de N° FP cohérent en client/montant, " +
+    "année dérivée du N° FP, etc.). Au moindre doute, REFUSE (confirmed=false). Réponds STRICTEMENT en JSON.";
+  const user =
+    `Type d'anomalie : ${type}.\n\n` +
+    "Enregistrements (JSON, par « ref ») :\n" + JSON.stringify(redacted) + "\n\n" +
+    (orders.length ? "Commandes candidates (JSON — { fp, client, cas }) :\n" + JSON.stringify(orders) + "\n\n" : "") +
+    "Propositions à vérifier (JSON) :\n" + JSON.stringify(items) + "\n\n" +
+    'Renvoie UNIQUEMENT : { "verdicts": [ { "ref": "<ref>", "confirmed": <true|false>, ' +
+    '"confidence": <réel 0..1>, "reason": "<très court>" } ] }, une entrée par ref proposé. Aucune prose hors JSON.';
+  return { system, user, targets };
+}
+
+/**
+ * Fusionne les verdicts de vérification dans les propositions. PURE.
+ *  - propositions « review » : verified=false (rien à appliquer).
+ *  - propositions actionnables : verified = (verdict.confirmed === true) ; on conserve la raison ; la confiance
+ *    effective (`confidence`) est ramenée au MIN(confiance 1er passage, confiance du relecteur) — un relecteur
+ *    hésitant abaisse la confiance globale. Une proposition non couverte par un verdict reste NON vérifiée (prudence).
+ * @returns {object[]} propositions enrichies { ...suggestion, verified, verifyReason }
+ */
+function applyVerdicts(suggestions, parsed) {
+  const verdicts = new Map();
+  for (const v of (parsed && parsed.verdicts) || []) {
+    const ref = String((v && v.ref) || "").trim();
+    if (ref) verdicts.set(ref, v);
+  }
+  return (suggestions || []).map((s) => {
+    if (!s || s.action === "review") return { ...s, verified: false, verifyReason: "" };
+    const v = verdicts.get(s.ref);
+    const confirmed = !!(v && v.confirmed === true);
+    const vConf = v && Number.isFinite(Number(v.confidence)) ? Math.max(0, Math.min(1, Number(v.confidence))) : 0;
+    return {
+      ...s,
+      verified: confirmed,
+      verifyReason: String((v && v.reason) || "").trim().slice(0, 200),
+      confidence: confirmed ? Math.min(clampConf(s.confidence), vConf || clampConf(s.confidence)) : clampConf(s.confidence),
+    };
+  });
+}
+
 module.exports = {
   TYPE_SPECS, RECORD_FIELDS, refOf, redactRecord, buildCorrectionPrompt, normalizeSuggestions, sanitizeField,
+  buildVerificationPrompt, applyVerdicts,
 };
