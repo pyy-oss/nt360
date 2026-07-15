@@ -27,6 +27,9 @@ export function fpKey(v?: string | null): string | null {
 // active depuis ≥ 366 j avec IdC ≤ 90 % est considérée PERDUE par la source → exclue du pipeline actif.
 const AGE_LOST_DAYS = 366;
 const AGE_LOST_IDC = 0.9;
+// IdC en POURCENTAGE (0-100) dans toute l'app ; la règle raisonne en 0-1. `p01` ramène en 0-1
+// (miroir de functions/domain/projection.js) — > 1 ⇒ ÷100, sinon ratio déjà (0-1 historique toléré).
+const p01 = (p?: number): number => { const n = Number(p) || 0; return n > 1 ? n / 100 : n; };
 
 /** Vrai si l'opportunité est « périmée par âge » (exclue des agrégats pipeline actifs côté serveur). */
 export function isAgedLost(o: { source?: string; stage?: number; ageDays?: number | null; probability?: number }): boolean {
@@ -35,7 +38,7 @@ export function isAgedLost(o: { source?: string; stage?: number; ageDays?: numbe
   if (stage < 1 || stage > 5) return false;
   const age = Number(o.ageDays);
   if (!Number.isFinite(age) || age < AGE_LOST_DAYS) return false;
-  return Number(o.probability) <= AGE_LOST_IDC;
+  return p01(Number(o.probability)) <= AGE_LOST_IDC;
 }
 
 /** Résolveur de RÉCONCILIATION N° FP (miroir EXACT de functions/lib/ids.js buildFpAliasResolver) : la table

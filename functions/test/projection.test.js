@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { normalizeTiers, projectionWeight, tierBreakdown } = require("../domain/projection");
+const { normalizeTiers, projectionWeight, tierBreakdown, p01 } = require("../domain/projection");
 
 const OPPS = [
   { probability: 0.95, amount: 1000 }, // Certitudes ≥90 → 100 %
@@ -36,5 +36,36 @@ describe("projection — moteur à 3 niveaux configurables", () => {
     expect(by.pipe).toMatchObject({ brut: 1000, pond: 0, count: 1 }); // compté en brut, pondéré 0 (inactif)
     const total = b.reduce((s, x) => s + x.pond, 0);
     expect(total).toBe(1400); // 1000 + 400 + 0
+  });
+});
+
+describe("projection — IdC en POURCENTAGE (0-100) via p01, mixte 0-1 toléré", () => {
+  it("p01 : > 1 ⇒ ÷100 ; ≤ 1 ⇒ identité (données 0-1 historiques)", () => {
+    expect(p01(90)).toBeCloseTo(0.9);
+    expect(p01(60)).toBeCloseTo(0.6);
+    expect(p01(0.9)).toBe(0.9);
+    expect(p01(0)).toBe(0);
+    expect(p01(100)).toBe(1);
+  });
+  it("les IdC en % tombent dans le BON palier (fin du ladder qui s'effondrait sur « Certitudes »)", () => {
+    const t = normalizeTiers();
+    expect(projectionWeight({ probability: 90, amount: 1000 }, t)).toBe(1000); // 90 % → Certitudes ×1
+    expect(projectionWeight({ probability: 80, amount: 2000 }, t)).toBe(400);  // 80 % → Forecast ×0,2
+    expect(projectionWeight({ probability: 60, amount: 1000 }, t)).toBe(50);   // 60 % → Pipe ×0,05
+    expect(projectionWeight({ probability: 40, amount: 5000 }, t)).toBe(0);    // 40 % → sous le plancher
+  });
+  it("tierBreakdown : population en % se RÉPARTIT (ne s'agglutine plus en Certitudes)", () => {
+    const b = tierBreakdown([
+      { probability: 90, amount: 1000 }, { probability: 80, amount: 2000 }, { probability: 60, amount: 1000 },
+    ], normalizeTiers());
+    const by = Object.fromEntries(b.map((x) => [x.key, x]));
+    expect(by.certitudes.count).toBe(1);
+    expect(by.forecast.count).toBe(1);
+    expect(by.pipe.count).toBe(1);
+  });
+  it("mixte 0-1 et 0-100 : mêmes paliers (parité pendant la transition, sans migration)", () => {
+    const t = normalizeTiers();
+    expect(projectionWeight({ probability: 90, amount: 1000 }, t)).toBe(projectionWeight({ probability: 0.9, amount: 1000 }, t));
+    expect(projectionWeight({ probability: 60, amount: 1000 }, t)).toBe(projectionWeight({ probability: 0.6, amount: 1000 }, t));
   });
 });

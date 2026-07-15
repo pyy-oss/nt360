@@ -12,6 +12,10 @@ const DEFS: { key: TierKey; min: number; weight: number; label: string; band: st
   { key: "pipe", min: 0.5, weight: 0.05, label: "Pipe", band: "50-70 %" },
 ];
 
+// Miroir de `p01` serveur : l'IdC est en POURCENTAGE (0-100) dans toute l'app ; les paliers raisonnent
+// en 0-1. Ramène toute valeur en 0-1 (> 1 ⇒ ÷100 ; sinon ratio déjà, données 0-1 historiques tolérées).
+export const p01 = (p?: number): number => { const n = Number(p) || 0; return n > 1 ? n / 100 : n; };
+
 /** Fusionne la config sur les défauts (poids borné [0,1], actif par défaut). Tableau ordonné min ↓. */
 export function normalizeTiers(cfg?: ProjectionConfig): Tier[] {
   const g = cfg || {};
@@ -26,7 +30,7 @@ export function normalizeTiers(cfg?: ProjectionConfig): Tier[] {
 /** Pondération de projection d'une opp : poids du 1er niveau atteint, 0 si niveau inactif. */
 export function projectionWeight(o: { probability?: number; amount?: number }, tiers?: Tier[]): number {
   const t = tiers || normalizeTiers();
-  const p = o.probability || 0, amt = o.amount || 0;
+  const p = p01(o.probability || 0), amt = o.amount || 0;
   for (const tier of t) if (p >= tier.min) return tier.active ? amt * tier.weight : 0;
   return 0;
 }

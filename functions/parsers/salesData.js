@@ -3,9 +3,11 @@
 const { sheetToJson } = require("../lib/xlsxRead");
 const { fpKey, num, cleanBu, noAcc, cleanName, cleanPerson, plausibleYear } = require("../lib/ids");
 const { headerKeys, val, valLabel, toISO, hashId, safeId } = require("../lib/sheets");
+const { p01 } = require("../domain/projection"); // IdC en % (0-100) ⇒ ratio 0-1 pour le pondéré
 
 /** Probabilités par défaut si `IdC` absent (§18.5). */
-const DEFAULT_PROBA = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
+// IdC par défaut d'une étape, en POURCENTAGE (0-100) — échelle canonique de l'app.
+const DEFAULT_PROBA = { 1: 10, 2: 25, 3: 40, 4: 60, 5: 80, 8: 5 };
 
 // Libellés canoniques des étapes (mot-clé → numéro).
 const STAGE_KEYWORDS = [
@@ -51,11 +53,11 @@ function parseSalesData(wb) {
     const am = cleanPerson(val(r, keys, "new am", "sales", "am", "commercial"));
     const idc = val(r, keys, "idc", "id c");
     let idcNum = idc == null || idc === "" ? null : num(idc);
-    // Normalise l'IdC en base-100 comme la marge (« 90 » = 90 % → 0.9) : sinon un IdC saisi en
-    // pourcentage retombait sur la proba PAR DÉFAUT (toute la pondération/certitudes faussée).
-    if (idcNum != null && idcNum > 1.5) idcNum = idcNum / 100;
+    // IdC stocké en POURCENTAGE (0-100), échelle canonique de l'app. On accepte la source telle quelle
+    // dans [0,100] (« 90 » = 90 %). Une source historique en 0-1 (« 0,9 ») reste valide et tolérée
+    // (p01 la normalise au calcul). Hors [0,100] → repli sur l'IdC par défaut de l'étape.
     const probability =
-      idcNum != null && idcNum > 0 && idcNum <= 1 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
+      idcNum != null && idcNum > 0 && idcNum <= 100 ? idcNum : DEFAULT_PROBA[stage] ?? 0;
 
     const fp = fpKey(val(r, keys, "n° fp", "n fp", "fp"));
     // « Âge Auto » (jours depuis la création/dernière activité) : sert à la règle d'auto-perte par âge
@@ -108,7 +110,7 @@ function parseSalesData(wb) {
       stage,
       stageLabel: STAGE_LABEL[stage] || String(val(r, keys, "statut", "stage") || ""),
       probability,
-      weighted: amount * probability,
+      weighted: amount * p01(probability), // IdC en % → ratio 0-1 pour garder un montant pondéré
       closingDate,
       ageDays, // Âge Auto (jours) — règle d'auto-perte par âge (aggregate)
 

@@ -111,27 +111,28 @@ describe("parseSalesData → opportunities (§17.5)", () => {
   it("proba = IdC sinon défaut ; pondéré = montant×proba", () => {
     const wb = wbFromRows("LIVE", [
       { Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", IdC: 0.5, "NEW AM": "DATCHA", "D Prev": "2026-03-01" },
-      { Client: "BETA", "Montant (HT)": 2000, Statut: "2-Montage", "NEW AM": "KOUADIO" }, // proba défaut 0.25
+      { Client: "BETA", "Montant (HT)": 2000, Statut: "2-Montage", "NEW AM": "KOUADIO" }, // IdC défaut étape 2 = 25 %
       { Client: "", "Montant (HT)": 0, Statut: "1-Qualification" }, // quarantaine
     ]);
     const { rows, report } = parseSalesData(wb);
     expect(rows).toHaveLength(2);
     expect(report.rowsSkipped).toBe(1);
+    // IdC en % (0-100) : ACME 0,5 (source 0-1 historique) tolérée telle quelle ; pondéré = montant × p01(IdC).
     const acme = rows.find((r) => r.client === "ACME");
     expect(acme.probability).toBe(0.5);
-    expect(acme.weighted).toBe(500);
+    expect(acme.weighted).toBe(500);        // 1000 × p01(0.5) = 1000 × 0.5
     const beta = rows.find((r) => r.client === "BETA");
-    expect(beta.probability).toBe(0.25);
-    expect(beta.weighted).toBe(500);
+    expect(beta.probability).toBe(25);      // défaut étape 2 en % (0-100)
+    expect(beta.weighted).toBe(500);        // 2000 × p01(25) = 2000 × 0.25
   });
-  it("IdC en base-100 (« 90 ») normalisé en 0.9 (pas de retombée sur la proba par défaut)", () => {
+  it("IdC en % (« 90 ») conservé tel quel ; source 0-1 historique tolérée", () => {
     const wb = wbFromRows("LIVE", [
       { Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", IdC: 90, "NEW AM": "DATCHA", "D Prev": "2026-03-01" },
       { Client: "BETA", "Montant (HT)": 1000, Statut: "4-Négociation", IdC: 0.9, "NEW AM": "KOUADIO", "D Prev": "2026-03-01" },
     ]);
     const { rows } = parseSalesData(wb);
-    expect(rows.find((r) => r.client === "ACME").probability).toBe(0.9); // « 90 » → 0.9 (éligible ≥90%)
-    expect(rows.find((r) => r.client === "BETA").probability).toBe(0.9); // 0.9 inchangé
+    expect(rows.find((r) => r.client === "ACME").probability).toBe(90);  // « 90 » conservé (échelle %)
+    expect(rows.find((r) => r.client === "BETA").probability).toBe(0.9); // 0.9 (0-1 historique) inchangé — p01 le normalise au calcul
   });
   it("oppId stable par hash quand extId absent (idempotence)", () => {
     const mk = () => parseSalesData(wbFromRows("LIVE", [{ Client: "ACME", "Montant (HT)": 1000, Statut: "4-Négociation", "NEW AM": "DATCHA" }])).rows[0]._id;

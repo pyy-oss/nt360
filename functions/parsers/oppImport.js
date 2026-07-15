@@ -13,7 +13,7 @@ const { normalizeStage } = require("./salesData");
 // « Source » est informatif (lecture seule). Les intitulés portent le format attendu pour guider la saisie.
 const TEMPLATE_HEADERS = [
   "Opp ID", "N° FP", "Client", "Désignation", "AM", "BU", "Montant", "Étape (1-9)",
-  "IdC (0-1)", "MB prév. (%)", "DR (Oui/Non)", "D Prev", "Prochaine action",
+  "IdC (%)", "MB prév. (%)", "DR (Oui/Non)", "D Prev", "Prochaine action",
   "Échéance action", "Motif de perte", "Source",
 ];
 
@@ -46,10 +46,11 @@ function numPresent(v) {
 function parseStage(v) { if (v == null || v === "") return undefined; const s = normalizeStage(v); return s >= 1 && s <= 9 ? s : undefined; }
 function parseProba(v) {
   if (v == null || v === "") return undefined;
-  let n = num(String(v).replace(/%/g, ""));
+  const n = num(String(v).replace(/%/g, ""));
   if (!Number.isFinite(n)) return undefined;
-  if (n > 1.5) n = n / 100;            // « 90 » ou « 90% » → 0.9 (parité normalisation IdC salesData)
-  return Math.min(1, Math.max(0, n));
+  // IdC en POURCENTAGE (0-100), échelle canonique de l'app. « 90 » ou « 90% » → 90. Une valeur
+  // historique en 0-1 (« 0,9 ») reste acceptée telle quelle (p01 la normalise au calcul). Borné [0,100].
+  return Math.min(100, Math.max(0, n));
 }
 function parsePct(v) { const n = numPresent(v); return n === undefined ? undefined : Math.min(100, Math.max(0, n)); }
 function parseDate(v) { if (v == null || v === "") return undefined; return toISO(v) || undefined; }

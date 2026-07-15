@@ -4,7 +4,7 @@
 // et mêmes ratios. Fonction PURE → testable sans React.
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
-import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
+import { projectionWeight, normalizeTiers, p01, type Tier } from "../lib/projection";
 import { fpKey, isAgedLost, buildFpAliasResolver, plausibleYear } from "../lib/ids";
 
 export type FilteredOverview = {
@@ -92,7 +92,7 @@ export function computeFilteredOverview(
   // contribution pondérée du niveau ≥90 (0 si désactivé).
   const pipelineProjete = S(active, (o) => projectionWeight(o, t));
   const certT = t.find((x) => x.key === "certitudes")!;
-  const pondCertain = certT.active ? S(active.filter((o) => (o.probability || 0) >= certT.min), (o) => o.amount) * certT.weight : 0;
+  const pondCertain = certT.active ? S(active.filter((o) => p01(o.probability || 0) >= certT.min), (o) => o.amount) * certT.weight : 0;
   const perdu = S(oppP.filter((o) => o.stage === 7), (o) => o.amount);
   const convDenom = commandes + pipelineProjete + perdu;
   return {

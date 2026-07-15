@@ -5,6 +5,7 @@
 //
 // Fonction PURE (aucun I/O, aucune horloge → `todayISO` fourni par l'appelant).
 
+const { p01 } = require("./projection"); // IdC en % (0-100) ⇒ ratio 0-1 pour le calcul de score
 const OPEN_MIN = 1, OPEN_MAX = 5; // étapes ouvertes (hors Gagné=6 / Perdu=7)
 
 // Contributions signées (points autour d'une base 50). Libellés restitués au commercial.
@@ -13,7 +14,7 @@ const OPEN_MIN = 1, OPEN_MAX = 5; // étapes ouvertes (hors Gagné=6 / Perdu=7)
 function factorsFor(o, todayISO, calib) {
   const f = [];
   const stage = Number(o.stage) || 0;
-  const prob = Number(o.probability);
+  const prob = p01(Number(o.probability));
   f.push({ label: `Étape ${stage}/6`, impact: Math.round((stage - 3) * 8) });
   if (Number.isFinite(prob) && prob > 0) f.push({ label: `Indice de confiance ${Math.round(prob * 100)}%`, impact: Math.round((prob - 0.5) * 40) });
   const cat = o.forecastCategory;

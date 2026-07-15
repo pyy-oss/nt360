@@ -2,6 +2,7 @@
 // RÈGLE D'AUTO-PERTE PAR ÂGE : la source déclare PERDUE toute affaire de plus d'un an dont la confiance
 // (IdC) est ≤ 90 % — cf. `SI(ET([@Age Auto]>=366;[@IdC]<=90%);"9-LOST";…)`. On la réplique côté agrégat
 // pour ne pas laisser une affaire périmée gonfler le pipeline pondéré / le funnel (dérive). PURE (testable).
+const { p01 } = require("./projection"); // normalisation d'échelle IdC (0-100 saisi ⇄ 0-1 calcul)
 const AGE_LOST_DAYS = 366;
 const AGE_LOST_IDC = 0.90;
 
@@ -17,7 +18,7 @@ function isAgedLost(o) {
   if (stage < 1 || stage > 5) return false; // déjà gagnée/perdue/suspendue/annulée : hors périmètre
   const age = Number(o.ageDays);
   if (!Number.isFinite(age) || age < AGE_LOST_DAYS) return false;
-  return Number(o.probability) <= AGE_LOST_IDC;
+  return p01(Number(o.probability)) <= AGE_LOST_IDC;
 }
 
 module.exports = { isAgedLost, AGE_LOST_DAYS, AGE_LOST_IDC };

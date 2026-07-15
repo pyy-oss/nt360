@@ -6,13 +6,13 @@
 // avec l'atterrissage et la Vue d'ensemble).
 const { sum } = require("./chaine");
 const { fpKey } = require("../lib/ids");
-const { projectionWeight, tierBreakdown, normalizeTiers } = require("./projection");
+const { projectionWeight, tierBreakdown, normalizeTiers, p01 } = require("./projection");
 const { groupSum } = require("./backlog");
 
 const CONFIANCE_MIN = 0.9;
 const isActive = (o) => o.stage >= 1 && o.stage <= 5;
 // Éligible « certain » (IdC ≥ 90 %) — conservé pour les certitudes.
-const isEligible = (o) => isActive(o) && (o.probability || 0) >= CONFIANCE_MIN;
+const isEligible = (o) => isActive(o) && p01(o.probability || 0) >= CONFIANCE_MIN;
 
 // Analyse temporelle du closing (D Prev) sur les opps ACTIVES — uniquement à partir de la
 // closingDate réelle (aucune date de création/étape en source → pas de vélocité/âge inventés).

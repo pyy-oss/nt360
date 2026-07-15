@@ -2106,7 +2106,7 @@ async function apiHandler(req, res) {
         const stage = clampStage(b.stage);
         const amount = Number(b.amount) || 0;
         const pr = Number(b.probability);
-        const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
+        const probability = pr > 0 && pr <= 100 ? pr : (DEFAULT_PROBA[stage] ?? 0); // IdC en % (0-100)
         const id = "saisie_" + Date.now().toString(36) + require("crypto").randomBytes(4).toString("hex");
         const doc = {
           oppId: id, source: "api", client, am: String(b.am || "").trim(), bu: String(b.bu || "AUTRE").trim().toUpperCase(),
@@ -2497,7 +2497,7 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
       oppId: opId, source: "saisie", genFromInvoice: true,
       client, am: PH_AM, bu, fp: p.fp, designation,
       amount: p.cas, stage: 6, stageLabel: STAGE_LABEL[6] || "6",
-      probability: 1, weighted: oppWeighted(p.cas, 1),
+      probability: 100, weighted: oppWeighted(p.cas, 100), // IdC en % : gagné = 100 %
       closingDate: p.closingDate, ownerUid: req.auth.uid, visibleTo,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });

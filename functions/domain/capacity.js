@@ -8,6 +8,7 @@
 
 const { WORKING_DAYS_PER_MONTH } = require("./activityKpi");
 const { isWorkforce } = require("./consultant");
+const { p01 } = require("./projection"); // IdC en % (0-100) ⇒ ratio 0-1 pour le repli montant×IdC
 
 // Jours-homme disponibles d'un consultant actif sur la plage = Σ mois (1 − occupation) × jours ouvrés.
 function availableDays(consultantId, loadByConsultant, months) {
@@ -29,7 +30,7 @@ function avgTjm(consultants, fallback = 250000) {
 function demandDaysOf(opp, tjm) {
   const pw = Number(opp.pw);
   const weighted = Number(opp.weighted);
-  const w = Number.isFinite(pw) ? pw : Number.isFinite(weighted) ? weighted : (Number(opp.amount) || 0) * (Number(opp.probability) || 0);
+  const w = Number.isFinite(pw) ? pw : Number.isFinite(weighted) ? weighted : (Number(opp.amount) || 0) * p01(opp.probability);
   return tjm > 0 ? w / tjm : 0;
 }
 
