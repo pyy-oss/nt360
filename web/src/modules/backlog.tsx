@@ -9,7 +9,7 @@ import { DateField } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
-import { fpKey } from "../lib/ids";
+import { fpKey, plausibleYear } from "../lib/ids";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, peekOrderAmount, type BillingMilestone, type AmountPeek } from "../lib/writes";
@@ -173,7 +173,13 @@ function CarryoverCard() {
   const repOf = (o: OpenOrder) => {
     const ms = msBy.get(fpKey(o.fp) || "");
     if (!ms) return 0;
-    return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
+    // Bornage MIROIR de milestones.js normalizeMilestones : date au format AAAA-MM-JJ ET millésime
+    // plausible — sinon un jalon à date aberrante (« 20226-… », > cutoff en comparaison de chaînes) serait
+    // compté ici mais pas côté serveur → `totalReporte` (front) divergerait de `reporteCaf` (back).
+    return Math.min(ms.filter((x) => {
+      const d = String(x.date || "").slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(d) && plausibleYear(d.slice(0, 4)) > 0 && d > cutoff;
+    }).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
   };
   const msOf = (o: OpenOrder) => msBy.get(fpKey(o.fp) || "");
   const driftOf = (o: OpenOrder) => { const ms = msOf(o); return !!ms?.length && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(o.projetable); };
