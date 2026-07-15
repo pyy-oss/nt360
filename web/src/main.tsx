@@ -7,22 +7,14 @@ import App from "./App";
 import { AuthProvider } from "./lib/rbac";
 import { ToastProvider } from "./design/components";
 import { installErrorReporter } from "./lib/errorReporter";
+import { reloadForStaleChunk } from "./lib/staleChunk";
 
 // Observabilité front : capture des erreurs JS non gérées / rejets non gérés → errorLog (Admin).
 installErrorReporter();
 
-// Résilience aux DÉPLOIEMENTS : après un déploiement, les anciens chunks hashés disparaissent du
-// hosting ; un onglet resté ouvert qui charge un module paresseux périmé échoue (« Failed to fetch
-// dynamically imported module »). On recharge alors UNE fois pour récupérer le nouvel index + chunks
-// (garde-fou anti-boucle : au plus un rechargement par tranche de 10 s). Évite l'« ERREUR D'AFFICHAGE ».
-window.addEventListener("vite:preloadError", () => {
-  const KEY = "nt360-chunk-reload";
-  const last = Number(sessionStorage.getItem(KEY) || 0);
-  if (Date.now() - last > 10000) {
-    sessionStorage.setItem(KEY, String(Date.now()));
-    window.location.reload();
-  }
-});
+// Résilience aux DÉPLOIEMENTS (chemin PRELOAD) : `vite:preloadError` se déclenche quand un chunk hashé
+// périmé n'est plus servi. On recharge une fois (util partagé avec l'ErrorBoundary, chemin RUNTIME).
+window.addEventListener("vite:preloadError", (e) => { e.preventDefault(); reloadForStaleChunk(); });
 
 // PWA (Lot 10) : enregistre le service worker (shell installable + ouverture hors-ligne) UNIQUEMENT en
 // PRODUCTION — en dev, un SW interfère avec le HMR de Vite. Best-effort (jamais bloquant).

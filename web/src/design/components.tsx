@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download, Activity, Loader2 } from "lucide-react";
 import { fmt, pct } from "./tokens";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
+import { isStaleChunkError, reloadForStaleChunk } from "../lib/staleChunk";
 import { trackWrite, useWriteActivity, useActivityLog } from "../lib/activity";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -740,23 +741,38 @@ export function useConfirm() {
   return [ask, node] as const;
 }
 
-export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) { return { error }; }
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; stale: boolean }> {
+  state = { error: null as Error | null, stale: false };
+  static getDerivedStateFromError(error: Error) { return { error, stale: isStaleChunkError(error) }; }
   componentDidCatch(error: Error) {
-    // Remonte le crash de rendu à l'observabilité (best-effort ; import paresseux pour ne pas
-    // coupler la primitive au reporter et éviter tout cycle d'import).
+    // CHUNK PÉRIMÉ après déploiement (chemin RUNTIME import()) : ce n'est pas un crash applicatif mais un
+    // artefact de déploiement. On recharge une fois (util partagé) et on NE REMONTE PAS l'erreur (sinon
+    // l'observabilité se remplit de faux positifs à chaque livraison — cf. « Failed to fetch … module »).
+    if (isStaleChunkError(error)) { reloadForStaleChunk(); return; }
+    // Vrai crash de rendu → observabilité (best-effort ; import paresseux pour éviter tout cycle d'import).
     import("../lib/errorReporter").then((m) => m.reportError(error?.message || "Crash de rendu", "ErrorBoundary", error?.stack)).catch(() => {});
   }
   render() {
     if (this.state.error) {
+      // Chunk périmé : message doux + rechargement (le reload de componentDidCatch a pu être throttlé).
+      if (this.state.stale) {
+        return (
+          <Card title="Mise à jour">
+            <div className="flex items-start gap-2 text-muted text-sm">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>Une nouvelle version est disponible. Rechargement…</span>
+            </div>
+            <button className="btn-ghost mt-3" onClick={() => reloadForStaleChunk() || window.location.reload()}>Recharger</button>
+          </Card>
+        );
+      }
       return (
         <Card title="Erreur d'affichage">
           <div className="flex items-start gap-2 text-clay text-sm">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
             <span>{String(this.state.error.message || this.state.error)}</span>
           </div>
-          <button className="btn-ghost mt-3" onClick={() => this.setState({ error: null })}>Réessayer</button>
+          <button className="btn-ghost mt-3" onClick={() => this.setState({ error: null, stale: false })}>Réessayer</button>
         </Card>
       );
     }
