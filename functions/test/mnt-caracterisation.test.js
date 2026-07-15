@@ -56,16 +56,18 @@ describe("C1 — RBAC : le futur module 'maintenance' se comporte comme un modul
   });
 });
 
-describe("C6 — Approbations : baseline AVANT l'ajout du type 'renouvellement de contrat' (ADR-004)", () => {
-  it("les natures/entités d'approbation actuelles n'incluent PAS le contrat de maintenance", () => {
-    // Le Lot 4 ajoutera (additivement) une nature et une entité. On fige l'état d'avant : aujourd'hui
-    // ni la nature ni l'entité contrat n'existent. Ce test sera mis à jour DANS le Lot 4.
-    expect(APPROVAL_KINDS).not.toContain("renouvellement_contrat");
-    expect(APPROVAL_ENTITIES).not.toContain("mnt_contrat");
+describe("C6 — Approbations : frontière DÉPLACÉE au Lot 4 (renouvellement/résiliation de contrat, ADR-004)", () => {
+  it("les natures/entités incluent DÉSORMAIS le contrat de maintenance (extension additive Lot 4)", () => {
+    // Frontière franchie volontairement au Lot 4 : le module soumet ses décisions via le moteur
+    // d'approbation existant. Ces valeurs étaient absentes avant le Lot 4 (cf. historique du test).
+    expect(APPROVAL_KINDS).toContain("renouvellement_contrat");
+    expect(APPROVAL_KINDS).toContain("resiliation_contrat");
+    expect(APPROVAL_ENTITIES).toContain("mnt_contrat");
   });
-  it("une demande de renouvellement de contrat est REJETÉE aujourd'hui (nature/entité inconnues)", () => {
+  it("une demande de renouvellement de contrat est DÉSORMAIS acceptée (moteur inchangé, valeurs ajoutées)", () => {
     const r = validateApprovalRequest({ kind: "renouvellement_contrat", entityType: "mnt_contrat", entityId: "FP/2026/1" });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    expect(r.value.entityType).toBe("mnt_contrat");
   });
   it("les demandes d'approbation EXISTANTES restent valides (non régression du moteur)", () => {
     const r = validateApprovalRequest({ kind: "remise_opp", entityType: "opportunity", entityId: "opp1", amount: 1000 });

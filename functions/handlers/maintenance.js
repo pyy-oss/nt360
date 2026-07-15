@@ -8,7 +8,7 @@ const { isMntEnabled } = require("../domain/mntFeature");
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { monthOf, craDaysFromHours } = require("../domain/mntTicket");
 
-function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId }) {
+function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée mnt_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `maintenance`.
   async function assertMntEnabled() {
@@ -115,7 +115,34 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true };
   });
 
-  return { upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention };
+  // Décision de contrat (renouvellement / résiliation) SOUMISE au moteur d'approbation EXISTANT
+  // (ADR-004) — routée vers le manager du demandeur (sinon direction), visible via la sécurité par
+  // enregistrement, décidée par le callable `decideApproval` et l'écran Approbations existants. On ne
+  // recrée aucun circuit : on ajoute juste une entrée `maintenance`-gouvernée dans `approvals`.
+  const submitMntDecision = onCallG("submitMntDecision", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const kind = String(req.data?.kind || "");
+    if (!["renouvellement_contrat", "resiliation_contrat"].includes(kind)) throw new HttpsError("invalid-argument", "nature de décision invalide");
+    const contratId = assertPlainId(req.data?.contratId, "id contrat");
+    const c = (await db.doc(`mnt_contrats/${contratId}`).get()).data();
+    if (!c) throw new HttpsError("not-found", "contrat introuvable");
+    const { validateApprovalRequest, approverFor } = require("../domain/approval");
+    const { ownerChain } = require("../domain/hierarchy");
+    const v = validateApprovalRequest({ kind, entityType: "mnt_contrat", entityId: contratId, entityLabel: `${c.client || ""} · ${c.fp || ""}`.trim(), note: req.data?.note });
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    const requester = req.auth.uid;
+    const usersMap = await loadUsersMap();
+    const approverUid = approverFor(usersMap, requester, await anyDirectionUid(requester));
+    if (!approverUid) throw new HttpsError("failed-precondition", "aucun approbateur disponible (définir un manager ou un compte direction)");
+    const visibleTo = Array.from(new Set([...ownerChain(usersMap, requester), approverUid]));
+    const doc = { ...v.value, status: "pending", requestedBy: requester, requestedByName: (usersMap[requester] && usersMap[requester].name) || null, approverUid, visibleTo, at: new Date().toISOString().slice(0, 10), createdAt: FieldValue.serverTimestamp() };
+    const ref = await db.collection("approvals").add(doc);
+    await db.collection("auditLog").add({ uid: requester, action: "mnt_decision_submit", module: "maintenance", entity: "approval", entityId: ref.id, detail: { kind, contratId, approverUid }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, id: ref.id, approverUid };
+  });
+
+  return { upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
