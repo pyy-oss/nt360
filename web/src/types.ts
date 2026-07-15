@@ -235,5 +235,5 @@ export type MntContrat = {
 };
 // Tickets & interventions de maintenance (mnt_, Lot 2). Temps d'intervention en heures ; alimente
 // le CRA (timesheets) converti en jours. Rattachés au contrat (contratId) et à l'affaire (fp).
-export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; ouvertLe?: any; updatedAt?: any };
+export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; ouvertLe?: any; priseEnCompteLe?: any; resoluLe?: any; updatedAt?: any };
 export type MntIntervention = { id?: string; ticketId?: string; contratId?: string; fp?: string; consultantId?: string; date?: string; heures?: number; commentaire?: string; updatedAt?: any };

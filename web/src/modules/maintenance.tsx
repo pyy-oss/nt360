@@ -5,12 +5,16 @@
 // money, date JJ/MM/AAAA via frDate). Aucune valeur en dur (tokens/tons via lib/mntContrat).
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
+import { where } from "firebase/firestore";
 import { useCan } from "../lib/rbac";
 import { useCollectionData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, EmptyState, Modal, cx } from "../design/components";
 import { Select, DateField } from "../design/inputs";
-import { frDate } from "../lib/format";
+import { frDate, tsMillis } from "../lib/format";
 import { fmt } from "../design/tokens";
+import { fpKey } from "../lib/ids";
+import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
+import type { Invoice } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants,
 } from "../lib/writes";
@@ -68,12 +72,20 @@ export const Maintenance: FC<Props> = () => {
   const addEng = () => setC("engagements", [...cForm.engagements, { type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: "", quota: "" }]);
   const setEng = (i: number, k: string, v: string) => setC("engagements", cForm.engagements.map((e, j) => (j === i ? { ...e, [k]: v } : e)));
   const rmEng = (i: number) => setC("engagements", cForm.engagements.filter((_, j) => j !== i));
+  // Échéancier du contrat ouvert : factures de l'affaire (par N° FP canonique) → engagé vs facturé.
+  // Lecture bornée par la requête (where fp==) ; nécessite le droit `facturation` (sinon écart neutre).
+  const openFp = cOpen && cForm.fp ? fpKey(cForm.fp) : "";
+  const { rows: cInvoices } = useCollectionData<Invoice>(openFp ? "invoices" : null, openFp ? [where("fp", "==", openFp)] : [], openFp || "");
+  const factureTotal = useMemo(() => cInvoices.reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices]);
+  const ech = useMemo(() => echeancier({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
 
   // --- Tickets ---
   const [tOpen, setTOpen] = useState(false);
   const [tForm, setTForm] = useState<MntTicket>({ statut: "ouvert", priorite: "moyenne" });
   const setT = <K extends keyof MntTicket>(k: K, v: MntTicket[K]) => setTForm((f) => ({ ...f, [k]: v }));
   const ticketsSorted = useMemo(() => [...tickets].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [tickets]);
+  const contratById = useMemo(() => Object.fromEntries(contrats.map((c) => [c.id!, c])), [contrats]);
+  const nowMs = Date.now();
   const openNewTicket = () => { setTForm({ statut: "ouvert", priorite: "moyenne" }); setTOpen(true); };
   const openEditTicket = (t: MntTicket) => { setTForm({ ...t }); setTOpen(true); };
   // Sélection d'un contrat : renseigne contratId + reporte fp/client (rattachement).
@@ -105,6 +117,14 @@ export const Maintenance: FC<Props> = () => {
     colText("Titre", (t: MntTicket) => t.titre || "—"),
     colText("Priorité", (t: MntTicket) => <Badge tone={prioriteTone(t.priorite)}>{label(PRIORITE_LABEL, t.priorite)}</Badge>),
     colText("Statut", (t: MntTicket) => <Badge tone={ticketStatutTone(t.statut)}>{label(TICKET_STATUT_LABEL, t.statut)}</Badge>),
+    // SLA de RÉSOLUTION : dérivé live de l'engagement du contrat (jours ouvrés, ADR-002) — ouvertLe →
+    // resoluLe (ou maintenant si non résolu). « — » si le contrat n'a pas d'engagement de résolution.
+    colText("SLA résolution", (t: MntTicket) => {
+      const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
+      if (!eng || !t.ouvertLe) return "—";
+      const st = slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs);
+      return <Badge tone={slaTone(st.state)}>{SLA_STATE_LABEL[st.state]}</Badge>;
+    }),
     colText("", (t: MntTicket) => (
       <div className="flex items-center justify-end gap-1.5">
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => openEditTicket(t)}>{canWrite ? "Ouvrir" : "Voir"}</button>
@@ -156,6 +176,14 @@ export const Maintenance: FC<Props> = () => {
                 ))}
               </div>
             )}
+          </div>
+          <div className="mt-4 pt-3 border-t border-line/60">
+            <div className="text-[13px] font-medium mb-2">Échéancier <span className="text-[11px] text-muted font-normal">— engagé (par échéance × {ech.periodsDue}) vs facturé (affaire)</span></div>
+            <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
+              <div><div className="text-[11px] text-muted">Engagé à ce jour</div><div className="tabnum">{money(ech.engage)}</div></div>
+              <div><div className="text-[11px] text-muted">Facturé (ERP)</div><div className="tabnum">{money(ech.facture)}</div></div>
+              <div><div className="text-[11px] text-muted">Écart</div><div className={cx("tabnum", ech.ecart > 0 ? "text-clay" : "text-emerald")}>{money(ech.ecart)}{ech.ecart > 0 ? " (sous-facturé)" : ""}</div></div>
+            </div>
           </div>
         </Modal>
       )}

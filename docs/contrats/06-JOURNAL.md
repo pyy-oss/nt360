@@ -31,6 +31,54 @@
 
 ---
 
+## 2026-07-15 — Lot 3 (Événements SLA & échéancier)
+
+**Fait**
+- Moteur SLA PUR `functions/domain/mntSla.js` : `businessMsBetween`/`addBusinessMs`/`slaState` —
+  horloge **jours ouvrés pleins Lun–Ven, UTC** (ADR-002), seuil en heures, état respecté/rompu/en_cours.
+- Échéancier PUR `functions/domain/mntEcheancier.js` : `echeancier` (engagé = montant/échéance ×
+  échéances dues vs facturé Σ factures par N° FP — ADR-005).
+- Miroir front EXACT `web/src/lib/mntSla.ts` (SLA + échéancier), parité testée (mêmes attentes que le
+  test back).
+- Handler : `upsertMntTicket` pose les horodatages de transition `priseEnCompteLe`/`resoluLe` **une
+  fois** au franchissement du statut (SLA à la minute). Aucun nouveau callable, aucune collection.
+- UI `maintenance.tsx` : colonne **SLA résolution** (badge live) sur les tickets ; **échéancier**
+  (engagé/facturé/écart) dans la fiche contrat, factures lues par `where fp==` (borné).
+
+**Filet / vérif — TOUT VERT**
+- `functions` **849** (+`mntSla.test.js`), `web` **85** (+`mntSla.test.ts`, parité), `test:rules`
+  **68** (inchangé), build OK, **chunk 115,3 KB ≤ 120**, no-undef (116), deploy-targets (**144**,
+  aucun callable ajouté), indexes, lint : verts.
+
+**Points de contact touchés**
+- **C11** : `fpKey` pour rapprocher les factures de l'affaire (échéancier).
+- **Aucun** contact recompute/rules/deploy nouveau : SLA **dérivé live** (ADR-015), pas de
+  matérialisation, pas de callable. Les horodatages de ticket sont écrits en Admin SDK (rules `write:false`).
+
+**Appris sur l'existant**
+- `useCollectionData(name, [where(...)], key)` accepte des contraintes → lecture bornée des factures
+  d'une affaire (pas de scan global). *(complète 01-EXISTANT §7)*
+
+**Échoué / abandonné**
+- Rien.
+
+**Dette assumée**
+- **Échéancier** : les factures sont rapprochées par `where fp == fpKey(contrat.fp)` (égalité indexée) —
+  suppose la facture stockée en FP **canonique**. Une facture à FP non canonique ne serait pas comptée
+  (le recompute gère les alias ailleurs). À robustifier (résolveur d'alias) si l'écart est constaté.
+- Lecture des factures nécessite le droit `facturation` (sinon écart neutre) — cohérent RBAC.
+- **Historique des ruptures SLA** non persisté (ADR-015) : reporté au Lot 5 (recompte + matérialisation).
+- SLA « prise en compte » calculable (`priseEnCompteLe`) mais non affiché en Lot 3 (colonne résolution
+  seule) — ajout trivial au besoin.
+
+**Décidé**
+- ADR-015 (SLA dérivé live, matérialisation reportée au Lot 5).
+
+**Suivant**
+- Validation + fusion, puis `/5-lot 4` (Renouvellements via `approvals`).
+
+---
+
 ## 2026-07-15 — Lot 2 (Tickets & interventions)
 
 **Fait**

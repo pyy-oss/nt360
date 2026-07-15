@@ -64,8 +64,15 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     if (!v.ok) throw new HttpsError("invalid-argument", v.error);
     const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
     let id = req.data?.id ? assertPlainId(req.data.id, "id ticket") : null;
-    if (id) { await db.doc(`mnt_tickets/${id}`).set(doc, { merge: true }); }
-    else { const ref = await db.collection("mnt_tickets").add({ ...doc, ouvertLe: FieldValue.serverTimestamp(), createdBy: req.auth.uid }); id = ref.id; }
+    if (id) {
+      // Horodatages de TRANSITION (SLA à la minute) : posés UNE fois quand le statut franchit le seuil,
+      // jamais réécrits (le SLA se mesure sur le premier passage). Prise en compte = passage en_cours ;
+      // résolution = passage resolu/clos.
+      const prev = (await db.doc(`mnt_tickets/${id}`).get()).data() || {};
+      if (v.value.statut === "en_cours" && !prev.priseEnCompteLe) doc.priseEnCompteLe = FieldValue.serverTimestamp();
+      if ((v.value.statut === "resolu" || v.value.statut === "clos") && !prev.resoluLe) doc.resoluLe = FieldValue.serverTimestamp();
+      await db.doc(`mnt_tickets/${id}`).set(doc, { merge: true });
+    } else { const ref = await db.collection("mnt_tickets").add({ ...doc, ouvertLe: FieldValue.serverTimestamp(), createdBy: req.auth.uid }); id = ref.id; }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "upsert_mnt_ticket" : "create_mnt_ticket", module: "maintenance", entity: "mnt_ticket", entityId: id, detail: { contratId: v.value.contratId, statut: v.value.statut, priorite: v.value.priorite }, ts: FieldValue.serverTimestamp() });
     return { ok: true, id };
   });
