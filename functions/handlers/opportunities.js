@@ -40,9 +40,10 @@ function createOpportunities({
       const ps = await db.doc(`opportunities/${d.id}`).get();
       if (ps.exists) { await assertRecordVisible(req, "opportunities", ps.data() || {}); prevStage = Number(ps.data().stage) || 0; } // OWD privé : édition dans le périmètre
     }
-    // Proba : valeur fournie (0..1) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
+    // IdC (%) : valeur fournie (0..100) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
+    // Une valeur historique en 0-1 reste acceptée (p01 la normalise au calcul).
     const pr = Number(d.probability);
-    const probability = pr > 0 && pr <= 1 ? pr : (DEFAULT_PROBA[stage] ?? 0);
+    const probability = pr > 0 && pr <= 100 ? pr : (DEFAULT_PROBA[stage] ?? 0);
     // Édition : id fourni préfixé « saisie_ » ; sinon nouvelle saisie. On ne touche QUE les saisies.
     const isNew = !(typeof d.id === "string" && d.id.startsWith("saisie_"));
     const id = isNew
@@ -171,11 +172,11 @@ function createOpportunities({
       if (!Number.isFinite(a) || a < 0) throw new HttpsError("invalid-argument", "montant invalide");
       patch.amount = a;
     }
-    // Probabilité (IdC) éditable : la projection pondère par PALIER d'IdC, pas par étape — corriger
-    // l'étape sans pouvoir ajuster l'IdC laissait le pondéré figé. Bornée [0,1].
+    // IdC (%) éditable : la projection pondère par PALIER d'IdC, pas par étape — corriger l'étape sans
+    // pouvoir ajuster l'IdC laissait le pondéré figé. Bornée [0,100] (échelle canonique en %).
     if (d.probability !== undefined && String(d.probability) !== "") {
       const pr = Number(d.probability);
-      if (!Number.isFinite(pr) || pr < 0 || pr > 1) throw new HttpsError("invalid-argument", "probabilité (0..1) invalide");
+      if (!Number.isFinite(pr) || pr < 0 || pr > 100) throw new HttpsError("invalid-argument", "IdC (0..100) invalide");
       patch.probability = pr;
     }
     if (d.lines !== undefined) { // lignes produit / CPQ-lite (Lot 8) : montant DÉRIVÉ des lignes

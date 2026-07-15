@@ -135,7 +135,7 @@ describe("oppImport — dérivations (finalize + create)", () => {
     const doc = buildCreateDoc({ client: "X", stage: 3 }, "FP/2027/2", "saisie_new");
     expect(doc.source).toBe("saisie");
     expect(doc.stage).toBe(3);
-    expect(doc.probability).toBe(0.4);     // DEFAULT_PROBA[3]
+    expect(doc.probability).toBe(40);      // DEFAULT_PROBA[3] en % (0-100)
     expect(doc.fp).toBe("FP/2027/2");
     expect(doc.dr).toBe(false);
     expect(doc.weighted).toBe(0);          // montant absent → 0

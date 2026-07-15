@@ -84,7 +84,7 @@ function finalizeUpdatePatch(cur, patch) {
 function buildCreateDoc(values, fp, id) {
   const stage = "stage" in values ? clampStage(values.stage) : 1;
   const pr = values.probability;
-  const probability = (typeof pr === "number" && pr > 0 && pr <= 1) ? pr : (DEFAULT_PROBA[stage] ?? 0);
+  const probability = (typeof pr === "number" && pr > 0 && pr <= 100) ? pr : (DEFAULT_PROBA[stage] ?? 0);
   const amount = Number(values.amount) || 0;
   return {
     oppId: id, source: "saisie",

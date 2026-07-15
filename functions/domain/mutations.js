@@ -20,8 +20,11 @@ function validateYearPo(v, currentYear) {
 // Étape d'opportunité bornée 1..9 (1 par défaut sur saisie invalide).
 const clampStage = (s) => Math.min(9, Math.max(1, Math.trunc(Number(s)) || 1));
 
-// Pondéré d'une opportunité = montant × probabilité (les deux coercés, défaut 0).
-const oppWeighted = (amount, probability) => (Number(amount) || 0) * (Number(probability) || 0);
+// Pondéré LINÉAIRE d'une opportunité = montant × IdC. L'IdC est en POURCENTAGE (0-100) dans l'app ;
+// `p01` le ramène en ratio 0-1 (miroir domain/projection) → le pondéré reste un montant, que l'IdC
+// soit saisi en 90 (%) ou 0,9 (historique). Tolère le mixte, aucune migration.
+const { p01 } = require("./projection");
+const oppWeighted = (amount, probability) => (Number(amount) || 0) * p01(probability);
 
 // Marge d'une fiche affaire à partir d'une saisie PARTIELLE (sale/cost) + valeurs courantes (prev).
 // Un champ `undefined` conserve la valeur courante ; `margin` = vente − revient si les deux sont

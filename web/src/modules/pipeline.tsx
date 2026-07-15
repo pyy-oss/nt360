@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, type FC, type ReactNode, type ChangeEvent } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useProjectionWeight } from "../lib/useProjectionWeight";
+import { p01 } from "../lib/projection";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, det, money } from "../design/components";
@@ -214,7 +215,8 @@ export const Am360: FC<Props> = () => {
 };
 
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
-const DEFAULT_PROBA: Record<number, number> = { 1: 0.1, 2: 0.25, 3: 0.4, 4: 0.6, 5: 0.8, 8: 0.05 };
+// IdC par défaut d'une étape, en POURCENTAGE (0-100) — échelle canonique de l'app (miroir salesData).
+const DEFAULT_PROBA: Record<number, number> = { 1: 10, 2: 25, 3: 40, 4: 60, 5: 80, 8: 5 };
 const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
 // Total dérivé des lignes produit (CPQ-lite, Lot 8) — miroir client de domain/quote.computeLines.
 const lineTot = (l: OppLine) => Math.round((Number(l.qty) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100));
@@ -243,7 +245,7 @@ const isAgedLost = (o: Opportunity): boolean => {
   if (stage < 1 || stage > 5) return false;
   const age = Number(o.ageDays);
   if (!Number.isFinite(age) || age < 366) return false;
-  return Number(o.probability) <= 0.9;
+  return p01(Number(o.probability)) <= 0.9;
 };
 
 // Import / export EN MASSE des opportunités (Lot 9). Export = modèle round-trip .xlsx (toutes les opps) ;
@@ -439,7 +441,7 @@ export const OppList: FC<Props> = () => {
   // déjà adossée au P&L est réalisée (dans le CAS) → l'inclure double-compterait le pondéré (parité
   // chaine/atterrissage/Cockpit `Commit`, invariant « même métrique = même nombre »).
   const certitudes = useMemo(() => rows
-    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9 && !isBooked(o))
+    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && p01(o.probability || 0) >= 0.9 && !isBooked(o))
     .sort((a, b) => pw(b) - pw(a)), [rows, isBooked, pw]);
   const certTotal = useMemo(() => certitudes.reduce((s, o) => s + pw(o), 0), [certitudes, pw]);
   const today = new Date().toISOString().slice(0, 10);
@@ -514,8 +516,8 @@ export const OppList: FC<Props> = () => {
             <label className="flex flex-col gap-1 text-[11px] text-muted">Étape
               <Select ariaLabel="Étape du pipeline" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} /></label>
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Probabilité (0 à 1)
-              <input className="field" aria-label="Probabilité (0 à 1)" placeholder="Proba 0..1" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-muted">IdC (%)
+              <input className="field" aria-label="IdC en pourcentage" placeholder="IdC 0..100" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></label>
             {/* MB prévisionnel : % de marge brute PRÉVISIONNELLE (prévision commerciale, non confidentielle). */}
             <label className="flex flex-col gap-1 text-[11px] text-muted">MB prévisionnel (%)
               <input className="field" aria-label="MB prévisionnel en pourcentage" placeholder="MB prév. %" value={f.mbPrev} onChange={(e) => setF({ ...f, mbPrev: e.target.value })} /></label>
@@ -601,7 +603,7 @@ export const OppList: FC<Props> = () => {
             colText("Affaire", (o) => o.designation || "—", (o) => o.designation || ""),
             det(colText("Commercial", (o) => o.am, (o) => o.am)),
             det(colText("BU", (o) => buBadge(o.bu), (o) => o.bu)), colNum("Montant", (o) => money(o.amount), (o) => o.amount),
-            det(colNum("Proba", (o) => pct(o.probability), (o) => o.probability)),
+            det(colNum("Proba", (o) => pct(p01(o.probability)), (o) => p01(o.probability))),
             colNum("Pondéré", (o) => money(pw(o)), (o) => pw(o)),
             colText("Closing (D Prev)", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
             det(colText("P&L", (o: Opportunity) => pnlFlag(o), () => 0)),
@@ -643,7 +645,7 @@ export const OppList: FC<Props> = () => {
             det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),
             colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
-            det(colNum("Proba", (r) => pct(r.probability), (r) => r.probability)),
+            det(colNum("Proba", (r) => pct(p01(r.probability)), (r) => p01(r.probability))),
             colNum("Pondéré", (r) => money(pw(r)), (r) => pw(r)),
             // MB prévisionnel (%) + DR — saisis dans la fiche, désormais RÉAFFICHÉS (cf. audit : champs write-only).
             det(colNum("MB prév.", (r: Opportunity) => (r.mbPrev != null ? `${r.mbPrev} %` : "—"), (r: Opportunity) => (r.mbPrev ?? -1))),

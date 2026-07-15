@@ -11,6 +11,11 @@ const TIER_DEFS = [
   { key: "pipe",       min: 0.5, weight: 0.05, label: "Pipe",       band: "50-70 %" },
 ];
 
+// Normalisation d'échelle de l'IdC. L'IdC est saisi/stocké en POURCENTAGE (0-100) dans toute l'app ;
+// les paliers ci-dessus raisonnent en 0-1. `p01` ramène toute valeur en 0-1 : > 1 ⇒ pourcentage (÷100),
+// sinon déjà un ratio (données historiques 0-1 tolérées → aucune migration). Identité pour p ≤ 1.
+const p01 = (p) => { const n = Number(p) || 0; return n > 1 ? n / 100 : n; };
+
 /** Fusionne la config (config/projection) sur les défauts et borne les valeurs. Renvoie un tableau
  *  ORDONNÉ du niveau le plus haut au plus bas (indispensable pour projectionWeight). */
 function normalizeTiers(cfg) {
@@ -27,7 +32,7 @@ function normalizeTiers(cfg) {
  *  niveau est désactivé ou si l'IdC est sous le plancher du plus bas niveau. */
 function projectionWeight(o, tiers) {
   const t = tiers || normalizeTiers();
-  const p = (o && o.probability) || 0, amt = (o && o.amount) || 0;
+  const p = p01((o && o.probability) || 0), amt = (o && o.amount) || 0;
   for (const tier of t) { // ordonné min décroissant : 0.9 → 0.7 → 0.5
     if (p >= tier.min) return tier.active ? amt * tier.weight : 0;
   }
@@ -40,7 +45,7 @@ function tierBreakdown(opps, tiers) {
   const t = tiers || normalizeTiers();
   const out = t.map((tier) => ({ key: tier.key, label: tier.label, band: tier.band, weight: tier.weight, active: tier.active, brut: 0, pond: 0, count: 0 }));
   for (const o of opps || []) {
-    const p = o.probability || 0, amt = o.amount || 0;
+    const p = p01(o.probability || 0), amt = o.amount || 0;
     const idx = t.findIndex((tier) => p >= tier.min);
     if (idx < 0) continue;
     out[idx].brut += amt;
@@ -50,4 +55,4 @@ function tierBreakdown(opps, tiers) {
   return out;
 }
 
-module.exports = { TIER_DEFS, normalizeTiers, projectionWeight, tierBreakdown };
+module.exports = { TIER_DEFS, normalizeTiers, projectionWeight, tierBreakdown, p01 };
