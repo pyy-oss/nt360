@@ -75,6 +75,29 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
+      # Le secret GRAPH_CLIENT_SECRET (Microsoft Graph / e-mails) est LIÉ (`secrets: [...]`) à des fonctions.
+      # S'il n'existe pas encore dans Secret Manager, `firebase deploy` le RÉCLAME (prompt interactif) et
+      # échoue en CI — ce qui bloquait TOUT le déploiement (hosting + functions non livrés). On garantit ici
+      # son existence de façon NON BLOQUANTE : si absent, on crée une version PLACEHOLDER inerte. Le secret
+      # RESTE dans Secret Manager (politique « secrets uniquement dans Secret Manager » respectée), l'e-mail
+      # RESTE inactif (config/emailNotify non renseignée ⇒ canSend=false, donc aucun envoi). Pour ACTIVER
+      # l'e-mail plus tard : `firebase functions:secrets:set GRAPH_CLIENT_SECRET` (pose la vraie valeur, qui
+      # devient une nouvelle version ENABLED et prime). Idempotent : si une version active existe déjà
+      # (placeholder ou vraie valeur), on n'y touche pas — le vrai secret n'est jamais écrasé.
+      - name: Assurer l'existence de GRAPH_CLIENT_SECRET (déploiement non bloquant)
+        run: |
+          gcloud auth activate-service-account --key-file="$HOME/sa.json"
+          PROJECT=propulse-business-87f7a
+          if ! gcloud secrets describe GRAPH_CLIENT_SECRET --project="$PROJECT" >/dev/null 2>&1; then
+            echo "GRAPH_CLIENT_SECRET absent → création d'une version placeholder inerte (e-mails désactivés)."
+            printf 'UNSET' | gcloud secrets create GRAPH_CLIENT_SECRET --data-file=- --replication-policy=automatic --project="$PROJECT"
+          elif ! gcloud secrets versions list GRAPH_CLIENT_SECRET --project="$PROJECT" --filter='state:ENABLED' --format='value(name)' | grep -q .; then
+            echo "GRAPH_CLIENT_SECRET sans version active → ajout d'un placeholder inerte."
+            printf 'UNSET' | gcloud secrets versions add GRAPH_CLIENT_SECRET --data-file=- --project="$PROJECT"
+          else
+            echo "GRAPH_CLIENT_SECRET déjà provisionné — inchangé (le vrai secret n'est jamais écrasé)."
+          fi
+
       # Projet PARTAGÉ : déploiement scopé (site hosting dédié, base Firestore nommée
       # nt360, nos functions par nom). Ne touche ni à la base (default) ni aux functions
       # de l'autre app.
