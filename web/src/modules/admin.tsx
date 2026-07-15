@@ -1,9 +1,10 @@
 // 13 — Habilitations : matrice profil × module + attribution de rôle.
-import { useState, useEffect, type FC } from "react";
+import { useState, useEffect, type FC, type ReactNode } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
-import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast, useConfirm } from "../design/components";
+import { Card, Table, ListView, Badge, Tip, Busy, DangerBtn, Toggle, Eyebrow, colText, colNum, cx, useToast, useConfirm } from "../design/components";
+import { trackWrite } from "../lib/activity";
 import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, setMntFeature, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
@@ -25,6 +26,12 @@ const MODULE_LABEL: Record<string, string> = {
 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Titre de rubrique — segmente la page Habilitations (~20 cartes) en blocs lisibles. Réutilise la
+// primitive Eyebrow (aucun style de titre en dur) + un filet de séparation léger entre rubriques.
+const Rubrique: FC<{ children: ReactNode }> = ({ children }) => (
+  <div className="border-t border-line/50 pt-3 mt-1 first:border-t-0 first:pt-0 first:mt-0"><Eyebrow as="h2">{children}</Eyebrow></div>
+);
+
 export const Habilitations: FC<Props> = () => {
   const { data } = useDocData<PermissionsConfig>("config/permissions");
   const { rows: users } = useCollectionData<UserRow>("users");
@@ -45,22 +52,32 @@ export const Habilitations: FC<Props> = () => {
   const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
   return (
     <div className="flex flex-col gap-4">
-      {canImport && <DataImportCard />}
+      <Rubrique>Mon compte</Rubrique>
       <MfaEnrollCard />
+      {canImport && <DataImportCard />}
+
+      {isDirection && <Rubrique>Sécurité &amp; accès</Rubrique>}
       {isDirection && <MntFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
-      {isDirection && <AutomationCard />}
       {isDirection && <ApiKeysCard />}
-      {isDirection && <CustomFieldsCard />}
-      {isDirection && <StaffingTargetsCard />}
+
+      {isDirection && <Rubrique>Intégrations &amp; automatisation</Rubrique>}
+      {isDirection && <ClickupCard />}
       {isDirection && <OutboundWebhookCard />}
-      {canWrite && <OpsHealthCard />}
-      {canWrite && <ClientErrorsCard />}
+      {isDirection && <AutomationCard />}
+      {isDirection && <CustomFieldsCard />}
+
+      {isDirection && <Rubrique>Réglages de calcul</Rubrique>}
       {isDirection && <ProjectionConfigCard />}
       {isDirection && <AlertThresholdsCard />}
+      {isDirection && <StaffingTargetsCard />}
+      {isDirection && <DedupeCard />}
+
+      {isDirection && <Rubrique>Notifications</Rubrique>}
       {isDirection && <NotificationCard />}
       {isDirection && <EmailNotifyCard />}
-      {isDirection && <DedupeCard />}
+
+      {isDirection && <Rubrique>Référentiels</Rubrique>}
       {isDirection && <ClientAliasCard />}
       {isDirection && <FuzzyDuplicatesCard />}
       {isDirection && <FxRatesCard />}
@@ -68,7 +85,12 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
       {isDirection && <RefListCard kind="territories" title="Référentiel — Territoires" placeholder="Abidjan Nord" tip="Liste des territoires (zones/segments commerciaux) proposée à l'affectation d'un compte (Client 360). Un territoire regroupe des comptes pour l'organisation commerciale." />}
       {isDirection && <RefListCard kind="teams" title="Référentiel — Équipes" placeholder="Équipe ICT" tip="Liste des équipes proposée à l'affectation des utilisateurs (Utilisateurs & rôles). Une équipe regroupe des commerciaux ; complète la hiérarchie manager de la sécurité par enregistrement." />}
-      {isDirection && <ClickupCard />}
+
+      {canWrite && <Rubrique>Observabilité</Rubrique>}
+      {canWrite && <OpsHealthCard />}
+      {canWrite && <ClientErrorsCard />}
+
+      <Rubrique>Droits &amp; utilisateurs</Rubrique>
       <Card title="Matrice droits (profil × module)" actions={isDirection && draft ? <div className="flex gap-2"><Busy label="Enregistrer" fn={async () => { await updateMatrix(draft); setDraft(null); }} /><button className="btn-ghost" onClick={() => setDraft(null)}>Annuler</button></div> : undefined}>
         <div className="overflow-x-auto">
           <table className="text-xs">
@@ -90,7 +112,7 @@ export const Habilitations: FC<Props> = () => {
       </Card>
       {isDirection && <CreateUserCard />}
       <Card title="Utilisateurs & rôles">
-        <Table columns={[
+        <ListView colsKey="admin-users" pageSize={25} searchKeys={[(u: UserRow) => u.email || "", (u: UserRow) => u.name || ""]} placeholder="Rechercher un utilisateur (email, nom)…" columns={[
           colText("Email", (u) => u.email), colText("Nom", (u) => u.name),
           isDirection
             ? colText("Actif", (u: UserRow) => <ActiveToggle uid={u.id!} active={u.active} />, (u: UserRow) => (u.active ? 1 : 0))
@@ -499,7 +521,9 @@ function ActiveToggle({ uid, active }: { uid: string; active?: boolean }) {
   return (
     <span className="inline-flex items-center gap-2">
       <Badge tone={active ? "emerald" : "clay"}>{active ? "oui" : "non"}</Badge>
-      <Busy variant="ghost" label={active ? "Désactiver" : "Réactiver"} okMsg={active ? "Compte désactivé" : "Compte réactivé"} fn={() => callSetUserActive(uid, !active)} />
+      {active
+        ? <DangerBtn label="Désactiver" confirm="Désactiver ce compte ? L'utilisateur perdra l'accès dès sa prochaine actualisation de session." confirmLabel="Désactiver" okMsg="Compte désactivé" errMsg="Désactivation refusée" fn={() => callSetUserActive(uid, false)} />
+        : <Busy variant="ghost" label="Réactiver" okMsg="Compte réactivé" fn={() => callSetUserActive(uid, true)} />}
     </span>
   );
 }
@@ -749,6 +773,19 @@ function MntFeatureCard() {
   );
 }
 
+// Sous-rangée d'actions ClickUp libellée — donne une hiérarchie au mur de boutons (Synchroniser /
+// Pousser / Diagnostic) et matérialise l'ordre recommandé (Rattacher AVANT push en masse).
+function ClickupActionRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[13px]">
+      <span className="w-full sm:w-40 shrink-0 text-[11px] text-faint leading-tight">
+        {label}{hint && <span className="block text-gold/80">{hint}</span>}
+      </span>
+      {children}
+    </div>
+  );
+}
+
 function ClickupCard() {
   const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -777,7 +814,7 @@ function ClickupCard() {
     if (cafBusy) return;
     setCafBusy(true);
     try {
-      const r = await syncClickupCaf();
+      const r = await trackWrite(syncClickupCaf(), "Synchro CAF");
       toast(`CAF synchronisé — ${r.pushed} poussé(s) / ${r.total} tâche(s)${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -788,7 +825,7 @@ function ClickupCard() {
     if (pullBusy) return;
     setPullBusy(true);
     try {
-      const r = await syncFromClickup();
+      const r = await trackWrite(syncFromClickup(), "Synchro ClickUp");
       toast(`Remonté depuis ClickUp — ${r.pulled} / ${r.total} tâche(s)${r.pmUpdated ? `, ${r.pmUpdated} PM` : ""}${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -799,7 +836,7 @@ function ClickupCard() {
     if (recBusy) return;
     setRecBusy(true);
     try {
-      const r = await reconcileClickupLinks({ listId: list });
+      const r = await trackWrite(reconcileClickupLinks({ listId: list }), "Rattachement ClickUp");
       toast(`Rattachement — ${r.matched} tâche(s) existante(s) reliée(s), ${r.already} déjà liée(s) / ${r.total} commande(s)`, "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -810,7 +847,7 @@ function ClickupCard() {
     if (healthBusy) return;
     setHealthBusy(true);
     try {
-      const r = await clickupHealth({ listId: list });
+      const r = await trackWrite(clickupHealth({ listId: list }), "Diagnostic ClickUp");
       toast(`Diagnostic — ${r.linked}/${r.commandesTotal} liées (${r.coverage}%), ${r.orphanTasks} tâche(s) orpheline(s)`, "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -823,7 +860,7 @@ function ClickupCard() {
     if (!(await ask(<>{label}<p className="mt-2 text-faint">Astuce : lancez d'abord « Rattacher les tâches existantes ».</p></>, { title: "Push en masse ClickUp", confirmLabel: force ? "Tout resynchroniser" : "Créer les tâches" }))) return;
     setBulkBusy(true);
     try {
-      const r = await pushAllOrdersToClickup({ force, listId: list });
+      const r = await trackWrite(pushAllOrdersToClickup({ force, listId: list }), "Push ClickUp");
       toast(`Push en masse — ${r.created} créée(s), ${r.adopted || 0} rattachée(s), ${r.updated} maj, ${r.skipped} ignorée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -845,7 +882,7 @@ function ClickupCard() {
         <>Supprimer <b>{preview.deletable}</b> tâche(s) ClickUp <b>dupliquée(s)</b> (toutes époques), sur <b>{preview.groups}</b> N° FP ?<p className="mt-2 text-faint">La tâche <b>liée</b> (ou la plus ancienne) est <b>conservée</b> pour chaque FP. Action tracée et irréversible côté ClickUp.</p></>,
         { title: "Nettoyer les doublons ClickUp", confirmLabel: `Supprimer ${preview.deletable}`, tone: "clay" });
       if (!ok) return;
-      const r = await dedupeClickupTasks({ apply: true, listId: list, windowHours: 0 });
+      const r = await trackWrite(dedupeClickupTasks({ apply: true, listId: list, windowHours: 0 }), "Nettoyage doublons ClickUp");
       toast(`Doublons nettoyés — ${r.deleted} supprimée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} sur ${r.groups} N° FP.`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -856,7 +893,7 @@ function ClickupCard() {
     if (enrichBusy) return;
     setEnrichBusy(true);
     try {
-      const r = await enrichClickup();
+      const r = await trackWrite(enrichClickup(), "Enrichissement ClickUp");
       toast(`Enrichissement — ${r.enriched} synthèse(s), ${r.subtasked} jalons→sous-tâches, ${r.checklisted} checklist(s) BC, ${r.tagged} tag(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -867,7 +904,7 @@ function ClickupCard() {
     if (bcRecBusy) return;
     setBcRecBusy(true);
     try {
-      const r = await reconcileBcLinks();
+      const r = await trackWrite(reconcileBcLinks(), "Rattachement BC ClickUp");
       toast(`BC rattachés — ${r.matched} tâche(s) reliée(s), ${r.already} déjà liée(s) / ${r.total} BC`, "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -879,7 +916,7 @@ function ClickupCard() {
     if (!(await ask(<>Importer dans l'app les BC saisis directement dans ClickUp (non encore présents) ?<p className="mt-2 text-faint">Les BC déjà connus par un import (Logistics/PDF) sont ignorés. Les BC importés sont créés au statut « émis » (engagement, sans impact sur le solde du compte).</p></>, { title: "Importer les BC depuis ClickUp", confirmLabel: "Importer" }))) return;
     setBcImportBusy(true);
     try {
-      const r = await importBcFromClickup();
+      const r = await trackWrite(importBcFromClickup(), "Import BC ClickUp");
       toast(`Import BC — ${r.created} créé(s), ${r.skippedKnown} déjà connu(s), ${r.skippedIncomplete} incomplet(s) / ${r.scanned} tâche(s)`, "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -890,7 +927,7 @@ function ClickupCard() {
     if (bcPullBusy) return;
     setBcPullBusy(true);
     try {
-      const r = await syncBcFromClickup();
+      const r = await trackWrite(syncBcFromClickup(), "Synchro BC ClickUp");
       toast(`Avancement BC remonté — ${r.pulled} / ${r.total} tâche(s)${r.failed ? `, ${r.failed} échec(s)` : ""}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -903,7 +940,7 @@ function ClickupCard() {
     if (!(await ask(<>{label}<p className="mt-2 text-faint">Astuce : lancez d'abord « Rattacher les BC existants ».</p></>, { title: "Push BC en masse ClickUp", confirmLabel: force ? "Tout resynchroniser" : "Créer les tâches" }))) return;
     setBcBulkBusy(true);
     try {
-      const r = await pushAllBcToClickup({ force });
+      const r = await trackWrite(pushAllBcToClickup({ force }), "Push BC ClickUp");
       toast(`Push BC — ${r.created} créé(s), ${r.adopted || 0} rattaché(s), ${r.updated} maj, ${r.skipped} ignoré(s)${r.failed ? `, ${r.failed} échec(s)` : ""} / ${r.total}`, r.failed ? "err" : "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -915,7 +952,7 @@ function ClickupCard() {
     if (whBusy) return;
     setWhBusy(true);
     try {
-      const r = await setupClickupWebhook(ep);
+      const r = await trackWrite(setupClickupWebhook(ep), "Webhook ClickUp");
       toast(`Webhook temps réel ${r.created ? "créé" : "mis à jour"}${r.hasSecret ? "" : " (secret manquant — recréez-le)"}`, r.hasSecret ? "ok" : "err");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -927,7 +964,7 @@ function ClickupCard() {
     if (!(await ask("Désactiver les webhooks temps réel ? La synchro repassera au tirage quotidien.", { title: "Désactiver le temps réel", confirmLabel: "Désactiver", tone: "clay" }))) return;
     setWhBusy(true);
     try {
-      await deleteClickupWebhook();
+      await trackWrite(deleteClickupWebhook(), "Désactivation webhook ClickUp");
       toast("Webhook temps réel désactivé", "ok");
     } catch (e: any) {
       const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
@@ -937,36 +974,44 @@ function ClickupCard() {
   return (
     <Card title="Intégration ClickUp" actions={<Busy label="Enregistrer" okMsg="Config ClickUp enregistrée" fn={save} />}>
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={on} onChange={(e) => setEnabled(e.target.checked)} className="accent-gold" /> Intégration active
-        </label>
+        <span className="inline-flex items-center gap-2">
+          <Toggle checked={on} onChange={setEnabled} ariaLabel="Intégration ClickUp active" /> Intégration active
+        </span>
         <label className="inline-flex items-center gap-2">Liste cible (Gestion de Projets)
           <Select ariaLabel="Liste ClickUp cible" className="!py-1" value={list} onChange={setListId} options={CLICKUP_LISTS.map((l) => ({ value: l.id, label: l.label }))} />
         </label>
-        <button type="button" className="btn-ghost !py-1.5" disabled={cafBusy} onClick={forceCaf} title="Repousser le CA Facturé de toutes les tâches liées">
-          {cafBusy ? "Synchro CAF…" : "Forcer la synchro CAF"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={pullBusy} onClick={pull} title="Remonter statut projet + dates depuis ClickUp">
-          {pullBusy ? "Synchro…" : "Synchroniser depuis ClickUp"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={recBusy} onClick={reconcile} title="Rattacher les commandes aux tâches ClickUp DÉJÀ existantes (Opp ID = FP), sans rien créer. À lancer AVANT tout push en masse.">
-          {recBusy ? "Rattachement…" : "Rattacher les tâches existantes"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(false)} title="Créer les tâches des commandes pas encore liées (adopte automatiquement une tâche existante par Opp ID = FP)">
-          {bulkBusy ? "Push…" : "Créer les commandes non liées"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
-          {bulkBusy ? "Push…" : "Tout resynchroniser"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer TOUTES les tâches ClickUp dupliquées (même N° FP), toutes époques, créées par des push concurrents. Aperçu (dry-run) puis confirmation ; la tâche liée / la plus ancienne est conservée pour chaque FP.">
-          {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
-          {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
-        </button>
-        <button type="button" className="btn-ghost !py-1.5" disabled={enrichBusy} onClick={enrich} title="Sur chaque tâche commande liée : commentaire de synthèse (CA/RAF, qualité) + jalons de facturation en sous-tâches + BC liés en checklist + tag « à risque »">
-          {enrichBusy ? "Enrichissement…" : "Enrichir les tâches"}
-        </button>
+      </div>
+      <div className="mt-3 flex flex-col gap-2.5">
+        <ClickupActionRow label="Synchroniser depuis ClickUp">
+          <button type="button" className="btn-ghost !py-1.5" disabled={pullBusy} onClick={pull} title="Remonter statut projet + dates depuis ClickUp">
+            {pullBusy ? "Synchro…" : "Synchroniser depuis ClickUp"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={cafBusy} onClick={forceCaf} title="Repousser le CA Facturé de toutes les tâches liées">
+            {cafBusy ? "Synchro CAF…" : "Forcer la synchro CAF"}
+          </button>
+        </ClickupActionRow>
+        <ClickupActionRow label="Pousser vers ClickUp" hint="Rattacher AVANT tout push en masse (anti-doublons)">
+          <button type="button" className="btn-ghost !py-1.5" disabled={recBusy} onClick={reconcile} title="Rattacher les commandes aux tâches ClickUp DÉJÀ existantes (Opp ID = FP), sans rien créer. À lancer AVANT tout push en masse.">
+            {recBusy ? "Rattachement…" : "Rattacher les tâches existantes"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(false)} title="Créer les tâches des commandes pas encore liées (adopte automatiquement une tâche existante par Opp ID = FP)">
+            {bulkBusy ? "Push…" : "Créer les commandes non liées"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bulkBusy} onClick={() => bulkPush(true)} title="Resynchroniser TOUTES les tâches liées (cœur + CAF)">
+            {bulkBusy ? "Push…" : "Tout resynchroniser"}
+          </button>
+        </ClickupActionRow>
+        <ClickupActionRow label="Diagnostic & maintenance">
+          <button type="button" className="btn-ghost !py-1.5" disabled={healthBusy} onClick={refreshHealth} title="Analyser la qualité de l'intégration (couverture, tâches orphelines, écarts CAF)">
+            {healthBusy ? "Diagnostic…" : "Diagnostic qualité"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={enrichBusy} onClick={enrich} title="Sur chaque tâche commande liée : commentaire de synthèse (CA/RAF, qualité) + jalons de facturation en sous-tâches + BC liés en checklist + tag « à risque »">
+            {enrichBusy ? "Enrichissement…" : "Enrichir les tâches"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={dedupeBusy} onClick={dedupeTasks} title="Supprimer TOUTES les tâches ClickUp dupliquées (même N° FP), toutes époques, créées par des push concurrents. Aperçu (dry-run) puis confirmation ; la tâche liée / la plus ancienne est conservée pour chaque FP.">
+            {dedupeBusy ? "Nettoyage…" : "Nettoyer les doublons"}
+          </button>
+        </ClickupActionRow>
       </div>
       <ClickupHealthPanel health={health} />
       {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-gold mt-1">{health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
@@ -1014,7 +1059,7 @@ function RoleSetter({ uid, current }: { uid: string; current?: string }) {
     <span className="inline-flex gap-1.5">
       <Select ariaLabel="Rôle de l'utilisateur" className="!py-1" value={role} onChange={setRole}
         options={ROLE_LIST.map((r) => ({ value: r, label: r }))} />
-      <Busy label="Poser" fn={() => callSetUserRole(uid, role)} />
+      <Busy label="Appliquer" okMsg="Rôle appliqué" fn={() => callSetUserRole(uid, role)} />
     </span>
   );
 }
@@ -1027,7 +1072,7 @@ function TeamSetter({ uid, current }: { uid: string; current?: string | null }) 
   return (
     <span className="inline-flex gap-1.5">
       <Select ariaLabel="Équipe de l'utilisateur" className="!py-1" value={team} onChange={setTeam} options={options} />
-      <Busy label="Poser" okMsg="Équipe posée" errMsg="Refusé" fn={() => callSetUserTeam(uid, team || null)} />
+      <Busy label="Appliquer" okMsg="Équipe posée" errMsg="Refusé" fn={() => callSetUserTeam(uid, team || null)} />
     </span>
   );
 }
@@ -1040,7 +1085,7 @@ function ManagerSetter({ uid, current, users }: { uid: string; current?: string 
   return (
     <span className="inline-flex gap-1.5">
       <Select ariaLabel="Manager de l'utilisateur" className="!py-1" value={mgr} onChange={setMgr} options={options} />
-      <Busy label="Poser" okMsg="Manager posé (visibilité ré-indexée)" errMsg="Refusé (cycle ou droit insuffisant)" fn={() => callSetManager(uid, mgr || null)} />
+      <Busy label="Appliquer" okMsg="Manager posé (visibilité ré-indexée)" errMsg="Refusé (cycle ou droit insuffisant)" fn={() => callSetManager(uid, mgr || null)} />
     </span>
   );
 }
@@ -1050,7 +1095,6 @@ function ManagerSetter({ uid, current, users }: { uid: string; current?: string 
 function SecurityCard({ users: _users }: { users: UserRow[] }) {
   const { data: owd } = useDocData<Partial<RecordAccess>>("config/recordAccess");
   const { data: sec } = useDocData<{ require2fa?: boolean }>("config/security");
-  const toast = useToast();
   const [derive, setDerive] = useState(true);
   const opps = owd?.opportunities === "private" ? "private" : "public";
   const accts = owd?.accounts === "private" ? "private" : "public";
@@ -1072,8 +1116,9 @@ function SecurityCard({ users: _users }: { users: UserRow[] }) {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-hair pt-3">
         <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={derive} onChange={(e) => setDerive(e.target.checked)} /> dériver les propriétaires depuis l'AM</label>
-        <Busy variant="ghost" label="Ré-indexer la visibilité" okMsg="Visibilité ré-indexée"
-          fn={async () => { const r = await callReindexVisibility(derive); toast(`${r.reindexed} enregistrement(s) ré-indexé(s)${r.derived ? `, ${r.derived} propriétaire(s) dérivé(s) de l'AM` : ""}`); }} />
+        <Busy variant="ghost" label="Ré-indexer la visibilité"
+          okMsg={(r) => `${r.reindexed} enregistrement(s) ré-indexé(s)${r.derived ? `, ${r.derived} propriétaire(s) dérivé(s) de l'AM` : ""}`}
+          fn={() => callReindexVisibility(derive)} />
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-hair pt-3">
         <div><div className="text-[13px]">MFA obligatoire (actions sensibles)</div><div className="text-[11px] text-muted">Exige un 2e facteur pour les opérations d'administration.</div></div>
@@ -1092,7 +1137,6 @@ const AUTOMATION_META: Record<AutomationRuleType, string> = {
 };
 function AutomationCard() {
   const { data } = useDocData<{ rules?: AutomationRule[] }>("config/automations");
-  const toast = useToast();
   const types = Object.keys(AUTOMATION_META) as AutomationRuleType[];
   const [draft, setDraft] = useState<Record<AutomationRuleType, { enabled: boolean; dueInDays: number }> | null>(null);
   const current: Record<string, { enabled: boolean; dueInDays: number }> = {};
@@ -1104,7 +1148,7 @@ function AutomationCard() {
     <Card title="Automatisation déclarative (règles → tâches)" actions={
       <div className="flex gap-2">
         {draft && <Busy label="Enregistrer" okMsg="Règles enregistrées" fn={async () => { await setAutomations(types.map((t) => ({ type: t, enabled: state[t].enabled, dueInDays: state[t].dueInDays }))); setDraft(null); }} />}
-        <Busy variant="ghost" label="Exécuter maintenant" okMsg="Règles exécutées" fn={async () => { const r = await runAutomations(); toast(`${r.created} tâche(s) créée(s) sur ${r.evaluated} opportunité(s)`); }} />
+        <Busy variant="ghost" label="Exécuter maintenant" okMsg={(r) => `${r.created} tâche(s) créée(s) sur ${r.evaluated} opportunité(s)`} fn={() => runAutomations()} />
       </div>}>
       <div className="flex flex-col gap-2">
         {types.map((t) => (
@@ -1156,7 +1200,7 @@ function ApiKeysCard() {
           {keys.map((k) => (
             <div key={k.id} className="flex items-center justify-between gap-2 border-t border-hair py-2 text-[13px]">
               <span className="inline-flex items-center gap-2">{!k.active && <Badge tone="clay">révoquée</Badge>}<span className="font-medium">{k.label}</span><code className="text-[11px] text-muted">{k.prefix}…</code>{k.scopes.map((s) => <Badge key={s} tone="steel">{s}</Badge>)}</span>
-              {k.active && <button type="button" className="text-clay hover:underline text-[11px]" onClick={async () => { await revokeApiKey(k.id); await load(); }}>Révoquer</button>}
+              {k.active && <DangerBtn label="Révoquer" confirm={`Révoquer la clé « ${k.label} » ? Tout système qui l'utilise perdra l'accès à l'API immédiatement (irréversible).`} confirmLabel="Révoquer" okMsg="Clé révoquée" errMsg="Révocation refusée" fn={async () => { await revokeApiKey(k.id); await load(); }} />}
             </div>
           ))}
         </div>
