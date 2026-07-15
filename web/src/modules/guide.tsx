@@ -86,7 +86,7 @@ const PARCOURS: Parcours[] = [
     who: "Import / Direction",
     need: (c) => canWrite(c, "import"),
     steps: [
-      { text: <>Repérer les anomalies dans <b>Qualité données</b> (champs manquants, rattachements).</>, go: "dataquality" },
+      { text: <>Repérer les anomalies dans <b>Qualité &amp; correction</b> (champs manquants, rattachements).</>, go: "cleanup" },
       { text: <>Corriger, supprimer, <b>annuler</b> ou dédoublonner dans <b>Assainissement</b>.</>, go: "cleanup" },
       { text: <>Principe : les imports sont des <b>deltas</b> (mise à jour / nouvel enregistrement), jamais une purge.</> },
       { text: <>Après correction, lancer un <b>Recalcul</b> (Vue d'ensemble) pour matérialiser.</>, go: "overview" },

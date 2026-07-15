@@ -5,6 +5,7 @@
 // ventilations, le funnel et l'analyse de closing utilisent tous ces mêmes niveaux (cohérence
 // avec l'atterrissage et la Vue d'ensemble).
 const { sum } = require("./chaine");
+const { fpKey } = require("../lib/ids");
 const { projectionWeight, tierBreakdown, normalizeTiers } = require("./projection");
 const { groupSum } = require("./backlog");
 
@@ -53,11 +54,19 @@ function closingAnalysis(active, asOf, pw) {
   return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop, overdueAge, avgOverdueDays };
 }
 
-function pipeline(opps, asOf, tiers) {
+function pipeline(opps, asOf, tiers, orders) {
   const t = tiers || normalizeTiers();
   const pw = (o) => projectionWeight(o, t);
   const active = opps.filter(isActive);
-  const projected = active.filter((o) => pw(o) > 0); // contribuent à la projection (IdC ≥ 50 %)
+  // PARITÉ chaine/atterrissage (audit cohérence chiffres, divergence A) : une opp active dont le FP porte
+  // DÉJÀ une commande (P&L) est déjà comptée dans le CAS. La garder dans le « pondéré PROJETÉ »
+  // (tot.weighted, tierBreakdown, ventilations, top) la double-compterait → même libellé « Commit »/
+  // « Pondéré projeté » que la Vue d'ensemble, mais deux nombres. On l'exclut donc de la PROJECTION,
+  // en gardant `active` (funnel byStage, conversion, comptages bruts) inchangé. FP canonique des deux côtés.
+  const bookedFps = new Set((orders || []).map((o) => fpKey(o.fp)).filter(Boolean));
+  const notBooked = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !(k && bookedFps.has(k)); };
+  const proj = bookedFps.size ? active.filter(notBooked) : active; // opps projetables (hors carnet)
+  const projected = proj.filter((o) => pw(o) > 0); // contribuent à la projection (IdC ≥ 50 %)
   const suspended = opps.filter((o) => o.stage === 8);
   const won = opps.filter((o) => o.stage === 6);
   const lost = opps.filter((o) => o.stage === 7);
@@ -85,30 +94,31 @@ function pipeline(opps, asOf, tiers) {
       const w = won.filter((o) => o.am === am).length;
       const l = lost.filter((o) => o.am === am).length;
       const act = active.filter((o) => o.am === am);
-      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(act, pw) };
+      // weighted = projeté NET du carnet (parité tot.weighted) ; activeCount = funnel actif brut.
+      return { am, won: w, lost: l, conv: w + l > 0 ? w / (w + l) : 0, activeCount: act.length, weighted: sum(act.filter(notBooked), pw) };
     })
     .filter((x) => x.won + x.lost + x.activeCount > 0)
     .sort((a, b) => (b.weighted - a.weighted) || (b.won - a.won));
 
   const wonCount = won.length, lostCount = lost.length;
   return {
-    // brut = toute la funnel active ; « pondéré » = PROJECTION tiérée (niveaux actifs) des actives.
-    tot: { brut: sum(active, (o) => o.amount), weighted: sum(active, pw), count: active.length, countConf: projected.length },
+    // brut = toute la funnel active ; « pondéré » = PROJECTION tiérée des actives HORS carnet (net).
+    tot: { brut: sum(active, (o) => o.amount), weighted: sum(proj, pw), count: active.length, countConf: projected.length },
     susp: { brut: sum(suspended, (o) => o.amount), count: suspended.length },
     confianceMin: CONFIANCE_MIN,
-    // Décomposition du pondéré projeté par niveau (Certitudes / Forecast / Pipe) — jamais mélangée.
-    tierBreakdown: tierBreakdown(active, t),
+    // Décomposition du pondéré projeté par niveau (Certitudes / Forecast / Pipe) — jamais mélangée, net du carnet.
+    tierBreakdown: tierBreakdown(proj, t),
     byStage,
-    byAM: groupSum(active, (o) => o.am, pw),
-    byBU: groupSum(active, (o) => o.bu, pw),
-    byMonth: groupSum(active, month, pw),
+    byAM: groupSum(proj, (o) => o.am, pw),
+    byBU: groupSum(proj, (o) => o.bu, pw),
+    byMonth: groupSum(proj, month, pw),
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
     byAmConv,
     topOpps,
-    // Analyse du closing (D Prev) : seulement si asOf fourni (sinon null, rétro-compat).
-    closing: asOf ? closingAnalysis(active, asOf, pw) : null,
+    // Analyse du closing (D Prev) sur les opps projetables (hors carnet, parité atterrissage.pipelineRetard).
+    closing: asOf ? closingAnalysis(proj, asOf, pw) : null,
   };
 }
 

@@ -485,8 +485,8 @@ export const Codir: FC<Props> = () => {
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               <StatTile label="CAF YTD" value={fmt(cafYtd)} color={T.emerald} sub="facturé — exercice" />
               <StatTile label="Backlog YTD" value={fmt(backlogYtd)} color={T.clay} sub="RAF glissant" />
-              <StatTile label="CAF Estimé" value={fmt(cafEst)} color={T.steel} sub="acquis : facturé + backlog" />
-              <StatTile label="CAF estimé yc pipeline pondéré" value={fmt(cafEstYcForecast)} color={T.gold} sub={`+ ${fmt(forecast)} pipeline pondéré`} />
+              <StatTile label="CAF acquis" value={fmt(cafEst)} color={T.steel} sub="facturé + backlog (RAF)" />
+              <StatTile label="Projeté CAF" value={fmt(cafEstYcForecast)} color={T.gold} sub={`acquis + ${fmt(forecast)} pipeline pondéré`} />
             </div>
 
             {/* Synthèse « en un coup d'œil » : trajectoire vers l'objectif (décompose l'atteinte par source) */}

@@ -284,7 +284,7 @@ function buildNews(x) {
 
   // — QUALITÉ —
   pushIf(B, dq.score != null && num(dq.score) < thr.qualiteMin, {
-    id: "qualite_donnees", domain: "qualite", severity: "medium", module: "dataquality",
+    id: "qualite_donnees", domain: "qualite", severity: "medium", module: "cleanup",
     title: "Qualité des données dégradée",
     detail: `Score de complétude ${pctTxt(dq.score)} — sous le plancher (${pctTxt(thr.qualiteMin)}). Fiabilise les imports.`,
     action: "Corriger les anomalies du cockpit Qualité des données puis ré-importer.",

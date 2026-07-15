@@ -11,6 +11,7 @@ import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, f
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
@@ -380,6 +381,7 @@ export const OppList: FC<Props> = () => {
   const { data: cfDoc } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields"); // champs custom (Lot 7b)
   const customDefs = cfDoc?.fields || [];
   const { match } = useFilters();
+  const clientKey = useClientKey(); // canonicalise le client pour matcher les options canoniques du filtre
   const canWrite = useCan("pipeline") === "write";
   const canImport = useCanImport();
   const { intent } = useNav();
@@ -389,7 +391,7 @@ export const OppList: FC<Props> = () => {
   // « Mon pipeline » : match souple sur l'AM (insensible à la casse/espaces). Filtre transverse appliqué ensuite.
   // Les opps FANTÔMES (stale : retirées de LIVE, cf. audit intégral I2) sont exclues de la vue pipeline
   // pour rester cohérent avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
-  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match(r, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
+  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
@@ -418,9 +420,15 @@ export const OppList: FC<Props> = () => {
   const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
   if (loading && !allRows.length) return <CardSkeleton />;
   const top = [...rows].sort((a, b) => pw(b) - pw(a)).slice(0, 10);
-  // Certitudes = opportunités ACTIVES (étapes 1..5) quasi-certaines (IdC ≥ 90 %), pas encore signées.
+  // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
+  // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
+  const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
+  const isBooked = (o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp))));
+  // Certitudes = opportunités ACTIVES (1..5) quasi-certaines (IdC ≥ 90 %) PAS encore au carnet : une opp
+  // déjà adossée au P&L est réalisée (dans le CAS) → l'inclure double-compterait le pondéré (parité
+  // chaine/atterrissage/Cockpit `Commit`, invariant « même métrique = même nombre »).
   const certitudes = rows
-    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9)
+    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9 && !isBooked(o))
     .sort((a, b) => pw(b) - pw(a));
   const certTotal = certitudes.reduce((s, o) => s + pw(o), 0);
   const today = new Date().toISOString().slice(0, 10);
@@ -437,10 +445,6 @@ export const OppList: FC<Props> = () => {
     });
     return [...m.entries()].map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
   })();
-  // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
-  // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
-  const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
-  const isBooked = (o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp))));
   const pnlFlag = (o: Opportunity): ReactNode =>
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
       : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
@@ -682,7 +686,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const jump = (id: string) => { if (canGo(id)) go(id); };
   const ladder = [
     { label: "Commit", band: "Certitudes ≥ 90 %", v: commit, color: T.emerald },
-    { label: "Best-case", band: "+ Forecast", v: best, color: T.gold },
+    { label: "Best Case", band: "+ Forecast", v: best, color: T.gold },
     { label: "Pipeline", band: "+ Pipe", v: pipe, color: T.steel },
   ];
   const maxLadder = Math.max(pipe, objectif, 1);
@@ -695,7 +699,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
       </div>
-      <Card title="Prévision — Commit / Best-case / Pipeline">
+      <Card title="Prévision par certitude (IdC) — Commit / Best Case / Pipeline">
         <div className="flex flex-col gap-2.5">
           {ladder.map((l) => (
             <div key={l.label} className="flex items-center gap-3">
@@ -712,7 +716,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
             </div>
           )}
         </div>
-        <Tip>Échelle <b>cumulée</b> de prévision : <b>Commit</b> = quasi-certain (≥ 90 %) · <b>Best-case</b> ajoute le Forecast · <b>Pipeline</b> ajoute le Pipe. Confrontée à l'objectif CAS de l'exercice. Poids/paliers réglés dans Habilitations.</Tip>
+        <Tip>Échelle <b>cumulée</b> par <b>palier d'IdC</b> (dérivée de la projection, NET du carnet) : <b>Commit</b> = quasi-certain (≥ 90 %) · <b>Best Case</b> ajoute le Forecast · <b>Pipeline</b> ajoute le Pipe. Confrontée à l'objectif CAS de l'exercice. Poids/paliers réglés dans Habilitations. À distinguer de la <b>Prévision commerciale</b> (catégories Commit/Best Case posées <i>manuellement</i> par le commercial dans la fiche).</Tip>
       </Card>
       <div className={cols2}>
         <Card title="Top commerciaux (pipeline pondéré)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
@@ -826,6 +830,7 @@ export const PipelineBoard: FC<Props> = () => {
   // Abonnement différé jusqu'à résolution de l'OWD (ready) — cf. OppList (re-audit).
   const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { match, f } = useFilters();
+  const clientKey = useClientKey();
   const pw = useProjectionWeight(); // pondéré TIÉRÉ (source unique avec le cockpit)
   const filterKey = `${f.bu}|${f.am}|${f.client}|${f.pm}`; // identité du filtre → réinitialise la pagination des colonnes
   const canWrite = useCan("pipeline") === "write";
@@ -875,7 +880,7 @@ export const PipelineBoard: FC<Props> = () => {
     if (r0.stale) return acc;
     const eff = optim[r0.oppId || r0.id || ""];
     const r = (eff != null && eff !== (r0.stage || 0)) ? { ...r0, stage: eff } : r0;
-    if (!isAgedLost(r) && match(r, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5) acc.push(r);
+    if (!isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (r.stage || 0) >= 1 && (r.stage || 0) <= 5) acc.push(r);
     return acc;
   }, []);
   // Groupement par étape en UN seul passage (puis tri par colonne) plutôt que 5 `filter` complets sur

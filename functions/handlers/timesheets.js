@@ -186,16 +186,27 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
     const fromYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth) ? req.data.fromMonth : `${sy}-${String(sm).padStart(2, "0")}`;
     const months = monthsRange(fromYm, `${cy}-${String(cm).padStart(2, "0")}`);
-    const [cSnap, tSnap] = await Promise.all([
+    const [cSnap, tSnap, aSnap] = await Promise.all([
       db.collection("consultants").select("name", "bu", "grade", "tjmTarget", "cjm").limit(MAX_SCAN + 1).get(),
       db.collection("timesheets").limit(MAX_SCAN + 1).get(),
+      // Affectations : nécessaires pour retenir le TJM CONTRACTUALISÉ couvrant chaque mois (parité pré-facturation).
+      db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "status").limit(MAX_SCAN + 1).get(),
     ]);
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const constat = computeConstat(timesheets, months);
     const byId = {};
     for (const r of constat.rows) byId[r.consultantId] = { billedDays: r.billedDays, months: r.months };
-    const pnl = computeResourcePnl(consultants, byId);
+    // CA au taux contractualisé : détail des jours facturés PAR MOIS (dans la plage) pour appliquer le TJM
+    // d'affectation couvrant chaque mois — sinon Rentabilité et Pré-facturation affichent deux « CA » divergents.
+    const monthSet = new Set(months);
+    const byMonth = {};
+    for (const t of timesheets) {
+      if (!t || !monthSet.has(t.month) || (Number(t.billedDays) || 0) <= 0) continue;
+      (byMonth[t.consultantId] || (byMonth[t.consultantId] = [])).push({ month: t.month, billedDays: Number(t.billedDays) || 0 });
+    }
+    const pnl = computeResourcePnl(consultants, byId, { byMonth, assignments });
     return { ok: true, months, ...pnl };
   });
 

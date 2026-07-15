@@ -2,7 +2,7 @@
 // (Lot 12) et des KPI d'activité (TACE / intercontrat — Lot 13). Comble l'angle mort « métier ESN » de
 // l'évaluation Directeur des Opérations : qui sont les ressources, leur grade, TJM/CJM, compétences, statut.
 // Le COÛT (CJM) n'est visible que si l'utilisateur a le droit « rentabilité » (confidentialité serveur).
-import { useState, useEffect, useCallback, type FC, type ReactNode } from "react";
+import { useState, useEffect, useCallback, createContext, useContext, type FC, type ReactNode } from "react";
 import { useCan } from "../lib/rbac";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, det, cx } from "../design/components";
 import { PctLine } from "../design/charts";
@@ -25,6 +25,14 @@ const STATUSES: { value: ConsultantStatus; label: string; tone: "emerald" | "gol
   { value: "inactive", label: "Sorti", tone: "clay" },
 ];
 const statusMeta = (s?: string) => STATUSES.find((x) => x.value === s) || STATUSES[0];
+
+// RÉACTIVITÉ CROISÉE (audit cycle de vie, HAUTE) : les cartes « aval » (P&L, pré-facturation, capacité,
+// activité, TACE) dérivent leurs chiffres des CRA / affectations / annuaire. Sans signal partagé, elles
+// restaient figées sur leur 1er chargement après une saisie CRA ou une affectation → nombres périmés
+// jusqu'à un rechargement manuel. Un `nonce` partagé, incrémenté à chaque mutation (bump), est ajouté aux
+// dépendances de chargement des cartes → refresh automatique et cohérent de tout l'écran.
+const RefreshCtx = createContext<{ nonce: number; bump: () => void }>({ nonce: 0, bump: () => {} });
+const useStaffingRefresh = () => useContext(RefreshCtx);
 const gradeLabel = (g?: string) => GRADES.find((x) => x.value === g)?.label || g || "—";
 const EMPTY: Consultant = { name: "", email: "", grade: "confirme", bu: "", tjmTarget: null, cjm: null, skills: [], status: "active", startDate: null };
 
@@ -64,7 +72,8 @@ function stat(label: string, value: ReactNode, tone?: string) {
 function ActivityCockpit() {
   const [k, setK] = useState<ActivityKpis | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { activityKpis().then(setK).catch(() => setK(null)).finally(() => setLoading(false)); }, []);
+  const { nonce } = useStaffingRefresh();
+  useEffect(() => { activityKpis().then(setK).catch(() => setK(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Activité — pilotage (6 mois)"><div className="text-[13px] text-muted py-2">Calcul des KPI…</div></Card>;
   if (!k || !k.global.headcount) return <Card title="Activité — pilotage (6 mois)"><Tip>Renseignez consultants et affectations pour obtenir les KPI d'activité : taux d'occupation, intercontrat, CA staffé prévisionnel.</Tip></Card>;
   const g = k.global;
@@ -98,7 +107,8 @@ function ActivityCockpit() {
         <Table columns={[
           colText("Consultant", (r) => <span className={cx(r.isBelow && "text-clay")}>{r.name || r.id}</span>, (r) => r.name || ""),
           colText("BU", (r) => r.bu || "—"),
-          colText("Statut", (r) => r.status),
+          // Statut TRADUIT (badge) — cohérent avec la table Staffing ; ne pas laisser fuir le code brut (« active »).
+          colText("Statut", (r) => { const m = statusMeta(r.status); return <Badge tone={m.tone}>{m.label}</Badge>; }, (r) => r.status || ""),
           colNum("Occupation", (r) => `${r.occupancyPct}%`, (r) => r.occupancyPct),
           colNum("Objectif", (r) => (r.targetPct != null ? `${r.targetPct}%` : "—"), (r) => r.targetPct ?? 0),
           colNum("Mois IC", (r) => String(r.idleMonths), (r) => r.idleMonths),
@@ -114,7 +124,8 @@ function ActivityCockpit() {
 function ResourcePnlCard() {
   const [p, setP] = useState<ResourcePnl | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { resourcePnl().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, []);
+  const { nonce } = useStaffingRefresh();
+  useEffect(() => { resourcePnl().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Rentabilité par ressource (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!p || !p.global.headcount) return <Card title="Rentabilité par ressource (6 mois)"><Tip>Saisissez des CRA (jours facturés) et renseignez TJM/CJM des consultants pour obtenir le P&L par ressource.</Tip></Card>;
   const g = p.global;
@@ -142,16 +153,24 @@ function ResourcePnlCard() {
       <div className="mt-3 border-t border-hair pt-2">
         <div className="text-[11px] text-muted uppercase tracking-wide mb-1">Par consultant (marge décroissante)</div>
         <Table columns={[
-          colText("Consultant", (r) => r.name || r.id),
+          // « à définir » signale un TJM/CJM manquant : sinon le consultant apparaît en perte (ou CA nul)
+          // sans explication et tire la marge globale vers le bas silencieusement.
+          det(colText("Consultant", (r) => (
+            <span className="inline-flex items-center gap-1.5">
+              {r.name || r.id}
+              {r.missingTjm && <Badge tone="gold">TJM à définir</Badge>}
+              {r.missingCjm && <Badge tone="steel">CJM à définir</Badge>}
+            </span>
+          ), (r) => r.name || "")),
           colText("Grade", (r) => r.grade || "—"),
           colText("BU", (r) => r.bu || "—"),
           colNum("J. fact.", (r) => String(r.billedDays), (r) => r.billedDays),
-          colNum("CA réel", (r) => money(r.caReal), (r) => r.caReal),
+          colNum("CA réel", (r) => (r.missingTjm ? "—" : money(r.caReal)), (r) => r.caReal),
           colNum("Marge", (r) => (r.margin != null ? money(r.margin) : "—"), (r) => r.margin ?? 0),
           colNum("Taux", (r) => (r.marginPct != null ? `${r.marginPct}%` : "—"), (r) => r.marginPct ?? 0),
         ]} rows={p.rows} />
       </div>
-      <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). Donnée <b>confidentielle</b> — visible uniquement avec le droit « rentabilité ».</Tip>
+      <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM — <b>taux contractualisé</b> de l'affectation couvrant chaque mois en priorité (identique à la <b>Pré-facturation</b>), à défaut le TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). « <span className="text-gold">TJM/CJM à définir</span> » = donnée manquante à compléter dans l'<b>annuaire</b>. Donnée <b>confidentielle</b> — droit « rentabilité ».</Tip>
     </Card>
   );
 }
@@ -164,7 +183,8 @@ const taceTone = (v: number | null) => v == null ? undefined : v >= 80 ? "text-e
 function TaceTrendCard() {
   const [d, setD] = useState<TaceTrend | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { taceHistory().then(setD).catch(() => setD(null)).finally(() => setLoading(false)); }, []);
+  const { nonce } = useStaffingRefresh();
+  useEffect(() => { taceHistory().then(setD).catch(() => setD(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Tendance TACE (12 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!d || !d.summary.points) return <Card title="Tendance TACE (12 mois)"><Tip>Saisissez des CRA sur plusieurs mois pour visualiser la <b>tendance</b> du TACE (Taux d'Activité Congés Exclus) et détecter une dérive avant qu'elle ne pèse sur la marge.</Tip></Card>;
   const s = d.summary;
@@ -193,7 +213,8 @@ const tjmSourceLabel = (s: string) => (s === "assignment" ? "affectation" : s ==
 function PreFacturation() {
   const [p, setP] = useState<PreBilling | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { preBillingFromCra().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, []);
+  const { nonce } = useStaffingRefresh();
+  useEffect(() => { preBillingFromCra().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Pré-facturation (CRA → à facturer)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!p || !p.global.lines) return <Card title="Pré-facturation (CRA → à facturer)"><Tip>Saisissez des CRA avec des <b>jours facturés</b> et renseignez le TJM (annuaire ou affectation) : nt360 propose ici le <b>montant HT à facturer</b> par consultant/BU/mois, exportable pour la compta.</Tip></Card>;
   const g = p.global;
@@ -325,8 +346,10 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
   const [adding, setAdding] = useState(false);
   const [importPaste, setImportPaste] = useState<string | null>(null);
   const [f, setF] = useState({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" });
+  const { nonce, bump } = useStaffingRefresh();
   const load = useCallback(async () => { setLoading(true); try { setK(await timesheetKpis()); } catch { setK(null); } finally { setLoading(false); } }, []);
-  useEffect(() => { load().catch(() => {}); }, [load]);
+  // nonce : recharge aussi quand une affectation/annuaire change ailleurs (occupation prévue dérivée).
+  useEffect(() => { load().catch(() => {}); }, [load, nonce]);
   if (loading) return <Card title="CRA — activité constatée (6 mois)"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
   const g = k?.global;
   const delta = g ? g.occupancyPct - (k!.plannedOccupancyPct || 0) : 0;
@@ -334,7 +357,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
     <Card title="CRA — activité constatée (6 mois)" actions={canWrite && (
       <div className="flex items-center gap-1.5">
         <Busy variant="ghost" label="Synchroniser ClickUp" okMsg="Jours facturés synchronisés" errMsg="Synchro ClickUp indisponible"
-          fn={async () => { const r = await syncClickupTimesheets(); await load(); if (!r.upserts) throw new Error(`Aucune entrée exploitable (${r.entries} entrée(s) ClickUp, ${r.mapped} consultant(s) mappé(s)). Renseignez l'« ID ClickUp » des consultants.`); }} />
+          fn={async () => { const r = await syncClickupTimesheets(); await load(); bump(); if (!r.upserts) throw new Error(`Aucune entrée exploitable (${r.entries} entrée(s) ClickUp, ${r.mapped} consultant(s) mappé(s)). Renseignez l'« ID ClickUp » des consultants.`); }} />
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setImportPaste(importPaste == null ? "" : null); setAdding(false); }}>{importPaste != null ? "Fermer" : "Importer (coller)"}</button>
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setAdding(!adding); setImportPaste(null); }}>{adding ? "Fermer" : "+ Saisie CRA"}</button>
       </div>)}>
@@ -345,7 +368,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
             placeholder={"Alice\t2026-01\t18\t2\t0\nBob\t2026-01\t20\t0\t0"} />
           <div className="flex items-center gap-2">
             <Busy variant="ghost" label="Importer" okMsg="CRA importés" errMsg="Import refusé"
-              fn={async () => { const r = await importTimesheets(importPaste || ""); setImportPaste(null); await load(); if (r.errorCount) throw new Error(`${r.imported} importé(s), ${r.errorCount} erreur(s) — ex. : ${r.errors[0]?.reason || ""}`); }} />
+              fn={async () => { const r = await importTimesheets(importPaste || ""); setImportPaste(null); await load(); bump(); if (r.errorCount) throw new Error(`${r.imported} importé(s), ${r.errorCount} erreur(s) — ex. : ${r.errors[0]?.reason || ""}`); }} />
             <span className="text-[11px] text-muted">Résout les noms contre l'annuaire ; ré-import = mise à jour (1 CRA par consultant×mois).</span>
           </div>
         </div>
@@ -363,7 +386,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">J. internes</span>
             <input className="field !py-1 w-20" type="number" value={f.internalDays} onChange={(e) => setF({ ...f, internalDays: e.target.value })} aria-label="Jours internes" /></label>
           <Busy variant="ghost" label="Enregistrer" okMsg="CRA enregistré" errMsg="Enregistrement refusé"
-            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.month) throw new Error("mois requis"); await upsertTimesheet({ consultantId: f.consultantId, month: f.month, billedDays: Number(f.billedDays) || 0, leaveDays: Number(f.leaveDays) || 0, internalDays: Number(f.internalDays) || 0 }); setF({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" }); setAdding(false); load(); }} />
+            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.month) throw new Error("mois requis"); await upsertTimesheet({ consultantId: f.consultantId, month: f.month, billedDays: Number(f.billedDays) || 0, leaveDays: Number(f.leaveDays) || 0, internalDays: Number(f.internalDays) || 0 }); setF({ consultantId: "", month: "", billedDays: "", leaveDays: "", internalDays: "" }); setAdding(false); load(); bump(); }} />
         </div>
       )}
       {!g || !g.reportedConsultants ? (
@@ -399,7 +422,8 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
 function CapacityPipeline() {
   const [c, setC] = useState<CapacityPlan | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { capacityPlan().then(setC).catch(() => setC(null)).finally(() => setLoading(false)); }, []);
+  const { nonce } = useStaffingRefresh();
+  useEffect(() => { capacityPlan().then(setC).catch(() => setC(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Capacité ⇄ pipeline (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!c) return <Card title="Capacité ⇄ pipeline (6 mois)"><Tip>Renseignez consultants, affectations et opportunités ouvertes pour rapprocher la capacité de délivrance du pipeline à venir.</Tip></Card>;
   const under = c.gapDays < 0;
@@ -430,7 +454,7 @@ function CapacityPipeline() {
           ]} rows={c.byBu} />
         </div>
       )}
-      <Tip>Demande = Σ (montant × probabilité) des opportunités ouvertes ÷ TJM moyen ({money(c.tjm)}). Capacité = jours-homme <b>non staffés</b> des actifs. Rapprochement <b>prévisionnel</b> — respecte votre périmètre de visibilité sur le pipeline.</Tip>
+      <Tip>Demande = Σ du <b>pipeline pondéré</b> (projection <b>tiérée</b> par palier d'IdC — Certitudes/Forecast/Pipe, réglée en Habilitations) des opportunités ouvertes ÷ TJM moyen ({money(c.tjm)}). Capacité = jours-homme <b>non staffés</b> des actifs. Rapprochement <b>prévisionnel</b> — respecte votre périmètre de visibilité sur le pipeline.</Tip>
     </Card>
   );
 }
@@ -442,8 +466,9 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [f, setF] = useState<Assignment>({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null });
+  const { nonce, bump } = useStaffingRefresh();
   const load = useCallback(async () => { setLoading(true); try { setPlan(await staffingPlan()); } catch { setPlan(null); } finally { setLoading(false); } }, []);
-  useEffect(() => { load().catch(() => {}); }, [load]);
+  useEffect(() => { load().catch(() => {}); }, [load, nonce]);
   const set = (k: keyof Assignment, v: unknown) => setF((p) => ({ ...p, [k]: v }));
   if (loading) return <Card title="Plan de charge"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
   if (!plan || !plan.consultants.length) return <Card title="Plan de charge"><Tip>Ajoutez des consultants puis affectez-les à des missions pour visualiser le plan de charge (charge par mois, sur-charge, intercontrat).</Tip></Card>;
@@ -474,7 +499,7 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TJM facturé</span>
             <input className="field !py-1 w-24" type="number" value={f.tjmBilled ?? ""} onChange={(e) => set("tjmBilled", e.target.value === "" ? null : Number(e.target.value))} aria-label="TJM facturé" /></label>
           <Busy variant="ghost" label="Affecter" okMsg="Affectation enregistrée" errMsg="Enregistrement refusé"
-            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.startMonth || !f.endMonth) throw new Error("période requise"); await upsertAssignment(f); setF({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null }); setAdding(false); load(); }} />
+            fn={async () => { if (!f.consultantId) throw new Error("consultant requis"); if (!f.startMonth || !f.endMonth) throw new Error("période requise"); await upsertAssignment(f); setF({ consultantId: "", startMonth: "", endMonth: "", allocationPct: 100, projectFp: "", label: "", tjmBilled: null }); setAdding(false); load(); bump(); }} />
         </div>
       )}
       {/* Matrice consultant × mois : le défilement horizontal (inévitable pour N mois) est CONTENU —
@@ -512,7 +537,7 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
             colText("Période", (a: Assignment) => `${monthLabel(a.startMonth)} → ${monthLabel(a.endMonth)}`),
             colNum("Alloc.", (a: Assignment) => `${a.allocationPct}%`, (a: Assignment) => a.allocationPct),
             colNum("TJM", (a: Assignment) => (a.tjmBilled != null ? money(a.tjmBilled) : "—"), (a: Assignment) => a.tjmBilled ?? 0),
-            ...(canWrite ? [colText("", (a: Assignment) => <DangerBtn label="Suppr." okMsg="Affectation supprimée" errMsg="Suppression refusée" confirm="Supprimer cette affectation ?" fn={async () => { await deleteAssignment(a.id!); await load(); }} />)] : []),
+            ...(canWrite ? [colText("", (a: Assignment) => <DangerBtn label="Suppr." okMsg="Affectation supprimée" errMsg="Suppression refusée" confirm="Supprimer cette affectation ?" fn={async () => { await deleteAssignment(a.id!); await load(); bump(); }} />)] : []),
           ]} rows={plan.assignments} />
         </div>
       )}
@@ -528,17 +553,22 @@ export const Staffing: FC<Props> = () => {
   const [canCost, setCanCost] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null); // id en édition, ou "new"
+  // Signal de rafraîchissement partagé (voir RefreshCtx) : incrémenté par les cartes filles à chaque mutation
+  // (CRA, affectation, annuaire) → les cartes aval se rechargent au lieu de rester figées sur le 1er snapshot.
+  const [nonce, setNonce] = useState(0);
+  const bump = useCallback(() => setNonce((n) => n + 1), []);
   const load = useCallback(async () => {
     setLoading(true);
     try { const r = await listConsultants(); setRows(r.rows); setCanCost(r.canCost); }
     catch { setRows([]); } finally { setLoading(false); }
   }, []);
-  useEffect(() => { load().catch(() => {}); }, [load]);
+  useEffect(() => { load().catch(() => {}); }, [load, nonce]);
 
   const counts = STATUSES.map((s) => ({ ...s, n: rows.filter((r) => (r.status || "active") === s.value).length }));
   const avgTjm = (() => { const v = rows.map((r) => r.tjmTarget).filter((x): x is number => typeof x === "number"); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null; })();
 
   return (
+    <RefreshCtx.Provider value={{ nonce, bump }}>
     <div className="flex flex-col gap-4">
       <ActivityCockpit />
       {canMargin && <ResourcePnlCard />}
@@ -553,7 +583,7 @@ export const Staffing: FC<Props> = () => {
           {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditing(editing === "new" ? null : "new")}>{editing === "new" ? "Fermer" : "+ Consultant"}</button>}
         </div>}>
         {canWrite && editing === "new" && (
-          <div className="border-b border-hair pb-3 mb-3"><ConsultantForm initial={EMPTY} canCost={canCost} onDone={() => { setEditing(null); load(); }} /></div>
+          <div className="border-b border-hair pb-3 mb-3"><ConsultantForm initial={EMPTY} canCost={canCost} onDone={() => { setEditing(null); load(); bump(); }} /></div>
         )}
         {loading ? <div className="text-[13px] text-muted py-2">Chargement…</div> : !rows.length ? (
           <Tip>Aucun consultant. Renseignez vos ressources (grade, BU, TJM/CJM, compétences, statut) pour piloter le <b>plan de charge</b> et les <b>KPI d'activité</b> (TACE, intercontrat) à venir. Le <b>coût (CJM)</b> n'est visible qu'avec le droit « rentabilité ».</Tip>
@@ -571,12 +601,12 @@ export const Staffing: FC<Props> = () => {
               ...(canWrite ? [colText("", (c: Consultant) => (
                 <span className="inline-flex gap-2">
                   <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEditing(editing === c.id ? null : c.id!)}>{editing === c.id ? "fermer" : "éditer"}</button>
-                  <DangerBtn label="Suppr." okMsg="Consultant supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteConsultant(c.id!); await load(); }} />
+                  <DangerBtn label="Suppr." okMsg="Consultant supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteConsultant(c.id!); await load(); bump(); }} />
                 </span>
               ))] : []),
             ]} rows={rows} colsKey="staffing-consultants" />
             {canWrite && rows.map((c) => editing === c.id && (
-              <div key={`edit-${c.id}`} className={cx("border-t border-hair pt-2 mt-2")}><ConsultantForm initial={c} canCost={canCost} onDone={() => { setEditing(null); load(); }} /></div>
+              <div key={`edit-${c.id}`} className={cx("border-t border-hair pt-2 mt-2")}><ConsultantForm initial={c} canCost={canCost} onDone={() => { setEditing(null); load(); bump(); }} /></div>
             ))}
             {avgTjm != null && <div className="mt-2 text-[11px] text-muted">TJM cible moyen : <b>{money(avgTjm)}</b> · {rows.length} ressource(s){!canCost && " — coût (CJM) masqué (droit « rentabilité » requis)"}</div>}
           </>
@@ -584,5 +614,6 @@ export const Staffing: FC<Props> = () => {
       </Card>
       <PlanDeCharge canWrite={canWrite} />
     </div>
+    </RefreshCtx.Provider>
   );
 };

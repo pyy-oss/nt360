@@ -15,6 +15,28 @@ describe("consultantPnl (Lot 17)", () => {
     expect(p.cost).toBeNull();
     expect(p.margin).toBeNull();
   });
+  it("CA au TAUX CONTRACTUALISÉ (parité pré-facturation) : le tjmBilled de l'affectation prime sur le TJM cible", () => {
+    // Consultant vendu 900/j (affectation confirmée) alors que son TJM cible annuaire est 700 → le CA réel
+    // doit refléter le taux réellement facturé, comme la pré-facturation (sinon deux « CA » divergents).
+    const ctx = {
+      byMonth: { c1: [{ month: "2026-01", billedDays: 20 }] },
+      assignments: [{ consultantId: "c1", startMonth: "2026-01", endMonth: "2026-06", tjmBilled: 900, status: "confirmed" }],
+    };
+    const p = consultantPnl({ id: "c1", tjmTarget: 700, cjm: 400 }, { billedDays: 20, months: 1 }, ctx);
+    expect(p.caReal).toBe(18000); // 20 × 900 (contrat), PAS 20 × 700 (cible)
+    expect(p.missingTjm).toBe(false);
+  });
+  it("repli TJM cible quand aucune affectation ne couvre le mois (ou taux ambigu)", () => {
+    const ctx = { byMonth: { c1: [{ month: "2026-01", billedDays: 20 }] }, assignments: [] };
+    const p = consultantPnl({ id: "c1", tjmTarget: 700, cjm: 400 }, { billedDays: 20, months: 1 }, ctx);
+    expect(p.caReal).toBe(14000); // 20 × 700 (cible)
+  });
+  it("aucun taux (ni contrat ni cible) → missingTjm=true, CA=0", () => {
+    const ctx = { byMonth: { c1: [{ month: "2026-01", billedDays: 20 }] }, assignments: [] };
+    const p = consultantPnl({ id: "c1", cjm: 400 }, { billedDays: 20, months: 1 }, ctx);
+    expect(p.caReal).toBe(0);
+    expect(p.missingTjm).toBe(true);
+  });
 });
 
 describe("computeResourcePnl — agrégats global / BU / grade", () => {

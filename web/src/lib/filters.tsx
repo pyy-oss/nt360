@@ -19,11 +19,18 @@ const up = (s?: string | null) => (s || "").trim().toUpperCase();
 const EMPTY: Filters = { bu: "", am: "", client: "", pm: "" };
 
 /** Prédicat PUR (testable) : la ligne passe-t-elle le filtre sur les dimensions demandées ?
- *  Comparaison insensible à la casse ; un critère vide n'exclut jamais. */
-export function filterMatch(f: Filters, row: { bu?: string; am?: string; client?: string; pm?: string | null }, dims: Dim[] = ["bu", "am", "client", "pm"]): boolean {
+ *  Comparaison insensible à la casse ; un critère vide n'exclut jamais.
+ *  `clientKey` (optionnel) CANONICALISE le nom client des DEUX côtés — indispensable car les OPTIONS
+ *  du filtre (summaries/clients_all) portent des clés canoniques (serveur) alors que les lignes brutes
+ *  portent le nom d'origine : sans lui, « SOCIETE GENERALE » (option) ne matche jamais « Société
+ *  Générale CI » (ligne) → la vue filtrée sous-compte vs le serveur (invariant « même métrique »). */
+export function filterMatch(f: Filters, row: { bu?: string; am?: string; client?: string; pm?: string | null }, dims: Dim[] = ["bu", "am", "client", "pm"], clientKey?: (s?: string | null) => string): boolean {
   if (dims.includes("bu") && f.bu && up(row.bu) !== up(f.bu)) return false;
   if (dims.includes("am") && f.am && up(row.am) !== up(f.am)) return false;
-  if (dims.includes("client") && f.client && up(row.client) !== up(f.client)) return false;
+  if (dims.includes("client") && f.client) {
+    const ck = clientKey || up; // repli : comparaison brute (rétro-compat / avant chargement des alias)
+    if (ck(row.client) !== ck(f.client)) return false;
+  }
   if (dims.includes("pm") && f.pm && up(row.pm) !== up(f.pm)) return false;
   return true;
 }
@@ -37,6 +44,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     set: (p) => setF((s) => ({ ...s, ...p })),
     clear: () => setF(EMPTY),
     active: !!(f.bu || f.am || f.client || f.pm),
+    // NB : `match` compare le client BRUT. La canonicalisation (miroir serveur config/clientAliases) est
+    // apportée par les vues qui filtrent des collections brutes via `useClientKey()` (lib/clientName), pour
+    // NE PAS embarquer clientName dans le chunk d'ENTRÉE (FilterProvider est chargé au démarrage).
     match: (row, dims) => filterMatch(f, row, dims),
   }), [f]);
   return <FilterCtx.Provider value={value}>{children}</FilterCtx.Provider>;

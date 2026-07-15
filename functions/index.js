@@ -1311,9 +1311,14 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   // pondéré TIÉRÉ (`pw`, source unique du « pondéré » — CLAUDE.md) et on le passe à la capacité, au lieu de
   // laisser lire le `weighted` linéaire persisté (interdit à l'affichage).
   const { projectionWeight, normalizeTiers } = require("./domain/projection");
+  const { isAgedLost } = require("./domain/oppLifecycle");
   const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
-  const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage"]);
-  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; })
+  // Population IDENTIQUE à pipeline/board/vélocité (cf. audit cohérence chiffres, divergence C) : ouvertes
+  // (1-5), NON `stale` (fantômes retirés de LIVE), NON périmées par âge (`isAgedLost`). Sans ces exclusions,
+  // des opps invisibles ailleurs gonflaient la demande → gap de recrutement surévalué. `source`/`ageDays`
+  // requis par isAgedLost (sinon jamais périmée).
+  const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage", "stale", "source", "ageDays"]);
+  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5 && o.stale !== true && !isAgedLost(o); })
     .map((o) => ({ ...o, pw: projectionWeight(o, tiers) }));
   const plan = capacityVsPipeline({ consultants, loadByConsultant: byConsultant, months, opps });
   return { ok: true, months, openOppCount: opps.length, ...plan };
@@ -1824,11 +1829,17 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   await requireRead(req, "pipeline");
   const { rollupForecast } = require("./domain/forecast");
   const { plausibleYear } = require("./lib/ids");
+  const { isAgedLost } = require("./domain/oppLifecycle");
   const [oppSnap, fiscalDoc] = await Promise.all([
-    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "ownerUid", "visibleTo").get(),
+    // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
+    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo").get(),
     db.doc("config/fiscal").get(),
   ]);
-  let opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true);
+  // Population COHÉRENTE avec le reste de la famille pipeline (cf. audit chiffres, divergence D) : NON `stale`
+  // ET NON périmée par âge. isAgedLost ne touche que les OUVERTES (1-5) → les catégories Closed/gagné sont
+  // conservées ; une opp ouverte périmée n'apparaît plus en Best Case/Pipeline ici alors qu'elle est absente
+  // du scoring/vélocité.
+  let opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true && !isAgedLost(o));
   // Visibilité par enregistrement : sous OWD « private », un non-admin ne prévoit que son périmètre.
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));

@@ -566,20 +566,26 @@ export const Fp360: FC<Props> = () => {
       <Card title="Recherche par N° FP">
         <input className="field w-full md:w-96" aria-label="Rechercher un N° FP" placeholder="FP/2026/13542" value={q} onChange={(e) => setQ(e.target.value)} />
       </Card>
-      {fp && (o ? (
+      {fp && ((o || invoices.length || opps.length || bc.length || sheets.length) ? (
         <>
-          <div className={grid4}>
-            <Kpi label="Client" value={o.client || "—"} />
-            <Kpi label="CAS" value={fmt(o.cas)} />
-            <Kpi label="RAF" value={fmt(o.raf)} tone="steel" />
-            {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
-          </div>
+          {/* Un N° FP peut exister HORS carnet (opp gagnée sans P&L, facture/BC orphelins) : on ne masque
+              plus les maillons rattachés faute de commande — on affiche tout ce qui porte ce FP. */}
+          {o ? (
+            <div className={grid4}>
+              <Kpi label="Client" value={o.client || "—"} />
+              <Kpi label="CAS" value={fmt(o.cas)} />
+              <Kpi label="RAF" value={fmt(o.raf)} tone="steel" />
+              {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
+            </div>
+          ) : (
+            <Tip><b>Aucune commande</b> (carnet P&L) pour {fp} — ce N° FP existe <b>hors carnet</b> : opportunité gagnée non adossée, facture ou BC orphelin. Les maillons rattachés sont listés ci-dessous ; corrigez le rattachement dans <b>Qualité &amp; correction</b>.</Tip>
+          )}
           <Card title={`Factures · ${invoices.length}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
           {canMargin && <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>}
           <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("Affaire", (x) => x.designation || "—"), colText("Commercial", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
-      ) : <EmptyState label={`Aucune commande pour ${fp}.`} />)}
+      ) : <EmptyState label={`Aucun élément rattaché à ${fp}.`} />)}
     </div>
   );
 };
