@@ -60,6 +60,19 @@ describe("mntRisque — signal SLA rompu", () => {
     });
     expect(r.items[0].slaRompus).toBe(0);
   });
+
+  it("prise en compte : ticket résolu en PREMIER CONTACT (sans en_cours) n'est PAS rompu à tort (audit BUG1)", () => {
+    // Engagement « prise_en_compte » 4 h. Ticket ouvert→resolu directement (priseEnCompteMs null car jamais
+    // passé en_cours), résolu en 1 h. La prise en compte a eu lieu AU PLUS TARD à la résolution (1 h < 4 h)
+    // → respecté. Avant le correctif, markMs=null basculait en « rompu » (échéance ancienne dépassée).
+    const cPec = { id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", echeanceType: "annuel", montantEngage: 0, engagements: [{ type: "prise_en_compte", couverture: "ouvre_lun_ven", seuilHeures: 4, quota: null }] };
+    const r = mntRisque({
+      contrats: [cPec],
+      tickets: [{ id: "t1", contratId: "c1", ouvertMs: day("2026-07-06"), priseEnCompteMs: null, resoluMs: day("2026-07-06") + 3600000, dateJour: "2026-07-06" }],
+      invoices: [], asOf: ASOF, nowMs: NOW,
+    });
+    expect(r.items[0].slaRompus).toBe(0);
+  });
 });
 
 describe("mntRisque — échéance proche", () => {
@@ -90,6 +103,16 @@ describe("mntRisque — quota dépassé", () => {
     const s = r.items[0].signals.find((x) => x.type === "quota_depasse");
     expect(s).toBeTruthy();
     expect(s.depassement).toBe(1); // 3 ouverts - quota 2
+  });
+});
+
+describe("mntRisque — échéancier : contrat non démarré (audit BUG3)", () => {
+  it("dateDebut FUTURE sur contrat actif → 0 échéance due → PAS de sous-facturation", () => {
+    const contrat = { id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-09-01", echeanceType: "mensuel", montantEngage: 100000, engagements: [] };
+    const r = mntRisque({ contrats: [contrat], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW });
+    expect(r.items[0].signals.some((s) => s.type === "sous_facturation")).toBe(false);
+    expect(r.items[0].sousFacturation.engage).toBe(0);
+    expect(r.items[0].niveau).toBe("vert");
   });
 });
 

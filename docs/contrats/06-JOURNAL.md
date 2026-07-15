@@ -31,6 +31,52 @@
 
 ---
 
+## 2026-07-15 — Audit adverse du module (4 axes) + remédiation des constats certains
+
+**Fait** — audit adverse en 4 axes parallèles (sécurité/RBAC + extinction, cohérence des chiffres,
+conformité au kit, chasse aux bugs). Correctifs des constats CERTAINS (bugs de correction, non-policy),
+chacun testé :
+- **BUG1 (SLA prise en compte, HAUTE)** — un ticket résolu en PREMIER CONTACT (`ouvert→resolu` sans
+  `en_cours`) a `priseEnCompteLe=null` → `slaState` basculait « rompu » à tort. `mntRisque.js` : pour un
+  engagement `prise_en_compte`, `markMs` retombe sur `resoluMs` (pris en compte au plus tard à la résolution).
+- **BUG2 (couverture `h24`, MOY/HAUTE)** — `slaState` ignorait `couverture` (tout en jours ouvrés). Ajout
+  de l'horloge **calendaire 24/7** pour `h24` (`mntSla.js` + miroir `mntSla.ts`). → **ADR-017**.
+- **BUG3 (échéancier, contrat non démarré)** — `dateDebut` future comptait déjà 1 échéance → fausse
+  sous-facturation. Garde `asOf >= dateDebut` (`mntEcheancier.js` + miroir).
+- **B2 (CRA double-mois, HAUTE)** — `computeConstat` comptait les DOCUMENTS comme des mois : un consultant
+  avec CRA manuel + contribution maintenance le même mois obtenait `months=2` → TACE ≈ divisé par 2 et coût
+  de banc gonflé (marge faussée via `resourcePnl`). Corrigé : **mois calendaires DISTINCTS** (`domain/timesheet.js`).
+  `billedDays` continue de s'additionner (une seule vérité du temps, ADR-013). Test de régression ajouté.
+- **Conformité (montant)** — le champ « Montant engagé » affichait `fmt()` (abrège « 1,2 M ») dans un
+  INPUT → corruption à la frappe (`digits("1,2 M")`="12"). Lié à la valeur brute, comme les 5 autres champs
+  montant de l'ERP (`maintenance.tsx`).
+
+**Appris sur l'existant**
+- `computeConstat` (autorité CRA) comptait les documents, pas les mois : bug LATENT que la 2ᵉ source
+  d'écriture (`timesheets/mnt_*`) a révélé. Le fix (mois distincts) est correct universellement.
+- Cohérence des chiffres du Lot 5 : **SAINE** (le front ne recalcule jamais le score, miroirs SLA/échéancier
+  byte-identiques, rapprochement par `fpKey`). Aucun correctif nécessaire sur cet axe.
+
+**Échoué / abandonné** — rien.
+
+**Dette assumée / EN ATTENTE DE DÉCISION (non corrigé dans cette passe)**
+- **B1 (invariant « éteint = ERP d'avant »)** : les docs `timesheets/mnt_*` créés drapeau ALLUMÉ
+  subsistent après extinction et continuent d'alimenter TACE/marge (les 4 consommateurs CRA ne filtrent pas
+  `source`). Violation de la règle intouchable n°6 dès que le drapeau a été allumé une fois.
+- **M1 (double facturation potentielle)** : les jours d'intervention `mnt_` (forfait `montantEngage`,
+  ADR-005) sont valorisés au TJM dans la marge (`resourcePnl`) et proposés à la pré-facturation
+  (`preBillingFromCra`) → risque de double compte revenu.
+- B1 et M1 sont des **décisions produit** (interaction maintenance↔CRA sur des KPI de production) →
+  **question posée à la direction** avant correctif (PR de suivi dédiée).
+
+**Décidé** — ADR-017 (horloge SLA `h24` calendaire).
+
+**Suivant** — décision direction sur B1/M1 → PR de suivi ; puis correctif lisibilité ClickUp (hors module).
+
+**Vérif** : functions 868 (89 fichiers) · web 90 · no-undef 117 · deploy-targets 146 · bundle 115.5 KB · lint web propre.
+
+---
+
 ## 2026-07-15 — Lot 5 (Moteur de risque — DERNIER lot du module)
 
 **Fait**

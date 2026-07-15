@@ -34,6 +34,21 @@ describe("mntSla — état SLA d'un engagement", () => {
   });
 });
 
+describe("mntSla — couverture h24 : horloge CALENDAIRE 24/7 (audit BUG2)", () => {
+  const sat00 = Date.UTC(2026, 2, 7, 0); // samedi 00:00
+  it("h24 : le week-end consomme du délai (rupture détectée le samedi)", () => {
+    const eng24 = { seuilHeures: 8, couverture: "h24" };
+    // Ouvert samedi 00:00, non résolu, maintenant samedi 12:00 → 12 h > 8 h → rompu (24/7).
+    expect(slaState(eng24, sat00, null, sat00 + 12 * H).state).toBe("rompu");
+    // Échéance = samedi 08:00 (pas de saut de week-end).
+    expect(slaState(eng24, sat00, null, sat00 + 4 * H).state).toBe("en_cours");
+  });
+  it("ouvre_lun_ven : le MÊME ticket samedi reste en cours (week-end ignoré) — contraste", () => {
+    const engLv = { seuilHeures: 8, couverture: "ouvre_lun_ven" };
+    expect(slaState(engLv, sat00, null, sat00 + 12 * H).state).toBe("en_cours"); // sam/dim ne consomment rien
+  });
+});
+
 describe("mntEcheancier — engagé vs facturé", () => {
   const c = { echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-01" };
   it("échéances dues = mois écoulés + 1 (1ʳᵉ à dateDebut) ; engagé = dues × montant", () => {

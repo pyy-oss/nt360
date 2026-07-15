@@ -38,17 +38,22 @@ function addBusinessMs(start, durMs) {
  * État SLA d'un engagement pour un ticket. `openMs` = ouverture ; `markMs` = horodatage de l'atteinte
  * (prise en compte ou résolution) ou null si non atteint ; `nowMs` = maintenant.
  * → { seuilHeures, dueMs, elapsedHours, state } où state ∈ 'respecte' | 'rompu' | 'en_cours'.
- *   - marqué : respecté si atteint avant l'échéance ouvrée, sinon rompu.
+ *   - marqué : respecté si atteint avant l'échéance, sinon rompu.
  *   - non marqué : rompu si l'échéance est déjà dépassée, sinon en cours.
+ * COUVERTURE : `ouvre_lun_ven` (défaut) → horloge JOURS OUVRÉS (saute le week-end) ; `h24` → horloge
+ * CALENDAIRE 24/7 (le week-end consomme du délai). Sans cette distinction, un engagement 24/7 serait
+ * calculé comme du Lun–Ven et sous-estimerait ses ruptures (audit Lot 5).
  */
 function slaState(engagement, openMs, markMs, nowMs) {
   const seuilHeures = Math.max(0, Number(engagement && engagement.seuilHeures) || 0);
-  const dueMs = addBusinessMs(openMs, seuilHeures * HOUR_MS);
+  const h24 = engagement && engagement.couverture === "h24";
+  const dueMs = h24 ? openMs + seuilHeures * HOUR_MS : addBusinessMs(openMs, seuilHeures * HOUR_MS);
+  const elapsedMs = (a, b) => (h24 ? Math.max(0, b - a) : businessMsBetween(a, b));
   if (markMs != null) {
-    const elapsed = businessMsBetween(openMs, markMs);
+    const elapsed = elapsedMs(openMs, markMs);
     return { seuilHeures, dueMs, elapsedHours: Math.round((elapsed / HOUR_MS) * 100) / 100, state: markMs <= dueMs ? "respecte" : "rompu" };
   }
-  const elapsed = businessMsBetween(openMs, nowMs);
+  const elapsed = elapsedMs(openMs, nowMs);
   return { seuilHeures, dueMs, elapsedHours: Math.round((elapsed / HOUR_MS) * 100) / 100, state: nowMs > dueMs ? "rompu" : "en_cours" };
 }
 

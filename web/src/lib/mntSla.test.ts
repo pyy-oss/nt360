@@ -16,6 +16,11 @@ describe("mntSla (front, miroir) — horloge jours ouvrés + état SLA", () => {
     expect(slaState({ seuilHeures: 8 }, wed10, null, wed10 + 100 * H).state).toBe("rompu");
     expect(slaState({ seuilHeures: 8 }, wed10, null, wed10 + 2 * H).state).toBe("en_cours");
   });
+  it("couverture h24 : horloge calendaire 24/7 (miroir back, audit BUG2)", () => {
+    const sat00 = Date.UTC(2026, 2, 7, 0); // samedi
+    expect(slaState({ seuilHeures: 8, couverture: "h24" }, sat00, null, sat00 + 12 * H).state).toBe("rompu");
+    expect(slaState({ seuilHeures: 8, couverture: "ouvre_lun_ven" }, sat00, null, sat00 + 12 * H).state).toBe("en_cours");
+  });
 });
 
 describe("mntSla (front, miroir) — échéancier", () => {
@@ -25,5 +30,11 @@ describe("mntSla (front, miroir) — échéancier", () => {
     expect(e.periodsDue).toBe(3);
     expect(e.engage).toBe(3000000);
     expect(e.ecart).toBe(500000);
+  });
+  it("contrat non démarré (asOf < dateDebut) → 0 échéance (miroir back, audit BUG3)", () => {
+    const e = echeancier({ echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-09-01" }, 0, "2026-07-15");
+    expect(e.periodsDue).toBe(0);
+    expect(e.engage).toBe(0);
+    expect(e.ecart).toBe(0);
   });
 });

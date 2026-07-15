@@ -23,7 +23,10 @@ function echeancier(contrat, factureTotal, asOfIso) {
   const per = PERIOD_MONTHS[c.echeanceType] || 1;
   const montant = Math.max(0, Math.round(Number(c.montantEngage) || 0));
   let periodsDue = 0;
-  if (parse(c.dateDebut)) {
+  // Contrat NON ENCORE DÉMARRÉ (asOf < dateDebut) → 0 échéance due : monthsBetween est bornée à 0, donc
+  // sans cette garde un contrat actif à date de début future compterait déjà 1 échéance (fausse sous-
+  // facturation — audit Lot 5). Comparaison lexicographique sûre sur des ISO AAAA-MM-JJ.
+  if (parse(c.dateDebut) && String(asOfIso) >= String(c.dateDebut)) {
     // Échéance émise en début de chaque période, la 1ʳᵉ à dateDebut → +1.
     periodsDue = Math.floor(monthsBetween(c.dateDebut, asOfIso) / per) + 1;
     // Borne par la durée du contrat si une date de fin est posée.

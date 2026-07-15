@@ -11,7 +11,6 @@ import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate, tsMillis } from "../lib/format";
-import { fmt } from "../design/tokens";
 import { fpKey } from "../lib/ids";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
 import type { Invoice } from "../types";
@@ -195,7 +194,7 @@ export const Maintenance: FC<Props> = () => {
             <Field label="Périodicité d'échéance"><Select value={cForm.echeanceType} onChange={(v) => setC("echeanceType", v)} options={opt(ECHEANCE_LABEL, ECHEANCES)} ariaLabel="Périodicité" /></Field>
             <Field label="Date de début"><DateField value={cForm.dateDebut} onChange={(v) => setC("dateDebut", v)} ariaLabel="Date de début" /></Field>
             <Field label="Date de fin (optionnelle)"><DateField value={cForm.dateFin} onChange={(v) => setC("dateFin", v)} ariaLabel="Date de fin" /></Field>
-            <Field label="Montant engagé (FCFA)"><input className="field tabnum" inputMode="numeric" value={cForm.montantEngage ? fmt(Number(cForm.montantEngage)) : ""} onChange={(e) => setC("montantEngage", digits(e.target.value))} placeholder="0" /></Field>
+            <Field label="Montant engagé (FCFA)"><input className="field tabnum" inputMode="numeric" value={cForm.montantEngage} onChange={(e) => setC("montantEngage", digits(e.target.value))} placeholder="0" /></Field>
           </div>
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2"><span className="text-[13px] font-medium">Engagements SLA</span>{canWrite && <button type="button" onClick={addEng} className="btn-ghost !px-2 !py-1 text-xs inline-flex items-center gap-1"><Plus size={13} /> Ajouter</button>}</div>
