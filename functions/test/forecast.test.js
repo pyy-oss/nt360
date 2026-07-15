@@ -2,13 +2,15 @@ import { describe, it, expect } from "vitest";
 const { defaultCategory, effectiveCategory, rollupForecast, FORECAST_CATEGORIES } = require("../domain/forecast");
 
 describe("defaultCategory / effectiveCategory", () => {
-  it("gagné→commit, ouverte active (1-5)→pipeline, reste (perdu/suspendu/annulé)→omitted", () => {
-    expect(defaultCategory({ stage: 6 })).toBe("commit");
+  it("défaut dérivé de l'étape : 5→commit, 4→best_case, 1-3→pipeline ; reste hors prévision", () => {
+    expect(defaultCategory({ stage: 6 })).toBe("commit");     // gagné (porté par le carnet dans le rollup)
+    expect(defaultCategory({ stage: 5 })).toBe("commit");     // Contractualisation → engagé
+    expect(defaultCategory({ stage: 4 })).toBe("best_case");  // Négociation → best case
     expect(defaultCategory({ stage: 3 })).toBe("pipeline");
-    expect(defaultCategory({ stage: 5 })).toBe("pipeline");
-    expect(defaultCategory({ stage: 7 })).toBe("omitted"); // perdu
-    expect(defaultCategory({ stage: 8 })).toBe("omitted"); // suspendu — AVANT retombait à tort sur pipeline
-    expect(defaultCategory({ stage: 9 })).toBe("omitted"); // annulé — idem
+    expect(defaultCategory({ stage: 1 })).toBe("pipeline");
+    expect(defaultCategory({ stage: 7 })).toBe("omitted");    // perdu
+    expect(defaultCategory({ stage: 8 })).toBe("omitted");    // suspendu — AVANT retombait à tort sur pipeline
+    expect(defaultCategory({ stage: 9 })).toBe("omitted");    // annulé — idem
   });
   it("catégorie posée prioritaire, sinon défaut ; valeur invalide → défaut", () => {
     expect(effectiveCategory({ stage: 3, forecastCategory: "commit" })).toBe("commit");
