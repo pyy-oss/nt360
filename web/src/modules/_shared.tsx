@@ -1,5 +1,5 @@
 // Helpers et primitives partagés par les modules (extraits de index.tsx pour le découpage).
-import { useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import { useState, lazy, Suspense, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { AlertTriangle, Upload, Filter, X, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
@@ -11,7 +11,11 @@ import { STALE_RECOMPUTE_DAYS } from "../lib/thresholds";
 export { relTime }; // ré-export (importé depuis "./_shared" par admin/overview)
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Badge, EmptyState, Modal, cx, useToast } from "../design/components";
-import { Gauge } from "../design/charts";
+// PERF bundle : `charts` tire recharts (~560 KB). `_shared` est le SEUL fichier de module importé
+// STATIQUEMENT par le shell (App.tsx, pour FilterBar/FreshnessGuard) → un import statique de `Gauge`
+// faisait précharger (modulepreload) recharts sur le chemin critique de TOUS les utilisateurs, écran de
+// connexion inclus. En LAZY, recharts n'est chargé qu'à l'ouverture d'une vue à jauge (overview/backlog).
+const Gauge = lazy(() => import("../design/charts").then((m) => ({ default: m.Gauge })));
 import { Select } from "../design/inputs";
 import { callImportDelta, callReingest, type ImportDeltaResult } from "../lib/writes";
 import type { AlertsSummary, AmsSummary, PmsSummary, EntitySummary, Objective, CommandesSummary, CommandeChunk, Order } from "../types";
@@ -44,7 +48,9 @@ export function atteinteTone(ratio: number): string {
 export function AtterrissageGauge({ proba, hasObjectif, h }: { proba: number; hasObjectif: boolean; h?: number }) {
   return (
     <>
-      <Gauge value={proba || 0} color={atteinteTone(proba || 0)} h={h} />
+      <Suspense fallback={<div style={{ height: h ? `${h}px` : 120 }} aria-hidden="true" />}>
+        <Gauge value={proba || 0} color={atteinteTone(proba || 0)} h={h} />
+      </Suspense>
       {hasObjectif && <div className="text-[11px] text-faint text-center -mt-1">Taux d'atteinte : projeté / objectif (plafonné à 100 %)</div>}
     </>
   );
