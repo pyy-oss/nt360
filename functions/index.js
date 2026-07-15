@@ -2874,6 +2874,18 @@ exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeout
   return { ok: true, config: cfg };
 });
 
+// DRAPEAU du module « Contrats de maintenance » (ADR-009) : maître-interrupteur unique. ÉTEINT (défaut)
+// ⇒ l'ERP est STRICTEMENT celui d'avant (aucune surface mnt_*, aucun agrégat, aucun cron). Édité en
+// Habilitations, DIRECTION uniquement (comme setClickupConfig). Écriture Admin SDK (les rules gardent
+// config/mntFeature en write:false). Audité. Le module s'allume/s'éteint sans redéploiement.
+exports.setMntFeature = onCallG("setMntFeature", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const enabled = req.data?.enabled === true;
+  await db.doc("config/mntFeature").set({ enabled, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_mnt_feature", module: "habilitations", entity: "config", entityId: "mntFeature", detail: { enabled }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, enabled };
+});
+
 // pushOrderToClickup : crée (ou met à jour, idempotent) une tâche ClickUp pour une commande, assignée
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).

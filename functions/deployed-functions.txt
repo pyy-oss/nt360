@@ -120,6 +120,7 @@ setFpAlias
 setFxRates
 setInvoiceFp
 setManager
+setMntFeature
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig

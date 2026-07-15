@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, Badge, Tip, Busy, DangerBtn, Toggle, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, setMntFeature, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
@@ -47,6 +47,7 @@ export const Habilitations: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       {canImport && <DataImportCard />}
       <MfaEnrollCard />
+      {isDirection && <MntFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
       {isDirection && <AutomationCard />}
       {isDirection && <ApiKeysCard />}
@@ -723,6 +724,31 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
 // URL par défaut de la fonction HTTP clickupWebhook (2nd gen, région us-central1). Modifiable si la
 // région/projet diffèrent — l'admin colle l'URL exacte affichée par le déploiement.
 const CLICKUP_WEBHOOK_ENDPOINT = "https://us-central1-propulse-business-87f7a.cloudfunctions.net/clickupWebhook";
+// Maître-interrupteur du module « Contrats de maintenance » (drapeau config/mntFeature, ADR-009).
+// ÉTEINT (défaut) ⇒ ERP strictement d'avant. Réservé direction (le callable re-vérifie côté serveur).
+function MntFeatureCard() {
+  const { data } = useDocData<{ enabled?: boolean }>("config/mntFeature");
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const enabled = data?.enabled === true;
+  const toggle = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try { await setMntFeature(v); toast(v ? "Module Contrats de maintenance ACTIVÉ" : "Module Contrats de maintenance désactivé", "ok"); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Contrats de maintenance — activation">
+      <Tip>Maître-interrupteur du module. <b>Éteint</b>, l'ERP est strictement celui d'avant (aucune donnée, aucun calcul, onglet masqué). <b>Allumé</b>, l'onglet « Contrats de maintenance » apparaît pour les rôles ayant le droit <code>maintenance</code> (la direction l'a déjà). Réversible à tout moment, sans redéploiement.</Tip>
+      <div className="flex items-center gap-3 mt-1">
+        <Toggle checked={enabled} onChange={toggle} disabled={busy} ariaLabel="Activer le module Contrats de maintenance" />
+        <span className={cx("text-[13px]", enabled ? "text-emerald" : "text-muted")}>{enabled ? "Activé" : "Désactivé"}</span>
+      </div>
+    </Card>
+  );
+}
+
 function ClickupCard() {
   const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);

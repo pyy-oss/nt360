@@ -626,6 +626,11 @@ export async function enrichClickup() {
   const res = await httpsCallable(functions, "enrichClickup", { timeout: 540_000 })({});
   return res.data as { ok: boolean; enriched: number; failed?: number; tagged: number; subtasked: number; checklisted: number; total: number };
 }
+/** Allume/éteint le module « Contrats de maintenance » (drapeau config/mntFeature, ADR-009). Direction. */
+export async function setMntFeature(enabled: boolean) {
+  const res = await httpsCallable(functions, "setMntFeature")({ enabled });
+  return res.data as { ok: boolean; enabled: boolean };
+}
 /** Diagnostic qualité de l'intégration ClickUp (couverture, orphelines, écarts CAF…). Admin. */
 export async function clickupHealth(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "clickupHealth", { timeout: 300_000 })({ listId: opts?.listId });
