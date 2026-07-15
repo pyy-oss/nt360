@@ -674,8 +674,14 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
         <Metric label="Commandes non liées" value={health.unlinked || 0} tone={(health.unlinked || 0) > 0 ? "text-gold" : "text-emerald"} sub={`dont ${health.unlinkedMatchable || 0} rattachables`} />
         <Metric label="Synchronisées (statut/dates)" value={health.synced || 0} sub={`sur ${health.linked} liées`} />
         <Metric label="Tâches ClickUp" value={health.tasksTotal || 0} sub={`${health.tasksWithFp || 0} avec N° FP`} />
-        <Metric label="Tâches orphelines" value={health.orphanTasks || 0} tone={(health.orphanTasks || 0) > 0 ? "text-gold" : "text-emerald"} sub="sans commande app" />
+        <Metric label="Tâches orphelines" value={health.orphanTasks || 0} tone={(health.orphanTasks || 0) > 0 ? "text-gold" : "text-emerald"} sub="sans N° FP ou hors commandes actives" />
         <Metric label="Écarts CAF" value={health.cafGapCount || 0} tone={(health.cafGapCount || 0) > 0 ? "text-clay" : "text-emerald"} sub={`${money(health.cafGapTotal)} d'écart`} />
+      </div>
+      {/* Deux sens OPPOSÉS, donc distincts : « non liées » = commandes app sans tâche (à pousser) ;
+          « orphelines » = tâches ClickUp sans commande active correspondante. Un total nul de rattachables
+          avec des orphelines n'est pas incohérent — ce sont deux populations disjointes. */}
+      <div className="text-[11px] text-faint mt-1.5">
+        « Non liées » = commandes de l'app sans tâche ClickUp. « Orphelines » = tâches ClickUp sans commande active (sens inverse) — les deux comptes sont indépendants.
       </div>
       {(health.unlinkedSample?.length || health.orphanSample?.length) ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
