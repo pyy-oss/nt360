@@ -1828,12 +1828,14 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
 exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { rollupForecast } = require("./domain/forecast");
-  const { plausibleYear } = require("./lib/ids");
+  const { plausibleYear, fpKey } = require("./lib/ids");
   const { isAgedLost } = require("./domain/oppLifecycle");
   const [oppSnap, fiscalDoc] = await Promise.all([
     // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
+    // fp + updatedAt : requis pour la dédup (intra/inter-source) et l'exclusion des opps DÉJÀ AU CARNET
+    // (parité stricte avec l'assiette pipeline du reste de la famille — cf. audit cohérence).
     // Scan BORNÉ (MAX_SCAN+1 + sliceCapped, comme scoreOpportunities) — pression mémoire maîtrisée à N grand.
-    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo").limit(MAX_SCAN + 1).get(),
+    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo", "fp", "updatedAt").limit(MAX_SCAN + 1).get(),
     db.doc("config/fiscal").get(),
   ]);
   const { docs: oppDocs, capped } = sliceCapped(oppSnap.docs);
@@ -1854,19 +1856,40 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // est la date de clôture PRÉVUE — souvent nulle ou d'un autre millésime — donc inexploitable pour le
   // millésime (cf. audit). On lit les lignes de commande MATÉRIALISÉES (summaries/commandesRows/*), la même
   // source que le cockpit (useCommandesRows → overviewCalc) → parité EXACTE du gagné avec le carnet.
+  // `bookedFps` = TOUS les FP portés par le carnet (toutes années). Une opp OUVERTE dont le FP est déjà
+  // au carnet serait comptée DEUX FOIS (dans Closed=CAS carnet ET dans le palier ouvert) → on l'exclut,
+  // exactement comme le reste de la famille pipeline (chaine/pipeline/atterrissage excluent les FP bookés).
   const cmdSnap = await db.collection("commandesRows").get();
-  let closedAmount = 0, closedCount = 0;
+  let closedAmount = 0, closedCount = 0; const bookedFps = new Set();
   for (const chunk of cmdSnap.docs) {
     for (const o of (chunk.data() || {}).rows || []) {
+      const k = fpKey(o.fp); if (k) bookedFps.add(k);
       if (periodYear && plausibleYear(o.yearPo) !== periodYear) continue; // filtre millésime carnet
       closedAmount += Number(o.cas) || 0;
       closedCount++;
     }
   }
-  // Les OUVERTES (1-5) alimentent commit/best_case/pipeline ; on les filtre par leur date de clôture
-  // PRÉVUE (closingDate), pertinente pour une opp encore ouverte. Les gagnées (stage 6) sont ignorées par
-  // rollupForecast (le carnet ci-dessus les porte) → aucun double-compte.
-  if (periodYear) opps = opps.filter((o) => Number(o.stage) === 6 || String(o.closingDate || "").slice(0, 4) === String(periodYear));
+  // DÉDUP (parité aggregate.js) : sinon des doublons de FP salesData (ids hérités) ou une opp 'saisie'
+  // ré-importée en LIVE gonflent le pipeline prévisionnel. Intra-source salesData : garder le PLUS RÉCENT
+  // (updatedAt) par FP ; inter-source : une 'saisie' dont le FP est couvert par une 'salesData' est écartée.
+  const _ts = (o) => { const u = o.updatedAt; return u && typeof u.toMillis === "function" ? u.toMillis() : (Number(u) || 0); };
+  const bestSalesByFp = new Map();
+  for (const o of opps) { if (o.source === "salesData") { const k = fpKey(o.fp); if (k && (!bestSalesByFp.has(k) || _ts(o) >= _ts(bestSalesByFp.get(k)))) bestSalesByFp.set(k, o); } }
+  const salesFps = new Set([...bestSalesByFp.keys()]);
+  opps = opps.filter((o) => {
+    if (o.source === "salesData") { const k = fpKey(o.fp); if (k && bestSalesByFp.get(k) !== o) return false; }
+    else if (o.source === "saisie") { const k = fpKey(o.fp); if (k && salesFps.has(k)) return false; }
+    return true;
+  });
+  // Les OUVERTES (1-5) alimentent commit/best_case/pipeline : filtrées par leur date de clôture PRÉVUE
+  // (closingDate) ET privées de celles DÉJÀ AU CARNET (bookedFps). Les gagnées (stage 6) sont ignorées par
+  // rollupForecast (le carnet les porte) → aucun double-compte, assiette alignée sur le pondéré du Cockpit.
+  opps = opps.filter((o) => {
+    if (Number(o.stage) === 6) return false;                 // gagné : porté par le carnet
+    const k = fpKey(o.fp); if (k && bookedFps.has(k)) return false; // déjà au carnet → pas de double-compte
+    if (periodYear && String(o.closingDate || "").slice(0, 4) !== String(periodYear)) return false;
+    return true;
+  });
   const rollup = rollupForecast(opps, closedAmount, closedCount);
   // Quota = objectif CAS annuel (périmètre global) de l'EXERCICE affiché — référence d'atteinte cohérente.
   const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
