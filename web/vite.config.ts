@@ -6,14 +6,20 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "dist",
-    // Découpe les gros vendors en chunks cacheables séparés (recharts/firebase/react)
-    // pour alléger le chunk d'entrée et améliorer le cache entre déploiements.
+    // Découpe les gros vendors en chunks cacheables séparés (react/recharts/firebase) pour alléger le
+    // chunk d'entrée et améliorer le cache entre déploiements. FORME FONCTION (pas tableau de noms) :
+    // le mapping par tableau ne capturait PAS `react/jsx-runtime` ni `scheduler` → ils étaient absorbés
+    // dans le chunk recharts (560 KB), qui devenait alors dépendance STATIQUE de l'entrée (React y vit) →
+    // recharts `modulepreload` sur le chemin critique de TOUS les utilisateurs. En groupant tout l'écosystème
+    // React (jsx-runtime/scheduler inclus) dans le chunk `react`, recharts redevient purement à la demande.
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ["react", "react-dom"],
-          recharts: ["recharts"],
-          firebase: ["firebase/app", "firebase/auth", "firebase/firestore", "firebase/functions", "firebase/app-check"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|use-sync-external-store)[\\/]/.test(id)) return "react";
+          if (/[\\/]node_modules[\\/](recharts|recharts-scale|d3-|victory-vendor|react-smooth|decimal\.js-light|fast-equals|internmap|eventemitter3|tiny-invariant)[\\/]/.test(id)) return "recharts";
+          if (/[\\/]node_modules[\\/]@?firebase[\\/]/.test(id)) return "firebase";
+          return;
         },
       },
     },

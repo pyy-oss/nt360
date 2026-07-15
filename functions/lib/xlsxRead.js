@@ -6,7 +6,11 @@
 // feuille portant une AOA (array-of-arrays) pré-extraite. `sheetToJson(ws, opts)` reste PUR/SYNC et
 // reproduit fidèlement le sous-ensemble de `XLSX.utils.sheet_to_json` réellement utilisé
 // (`header:1`, mode objets, `defval`, `range`). Les parseurs et `buildWrites` restent donc synchrones.
-const ExcelJS = require("exceljs");
+//
+// PERF cold-start : `exceljs` (module lourd, ~100-300 ms de chargement) est requis PARESSEUSEMENT dans les
+// deux seules fonctions qui l'utilisent (readWorkbook / aoaToXlsxBase64, déjà async) — et NON au top-level.
+// Comme ce module est requis par index.js (monolithe), un require top-level le chargeait au démarrage à
+// froid de CHACUNE des ~136 fonctions, dont l'immense majorité ne lit jamais de classeur.
 
 // Normalise une valeur de cellule exceljs vers un primitif « à la xlsx cellDates:true » :
 // string / number / boolean / Date / null. Résout richText, hyperlink, formule (→ résultat).
@@ -54,6 +58,7 @@ function sheetToAoa(ws) {
  * @returns {Promise<{SheetNames:string[], Sheets:Record<string,{_aoa:any[][]}>}>}
  */
 async function readWorkbook(buf) {
+  const ExcelJS = require("exceljs"); // require paresseux (perf cold-start — cf. en-tête du module)
   const wb = new ExcelJS.Workbook();
   // exceljs accepte un Buffer Node ou un ArrayBuffer ; on normalise en Buffer.
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
@@ -142,6 +147,7 @@ function sheetToJson(ws, opts = {}) {
  * @returns {Promise<string>} base64
  */
 async function aoaToXlsxBase64(aoa, sheetName) {
+  const ExcelJS = require("exceljs"); // require paresseux (perf cold-start — cf. en-tête du module)
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName || "Feuille1");
   for (const row of aoa) ws.addRow(row);

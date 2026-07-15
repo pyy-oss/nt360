@@ -1,5 +1,5 @@
 // Modules opérations : P&L Projet, Crédit Fournisseurs, Exécution BC, Clients/Domaines, FP 360°.
-import { useState, useEffect, type FC } from "react";
+import { useState, useEffect, useMemo, type FC } from "react";
 import { where } from "firebase/firestore";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
@@ -35,20 +35,27 @@ export const PnlProjet: FC<Props> = () => {
   const { rows: mrows } = useCollectionData<ProjectSheet>(canMargin ? "projectSheetsMargin" : null);
   const { rows: bc } = useCollectionData<BcLine>("bcLines");
   const { match } = useFilters();
-  const marginBy = new Map(mrows.map((m) => [m.fp, m]));
-  const base = allRows.filter((r) => match(r, ["client"])); // fiches : filtre client uniquement
-  const rows = canMargin ? base.map((r) => ({ ...r, ...(marginBy.get(r.fp) || {}) })) : base;
   const canImport = useCanImport();
   const canEditFiche = useCan("rentabilite") === "write"; // saisie du prix de vente = donnée de marge
   const { intent } = useNav();
-  if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
-  const revient = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
-  const vente = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
-  const marge = rows.reduce((s, r) => s + (r.margin || 0), 0);
-  const pmb = vente > 0 ? marge / vente : 0;
+  // Dérivations plein-tableau (projectSheets + bcLines temps réel) MÉMOÏSÉES — avant tout retour anticipé
+  // (hooks inconditionnels) : sinon Map + filter + 3 reduces + index BC rejoués à chaque render (expand/collapse).
+  const marginBy = useMemo(() => new Map(mrows.map((m) => [m.fp, m])), [mrows]);
+  const base = useMemo(() => allRows.filter((r) => match(r, ["client"])), [allRows, match]); // fiches : filtre client uniquement
+  const rows = useMemo(() => canMargin ? base.map((r) => ({ ...r, ...(marginBy.get(r.fp) || {}) })) : base, [base, canMargin, marginBy]);
+  const { revient, vente, marge, pmb } = useMemo(() => {
+    const rv = rows.reduce((s, r) => s + (r.costTotal || 0), 0);
+    const vt = rows.reduce((s, r) => s + (r.saleTotal || 0), 0);
+    const mg = rows.reduce((s, r) => s + (r.margin || 0), 0);
+    return { revient: rv, vente: vt, marge: mg, pmb: vt > 0 ? mg / vt : 0 };
+  }, [rows]);
   // Lignes BC indexées par N° FP → détail des coûts (type / fournisseur) masquable sous chaque affaire.
-  const bcByFp = new Map<string, BcLine[]>();
-  for (const b of bc) { const k = b.fp || ""; if (!k) continue; (bcByFp.get(k) || bcByFp.set(k, []).get(k)!).push(b); }
+  const bcByFp = useMemo(() => {
+    const m = new Map<string, BcLine[]>();
+    for (const b of bc) { const k = b.fp || ""; if (!k) continue; (m.get(k) || m.set(k, []).get(k)!).push(b); }
+    return m;
+  }, [bc]);
+  if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   // Panneau déplié : actions (mise à jour / suppression, si droit) puis ventilation des coûts de
   // l'affaire par type de dépense et par fournisseur (lignes BC de même N° FP).
   const affaireDetail = (r: ProjectSheet) => {
@@ -287,6 +294,9 @@ function BcImport() {
 
 // 10 — Exécution BC
 const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
+// BC en retard : ETA (réelle sinon contractuelle) dépassée ET non livré. Pur (today injecté) → réutilisé
+// par le comptage plein-tableau (mémo) ET la colonne « Retard » par ligne, sans recréer de Date.
+const isBcLate = (r: BcLine, today: string) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
 export const BC: FC<Props> = () => {
   const { rows: allRows } = useCollectionData<BcLine>("bcLines");
   // Exécution BC = BC RÉELLEMENT ÉMIS via l'IMPORT BC (Logistics / PDF). Les lignes issues des
@@ -296,7 +306,7 @@ export const BC: FC<Props> = () => {
   // Exécution BC = TOUTES les lignes issues de l'import BC (source ≠ "fiche"), y compris celles dont
   // le N° BC n'est pas encore renseigné — elles restent visibles et fiabilisables, jamais masquées
   // en silence (sinon un BC unitaire/logistics sans N° disparaîtrait sans aucun indicateur).
-  const rows = allRows.filter((r) => r.source !== "fiche");
+  const rows = useMemo(() => allRows.filter((r) => r.source !== "fiche"), [allRows]);
   const planned = allRows.length - rows.length; // = lignes de fiche affaire (achats planifiés)
   const canWrite = useCan("bc") === "write";
   // Intégration ClickUp BC : bouton par ligne (push/synchro du bon de commande) si l'intégration est
@@ -308,13 +318,16 @@ export const BC: FC<Props> = () => {
   const [flt, setFlt] = useState<"all" | "open" | "late">(intent?.segment === "late" ? "late" : intent?.segment === "open" ? "open" : "all");
   // Drill-through depuis le Centre d'alertes (« BC en retard / en attente ») → segment pré-sélectionné.
   useEffect(() => { if (intent?.segment === "late" || intent?.segment === "open") setFlt(intent.segment as "late" | "open"); }, [intent]);
-  const today = new Date().toISOString().slice(0, 10);
-  const isLate = (r: BcLine) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
-  const byStatus: Record<string, number> = {};
-  for (const r of rows) byStatus[r.status || "a_emettre"] = (byStatus[r.status || "a_emettre"] || 0) + 1;
-  const solde = byStatus["solde"] || 0;
-  const lateCount = rows.filter(isLate).length;
-  const filtered = flt === "late" ? rows.filter(isLate) : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []); // stable sur la session (pas de bascule minuit mi-session)
+  const isLate = (r: BcLine) => isBcLate(r, today); // colonne « Retard » par ligne (table paginée)
+  // byStatus + lateCount + filtered en UNE seule passe MÉMOÏSÉE (le retard n'est plus parcouru deux fois).
+  const { byStatus, solde, lateCount, filtered } = useMemo(() => {
+    const bs: Record<string, number> = {};
+    const lateRows: BcLine[] = [];
+    for (const r of rows) { const st = r.status || "a_emettre"; bs[st] = (bs[st] || 0) + 1; if (isBcLate(r, today)) lateRows.push(r); }
+    const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
+    return { byStatus: bs, solde: bs["solde"] || 0, lateCount: lateRows.length, filtered: filt };
+  }, [rows, flt, today]);
   return (
     <div className="flex flex-col gap-4">
       {canWrite && <BcImport />}

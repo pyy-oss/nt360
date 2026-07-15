@@ -1,5 +1,5 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
-import { useState, useEffect, type FC, type ReactNode, type ChangeEvent } from "react";
+import { useState, useEffect, useMemo, useCallback, type FC, type ReactNode, type ChangeEvent } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
@@ -373,6 +373,11 @@ function OppBulkExcel() {
   );
 }
 
+// Bucket de statut d'une opp par étape (1..5 actives, 6 gagnée, 7 perdue, 8 suspendue, 9 annulée).
+// Hissé au scope module : pur, réutilisé par les mémos de OppList (comptages + liste affichée).
+const segOf = (s: number): "active" | "won" | "lost" | "susp" | "cxl" =>
+  s >= 1 && s <= 5 ? "active" : s === 6 ? "won" : s === 7 ? "lost" : s === 8 ? "susp" : s === 9 ? "cxl" : "active";
+
 export const OppList: FC<Props> = () => {
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
   // On DIFFÈRE l'abonnement tant que l'OWD n'est pas résolu (ready) — sinon requête sans `visibleTo`
@@ -391,7 +396,12 @@ export const OppList: FC<Props> = () => {
   // « Mon pipeline » : match souple sur l'AM (insensible à la casse/espaces). Filtre transverse appliqué ensuite.
   // Les opps FANTÔMES (stale : retirées de LIVE, cf. audit intégral I2) sont exclues de la vue pipeline
   // pour rester cohérent avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
-  const rows = allRows.filter((r) => !r.stale && !isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm)));
+  // MÉMOÏSÉ : filtrage plein-tableau (collection opportunities entière). Sans mémo, chaque frappe dans la
+  // MODALE d'édition (état `f` co-localisé) re-filtrait tout le pipeline → lag de saisie à N grand.
+  const rows = useMemo(
+    () => allRows.filter((r) => !r.stale && !isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm))),
+    [allRows, match, clientKey, mine, meAm],
+  );
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
   const { rows: cmd } = useCommandesRows();
@@ -418,25 +428,26 @@ export const OppList: FC<Props> = () => {
   const openNew = () => { setF({ ...EMPTY_OPP, am: meAm }); setOpen(true); };
   // Changer d'étape pré-remplit la proba par défaut de l'étape si elle est vide (évite un pondéré à 0).
   const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
-  if (loading && !allRows.length) return <CardSkeleton />;
-  const top = [...rows].sort((a, b) => pw(b) - pw(a)).slice(0, 10);
+  // Toutes ces dérivations plein-tableau sont MÉMOÏSÉES (avant tout retour anticipé → hooks inconditionnels,
+  // React #310) : sinon chaque frappe dans la modale d'édition les rejouait sur toute la collection.
+  const top = useMemo(() => [...rows].sort((a, b) => pw(b) - pw(a)).slice(0, 10), [rows, pw]);
   // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
   // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
-  const bookedFps = new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]);
-  const isBooked = (o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp))));
+  const bookedFps = useMemo(() => new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]), [cmd]);
+  const isBooked = useCallback((o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp)))), [bookedFps]);
   // Certitudes = opportunités ACTIVES (1..5) quasi-certaines (IdC ≥ 90 %) PAS encore au carnet : une opp
   // déjà adossée au P&L est réalisée (dans le CAS) → l'inclure double-compterait le pondéré (parité
   // chaine/atterrissage/Cockpit `Commit`, invariant « même métrique = même nombre »).
-  const certitudes = rows
+  const certitudes = useMemo(() => rows
     .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && (o.probability || 0) >= 0.9 && !isBooked(o))
-    .sort((a, b) => pw(b) - pw(a));
-  const certTotal = certitudes.reduce((s, o) => s + pw(o), 0);
+    .sort((a, b) => pw(b) - pw(a)), [rows, isBooked, pw]);
+  const certTotal = useMemo(() => certitudes.reduce((s, o) => s + pw(o), 0), [certitudes, pw]);
   const today = new Date().toISOString().slice(0, 10);
   // Prochaines actions commerciales échéancées (opps ACTIVES avec date d'action), triées par échéance.
-  const actions = rows.filter((o) => o.nextStepDate && (o.stage || 0) >= 1 && (o.stage || 0) <= 5)
-    .sort((a, b) => (a.nextStepDate || "").localeCompare(b.nextStepDate || ""));
+  const actions = useMemo(() => rows.filter((o) => o.nextStepDate && (o.stage || 0) >= 1 && (o.stage || 0) <= 5)
+    .sort((a, b) => (a.nextStepDate || "").localeCompare(b.nextStepDate || "")), [rows]);
   // Motifs de perte (opps PERDUES, étape 7) regroupés — analytique win/loss.
-  const lostByReason = (() => {
+  const lostByReason = useMemo(() => {
     const m = new Map<string, { count: number; amount: number }>();
     rows.filter((o) => o.stage === 7).forEach((o) => {
       const k = (o.lostReason || "").trim() || "(non renseigné)";
@@ -444,15 +455,19 @@ export const OppList: FC<Props> = () => {
       e.count++; e.amount += (o.amount || 0); m.set(k, e);
     });
     return [...m.entries()].map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
-  })();
+  }, [rows]);
+  // Comptages par statut en UNE seule passe (au lieu de 5 `rows.filter` complets rejoués à chaque render).
+  const segCounts = useMemo(() => {
+    const c = { active: 0, won: 0, lost: 0, susp: 0, cxl: 0 };
+    for (const o of rows) c[segOf(o.stage || 0)]++;
+    return c;
+  }, [rows]);
+  const shownOpps = useMemo(() => seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg), [rows, seg]);
   const pnlFlag = (o: Opportunity): ReactNode =>
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
       : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
         : <span className="text-faint">—</span>;
-  // Buckets de statut par étape (1..5 actives, 6 gagnée, 7 perdue, 8 suspendue, 9 annulée).
-  const segOf = (s: number) => (s >= 1 && s <= 5 ? "active" : s === 6 ? "won" : s === 7 ? "lost" : s === 8 ? "susp" : s === 9 ? "cxl" : "active");
-  const segCount = (k: string) => rows.filter((o) => segOf(o.stage || 0) === k).length;
-  const shownOpps = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
+  if (loading && !allRows.length) return <CardSkeleton />;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -605,11 +620,11 @@ export const OppList: FC<Props> = () => {
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <Segmented value={seg} onChange={setSeg} ariaLabel="Filtrer par statut d'opportunité" options={[
             { value: "all", label: "Toutes", count: rows.length },
-            { value: "active", label: "Actives", count: segCount("active") },
-            { value: "won", label: "Gagnées", count: segCount("won") },
-            { value: "lost", label: "Perdues", count: segCount("lost") },
-            { value: "susp", label: "Suspendues", count: segCount("susp") },
-            { value: "cxl", label: "Annulées", count: segCount("cxl") },
+            { value: "active", label: "Actives", count: segCounts.active },
+            { value: "won", label: "Gagnées", count: segCounts.won },
+            { value: "lost", label: "Perdues", count: segCounts.lost },
+            { value: "susp", label: "Suspendues", count: segCounts.susp },
+            { value: "cxl", label: "Annulées", count: segCounts.cxl },
           ]} />
           {canImport && <ImportButton label="Importer (LIVE / Sales)" />}
         </div>}>
