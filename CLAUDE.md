@@ -100,3 +100,139 @@ stop-hook.
 Écrire du code qui se fond dans l'existant : mêmes idiomes, densité de commentaires (commentaires en
 français, orientés « pourquoi »), primitives design réutilisées. Préférer une règle métier PURE dans
 `domain/` + test vitest à du code inline non testé.
+
+
+---
+
+# Module Contrats de Maintenance — règles de travail
+
+Cette section encadre tout travail sur le module de gestion des contrats de maintenance.
+Elle s'applique à chaque session, sans rappel.
+
+## Le contexte en une phrase
+
+On ajoute un module de pilotage des contrats de maintenance **à l'intérieur d'un ERP maison
+existant, en production, que d'autres personnes utilisent tous les jours**. La réussite ne se
+mesure pas à la qualité du module. Elle se mesure à deux choses : **rien d'autre n'a bougé**, et
+**le module est indiscernable du reste de l'ERP**.
+
+## Les documents de référence
+
+| Fichier | Rôle | Modifiable ? |
+|---|---|---|
+| `docs/contrats/00-SPEC-MODULE.md` | Le besoin. Ce qu'on doit produire. | ❌ Jamais |
+| `docs/contrats/01-EXISTANT.md` | **Où** sont les choses dans l'ERP. | Phase 0 |
+| `docs/contrats/02-REGLES.md` | **Comment** les choses s'écrivent. Base, ingénierie, tokens, UI/UX, métier. | Phase 1 |
+| `docs/contrats/03-ACCELERATEURS.md` | Ce qu'on réutilise plutôt que de le recréer. | Phase 2 |
+| `docs/contrats/04-PLAN-INTEGRATION.md` | Où et comment le module s'ancre. | Phase 3 |
+| `docs/contrats/05-DECISIONS.md` | Registre des décisions (ADR). | Append-only |
+| `docs/contrats/06-JOURNAL.md` | Fait, appris, échoué. | Append-only |
+
+**Au début de chaque session : lis `01-EXISTANT.md`, `02-REGLES.md`, `03-ACCELERATEURS.md`,
+`04-PLAN-INTEGRATION.md` et `06-JOURNAL.md` avant toute autre action.** S'ils sont vides ou
+marqués `[À REMPLIR]`, la phase correspondante n'est pas faite : n'avance pas, dis-le.
+
+## La séquence — non négociable
+
+```
+Phase 0  Empreinte     → où sont les choses          → aucun code applicatif
+Phase 1  Règles        → comment elles s'écrivent    → aucun code applicatif
+Phase 2  Accélérateurs → ce qu'on ne recrée pas      → aucun code applicatif
+Phase 3  Plan          → où le module s'ancre        → aucun code applicatif
+Phase 4  Filet         → tests de caractérisation    → tests seulement
+Phase 5+ Lots          → le module, un lot à la fois → code
+```
+
+Chaque phase se termine par une **validation humaine explicite**. Tu ne passes pas à la suivante
+de ta propre initiative. Tu produis le livrable, tu résumes, tu signales tes incertitudes, tu
+t'arrêtes.
+
+## La règle qui prime sur toutes les autres
+
+> **La règle de l'ERP gagne. Toujours.**
+>
+> Même laide. Même datée. Même contraire à l'état de l'art. Même contraire à la spécification du
+> module. Si l'ERP stocke les montants en flottant, le module aussi. S'il nomme ses tables
+> `T_CLI_01`, le module aussi. S'il écrit « Sauvegarder » et pas « Enregistrer », le module aussi.
+>
+> Tu n'es pas là pour élever le niveau. Tu es là pour être **indiscernable**. Un îlot de code
+> exemplaire au milieu d'un ERP qui ne l'est pas ne relève rien : il crée deux façons de faire,
+> donc deux façons de se tromper.
+>
+> Toute exception à cette règle passe par un ADR validé par un humain. Aucune exception.
+
+## Interdits absolus
+
+- ❌ **Ne recrée pas ce qui existe.** Avant de créer une table, un service, un composant, un
+  utilitaire : cherche. Si tu ne trouves pas, cherche encore avec un autre vocabulaire (l'ERP
+  est en français, ou en anglais, ou en abrégé maison). Si tu ne trouves toujours pas, demande
+  confirmation avant de créer.
+- ❌ **N'invente aucune convention.** Nommage, types, formats, couleurs, libellés : tout est dans
+  `02-REGLES.md`. Si une règle y manque, c'est un ADR, pas une décision silencieuse.
+- ❌ **Aucune valeur en dur** — couleur, taille, espacement, police, format de date — si l'ERP a
+  une source de tokens.
+- ❌ **Ne modifie ni ne supprime jamais une colonne ou une table existante.** Additif uniquement.
+- ❌ **Ne touche à aucun fichier hors du périmètre du lot** sans demander.
+- ❌ **N'ajoute aucune dépendance** sans ADR validé.
+- ❌ **Ne devine pas la pile technique.** Lis-la.
+- ❌ **Ne réécris pas du code existant « au passage »** parce qu'il te semble améliorable. Note-le
+  dans le journal.
+- ❌ **N'invente aucune donnée.** Une hypothèse non signalée est un bug différé.
+
+## Obligations
+
+- ✅ **Additif uniquement** : schéma en *expand / migrate / contract*.
+- ✅ **Espace de noms dédié** : préfixe `mnt_` (ou celui défini en `02-REGLES.md` si l'ERP en
+  impose un autre), pour que la frontière du module soit visible à l'œil nu.
+- ✅ **Drapeau de fonctionnalité** : le module s'éteint sans redéploiement, et à drapeau éteint
+  l'ERP est **strictement** celui d'avant.
+- ✅ **Test de caractérisation avant modification.**
+- ✅ **Un lot = une branche = une revue.**
+- ✅ **Chaque décision structurante = un ADR.**
+- ✅ **Fin de session = entrée de journal**, échecs compris.
+
+## Les dix règles intouchables
+
+> **[À REMPLIR EN FIN DE PHASE 1]** — recopiées depuis `02-REGLES.md` §H.
+> Ce sont les règles dont la violation serait immédiatement visible par un utilisateur ou un
+> développeur de l'ERP. Chacune porte son moyen de vérification mécanique, et chacune est
+> contrôlée à chaque `/verif`.
+
+| # | Règle | Vérification |
+|---|---|---|
+| 1 | | |
+| 2 | | |
+| 3 | | |
+| 4 | | |
+| 5 | | |
+| 6 | | |
+| 7 | | |
+| 8 | | |
+| 9 | | |
+| 10 | | |
+
+## Les pièges connus
+
+| Piège | Règle |
+|---|---|
+| **Arrondi FCFA** | Le franc CFA n'a pas de subdivision. Fais comme l'ERP, pas comme la norme. |
+| **Type des montants** | Si l'ERP est en flottant, le module aussi. ADR pour signaler le risque, pas pour le corriger. |
+| **Format de date** | Un module qui affiche `AAAA-MM-JJ` dans un ERP en `JJ/MM/AAAA` saute aux yeux. |
+| **Couleurs de statut** | L'ERP a déjà un rouge et un vert qui veulent dire quelque chose. Les 4 couleurs de risque du module doivent-elles s'y aligner ? → ADR. |
+| **Fuseau** | Abidjan est à UTC+0. Le SLA se calcule à la minute. Vérifie ce que l'ERP stocke. |
+| **Langue des identifiants** | Suis l'ERP, pas la spécification du module. |
+| **Jours fériés** | Ils sont dans la paie, pas dans un module « calendrier ». |
+| **Coûts horaires chargés** | Ils existent déjà. Les recréer, c'est créer une deuxième vérité. |
+
+## Le vocabulaire du module
+
+`contrat` · `version_contrat` · `engagement_sla` · `couverture_b2b` · `quota` ·
+`echeance_facturation` · `ligne_cout` · `ticket` · `intervention` · `evenement_sla` ·
+`score_risque` · `signal` · `decision`
+
+**Sauf si l'ERP est en anglais** — auquel cas tu suis l'ERP. La règle est la cohérence, pas la langue.
+
+## Quand tu es bloqué
+
+Dis-le. Explicitement. Avec ce que tu as cherché et ce que tu n'as pas trouvé.
+Une question posée coûte deux minutes. Une hypothèse silencieuse coûte un lot.
