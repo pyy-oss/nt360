@@ -31,6 +31,26 @@
 
 ---
 
+## 2026-07-15 — Audit de vérification de la remédiation (#381/#382) — 3 axes
+
+**Fait** — audit adverse du diff de remédiation (`015702d..f0a5be1`), focalisé sur le code PARTAGÉ
+(`domain/timesheet.js`, `handlers/timesheets.js`) dont dépendent Activité/Rentabilité. Verdict :
+- **Non-régression : VERT.** `computeConstat` (mois distincts) = no-op strict sur toute donnée que le code
+  peut produire (tous les writers `timesheets` en id déterministe `consultant_mois` merge → nb docs = nb mois
+  distincts pour le legacy). Forme de sortie inchangée (le `Set _months` ne fuit pas). Drapeau OFF = ERP
+  d'avant, `mntEnabled()` fail-safe = false. `computeTaceTrend` sans biais résiduel.
+- **Bugs : aucun confirmé.** Le fallback `prise_en_compte→resoluMs` prouvé MONOTONE (ne peut que faire
+  rompu→respecté, jamais l'inverse). 2 edges LOW non productibles (données dégénérées). Tests non-tautologiques.
+- **Conformité/parité : CONFORME.** Miroirs `mntSla.js`↔`mntSla.ts` exacts ; runbook & ADR-017/018 fidèles.
+
+**Appris / durci** — seule condition où mois-distincts changerait un chiffre legacy : **doublon historique**
+`(consultant, mois)` non-mnt (pollution manuelle, impossible via les callables). Ajout d'un **contrôle
+pré-vol R0** au runbook de recette (grouper `timesheets` hors `mnt`, refuser `count>1`).
+
+**Suivant** — néant : remédiation propre, module clos. Reste optionnel (toggle in-app du drapeau).
+
+---
+
 ## 2026-07-15 — Runbook de recette & activation (07-RECETTE-ACTIVATION.md)
 
 **Fait** — `docs/contrats/07-RECETTE-ACTIVATION.md` : procédure de recette (12 étapes R1–R12 à critère
