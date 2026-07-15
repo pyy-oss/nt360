@@ -31,6 +31,20 @@
 
 ---
 
+## 2026-07-15 — Runbook de recette & activation (07-RECETTE-ACTIVATION.md)
+
+**Fait** — `docs/contrats/07-RECETTE-ACTIVATION.md` : procédure de recette (12 étapes R1–R12 à critère
+mécanique), d'activation (déploiement → RBAC `maintenance` → drapeau `config/mntFeature`) et de rollback
+(éteindre le drapeau = ERP d'avant, données conservées). Limites v1 tracées (ADR-006/015/017/018).
+
+**Appris sur l'existant** — aucun setter/UI pour `config/mntFeature` : l'activation se fait par écriture
+Firestore directe (console/Admin SDK). ADR-009 évoquait « édité en Habilitations » → toggle in-app = évolution
+optionnelle (signalée dans le runbook §3.3 et §5), non requise pour activer.
+
+**Suivant** — module prêt pour la recette ; à la main de la direction pour l'allumage.
+
+---
+
 ## 2026-07-15 — Suite d'audit : interaction maintenance↔CRA (décisions direction 1A + 2A)
 
 **Fait** — clôture des deux constats de politique produit laissés en attente (B1/M1), après arbitrage
