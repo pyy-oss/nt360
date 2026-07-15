@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Grep(**)",
+      "Glob(**)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git branch:*)",
+      "Bash(git blame:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(tree:*)",
+      "Bash(./scripts/empreinte.sh:*)",
+      "Write(docs/contrats/**)",
+      "Edit(docs/contrats/**)"
+    ],
+    "ask": [
+      "Write(**)",
+      "Edit(**)",
+      "Bash(npm:*)",
+      "Bash(yarn:*)",
+      "Bash(pip:*)",
+      "Bash(composer:*)",
+      "Bash(mvn:*)",
+      "Bash(dotnet:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(rm -rf:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ]
+  },
+  "env": {
+    "MODULE": "contrats-maintenance",
+    "PREFIXE": "mnt_"
+  }
+}
