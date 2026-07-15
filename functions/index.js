@@ -1846,14 +1846,28 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   const currentFy = (fiscalDoc.data() || {}).currentFy || new Date().getUTCFullYear();
-  // EXERCICE SÉLECTIONNÉ : filtre la prévision par ANNÉE DE CLÔTURE (closingDate), en miroir de l'assiette
-  // d'opps du cockpit (overviewCalc : inPeriod(yr(closingDate))). Sans ce filtre, la carte affichait le
-  // CUMUL toutes années alors qu'un exercice précis est choisi → incohérent avec le sélecteur de période.
-  // `period` = année ("2026") ou "all"/absent (cumul, référence quota = exercice courant).
+  // EXERCICE SÉLECTIONNÉ. `period` = année ("2026") ou "all"/absent (cumul, référence quota = exercice courant).
   const periodYear = plausibleYear(String(req.data?.period || ""));
   const targetFy = periodYear || currentFy;
-  if (periodYear) opps = opps.filter((o) => String(o.closingDate || "").slice(0, 4) === String(periodYear));
-  const rollup = rollupForecast(opps);
+  // GAGNÉ (« Closed ») = CARNET de l'exercice, PAS les opps gagnées filtrées par closingDate. L'année de
+  // gain fiable est celle de la COMMANDE (`yearPo`, dérivée du P&L/N° FP) ; sur une opp gagnée, `closingDate`
+  // est la date de clôture PRÉVUE — souvent nulle ou d'un autre millésime — donc inexploitable pour le
+  // millésime (cf. audit). On lit les lignes de commande MATÉRIALISÉES (summaries/commandesRows/*), la même
+  // source que le cockpit (useCommandesRows → overviewCalc) → parité EXACTE du gagné avec le carnet.
+  const cmdSnap = await db.collection("commandesRows").get();
+  let closedAmount = 0, closedCount = 0;
+  for (const chunk of cmdSnap.docs) {
+    for (const o of (chunk.data() || {}).rows || []) {
+      if (periodYear && plausibleYear(o.yearPo) !== periodYear) continue; // filtre millésime carnet
+      closedAmount += Number(o.cas) || 0;
+      closedCount++;
+    }
+  }
+  // Les OUVERTES (1-5) alimentent commit/best_case/pipeline ; on les filtre par leur date de clôture
+  // PRÉVUE (closingDate), pertinente pour une opp encore ouverte. Les gagnées (stage 6) sont ignorées par
+  // rollupForecast (le carnet ci-dessus les porte) → aucun double-compte.
+  if (periodYear) opps = opps.filter((o) => Number(o.stage) === 6 || String(o.closingDate || "").slice(0, 4) === String(periodYear));
+  const rollup = rollupForecast(opps, closedAmount, closedCount);
   // Quota = objectif CAS annuel (périmètre global) de l'EXERCICE affiché — référence d'atteinte cohérente.
   const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
   const quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
