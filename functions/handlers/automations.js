@@ -5,6 +5,7 @@
 // à injection : aucun global d'index.js référencé. `runAutomationsCore` est RETOURNÉE en plus des deux
 // callables car le planifié quotidien (index.js) l'appelle directement. Exports déclarés dans index.js
 // (garde-fou de déploiement par nom). Comportement identique à l'inline d'origine.
+const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const AUTOMATION_RULE_TYPES = ["opp_no_nextstep", "opp_stale"];
 
 function createAutomations({ onCallG, HttpsError, db, FieldValue, loadUsersMap, nowISO10 }) {
@@ -27,12 +28,13 @@ function createAutomations({ onCallG, HttpsError, db, FieldValue, loadUsersMap, 
     const rules = Array.isArray(cfg.rules) ? cfg.rules.filter((r) => r.enabled) : [];
     if (!rules.length) return { created: 0, evaluated: 0 };
     const [oppSnap, existingSnap, usersMap] = await Promise.all([
-      db.collection("opportunities").select("client", "stage", "nextStep", "stale", "ownerUid").get(),
-      db.collection("activities").where("auto", "==", true).select("autoKey").get(),
+      // Scans BORNÉS (MAX_SCAN+1 + sliceCapped) — `activities` (tâches auto quotidiennes) croît sans limite.
+      db.collection("opportunities").select("client", "stage", "nextStep", "stale", "ownerUid").limit(MAX_SCAN + 1).get(),
+      db.collection("activities").where("auto", "==", true).select("autoKey").limit(MAX_SCAN + 1).get(),
       loadUsersMap(),
     ]);
-    const opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const existing = new Set(existingSnap.docs.map((d) => d.data().autoKey).filter(Boolean));
+    const opps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const existing = new Set(sliceCapped(existingSnap.docs).docs.map((d) => d.data().autoKey).filter(Boolean));
     const tasks = evaluateAutomations(rules, opps, existing);
     if (!tasks.length) return { created: 0, evaluated: opps.length };
     const { ownerChain } = require("../domain/hierarchy");

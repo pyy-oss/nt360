@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 const { applyWrites, stripLiveOpps, resolveLogisticsFx } = require("../lib/apply");
 
 // Faux Firestore minimal : un store `bcLines/{id} → data`, avec upsert (merge), delete et
-// requête `collection("bcLines").where("fp","==",v)`. Suffit à exercer le balayage anti-orphelins.
+// requête `collection("bcLines").where("fp", op, v)` (op "==" OU "in" — le balayage anti-orphelins
+// interroge désormais par TRANCHES de FP via `in`). Suffit à exercer le balayage.
 function fakeDb(seed = {}) {
   const store = new Map(Object.entries(seed)); // path -> data
   const mk = () => {
@@ -24,12 +25,13 @@ function fakeDb(seed = {}) {
     batch: mk,
     doc: (path) => ({ path }),
     collection: (col) => ({
-      where: (field, _op, value) => ({
+      where: (field, op, value) => ({
         async get() {
           const docs = [];
           for (const [path, data] of store) {
             if (!path.startsWith(col + "/")) continue;
-            if (data[field] !== value) continue;
+            if (op === "in") { if (!value.includes(data[field])) continue; }
+            else if (data[field] !== value) continue;
             docs.push({ id: path.slice(col.length + 1), ref: { path }, get: (f) => data[f] });
           }
           return { docs };
