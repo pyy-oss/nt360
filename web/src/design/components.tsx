@@ -238,14 +238,22 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
   const [page, setPage] = useState(0);
   const { primary, detail } = splitCols(cols);
   const hasDetail = detail.length > 0;
+  // Tri mémoïsé sur des signaux STABLES : lignes, état de tri, visibilité des colonnes (`hidden`, dont
+  // l'identité ne change qu'à une bascule utilisateur). On NE dépend PAS de `primary`/`cols` : les
+  // appelants construisent leurs colonnes en INLINE (identité neuve à CHAQUE rendu), ce qui re-triait la
+  // liste entière à chaque rendu non lié (tick onSnapshot, frappe ailleurs) — le memo ne cachait jamais.
+  // `primary` est relu au calcul (contenu identique tant que `hidden`/le contenu des colonnes ne bouge pas).
   const sorted = useMemo(() => {
-    if (!sort || !primary[sort.i]?.sort) return rows.map((r, i) => ({ r, i }));
-    const key = primary[sort.i].sort!;
-    return rows.map((r, i) => ({ r, i })).sort((a, b) => {
+    const base = rows.map((r, i) => ({ r, i }));
+    const key = sort ? primary[sort.i]?.sort : null;
+    if (!key || !sort) return base;
+    const dir = sort.dir;
+    return base.sort((a, b) => {
       const va = key(a.r), vb = key(b.r);
-      return va < vb ? -1 * sort.dir : va > vb ? 1 * sort.dir : 0;
+      return va < vb ? -1 * dir : va > vb ? 1 * dir : 0;
     });
-  }, [rows, sort, primary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, sort, hidden]);
   // Pagination des longues listes : au-delà de `pageSize` lignes on ne rend qu'une fenêtre + un pager.
   // Les listes courtes (< pageSize) restent inchangées (aucun pager). `pageSize={0}` désactive.
   const total = sorted.length;
@@ -413,8 +421,12 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
       r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
     }
     return r;
+    // Déps STABLES (rows/q/sort/hidden) — PAS `cols` : les colonnes sont construites en inline côté
+    // appelant (identité neuve à chaque rendu) → sans ça le filtre+tri re-tournait à chaque rendu non
+    // lié. `hidden` (bascule colonnes) capture le seul changement de colonnes qui doit re-trier ; `primary`
+    // est relu au calcul.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, sort, cols]);
+  }, [rows, q, sort, hidden]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const cur = Math.min(page, pages - 1);

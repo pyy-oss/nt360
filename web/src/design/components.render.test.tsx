@@ -38,6 +38,40 @@ describe("Table — rendu & personnalisation des colonnes", () => {
     // Le choix est persisté sous la clé attendue.
     expect(localStorage.getItem("nt360-cols-t-test")).toContain("Client");
   });
+
+  // Le tri est mémoïsé sur des signaux STABLES (rows/sort/hidden) et NON sur l'identité des colonnes
+  // (construites en inline côté appelant → neuves à chaque rendu). Ces tests figent le comportement :
+  // le tri fonctionne toujours, et masquer une colonne (bascule `hidden`) ré-évalue bien le rendu.
+  it("tri : cliquer un entête triable ordonne les lignes puis inverse le sens", () => {
+    const desc = [
+      { fp: "FP/2026/1", client: "ZED", cas: 100 },
+      { fp: "FP/2026/2", client: "ALP", cas: 900 },
+    ];
+    render(<Table columns={cols} rows={desc} />);
+    // Ordre du DOM au repos = ordre des lignes fournies (ZED avant ALP).
+    let cells = screen.getAllByText(/ZED|ALP/).map((n) => n.textContent);
+    expect(cells).toEqual(["ZED", "ALP"]);
+    // Tri ascendant sur « Client » → ALP remonte.
+    fireEvent.click(screen.getByRole("button", { name: "Client" }));
+    cells = screen.getAllByText(/ZED|ALP/).map((n) => n.textContent);
+    expect(cells).toEqual(["ALP", "ZED"]);
+    // Deuxième clic → sens inverse.
+    fireEvent.click(screen.getByRole("button", { name: "Client" }));
+    cells = screen.getAllByText(/ZED|ALP/).map((n) => n.textContent);
+    expect(cells).toEqual(["ZED", "ALP"]);
+  });
+
+  it("tri actif puis masquage d'une colonne : le rendu reste cohérent (hidden re-déclenche le memo)", () => {
+    render(<Table columns={cols} rows={rows} colsKey="sort-hide" />);
+    fireEvent.click(screen.getByRole("button", { name: "CAS" })); // tri ascendant sur CAS
+    // Masquer « Client » : la bascule `hidden` doit ré-évaluer le tri sans casser l'affichage.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Colonne Client" }));
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+    // Les lignes restent rendues, dans l'ordre CAS croissant (FP/2026/1=1000 avant FP/2026/2=2000).
+    // On lit la colonne FP, toujours visible (« Client » est masquée).
+    const cells = screen.getAllByText(/FP\/2026\/[12]/).map((n) => n.textContent);
+    expect(cells).toEqual(["FP/2026/1", "FP/2026/2"]);
+  });
 });
 
 describe("ListView — recherche, détail extensible, colonnes", () => {
