@@ -5,7 +5,7 @@
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
 import { projectionWeight, normalizeTiers, type Tier } from "../lib/projection";
-import { fpKey, isAgedLost, buildFpAliasResolver } from "../lib/ids";
+import { fpKey, isAgedLost, buildFpAliasResolver, plausibleYear } from "../lib/ids";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -54,7 +54,9 @@ export function computeFilteredOverview(
   opps = oppsActive.filter((o) => { if (o.source !== "saisie") return true; const k = fpKey(o.fp); return !(k && salesFps.has(k)); });
   // Commandes du périmètre = cohorte par année de PO ; backlog GLISSANT = toutes les commandes
   // ouvertes du périmètre (indépendant de la période).
-  const ordP = cmdRows.filter((o) => inPeriod(String(o.yearPo || "")) && m(o, DIMS));
+  // Millésime borné par `plausibleYear` (miroir serveur aggregate.js) — jamais `yearPo` brut (CLAUDE.md) :
+  // un millésime aberrant (0 après bornage) ne coïncide avec aucun onglet de période réel.
+  const ordP = cmdRows.filter((o) => inPeriod(String(plausibleYear(o.yearPo) || "")) && m(o, DIMS));
   const ordAll = cmdRows.filter((o) => m(o, DIMS));
   // Attribution des factures au périmètre via leur commande (FP CANONIQUE) ; repli bu/client de la facture.
   const byFp = new Map<string, Order>();

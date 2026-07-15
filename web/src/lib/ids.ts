@@ -4,6 +4,16 @@
 // (« FP/2024/013 » vs « FP/2024/13 ») échappe au rapprochement et fausse les comptes (double-compte
 // pipeline, faux « sans commande P&L », etc.).
 
+/** Année plausible [2015, année+3] (miroir EXACT de functions/lib/ids.js) : rejette les sentinelles
+ *  (1899/1900/0) et les millésimes aberrants (20226). Retourne le nombre si plausible, sinon 0. Tout
+ *  filtrage/regroupement par millésime DOIT passer par elle (CLAUDE.md) — jamais `yearPo` brut. */
+export function plausibleYear(y?: string | number | null): number {
+  const n = Math.trunc(Number(y));
+  if (!Number.isFinite(n)) return 0;
+  const max = new Date().getFullYear() + 3;
+  return n >= 2015 && n <= max ? n : 0;
+}
+
 /** Normalise un N° FP → forme canonique "FP/AAAA/N" (miroir exact de functions/lib/ids.js). */
 export function fpKey(v?: string | null): string | null {
   const m = String(v || "").match(/FP\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);

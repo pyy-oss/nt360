@@ -4,16 +4,20 @@
 //   • alimenter la tendance de facturation (Σ jalons par mois, jusqu'au 31/12) ;
 //   • détecter la DÉRIVE vs le RAF projetable (Σ jalons ≠ RAF → « à réconcilier »).
 // Règle stricte de saisie (validée à l'éditeur) : Σ jalons = RAF projetable du projet.
+const { plausibleYear } = require("../lib/ids");
 const MAX_MILESTONES = 15;
 const DEFAULT_MILESTONE_COUNT = 3;
 
-/** Nettoie/valide une liste de jalons : dates ISO, montants entiers > 0, triés par date, ≤ 15.
- *  Déterministe et idempotent (normalize(normalize(x)) === normalize(x)). */
+/** Nettoie/valide une liste de jalons : dates ISO à MILLÉSIME PLAUSIBLE ([2015, année+3] via
+ *  `plausibleYear` — CLAUDE.md : tout filtrage par millésime passe par elle), montants entiers > 0,
+ *  triés par date, ≤ 15. Déterministe et idempotent. Sans le bornage, un jalon « 1900-05-01 » (passé
+ *  aberrant → écart échu permanent) ou « 2099-… » (futur aberrant → 100 % reporté N+1, retiré du CAF
+ *  courant) était persisté silencieusement. */
 function normalizeMilestones(list) {
   if (!Array.isArray(list)) return [];
   return list
     .map((m) => ({ date: m && m.date ? String(m.date).slice(0, 10) : "", amount: Math.round(Number(m && m.amount) || 0) }))
-    .filter((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.date) && m.amount > 0)
+    .filter((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.date) && plausibleYear(m.date.slice(0, 4)) > 0 && m.amount > 0)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     .slice(0, MAX_MILESTONES);
 }
