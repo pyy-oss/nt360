@@ -1012,3 +1012,10 @@ export async function upsertMntContrat(c: MntContrat) {
 export async function deleteMntContrat(id: string) {
   await httpsCallable(functions, "deleteMntContrat")({ id });
 }
+
+// Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
+import type { MntTicket, MntIntervention } from "../types";
+export async function upsertMntTicket(t: MntTicket) { const res = await httpsCallable(functions, "upsertMntTicket")(t); return res.data as { ok: boolean; id: string }; }
+export async function deleteMntTicket(id: string) { await httpsCallable(functions, "deleteMntTicket")({ id }); }
+export async function upsertMntIntervention(i: MntIntervention) { const res = await httpsCallable(functions, "upsertMntIntervention")(i); return res.data as { ok: boolean; id: string }; }
+export async function deleteMntIntervention(id: string) { await httpsCallable(functions, "deleteMntIntervention")({ id }); }

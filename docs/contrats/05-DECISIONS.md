@@ -3,6 +3,57 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-013 — Alimenter le CRA depuis les interventions (8 h ouvrées = 1 jour), en doc CRA distinct
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Décision utilisateur (Lot 2) : le temps d'intervention doit **alimenter le CRA** (timesheets) — une
+seule vérité du temps, pour la marge (ADR-007). Or les interventions sont en **heures** sur une date,
+le CRA en **jours** par mois, et l'id du CRA manuel est `consultantId_mois` (`handlers/timesheets.js:16`).
+
+### Décision
+Le callable d'intervention recalcule, pour chaque (consultant × mois), la somme des heures des
+interventions → **jours = heures / 8** (journée ouvrée standard), écrite dans un doc CRA **distinct**
+`timesheets/mnt_<consultant>_<mois>` avec `source: "mnt"`. `computeConstat` (`domain/timesheet.js:46`)
+sommant `billedDays` **par consultant sur tous les docs du mois**, la contribution maintenance s'ADDITIONNE
+au CRA manuel **sans collision** (id différent). Drapeau éteint ⇒ aucune intervention ⇒ **TACE inchangée**.
+
+### Conséquences
+- Une seule vérité du temps (le CRA inclut la maintenance quand le module est allumé) ; le taux 8 h/jour
+  est une **hypothèse** (pas de référentiel d'horaires dans l'ERP) — à paramétrer si un besoin apparaît.
+- Un consultant très sollicité en maintenance peut voir son TACE dépasser 100 % (billed + maintenance) :
+  signal de sur-service, cohérent, mais à surveiller côté qualité.
+
+### Ce qu'on saura dans six mois
+Si le taux 8 h/jour ou l'addition au TACE fausse la lecture d'occupation → paramétrer les horaires.
+
+---
+
+## ADR-014 — Quatre niveaux de priorité de ticket, alignés sur la palette de risque
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Décision utilisateur (Lot 2) : 4 niveaux de priorité réutilisant la palette de risque (ADR-008).
+
+### Décision
+Priorités = `basse / moyenne / haute / critique` (code applicatif), tons **emerald / gold / clay /
+plum** (`web/src/lib/mntContrat.ts`, mêmes teintes que les 4 niveaux de risque). Statut de ticket =
+`ouvert / en_cours / resolu / clos`.
+
+### Conséquences
+- Cohérence visuelle avec le futur score de risque ; aucune teinte nouvelle (règle C / H4).
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs confondent priorité de ticket et niveau de risque de contrat (même palette).
+
+---
+
 ## ADR-012 — Embarquer les engagements SLA dans le document contrat (v1)
 
 - **Date :** 2026-07-15

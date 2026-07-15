@@ -32,3 +32,16 @@ export function statutTone(statut?: string): "emerald" | "steel" | "gold" | "cla
 }
 
 export const label = (map: Record<string, string>, v?: string): string => (v ? map[v] || v : "—");
+
+// Tickets & interventions (Lot 2). Priorité mappée sur la palette de risque (ADR-008/014) :
+// basse=vert (calme) → critique=plum.
+export const TICKET_STATUTS = ["ouvert", "en_cours", "resolu", "clos"] as const;
+export const PRIORITES = ["basse", "moyenne", "haute", "critique"] as const;
+export const TICKET_STATUT_LABEL: Record<string, string> = { ouvert: "Ouvert", en_cours: "En cours", resolu: "Résolu", clos: "Clos" };
+export const PRIORITE_LABEL: Record<string, string> = { basse: "Basse", moyenne: "Moyenne", haute: "Haute", critique: "Critique" };
+export function ticketStatutTone(s?: string): "emerald" | "steel" | "gold" | "clay" | "neutral" {
+  switch (s) { case "ouvert": return "gold"; case "en_cours": return "steel"; case "resolu": return "emerald"; case "clos": return "neutral"; default: return "neutral"; }
+}
+export function prioriteTone(p?: string): "emerald" | "gold" | "clay" | "plum" | "neutral" {
+  switch (p) { case "basse": return "emerald"; case "moyenne": return "gold"; case "haute": return "clay"; case "critique": return "plum"; default: return "neutral"; }
+}
