@@ -243,12 +243,97 @@ Si un `mnt_` en snake_case ou un libellé anglais a échappé au contrôle `/ver
 
 ---
 
-## Décisions encore OUVERTES (à trancher en Phase 3)
+## ADR-003 — Matérialiser les scores de risque dans `summaries/mnt_risque`
 
-- **ADR-003** — Scores de risque **à la volée ou matérialisés** par recompute (`summaries/*`) ?
-  *Recommandation : matérialisés, cohérent avec l'invariant « même métrique = même nombre ».* — **Proposé**
-- **ADR-004** — Réutiliser le **moteur d'approbation existant** (`approvals`) pour les
-  renouvellements/décisions de contrat ? *Recommandation : oui (Lot 4 existant).* — **Proposé**
-- **ADR-005** — Source de vérité du **montant facturé** du contrat, sachant que l'ERP facture déjà
-  (`invoices`, en HT) : le contrat porte-t-il un montant d'engagement propre distinct du facturé ?
-  — **Proposé**
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+L'ERP matérialise déjà toutes ses métriques d'agrégat dans `summaries/*` via le recompute sérialisé
+(`lib/aggregate.js`) et impose l'invariant « même métrique calculée à deux endroits = même nombre »
+(CLAUDE.md). Un calcul front dupliqué diverge (piège de cohérence récurrent, cf. `overviewCalc.ts`).
+
+### Décision
+Les scores de risque sont **matérialisés** dans `summaries/mnt_risque`, calculés par le recompute
+existant (gate `want("maintenance")`), recalcul différé après écriture (`requestRecompute`).
+
+### Conséquences
+- Une seule vérité du score ; lecture rapide ; toucher `aggregate.js` (point de contact C3, risque
+  majeur) impose un test d'identité octet-pour-octet des summaries existants, drapeau off.
+- Le score n'est pas « temps réel à la milliseconde » : il suit le rythme du recompute (acceptable).
+
+### Ce qu'on saura dans six mois
+Si un score affiché diverge d'un recalcul → le miroir front/back n'était pas exact.
+
+---
+
+## ADR-004 — Réutiliser le moteur d'approbation pour les décisions de contrat
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Un moteur d'approbation générique existe (`approvals`, `domain/approval.js`, module `approvals.tsx`,
+Lot 4) : soumission → décision hiérarchique + suivi. Recréer un circuit dédié créerait une 2ᵉ voie.
+
+### Décision
+Les renouvellements/résiliations de contrat sont soumis via **`approvals`** (un type d'objet
+`mnt_renouvellement`), pas un circuit dédié.
+
+### Conséquences
+- On hérite du suivi et de la hiérarchie existants ; ajouter un type ne doit pas casser le listing
+  des approbations existantes (point de contact C6, test de caractérisation requis).
+
+### Ce qu'on saura dans six mois
+Si un besoin de circuit spécifique (multi-niveaux propres au contrat) apparaît → nouvel ADR.
+
+---
+
+## ADR-005 — Le contrat porte un montant d'engagement propre ; l'ERP reste la source de la facturation
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+L'ERP facture déjà (`invoices`, en HT, rattachées par `fp`). Le contrat a besoin d'un montant
+d'engagement (annuel/mensuel) pour piloter le « reste à facturer », mais ne doit pas re-facturer.
+
+### Décision
+`mnt_contrats.montantEngage` = **engagement propre** du contrat ; la **facturation réelle reste
+l'ERP** (`invoices` par `fp`). L'échéancier compare engagé vs facturé.
+
+### Conséquences
+- Aucune double facturation, aucune 2ᵉ vérité de facture ; le suivi « reste à facturer sur
+  engagement » est possible. Le lettrage/encaissement reste celui de l'ERP (ADR-011).
+
+### Ce qu'on saura dans six mois
+Si l'engagement saisi diverge durablement du facturé sans explication → donnée de contrat obsolète.
+
+---
+
+## ADR-011 — S'appuyer sur le statut `paid` de l'ERP (pas de lettrage propre) ; pas de pièce jointe en v1
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+L'ERP n'a ni lettrage/encaissement formel (règlement = booléen `invoices.paid` + relances/DSO,
+Phase 1 §A) ni GED généraliste (Storage limité à `imports/`/`exports/`, Phase 0). Arbitrages A1/A2
+de la Phase 2.
+
+### Décision
+- **A1** : le contrat lit le statut `paid` des factures de l'affaire (via `fp`) ; **aucun suivi
+  d'encaissement/lettrage propre** (pas de 2ᵉ vérité cash).
+- **A2** : **aucune pièce jointe en v1** ; le contrat référence l'affaire. Storage `mnt_docs/`
+  (règles type `exports/`) seulement si un besoin métier est confirmé (nouvel ADR).
+
+### Conséquences
+- Surface minimale, rien à sécuriser côté GED en v1 ; le règlement reste piloté par les relances
+  existantes.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs joignent les PDF ailleurs (mail, ClickUp) faute de `mnt_docs/` → rouvrir A2.
