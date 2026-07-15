@@ -631,14 +631,16 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
 }
 
 /** Bouton d'action asynchrone avec état + toast. */
-export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Action refusée" }: { label: string; fn: () => Promise<any>; variant?: "gold" | "ghost"; okMsg?: string; errMsg?: string }) {
+// okMsg accepte une FONCTION (résultat → message) pour surfacer les compteurs d'un callable
+// (« Rattachement — 12 tâches reliées ») sans réimplémenter le pattern busy+toast+trackWrite à la main.
+export function Busy({ label, fn, variant = "gold", okMsg = "Fait", errMsg = "Action refusée" }: { label: string; fn: () => Promise<any>; variant?: "gold" | "ghost"; okMsg?: string | ((r: any) => string); errMsg?: string }) {
   const [s, setS] = useState<"" | "busy">("");
   const toast = useToast();
   return (
     <button
       className={variant === "gold" ? "btn-gold" : "btn-ghost"}
       disabled={s === "busy"}
-      onClick={async () => { setS("busy"); try { await trackWrite(fn(), label); toast(okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
+      onClick={async () => { setS("busy"); try { const r = await trackWrite(fn(), label); toast(typeof okMsg === "function" ? okMsg(r) : okMsg, "ok"); } catch (e: any) { const detail = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(detail ? `${errMsg} — ${detail}` : errMsg, "err"); } finally { setS(""); } }}
     >
       {s === "busy" ? "…" : label}
     </button>
