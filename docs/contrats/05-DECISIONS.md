@@ -3,6 +3,41 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-018 — Interaction maintenance↔CRA : activité gatée par le drapeau, jamais valorisée au TJM
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+L'audit adverse a montré deux effets de bord de l'alimentation du CRA par les interventions (ADR-013,
+docs `timesheets/mnt_*`) : **B1** — les docs subsistent drapeau éteint et continuent d'alimenter
+TACE/marge (violation de « éteint = ERP d'avant ») ; **M1** — les jours de maintenance, couverts par le
+forfait du contrat (`montantEngage`, ADR-005), étaient re-valorisés au TJM en marge (`resourcePnl`) et
+proposés à la pré-facturation → double compte revenu.
+
+### Décision
+- **1A** — La contribution `source:"mnt"` compte pour l'**activité** (TACE/occupation : `timesheetKpis`,
+  `taceHistory`) **uniquement quand le drapeau est allumé** ; drapeau éteint ⇒ elle est écartée (l'ERP
+  redevient strictement celui d'avant).
+- **2A** — Elle est **TOUJOURS écartée de la valorisation au TJM** (marge `resourcePnl` + pré-facturation
+  `preBillingFromCra`), quel que soit le drapeau : le revenu de la maintenance est le forfait du contrat,
+  jamais le TJM × jours (pas de double compte).
+- Implémentation : helper PUR `excludeMaintenance` (`domain/timesheet.js`) ; lecture du drapeau
+  `config/mntFeature` dans les 2 callables d'activité.
+
+### Conséquences
+- « Éteint = ERP d'avant » restauré pour les KPI CRA (B1 clos). Aucune double facturation (M1 clos).
+- La rentabilité par ressource (`resourcePnl`) et la pré-facturation ne reflètent que le **temps régie**
+  (projet), pas la maintenance forfaitaire — cohérent avec ADR-005 (le suivi maintenance = échéancier).
+- La marge maintenance (coût réel des jours d'intervention) n'est pas suivie en v1 → si besoin, brancher
+  le coût chargé (ADR-007bis) sur un P&L maintenance dédié.
+
+### Ce qu'on saura dans six mois
+Si la direction veut la marge nette maintenance (coût des interventions vs forfait) → P&L maintenance dédié.
+
+---
+
 ## ADR-017 — Définir l'horloge SLA `h24` en temps calendaire 24/7 (couverture de première classe)
 
 - **Date :** 2026-07-15
