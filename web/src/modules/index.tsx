@@ -8,7 +8,7 @@
 import { lazy, type ComponentType, type FC } from "react";
 import {
   LayoutDashboard, GitBranch, Target, Receipt, Layers, TrendingUp, Percent, FileText,
-  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, FileCheck2, type LucideIcon,
+  Truck, ClipboardList, Users, Boxes, Search, Shield, ListChecks, ShoppingCart, FileSpreadsheet, SlidersHorizontal, UserRound, Newspaper, Eraser, BellRing, BookOpen, Radar, Gauge, Kanban, Contact, ListTodo, Stamp, Sparkles, UsersRound, FileCheck2, Wrench, type LucideIcon,
 } from "lucide-react";
 import type { Props } from "./_shared";
 
@@ -53,11 +53,16 @@ const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
 const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
+// Module Contrats de maintenance (mnt_) — chargé en lazy comme les autres ; masqué tant que le
+// drapeau config/mntFeature est éteint (voir champ `flag` ci-dessous et App.tsx).
+const Maintenance = from(() => import("./maintenance"), "Maintenance");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
 
-export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod }[] = [
+// `flag` (optionnel) : id d'un overlay config/<flag> ; l'onglet n'est visible que si ce drapeau est
+// allumé (App.tsx). Absent = comportement historique (visibilité pilotée par le seul RBAC).
+export const MODULES: { id: string; key: string; label: string; icon: LucideIcon; Component: Mod; flag?: string }[] = [
   { id: "overview", key: "overview", label: "Vue d'ensemble", icon: LayoutDashboard, Component: Overview },
   { id: "news", key: "overview", label: "Actualité", icon: Newspaper, Component: Actualite },
   { id: "codir", key: "overview", label: "Bilan CODIR", icon: Gauge, Component: Codir },
@@ -94,6 +99,9 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
   { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
   { id: "clickupcockpit", key: "overview", label: "Cockpit ClickUp", icon: Radar, Component: ClickupCockpit },
+  // Contrats de maintenance : clé RBAC dédiée `maintenance` (absente de la matrice → `none` par
+  // défaut) ET drapeau `mntFeature` (éteint par défaut). Doublement masqué tant que non activé.
+  { id: "maintenance", key: "maintenance", label: "Contrats de maintenance", icon: Wrench, Component: Maintenance, flag: "mntFeature" },
 ];
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
@@ -106,6 +114,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "domaines"] },
+  { label: "Contrats", ids: ["maintenance"] },
   { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },
 ];
 

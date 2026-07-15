@@ -55,6 +55,7 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/relancesBc"), { count: 0 });
     await setDoc(doc(db, "summaries/relancesJalons"), { count: 0 });
     await setDoc(doc(db, "auditLog/A1"), { action: "seed" });
+    await setDoc(doc(db, "mnt_contrats/C1"), { fp: "FP/2026/1", client: "X" });
   });
 });
 
@@ -363,5 +364,32 @@ describe("Agrégats & audit", () => {
   });
   it("lecture ne lit PAS auditLog", async () => {
     await assertFails(getDoc(doc(as("lecture"), "auditLog/A1")));
+  });
+});
+
+describe("Module Contrats de maintenance — double verrou (drapeau config/mntFeature + droit maintenance)", () => {
+  // Allume le drapeau via contexte privilégié (contourne les rules, comme le fait le callable Admin SDK).
+  const enableFlag = () => testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "config/mntFeature"), { enabled: true });
+  });
+  it("drapeau ÉTEINT (doc absent) : même la direction ne lit PAS mnt_contrats (ERP strictement d'avant)", async () => {
+    await assertFails(getDoc(doc(as("direction"), "mnt_contrats/C1")));
+  });
+  it("drapeau ALLUMÉ + droit maintenance (direction = write partout) : lecture autorisée", async () => {
+    await enableFlag();
+    await assertSucceeds(getDoc(doc(as("direction"), "mnt_contrats/C1")));
+  });
+  it("drapeau ALLUMÉ mais SANS droit maintenance : lecture refusée (RBAC ferme le module par défaut)", async () => {
+    await enableFlag();
+    await assertFails(getDoc(doc(as("lecture"), "mnt_contrats/C1")));
+    await assertFails(getDoc(doc(as("commercial"), "mnt_contrats/C1")));
+  });
+  it("personne n'écrit mnt_contrats en direct (Functions only), même drapeau allumé", async () => {
+    await enableFlag();
+    await assertFails(setDoc(doc(as("direction"), "mnt_contrats/C1"), { fp: "FP/2026/1" }));
+  });
+  it("config/mntFeature : lisible par tout rôle nt360, refusé au non-authentifié", async () => {
+    await assertSucceeds(getDoc(doc(as("lecture"), "config/mntFeature")));
+    await assertFails(getDoc(doc(as(null), "config/mntFeature")));
   });
 });

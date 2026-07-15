@@ -31,6 +31,63 @@
 
 ---
 
+## 2026-07-15 — Lot 0 (Socle éteint)
+
+**Fait**
+- Drapeau de fonctionnalité `config/mntFeature` (ADR-009) : lecture PURE `isMntEnabled` côté back
+  (`functions/domain/mntFeature.js`) + miroir front (`web/src/lib/mntFeature.ts`). Défaut = éteint
+  par ABSENCE du doc (aucune donnée à créer).
+- Clé RBAC `maintenance` : le module est enregistré dans `MODULES[]` (`web/src/modules/index.tsx`)
+  avec `key: "maintenance"` (absente de la matrice → `none` par défaut) ET `flag: "mntFeature"`.
+  Double verrou : RBAC + drapeau.
+- Coquille de module `web/src/modules/maintenance.tsx` (lazy) — masquée par App tant que le drapeau
+  est éteint (`App.tsx` : `moduleFlagOn(m.flag, mntFeature)` dans le filtre `visible`).
+- `firestore.rules` : helper `mntEnabled()` (fail-closed) + blocs `mnt_contrats/…/mnt_evenementsSla`
+  (lecture = drapeau ALLUMÉ **et** `canRead('maintenance')`, écriture `if false` = callables) +
+  lecture de `config/mntFeature` (isNt360).
+- **C10 prouvé** : test:rules (émulateur) — drapeau éteint ⇒ même la direction ne lit pas `mnt_*` ;
+  allumé + droit ⇒ lecture ; allumé sans droit ⇒ refus ; écriture toujours refusée.
+
+**Filet / vérif — TOUT VERT**
+- `functions` : **84 fichiers / 828 tests** (+ `mntFeature.test.js`).
+- `web` : **14 fichiers / 78 tests** (+ `mntFeature.test.ts`).
+- `test:rules` : **68 tests** (+ 5 cas « double verrou »).
+- Build web OK ; **chunk d'entrée 114,9 KB ≤ 120 KB** (le module est un chunk lazy à part → C5 OK).
+- Gardes : `check-no-undef` (111 fichiers), `check-deploy-targets` (138 fns, **inchangé** — aucun
+  callable ajouté), `check-firestore-indexes`, lint react-hooks : verts.
+
+**Points de contact touchés** : C1 (RBAC — clé additionnelle, matrice inchangée), C4 (aucun export
+serveur ⇒ deployed-functions.txt inchangé), C5 (nav lazy, budget respecté), **C10** (drapeau — figé
+et testé). C2 (rules) étendu additivement (blocs `mnt_*` + `config/mntFeature`), sans toucher aux
+règles existantes (68 tests dont les anciens toujours verts).
+
+**Appris sur l'existant**
+- `config/{id}` (`firestore.rules`) est une **allowlist fail-closed** : un nouveau doc `config/*`
+  n'est PAS lisible par défaut → il a fallu une règle dédiée `config/mntFeature` (cohérent avec la
+  sécurité de l'ERP, pas un contournement). *(complète `01-EXISTANT.md §5`)*
+- La visibilité d'un module front = `MODULES.filter(can(key) !== "none")` (`App.tsx:43`) : une clé
+  RBAC absente de la matrice suffit déjà à masquer un module. Le drapeau ajoute le maître-interrupteur.
+
+**Échoué / abandonné**
+- Rien.
+
+**Dette assumée**
+- L'éditeur de matrice RBAC (Habilitations) n'expose pas encore la clé `maintenance` : impossible
+  d'accorder le droit depuis l'UI. **Volontaire** en Lot 0 (module éteint) ; remboursé au lot où l'on
+  active le module (ajout de `maintenance` à la liste des modules de l'écran Habilitations). En
+  attendant, seule la direction (write partout) peut lire `mnt_*` une fois le drapeau allumé.
+- `summaryModule('mnt_risque')→'maintenance'` (`firestore.rules`) non ajouté : le summary n'existe
+  qu'au Lot 5 ; mapping ajouté à ce moment (C3).
+
+**Décidé**
+- Aucun nouvel ADR. Application d'ADR-009 (drapeau `config/mntFeature`) et ADR-010 (nommage `mnt_`).
+
+**Suivant**
+- Validation humaine, puis `/5-lot 1` (Contrat & engagements SLA — données : `mnt_contrats` +
+  `mnt_engagementsSla`, CRUD callables, liste + fiche, adossé au N° FP).
+
+---
+
 ## 2026-07-15 — Phase 4 (Filet de non-régression)
 
 **Fait**
