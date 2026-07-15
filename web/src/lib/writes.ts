@@ -2,6 +2,7 @@
 // ces écritures échouent côté serveur si le rôle est insuffisant (UI désactivée en amont).
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
+import type { MntContrat } from "../types";
 
 // Un appel callable peut échouer TRANSITOIREMENT pendant un DÉPLOIEMENT des Cloud Functions : le temps
 // que la fonction soit remplacée, l'infra renvoie un 500/INTERNAL (parfois UNAVAILABLE / DEADLINE).
@@ -999,4 +1000,15 @@ export type OpsBulletin = { _id?: string; fy: number; week: number; sections: Bu
 export async function upsertOpsBulletin(b: { fy: number; week: number; sections: BulletinSection[] }) {
   const res = await httpsCallable(functions, "upsertOpsBulletin")(b);
   return res.data as { ok: boolean; id: string };
+}
+
+// CONTRATS DE MAINTENANCE (module mnt_, Lot 1). Écriture callable-only, double garde serveur
+// (droit `maintenance` + drapeau config/mntFeature). L'UI est désactivée en amont si le rôle
+// n'a pas le droit ; les rules restent la barrière opposable.
+export async function upsertMntContrat(c: MntContrat) {
+  const res = await httpsCallable(functions, "upsertMntContrat")(c);
+  return res.data as { ok: boolean; id: string };
+}
+export async function deleteMntContrat(id: string) {
+  await httpsCallable(functions, "deleteMntContrat")({ id });
 }

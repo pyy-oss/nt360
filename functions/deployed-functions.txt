@@ -38,6 +38,7 @@ deleteAssignment
 deleteCandidate
 deleteClickupWebhook
 deleteConsultant
+deleteMntContrat
 deleteTimesheet
 listCandidates
 listConsultants
@@ -49,6 +50,7 @@ timesheetKpis
 upsertAssignment
 upsertCandidate
 upsertConsultant
+upsertMntContrat
 upsertTimesheet
 deleteContact
 deleteObjective

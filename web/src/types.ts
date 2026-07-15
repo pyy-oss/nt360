@@ -223,3 +223,13 @@ export type OpsLog = { id?: string; kind?: string; action?: string; trigger?: st
 // Journal d'erreurs client (observabilité front) — écrit par le callable logClientError, lu en Admin.
 export type ErrorLog = { id?: string; uid?: string; role?: string | null; message?: string; stack?: string | null; url?: string | null; module?: string | null; ua?: string | null; ts?: any };
 export type PermissionsConfig = { matrix?: Record<string, Record<string, string>> };
+
+// Contrats de maintenance (module mnt_, Lot 1). Montants number (FCFA entier), dates ISO AAAA-MM-JJ,
+// statuts/couvertures en code applicatif. Engagements SLA EMBARQUÉS (ADR-012). Clé = N° FP (ADR-001).
+export type MntEngagement = { type: string; couverture: string; seuilHeures: number; quota: number | null };
+export type MntContrat = {
+  id?: string; fp?: string; client?: string; bu?: string; am?: string;
+  statut?: string; echeanceType?: string; dateDebut?: string; dateFin?: string | null;
+  montantEngage?: number; deviseEngage?: string; engagements?: MntEngagement[];
+  updatedAt?: any; createdAt?: any;
+};
