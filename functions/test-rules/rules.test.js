@@ -56,6 +56,7 @@ beforeEach(async () => {
     await setDoc(doc(db, "summaries/relancesJalons"), { count: 0 });
     await setDoc(doc(db, "auditLog/A1"), { action: "seed" });
     await setDoc(doc(db, "mnt_contrats/C1"), { fp: "FP/2026/1", client: "X" });
+    await setDoc(doc(db, "summaries/mnt_risque"), { total: 0, items: [] });
   });
 });
 
@@ -391,5 +392,12 @@ describe("Module Contrats de maintenance — double verrou (drapeau config/mntFe
   it("config/mntFeature : lisible par tout rôle nt360, refusé au non-authentifié", async () => {
     await assertSucceeds(getDoc(doc(as("lecture"), "config/mntFeature")));
     await assertFails(getDoc(doc(as(null), "config/mntFeature")));
+  });
+  it("summaries/mnt_risque : DOUBLE verrou comme les collections mnt_* (drapeau + droit maintenance)", async () => {
+    // Drapeau éteint → même la direction ne lit pas le summary de risque (C3/C10 : agrégat gaté au drapeau).
+    await assertFails(getDoc(doc(as("direction"), "summaries/mnt_risque")));
+    await enableFlag();
+    await assertSucceeds(getDoc(doc(as("direction"), "summaries/mnt_risque"))); // drapeau + droit
+    await assertFails(getDoc(doc(as("commercial"), "summaries/mnt_risque")));    // drapeau mais pas le droit
   });
 });

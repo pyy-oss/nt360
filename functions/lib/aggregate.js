@@ -646,6 +646,28 @@ async function recomputeCore(db, only) {
     }
   }
 
+  // ── CONTRATS DE MAINTENANCE (module gaté) — scores de risque MATÉRIALISÉS dans summaries/mnt_risque
+  // (ADR-003, point de contact C3). DOUBLEMENT gaté : want("maintenance") ET drapeau config/mntFeature
+  // ALLUMÉ. Éteint (défaut) ⇒ aucune lecture mnt_*, aucun summary mnt_risque écrit → le recompute est
+  // STRICTEMENT identique à avant (invariant « éteint = ERP d'avant », C10). Bloc ENTIÈREMENT ADDITIF :
+  // il ne lit que des collections mnt_* + invoices (déjà en mémoire) et ne pousse qu'un seul chemin
+  // NOUVEAU (summaries/mnt_risque) — jamais un summary existant. Cf. functions/test/mntRisque* + garde
+  // de caractérisation (recompute drapeau off ⇒ zéro écriture mnt_*).
+  if (want("maintenance")) {
+    const { isMntEnabled } = require("../domain/mntFeature");
+    const mntCfg = (await db.doc("config/mntFeature").get()).data();
+    if (isMntEnabled(mntCfg)) {
+      const { mntRisque } = require("../domain/mntRisque");
+      const tsMs = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : (Number(t) || 0));
+      const [mntContrats, mntTickets] = await Promise.all([readAll(db, "mnt_contrats", true), readAll(db, "mnt_tickets", true)]);
+      // Horodatages Firestore → millisecondes à la FRONTIÈRE I/O (le domaine reste pur). Le mois
+      // d'ouverture (quota) se dérive de ouvertLe.
+      const ticks = mntTickets.map((t) => { const openMs = tsMs(t.ouvertLe); return { id: t.id, contratId: t.contratId, ouvertMs: openMs, priseEnCompteMs: t.priseEnCompteLe ? tsMs(t.priseEnCompteLe) : null, resoluMs: t.resoluLe ? tsMs(t.resoluLe) : null, dateJour: openMs ? new Date(openMs).toISOString().slice(0, 10) : null }; });
+      const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now() });
+      w.push({ path: "summaries/mnt_risque", data: { ...risque, ...stamp } });
+    }
+  }
+
   // Enregistre la liste des périodes disponibles (sélecteur front) + l'horodatage du dernier
   // recompute (bandeau de fraîcheur « données à jour au… »).
   w.push({ path: "config/periods", data: { available: periods, currentFy, lastRecomputeAt: FieldValue.serverTimestamp() } });

@@ -710,6 +710,43 @@ exports.emailCodirDigest = onSchedule({ schedule: "every monday 08:00", secrets:
   await logOps({ kind: "email", trigger: "codir", status: r.ok ? "ok" : "error", detail: { bulletins: bulletins.length, recipients: cfg.recipients.codir.length }, error: r.error });
 });
 
+// Digest QUOTIDIEN du RISQUE des contrats de maintenance (Lot 5) : direction (digest global via `codir`)
+// + chaque AM (ses contrats à risque, nom→email via l'annuaire). VERROUILLÉ par le drapeau
+// config/mntFeature : éteint (défaut) ⇒ no-op STRICT (aucune lecture mnt_*, aucun email) — « éteint =
+// ERP d'avant » (C7/C8/C10). Planifié après le recompute + les autres digests (07:00–07:15).
+exports.mntSlaSweep = onSchedule({ schedule: "every day 07:30", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
+  const { isMntEnabled } = require("./domain/mntFeature");
+  const mntCfg = (await db.doc("config/mntFeature").get()).data();
+  if (!isMntEnabled(mntCfg)) return; // module éteint → rien
+  const cfg = await loadEmailCfg();
+  if (!cfg.enabled || !cfg.triggers.maintenance) return;
+  const risque = (await db.doc("summaries/mnt_risque").get()).data() || {};
+  const items = (risque.items || []).filter((i) => i && i.niveau !== "vert"); // Ambre et plus
+  if (!items.length) return;
+  const { buildMntRisqueEmail, emailForName } = require("./domain/emailNotify");
+  // Digest DIRECTION (global) — réutilise la liste de destinataires « codir » (direction/CODIR).
+  let sentDir = 0;
+  if (cfg.recipients.codir.length) {
+    const mail = buildMntRisqueEmail(items, "direction");
+    const r = await sendEmail(cfg, { to: cfg.recipients.codir, subject: mail.subject, html: mail.html });
+    if (r.ok) sentDir += 1;
+  }
+  // Digest par AM — chacun reçoit SES contrats à risque (résolution nom→email via l'annuaire users).
+  const usersByName = {};
+  (await db.collection("users").select("name", "email").get()).forEach((d) => { const n = (d.data().name || "").toLowerCase().trim(); if (n) usersByName[n] = { email: d.data().email }; });
+  const byAm = new Map();
+  for (const it of items) { const who = it.am; if (!who) continue; if (!byAm.has(who)) byAm.set(who, []); byAm.get(who).push(it); }
+  let sentAm = 0, skipped = 0;
+  for (const [who, list] of byAm) {
+    const to = emailForName(who, usersByName);
+    if (!to) { skipped += 1; continue; }
+    const mail = buildMntRisqueEmail(list, who);
+    const r = await sendEmail(cfg, { to, subject: mail.subject, html: mail.html });
+    if (r.ok) sentAm += 1; else skipped += 1;
+  }
+  await logOps({ kind: "email", trigger: "maintenance", status: "ok", detail: { direction: sentDir, am: sentAm, skipped, contrats: items.length } });
+});
+
 // --- CURATION DE LA VEILLE (agent LLM) — score la PERTINENCE de chaque TYPE de bulletin d'actualité
 // pour filtrer le bruit « avant publication ». Confidentialité par CONSTRUCTION : on n'envoie à l'API
 // QUE des signaux dé-identifiés (clé + libellé générique du catalogue + domaine + sévérité), jamais le

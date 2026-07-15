@@ -112,6 +112,9 @@ service cloud.firestore {
         : id.matches('clickupDelays.*') ? 'backlog'
         // Charge par Project Manager (carte Commandes + filtre PM transverse) → lisible à overview.
         : id.matches('pms.*') ? 'overview'
+        // Scores de risque des contrats de maintenance (Lot 5) → module 'maintenance'. Le drapeau
+        // ajoute un second verrou dans le match /summaries (mnt_risque illisible drapeau éteint, C10).
+        : id.matches('mnt_risque.*') ? 'maintenance'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';
@@ -207,8 +210,10 @@ service cloud.firestore {
     // fermée → plus d'objectif posé sans contrôle ni journal, cohérent avec creditLines/billingMilestones.
     match /objectives/{id}    { allow read: if canRead('objectifs');    allow write: if false; }
 
-    // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat.
-    match /summaries/{id}     { allow read: if canRead(summaryModule(id)); allow write: if false; }
+    // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat. Le conjoint
+    // « maintenance ⇒ drapeau allumé » est TOUJOURS vrai pour les summaries existants (summaryModule ≠
+    // 'maintenance') → comportement inchangé ; il n'ajoute le double verrou du drapeau qu'à mnt_risque (C3/C10).
+    match /summaries/{id}     { allow read: if canRead(summaryModule(id)) && (summaryModule(id) != 'maintenance' || mntEnabled()); allow write: if false; }
     // Chunks des commandes matérialisées (module « overview », comme summaries/commandes).
     match /commandesRows/{id} { allow read: if canRead('overview');       allow write: if false; }
     // Chunks de MARGE par ligne → accès « Rentabilité » requis (confidentialité).

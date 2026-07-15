@@ -44,6 +44,7 @@ deleteMntTicket
 deleteTimesheet
 listCandidates
 listConsultants
+mntSlaSweep
 preBillingFromCra
 resourcePnl
 staffingPlan

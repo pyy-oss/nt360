@@ -6,8 +6,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isEmail = (s) => EMAIL_RE.test(String(s || "").trim());
 const cleanEmails = (arr) => Array.from(new Set((Array.isArray(arr) ? arr : []).map((x) => String(x || "").trim().toLowerCase()).filter(isEmail)));
 
-// Les 4 déclencheurs pris en charge.
-const TRIGGERS = ["approvals", "relances", "alerts", "codir"];
+// Les déclencheurs pris en charge. `maintenance` (Lot 5) est ADDITIF : les configs existantes n'ont
+// pas la clé → défaut `true` (comme les autres), mais le cron mntSlaSweep est de toute façon verrouillé
+// par le drapeau config/mntFeature → aucun email tant que le module est éteint.
+const TRIGGERS = ["approvals", "relances", "alerts", "codir", "maintenance"];
 
 /** Normalise/valide la config email (config/emailNotify). Ne stocke JAMAIS le secret client (Secret Manager). */
 function normalizeEmailConfig(raw) {
@@ -99,7 +101,35 @@ function buildCodirEmail(bulletins, headline) {
   };
 }
 
+// Libellés FR des paliers/signaux de risque (le domaine mntRisque ne porte que des codes). Utilisés
+// pour l'email de digest ; le front a son propre miroir de libellés (web/src/lib/mntRisque.ts).
+const MNT_NIVEAU_LABEL = { critique: "Critique", rouge: "Rouge", ambre: "Ambre", vert: "Vert" };
+const MNT_SIGNAL_LABEL = { sla_rompu: "SLA rompu", echeance_proche: "Échéance proche", quota_depasse: "Quota dépassé", sous_facturation: "Sous-facturation" };
+
+/**
+ * Email « digest de risque des contrats de maintenance » (Lot 5). `items` = contrats à risque
+ * (niveau ≠ vert), déjà filtrés/triés. `audience` = "direction" (digest global) ou un nom d'AM
+ * (ses contrats). Best-effort côté appelant (mntSlaSweep). Rien d'envoyé si `items` est vide.
+ */
+function buildMntRisqueEmail(items, audience) {
+  const list = Array.isArray(items) ? items : [];
+  const rows = list.slice(0, 30).map((it) => {
+    const sig = (it.signals || []).map((s) => MNT_SIGNAL_LABEL[s.type] || s.type).join(", ");
+    const niv = MNT_NIVEAU_LABEL[it.niveau] || it.niveau;
+    return `<b>${esc(it.client || "—")}</b> <span style="color:#9ca3af">${esc(it.fp || "")}</span> — ${esc(niv)} (${Number(it.score) || 0}/100)${sig ? ` · <span style="color:#4b5563">${esc(sig)}</span>` : ""}`;
+  });
+  const isDir = audience === "direction";
+  const intro = isDir
+    ? `<p>${list.length} contrat(s) de maintenance à surveiller (risque Ambre ou plus) :</p>`
+    : `<p>Bonjour ${esc(audience || "")}, vos contrats de maintenance à surveiller :</p>`;
+  return {
+    subject: `nt360 — Risque contrats de maintenance : ${list.length} à surveiller${isDir ? "" : ` (${esc(audience || "")})`}`,
+    html: shell("Risque · Contrats de maintenance", intro, rows.length ? listRows(rows) : "<p style=\"color:#9ca3af\">Aucun contrat à risque.</p>", "Ouvrez « Contrats de maintenance » dans nt360 pour le détail et les décisions."),
+  };
+}
+
 module.exports = {
   TRIGGERS, isEmail, cleanEmails, normalizeEmailConfig, canSend, emailForName,
-  buildAlertsEmail, buildApprovalEmail, buildRelancesEmail, buildCodirEmail,
+  buildAlertsEmail, buildApprovalEmail, buildRelancesEmail, buildCodirEmail, buildMntRisqueEmail,
+  MNT_NIVEAU_LABEL, MNT_SIGNAL_LABEL,
 };
