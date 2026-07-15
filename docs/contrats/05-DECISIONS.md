@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-017 — Définir l'horloge SLA `h24` en temps calendaire 24/7 (couverture de première classe)
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+`COUVERTURES = ["ouvre_lun_ven", "h24"]` (`domain/mntContrat.js`) est validé à l'écriture, mais l'audit
+adverse du Lot 5 a montré que `slaState` ignorait `couverture` : tout était calculé en jours ouvrés,
+rendant `h24` **inerte** (un engagement 24/7 sous-estimait ses ruptures le week-end).
+
+### Décision
+`slaState` (`domain/mntSla.js` + miroir `web/src/lib/mntSla.ts`) branche sur `couverture` :
+`ouvre_lun_ven` (défaut) → horloge **jours ouvrés** (saute le week-end, ADR-002) ; `h24` → horloge
+**calendaire 24/7** (le week-end consomme du délai). Testé des deux côtés (parité).
+
+### Conséquences
+- `h24` devient une couverture réelle ; les ruptures 24/7 remontent au bon moment.
+- Toujours pas de jours fériés (ADR-006) : `h24` = 24/7 strict, sans exception de calendrier.
+
+### Ce qu'on saura dans six mois
+Si un contrat 24/7 conteste une rupture calculée un jour férié → déclenche `config/mntFeries` (ADR-006).
+
+---
+
 ## ADR-016 — Scorer le risque contrat sur quatre signaux additifs, en quatre paliers
 
 - **Date :** 2026-07-15

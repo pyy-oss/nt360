@@ -64,7 +64,12 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs } = {}) {
       if (!openMs) continue;
       let rompu = false;
       for (const e of engagements) {
-        const markMs = e && e.type === "prise_en_compte" ? (t.priseEnCompteMs != null ? Number(t.priseEnCompteMs) : null)
+        // Horodatage de l'atteinte selon le type d'engagement. Pour « prise en compte », un ticket
+        // résolu DIRECTEMENT (ouvert→resolu, sans passer par en_cours) n'a jamais de priseEnCompteLe :
+        // il a pourtant été pris en compte AU PLUS TARD à sa résolution → on retombe sur resoluMs
+        // (sinon markMs=null ferait basculer tout premier-contact ancien en « rompu » à tort).
+        const markMs = e && e.type === "prise_en_compte"
+          ? (t.priseEnCompteMs != null ? Number(t.priseEnCompteMs) : (t.resoluMs != null ? Number(t.resoluMs) : null))
           : (t.resoluMs != null ? Number(t.resoluMs) : null);
         if (slaState(e, openMs, markMs, now).state === "rompu") { rompu = true; break; }
       }

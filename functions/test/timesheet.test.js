@@ -44,6 +44,20 @@ describe("computeConstat — agrégat constaté", () => {
     expect(r.global.reportedConsultants).toBe(2);
   });
 
+  it("deux CRA d'un MÊME (consultant × mois) ne gonflent PAS le dénominateur (mois distincts, audit Lot 5)", () => {
+    // CRA manuel + contribution maintenance (source « mnt », ADR-013) sur le même mois : billedDays
+    // s'ADDITIONNENT (une seule vérité du temps), mais le mois ne compte QU'UNE fois (months=1).
+    const r = computeConstat([
+      { consultantId: "c1", month: "2026-01", billedDays: 15, leaveDays: 2, internalDays: 0 },              // CRA manuel
+      { consultantId: "c1", month: "2026-01", billedDays: 3, leaveDays: 0, internalDays: 0, source: "mnt" }, // maintenance
+    ], ["2026-01"]);
+    const c1 = r.rows.find((x) => x.consultantId === "c1");
+    expect(c1.months).toBe(1);               // un seul mois calendaire, pas deux documents
+    expect(c1.billedDays).toBe(18);          // 15 + 3 additionnés
+    // TACE = 18 / (1×20 − 2 congés = 18) = 100 % — et non 18 / (2×20 − 2 = 38) = 47 % (bug corrigé)
+    expect(c1.tacePct).toBe(100);
+  });
+
   it("borne le TACE constaté à 100 % (jours facturés > jours ouvrables du modèle)", () => {
     // 28 facturés sur un mois modélisé à 20 j ouvrés → 140 % non borné : doit être clampé à 100.
     const r = computeConstat([{ consultantId: "c1", month: "2026-01", billedDays: 28, leaveDays: 0, internalDays: 0 }], ["2026-01"]);

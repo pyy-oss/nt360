@@ -48,12 +48,17 @@ function computeConstat(timesheets, months) {
   const rows = (timesheets || []).filter((t) => set.has(t.month));
   const byConsultant = {};
   for (const t of rows) {
-    const c = byConsultant[t.consultantId] || (byConsultant[t.consultantId] = { consultantId: t.consultantId, billedDays: 0, leaveDays: 0, internalDays: 0, months: 0 });
-    c.billedDays += Number(t.billedDays) || 0; c.leaveDays += Number(t.leaveDays) || 0; c.internalDays += Number(t.internalDays) || 0; c.months += 1;
+    const c = byConsultant[t.consultantId] || (byConsultant[t.consultantId] = { consultantId: t.consultantId, billedDays: 0, leaveDays: 0, internalDays: 0, _months: new Set() });
+    c.billedDays += Number(t.billedDays) || 0; c.leaveDays += Number(t.leaveDays) || 0; c.internalDays += Number(t.internalDays) || 0;
+    // Le nombre de mois OUVRABLES compte les mois CALENDAIRES DISTINCTS, pas les documents : plusieurs
+    // CRA d'un même (consultant × mois) — ex. CRA manuel + contribution maintenance source "mnt" (ADR-013) —
+    // ne doivent PAS gonfler le dénominateur (sinon TACE et coût de banc faussés — audit Lot 5).
+    if (t.month) c._months.add(t.month);
   }
   const list = Object.values(byConsultant).map((c) => {
-    const workable = Math.max(1, c.months * WORKING_DAYS_PER_MONTH - c.leaveDays);
-    return { ...c, tacePct: clampPct(c.billedDays / workable * 100), occupancyPct: clampPct((c.billedDays + c.internalDays) / Math.max(1, c.months * WORKING_DAYS_PER_MONTH) * 100) };
+    const months = c._months.size;
+    const workable = Math.max(1, months * WORKING_DAYS_PER_MONTH - c.leaveDays);
+    return { consultantId: c.consultantId, billedDays: c.billedDays, leaveDays: c.leaveDays, internalDays: c.internalDays, months, tacePct: clampPct(c.billedDays / workable * 100), occupancyPct: clampPct((c.billedDays + c.internalDays) / Math.max(1, months * WORKING_DAYS_PER_MONTH) * 100) };
   });
   const totBilled = list.reduce((s, c) => s + c.billedDays, 0);
   const totLeave = list.reduce((s, c) => s + c.leaveDays, 0);

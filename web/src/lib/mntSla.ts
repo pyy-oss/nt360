@@ -30,14 +30,17 @@ export function addBusinessMs(start: number, durMs: number): number {
   return cur;
 }
 export type SlaState = { seuilHeures: number; dueMs: number; elapsedHours: number; state: "respecte" | "rompu" | "en_cours" };
-export function slaState(engagement: { seuilHeures?: number } | undefined, openMs: number, markMs: number | null, nowMs: number): SlaState {
+// Miroir EXACT de functions/domain/mntSla.js : couverture `h24` → horloge calendaire 24/7 ; sinon jours ouvrés.
+export function slaState(engagement: { seuilHeures?: number; couverture?: string } | undefined, openMs: number, markMs: number | null, nowMs: number): SlaState {
   const seuilHeures = Math.max(0, Number(engagement && engagement.seuilHeures) || 0);
-  const dueMs = addBusinessMs(openMs, seuilHeures * HOUR_MS);
+  const h24 = !!engagement && engagement.couverture === "h24";
+  const dueMs = h24 ? openMs + seuilHeures * HOUR_MS : addBusinessMs(openMs, seuilHeures * HOUR_MS);
+  const elapsedMs = (a: number, b: number) => (h24 ? Math.max(0, b - a) : businessMsBetween(a, b));
   if (markMs != null) {
-    const elapsed = businessMsBetween(openMs, markMs);
+    const elapsed = elapsedMs(openMs, markMs);
     return { seuilHeures, dueMs, elapsedHours: Math.round((elapsed / HOUR_MS) * 100) / 100, state: markMs <= dueMs ? "respecte" : "rompu" };
   }
-  const elapsed = businessMsBetween(openMs, nowMs);
+  const elapsed = elapsedMs(openMs, nowMs);
   return { seuilHeures, dueMs, elapsedHours: Math.round((elapsed / HOUR_MS) * 100) / 100, state: nowMs > dueMs ? "rompu" : "en_cours" };
 }
 export const slaTone = (s: string): "emerald" | "clay" | "steel" | "neutral" => (s === "respecte" ? "emerald" : s === "rompu" ? "clay" : s === "en_cours" ? "steel" : "neutral");
@@ -58,7 +61,8 @@ export function echeancier(contrat: { echeanceType?: string; montantEngage?: num
   const per = PERIOD_MONTHS[contrat.echeanceType || "mensuel"] || 1;
   const montant = Math.max(0, Math.round(Number(contrat.montantEngage) || 0));
   let periodsDue = 0;
-  if (parse(contrat.dateDebut)) {
+  // Miroir back : contrat non démarré (asOf < dateDebut) → 0 échéance due (pas de fausse sous-facturation).
+  if (parse(contrat.dateDebut) && String(asOfIso) >= String(contrat.dateDebut)) {
     periodsDue = Math.floor(monthsBetween(contrat.dateDebut, asOfIso) / per) + 1;
     if (parse(contrat.dateFin || undefined)) {
       const total = Math.floor(monthsBetween(contrat.dateDebut, contrat.dateFin || undefined) / per) + 1;
