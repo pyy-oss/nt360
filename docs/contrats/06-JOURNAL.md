@@ -31,6 +31,30 @@
 
 ---
 
+## 2026-07-15 — Suite d'audit : interaction maintenance↔CRA (décisions direction 1A + 2A)
+
+**Fait** — clôture des deux constats de politique produit laissés en attente (B1/M1), après arbitrage
+direction (**1A + 2A**, ADR-018) :
+- Helper PUR `excludeMaintenance` (`domain/timesheet.js`) : écarte les CRA `source:"mnt"` d'une liste.
+- **B1 / 1A** — `timesheetKpis` + `taceHistory` (activité) : la contribution `mnt` est écartée **quand le
+  drapeau est éteint** → TACE/occupation redeviennent strictement celles d'avant le module.
+- **M1 / 2A** — `resourcePnl` (marge) + `preBillingFromCra` (pré-facturation) : contribution `mnt`
+  **toujours écartée** de la valorisation au TJM (les jours sont couverts par le forfait `montantEngage`,
+  ADR-005) → plus de double compte revenu.
+- Test PUR ajouté (`excludeMaintenance` + TACE sans la contribution mnt).
+
+**Appris sur l'existant**
+- `computeTaceTrend` calcule le TACE PAR MOIS (dénominateur 20 j fixe) → pas de biais « double-mois »
+  comme `computeConstat` ; seule la contribution `mnt` devait y être gatée par le drapeau (fait).
+
+**Décidé** — ADR-018 (interaction maintenance↔CRA : activité gatée par le drapeau, jamais valorisée au TJM).
+
+**Suivant** — correctif de lisibilité ClickUp (relabel admin.tsx) en PR séparée (hors module).
+
+**Vérif** : functions 869 (89 fichiers) · no-undef 117 · deploy-targets 146.
+
+---
+
 ## 2026-07-15 — Audit adverse du module (4 axes) + remédiation des constats certains
 
 **Fait** — audit adverse en 4 axes parallèles (sécurité/RBAC + extinction, cohérence des chiffres,

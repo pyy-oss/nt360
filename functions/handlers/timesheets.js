@@ -6,8 +6,15 @@
 // Fabrique `createTimesheets(deps)` à injection ; helpers PURS requis directement. Exports déclarés dans
 // index.js (garde-fou de déploiement par nom). Comportement identique à l'inline d'origine.
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
+const { isMntEnabled } = require("../domain/mntFeature");
+const { excludeMaintenance } = require("../domain/timesheet");
 
 function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM }) {
+  // Drapeau du module maintenance : lu à la demande. ÉTEINT ⇒ la contribution CRA « mnt » (ADR-013)
+  // est écartée des KPI d'activité (TACE/occupation) pour restaurer strictement l'ERP d'avant (1A).
+  async function mntEnabled() {
+    try { return isMntEnabled((await db.doc("config/mntFeature").get()).data()); } catch (e) { return false; }
+  }
   const upsertTimesheet = onCallG("upsertTimesheet", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "pipeline");
     const { validateTimesheet } = require("../domain/timesheet");
@@ -45,7 +52,9 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       db.collection("consultants").select("name", "status").limit(MAX_SCAN + 1).get(),
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct").limit(MAX_SCAN + 1).get(),
     ]);
-    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    let timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Drapeau maintenance éteint ⇒ la contribution « mnt » disparaît de TACE/occupation (ERP d'avant, 1A).
+    if (!(await mntEnabled())) timesheets = excludeMaintenance(timesheets);
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const nameById = Object.fromEntries(consultants.map((c) => [c.id, c.name || null]));
@@ -78,7 +87,8 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       db.collection("timesheets").limit(MAX_SCAN + 1).get(),
       db.collection("consultants").select("bu").limit(MAX_SCAN + 1).get(),
     ]);
-    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    let timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!(await mntEnabled())) timesheets = excludeMaintenance(timesheets); // ERP d'avant drapeau éteint (1A)
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const trend = computeTaceTrend(timesheets, consultants, months);
     return { ok: true, months, ...trend };
@@ -193,7 +203,9 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "status").limit(MAX_SCAN + 1).get(),
     ]);
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Valorisation au TJM : on ÉCARTE TOUJOURS la contribution « mnt » (jours couverts par le forfait du
+    // contrat, ADR-005 → jamais re-valorisés au TJM en marge, décision 2A), quel que soit le drapeau.
+    const timesheets = excludeMaintenance(sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })));
     const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const constat = computeConstat(timesheets, months);
     const byId = {};
@@ -230,7 +242,8 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "projectFp", "label", "status").limit(MAX_SCAN + 1).get(),
     ]);
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Pré-facturation au TJM : contribution « mnt » ÉCARTÉE (forfait, ADR-005 → pas de double facturation, 2A).
+    const timesheets = excludeMaintenance(sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })));
     const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const result = computePreBilling(consultants, timesheets, assignments, months);
     return { ok: true, months, ...result };

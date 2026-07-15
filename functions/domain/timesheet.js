@@ -73,4 +73,13 @@ function computeConstat(timesheets, months) {
   return { global, rows: list.sort((a, b) => a.tacePct - b.tacePct) };
 }
 
-module.exports = { WORKING_DAYS_PER_MONTH, validateTimesheet, tace, occupancy, computeConstat };
+// Contribution du module maintenance au CRA (ADR-013) : docs `source:"mnt"`. `excludeMaintenance`
+// les écarte d'une liste de CRA. Utilisé (1) quand le drapeau maintenance est ÉTEINT — pour restaurer
+// STRICTEMENT l'ERP d'avant (TACE/occupation, décision 1A) — et (2) TOUJOURS pour la valorisation au
+// TJM (marge par ressource, pré-facturation), car les jours de maintenance sont couverts par le forfait
+// du contrat (montantEngage, ADR-005) et ne doivent pas être re-valorisés au TJM (décision 2A). PUR.
+const MNT_SOURCE = "mnt";
+const isMaintenanceTimesheet = (t) => !!t && t.source === MNT_SOURCE;
+const excludeMaintenance = (rows) => (Array.isArray(rows) ? rows.filter((t) => !isMaintenanceTimesheet(t)) : []);
+
+module.exports = { WORKING_DAYS_PER_MONTH, MNT_SOURCE, validateTimesheet, tace, occupancy, computeConstat, isMaintenanceTimesheet, excludeMaintenance };

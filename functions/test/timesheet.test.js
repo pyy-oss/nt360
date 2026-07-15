@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateTimesheet, tace, occupancy, computeConstat } from "../domain/timesheet.js";
+import { validateTimesheet, tace, occupancy, computeConstat, excludeMaintenance, isMaintenanceTimesheet } from "../domain/timesheet.js";
 
 describe("validateTimesheet (Lot 15 CRA)", () => {
   it("consultant + mois requis", () => {
@@ -56,6 +56,22 @@ describe("computeConstat — agrégat constaté", () => {
     expect(c1.billedDays).toBe(18);          // 15 + 3 additionnés
     // TACE = 18 / (1×20 − 2 congés = 18) = 100 % — et non 18 / (2×20 − 2 = 38) = 47 % (bug corrigé)
     expect(c1.tacePct).toBe(100);
+  });
+
+  it("excludeMaintenance écarte les CRA source=mnt (décisions 1A/2A) et garde les autres", () => {
+    const rows = [
+      { consultantId: "c1", month: "2026-01", billedDays: 15 },                 // manuel (source absent)
+      { consultantId: "c1", month: "2026-01", billedDays: 3, source: "mnt" },   // maintenance
+      { consultantId: "c2", month: "2026-01", billedDays: 10, source: "manual" },
+    ];
+    expect(isMaintenanceTimesheet({ source: "mnt" })).toBe(true);
+    expect(isMaintenanceTimesheet({ source: "manual" })).toBe(false);
+    const kept = excludeMaintenance(rows);
+    expect(kept).toHaveLength(2);
+    expect(kept.some((t) => t.source === "mnt")).toBe(false);
+    // Sans la contribution mnt, c1 sur janvier = 15 j / 20 = 75 % (la maintenance ne compte plus).
+    const r = computeConstat(kept, ["2026-01"]);
+    expect(r.rows.find((x) => x.consultantId === "c1").tacePct).toBe(75);
   });
 
   it("borne le TACE constaté à 100 % (jours facturés > jours ouvrables du modèle)", () => {
