@@ -164,6 +164,19 @@ describe("pipeline — pondéré = PROJECTION tiérée (100/20/10), conversion",
     expect(oa.dPlus.count).toBe(0);
     expect(pc.closing.avgOverdueDays).toBe(30); // round((45 + 14) / 2)
   });
+  it("pondéré NET du carnet : une opp active dont le FP est déjà commande est exclue de la projection (parité chaine/atterrissage)", () => {
+    // o6 (IdC 0.95 → 100 % · 1000) porte FP/2026/9 ; une commande sur ce FP la « booke » → déjà au CAS.
+    const opps = OPPS.map((o) => (o.oppId === "o6" ? { ...o, fp: "FP/2026/9" } : o));
+    const base = pipeline(opps);            // sans orders → aucune exclusion
+    const net = pipeline(opps, undefined, undefined, [{ fp: "FP/2026/0009" }]); // FP canonique (zéros de tête)
+    expect(base.tot.weighted).toBe(1050);   // o6 (1000) + o1 (50)
+    expect(net.tot.weighted).toBe(50);      // o6 retirée du pondéré (déjà au carnet), o1 conservée
+    expect(net.tot.count).toBe(3);          // funnel actif BRUT inchangé (o1, o2, o6)
+    expect(net.byAM.DATCHA).toBe(50);       // pondéré AM net du carnet
+    const datcha = net.byAmConv.find((x) => x.am === "DATCHA");
+    expect(datcha.activeCount).toBe(2);     // activeCount reste brut (o1 + o6)
+    expect(datcha.weighted).toBe(50);       // weighted net du carnet
+  });
 });
 
 describe("suppliers — SOA : solde (facturé) vs engagement (§18.6)", () => {

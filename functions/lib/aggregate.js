@@ -330,7 +330,7 @@ async function recomputeCore(db, only) {
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  const plSummary = pipeline(opps, asOf, tiers); // réutilisé par l'Actualité (couverture, closing, conversion…)
+  const plSummary = pipeline(opps, asOf, tiers, orders); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, ...stamp } }); // global (rétro-compat)
   let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
@@ -628,7 +628,8 @@ async function recomputeCore(db, only) {
       w.push({ path: `summaries/overview_${period}`, data: { period, ...ovRest, ratios: { tauxFacturation: ovR.tauxFacturation, tauxConversionVente: ovR.tauxConversionVente }, ...stamp } });
       w.push({ path: `summaries/overviewMargin_${period}`, data: { period, mb: ovMb, pmb: ovR.pmb, ...stamp } });
     }
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers), ...stamp } });
+    // `ord` (commandes de la période) → exclusion « déjà au carnet » IDENTIQUE à overview_${period} (parité Certitudes/Commit).
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord), ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec

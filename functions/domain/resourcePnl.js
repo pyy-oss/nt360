@@ -6,16 +6,40 @@
 // Fonctions PURES (aucun I/O) → testables.
 
 const WORKING_DAYS_PER_MONTH = 20; // cohérent avec activityKpi / timesheet
+const { coveringRate } = require("./preBilling");
+
+// CA réel d'un consultant = jours FACTURÉS × TJM. PARITÉ STRICTE avec la pré-facturation (preBilling) :
+// TJM = taux CONTRACTUALISÉ de l'affectation couvrant CHAQUE mois (coveringRate, non ambigu) en priorité,
+// repli sur le TJM cible de l'annuaire. Sans `ctx` (byMonth + assignments), repli historique = billed ×
+// tjmTarget. Sans cette parité, Rentabilité et Pré-facturation affichaient DEUX « CA » différents pour le
+// même consultant (target vs contrat). Renvoie { caReal, hasRate }.
+function realRevenue(consultant, agg, ctx) {
+  const tjmTarget = Number(consultant && consultant.tjmTarget);
+  const targetOk = Number.isFinite(tjmTarget) && tjmTarget > 0;
+  const rows = ctx && ctx.byMonth ? ctx.byMonth[consultant.id] : null;
+  if (!rows || !rows.length) {
+    // Repli période-globale (rétro-compat / pas de détail mensuel) : billed × TJM cible.
+    const billed = Number(agg && agg.billedDays) || 0;
+    return { caReal: targetOk ? Math.round(billed * tjmTarget) : 0, hasRate: targetOk };
+  }
+  let caReal = 0, hasRate = false;
+  for (const m of rows) { // { month, billedDays }
+    const cover = coveringRate(ctx.assignments, consultant.id, m.month);
+    const tjm = cover.tjm != null ? cover.tjm : (targetOk ? tjmTarget : null);
+    if (tjm != null) { hasRate = true; caReal += Math.round((Number(m.billedDays) || 0) * tjm); }
+  }
+  return { caReal, hasRate };
+}
 
 // P&L d'un consultant. `agg` = { billedDays, months } issu du CRA (computeConstat). tjm/cjm de l'annuaire.
-function consultantPnl(consultant, agg) {
+// `ctx` (optionnel) = { byMonth: {id:[{month,billedDays}]}, assignments } → CA au taux contractualisé.
+function consultantPnl(consultant, agg, ctx) {
   const billed = Number(agg && agg.billedDays) || 0;
   const monthsN = Math.max(0, Number(agg && agg.months) || 0);
-  const tjm = Number(consultant && consultant.tjmTarget);
   const cjm = Number(consultant && consultant.cjm);
-  const missingTjm = !Number.isFinite(tjm);
+  const { caReal, hasRate } = realRevenue(consultant, agg, ctx);
+  const missingTjm = !hasRate; // aucun taux exploitable (ni contrat couvrant, ni TJM cible)
   const missingCjm = !Number.isFinite(cjm);
-  const caReal = missingTjm ? 0 : Math.round(billed * tjm);
   const cost = missingCjm ? null : Math.round(monthsN * WORKING_DAYS_PER_MONTH * cjm);
   const margin = cost != null ? caReal - cost : null;
   const marginPct = cost != null && caReal > 0 ? Math.round(margin / caReal * 100) : null;
@@ -46,10 +70,12 @@ function sumBy(rows, keyFn) {
 }
 
 // Rentabilité de tout l'effectif renseigné au CRA sur la plage. `constatByConsultant` = { id: {billedDays, months} }.
-function computeResourcePnl(consultants, constatByConsultant) {
+// `ctx` (optionnel) = { byMonth: {id:[{month,billedDays}]}, assignments } → CA au taux contractualisé (parité
+// pré-facturation). Sans lui, CA = billed × TJM cible (rétro-compat).
+function computeResourcePnl(consultants, constatByConsultant, ctx) {
   const rows = (consultants || [])
     .filter((c) => constatByConsultant && constatByConsultant[c.id])
-    .map((c) => consultantPnl(c, constatByConsultant[c.id]))
+    .map((c) => consultantPnl(c, constatByConsultant[c.id], ctx))
     .sort((a, b) => (b.margin || 0) - (a.margin || 0));
   const totCa = rows.reduce((s, r) => s + r.caReal, 0);
   const withCost = rows.filter((r) => r.cost != null);

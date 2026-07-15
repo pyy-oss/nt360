@@ -24,7 +24,8 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
   // orders.fp est canonisé (mergeCommandes), invoices.fp reste au format source → sans fpKey, une facture
   // au FP formaté autrement n'est pas rattachée à son AM → CAF par commercial sous-comptée.
   const amOfFp = {};
-  for (const o of orders || []) { const k = fpKey(o.fp); if (k) amOfFp[k] = normAm(o.am); }
+  const bookedFps = new Set();
+  for (const o of orders || []) { const k = fpKey(o.fp); if (k) { amOfFp[k] = normAm(o.am); bookedFps.add(k); } }
 
   const objByAm = {};
   for (const ob of objectives || []) {
@@ -50,8 +51,11 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
       const active = myOpps.filter((o) => o.stage >= 1 && o.stage <= 5);
       const won = myOpps.filter((o) => o.stage === 6).length;
       const lost = myOpps.filter((o) => o.stage === 7).length;
-      // « Pondéré » = PROJECTION tiérée (défauts 100/20/5, configurables en Habilitations), cohérent avec pipeline/atterrissage.
-      const pipelinePondere = sum(active, pw);
+      // « Pondéré » = PROJECTION tiérée (défauts 100/20/5, configurables en Habilitations), cohérent avec pipeline/
+      // atterrissage : NET du carnet — une opp active dont le FP porte déjà une commande est déjà dans le CAS,
+      // l'inclure ici la double-compterait (parité chaine/atterrissage.alreadyBooked). activeCount reste brut.
+      const projActive = active.filter((o) => { const k = fpKey(o.fp); return !(k && bookedFps.has(k)); });
+      const pipelinePondere = sum(projActive, pw);
 
       const ob = objByAm[am.toUpperCase()];
       const targetCas = ob ? ob.targetCas || 0 : 0;

@@ -214,8 +214,11 @@ service cloud.firestore {
     match /config/notifications { allow read: if canWrite('habilitations'); allow write: if false; }
     // config/outboundWebhooks (Lot 7b) contient l'URL du webhook sortant (sensible) → habilitations.
     match /config/outboundWebhooks { allow read: if canWrite('habilitations'); allow write: if false; }
-    // Table d'alias de normalisation clients : éditée via setClientAliases, lue par l'écran Admin.
-    match /config/clientAliases { allow read: if canWrite('habilitations'); allow write: if false; }
+    // Table d'alias de normalisation clients (nom→nom, donnée NON sensible — les noms clients
+    // apparaissent déjà partout, comme fpAliases) : éditée via setClientAliases, LUE au niveau
+    // « overview » pour que le filtre client transverse canonicalise EN MIROIR du serveur (sinon
+    // une vue filtrée sous-compte vs l'agrégat serveur). L'édition reste réservée à la direction.
+    match /config/clientAliases { allow read: if canRead('overview'); allow write: if false; }
     // Overlays d'annulation (statut « Annulée » persistant, hors delta) : ids exclus des agrégats,
     // édités via setCancellation. Lisibles AU NIVEAU DU MODULE (cloisonnement) — les commandes à
     // « overview », les factures à « facturation » (pas de fuite de libellé facturation ailleurs).

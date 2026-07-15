@@ -63,4 +63,12 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     const d = r.find((x) => x.am === "DATCHA");
     expect(d.facture).toBe(500); // 400 + 100 rattachés malgré le formatage
   });
+  it("pondéré NET du carnet : une opp active dont le FP est déjà commande est exclue (parité pipeline/atterrissage)", () => {
+    // La commande FP/2026/1 (DATCHA) « booke » l'opp active portant ce FP → déjà au CAS, hors pondéré.
+    const o = [{ fp: "FP/2026/1", am: "DATCHA", cas: 1000, yearPo: 2026 }];
+    const op = [{ am: "DATCHA", stage: 3, probability: 0.95, amount: 1000, fp: "FP/2026/0001" }];
+    const d = am360(o, [], op, [], 2026).rows.find((x) => x.am === "DATCHA");
+    expect(d.pipelinePondere).toBe(0); // opp au carnet retirée du pondéré
+    expect(d.activeCount).toBe(1);     // funnel actif BRUT inchangé
+  });
 });

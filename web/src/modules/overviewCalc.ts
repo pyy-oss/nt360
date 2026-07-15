@@ -19,8 +19,15 @@ export function computeFilteredOverview(
   cmdRows: Order[], invoices: Invoice[], opps: Opportunity[], period: string,
   match: (row: { bu?: string; am?: string; client?: string }, dims?: Dim[]) => boolean,
   tiers?: Tier[], fpAliasMap?: Record<string, string> | null,
+  clientKey?: (raw?: string | null) => string,
 ): FilteredOverview {
   const t = tiers || normalizeTiers();
+  // CANONICALISATION du client EN MIROIR du serveur (aggregate.js normalise les noms au recompute ; les
+  // options du filtre = clés canoniques de clients_all). Sans elle, filtrer un client dont la graphie brute
+  // ≠ canonique (accents, forme juridique, « CI », alias) fait tomber Certitudes/pondéré à zéro alors que le
+  // serveur regroupe tout → divergence. On enveloppe `match` : la comparaison porte sur le nom canonique.
+  const ck = clientKey || ((s?: string | null) => (s || "").toUpperCase());
+  const m = (row: { bu?: string; am?: string; client?: string }, dims?: Dim[]) => match({ ...row, client: ck(row.client) }, dims);
   // RÉCONCILIATION N° FP (overlay config/fpAliases) EN MIROIR du serveur (aggregate.js:158-164) : le
   // recompute redirige le FP des opps/factures BRUTES vers le FP du P&L AVANT l'overview. Les cmdRows sont
   // déjà canoniques (bakés serveur) ; on aligne ici opps + factures, sinon une opp aliasée n'est pas vue
@@ -47,8 +54,8 @@ export function computeFilteredOverview(
   opps = oppsActive.filter((o) => { if (o.source !== "saisie") return true; const k = fpKey(o.fp); return !(k && salesFps.has(k)); });
   // Commandes du périmètre = cohorte par année de PO ; backlog GLISSANT = toutes les commandes
   // ouvertes du périmètre (indépendant de la période).
-  const ordP = cmdRows.filter((o) => inPeriod(String(o.yearPo || "")) && match(o, DIMS));
-  const ordAll = cmdRows.filter((o) => match(o, DIMS));
+  const ordP = cmdRows.filter((o) => inPeriod(String(o.yearPo || "")) && m(o, DIMS));
+  const ordAll = cmdRows.filter((o) => m(o, DIMS));
   // Attribution des factures au périmètre via leur commande (FP CANONIQUE) ; repli bu/client de la facture.
   const byFp = new Map<string, Order>();
   for (const o of cmdRows) { const k = fpKey(o.fp); if (k) byFp.set(k, o); }
@@ -56,9 +63,9 @@ export function computeFilteredOverview(
     if (!inPeriod(yr(i.date))) return false;
     const k = fpKey(i.fp);
     const o = k ? byFp.get(k) : undefined;
-    return match({ bu: o?.bu ?? i.bu, am: o?.am, client: o?.client ?? i.client }, DIMS);
+    return m({ bu: o?.bu ?? i.bu, am: o?.am, client: o?.client ?? i.client }, DIMS);
   });
-  const oppP = opps.filter((o) => inPeriod(yr(o.closingDate)) && match(o, DIMS));
+  const oppP = opps.filter((o) => inPeriod(yr(o.closingDate)) && m(o, DIMS));
   const commandes = S(ordP, (o) => o.cas);
   const backlog = S(ordAll, (o) => Math.max(o.raf || 0, 0));
   const backlogCount = ordAll.filter((o) => (o.raf || 0) > 0).length;

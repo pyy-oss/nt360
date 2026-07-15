@@ -201,7 +201,7 @@ export async function listCandidates() {
 }
 
 // RENTABILITÉ PAR RESSOURCE (Lot 17) — P&L par consultant (confidentiel, droit « rentabilité »).
-export type ResourcePnlRow = { id: string; name: string | null; bu: string | null; grade: string | null; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+export type ResourcePnlRow = { id: string; name: string | null; bu: string | null; grade: string | null; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null; missingTjm: boolean; missingCjm: boolean };
 export type ResourcePnlGroup = { key: string; headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
 export type ResourcePnl = {
   ok: boolean; months: string[];

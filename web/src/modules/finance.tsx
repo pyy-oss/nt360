@@ -10,6 +10,7 @@ import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
+import { useClientKey } from "../lib/clientName";
 import { frDate } from "../lib/format";
 import { marginWaterfall } from "../lib/waterfall";
 import { MARGIN } from "../lib/thresholds";
@@ -173,7 +174,8 @@ export const InvoiceList: FC<Props> = () => {
   const { data: cxl } = useDocData<CancellationsDoc>("config/cancelInvoices");
   const cancelled = new Set((cxl?.items || []).map((e) => e.id));
   const { match } = useFilters();
-  const rows = allRows.filter((r) => match(r, ["bu", "client"])); // les factures ne portent pas d'AM
+  const clientKey = useClientKey(); // canonicalise le client (miroir serveur) pour matcher l'option canonique
+  const rows = allRows.filter((r) => match({ ...r, client: clientKey(r.client) }, ["bu", "client"])); // les factures ne portent pas d'AM
   const canImport = useCanImport();
   const { intent } = useNav();
   const [f, setF] = useState<"all" | "linked" | "orphan">(intent?.segment === "orphan" ? "orphan" : "all");
@@ -306,7 +308,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         <Card title={`${baseLbl} vs MB par commercial (AM)`}>
           {(p.byAm || []).length
             ? <GroupedBars data={(p.byAm || []).slice(0, 10).map((a) => ({ name: a.am, [baseLbl]: a.base, MB: a.mb }))} series={[{ key: baseLbl, color: T.steel, name: baseLbl }, { key: "MB", color: T.gold, name: "MB" }]} />
-            : <EmptyState label="Pas de commercial renseigné." />}
+            : <EmptyState label="Aucun commercial renseigné." />}
         </Card>
       </div>
       <MarginWaterfall byBu={p.byBu || []} />
