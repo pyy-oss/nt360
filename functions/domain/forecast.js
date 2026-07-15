@@ -13,13 +13,18 @@ const LOST_STAGE = 7;  // Perdu
 // comme « omitted » (parité avec l'assiette `active` du cockpit, overviewCalc : stage ∈ [1..5]).
 const OPEN_MIN = 1, OPEN_MAX = 5;
 
-// Catégorie par défaut d'une opportunité (si le commercial n'en a pas posé) : gagné → commit,
-// ouverte active (1-5) → pipeline, tout le reste (perdu/suspendu/annulé) → omitted (hors prévision).
-// AVANT : stage 8/9 retombait sur « pipeline » et gonflait à tort le pipeline prévisionnel.
+// Catégorie par défaut d'une opportunité quand le commercial n'en a POSÉ aucune. Dérivée de l'ÉTAPE
+// d'avancement (le commercial garde la main : une catégorie posée prime toujours, cf. effectiveCategory) :
+//   5-Contractualisation → commit (quasi-engagé)  ·  4-Négociation → best_case  ·  1-3 → pipeline.
+// Le gagné (6) est porté par le carnet (rollup l'ignore) ; perdu/suspendu/annulé (7/8/9) et tout millésime
+// hors [1..5] → omitted (hors prévision). AVANT : toute ouverte retombait sur « pipeline » → Commit et Best
+// Case restaient collés au carnet (paliers indifférenciés) ; et 8/9 gonflaient à tort le pipeline.
 function defaultCategory(opp) {
   const stage = Number(opp && opp.stage) || 0;
   if (stage === WON_STAGE) return "commit";
-  if (stage >= OPEN_MIN && stage <= OPEN_MAX) return "pipeline";
+  if (stage === 5) return "commit";
+  if (stage === 4) return "best_case";
+  if (stage >= OPEN_MIN && stage <= 3) return "pipeline";
   return "omitted";
 }
 

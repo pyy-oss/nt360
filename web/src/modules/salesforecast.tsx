@@ -46,7 +46,7 @@ export const SalesForecast: FC<Props> = ({ period }) => {
               <Bar label="Best Case" value={r.bestCase} max={max} tone="bg-steel" sub={`+${r.counts.bestCase}`} />
               <Bar label="Pipeline" value={r.pipeline} max={max} tone="bg-ink/40" sub={`+${r.counts.pipeline}`} />
             </div>
-            <Tip><b>Closed (gagné)</b> = carnet de commandes de l'exercice (CAS, millésime de la commande) — même source que la Vue d'ensemble. Les paliers <b>cumulatifs</b> au-dessus (Commit ⊆ Best Case ⊆ Pipeline) ajoutent les opportunités <b>ouvertes</b> selon la catégorie posée par le commercial dans la fiche — indépendante de l'étape (tant qu'aucune n'est engagée, Commit et Best Case restent au niveau du carnet). Le quota est l'objectif CAS de l'exercice (paramétré dans Objectifs).</Tip>
+            <Tip><b>Closed (gagné)</b> = carnet de commandes de l'exercice (CAS, millésime de la commande) — même source que la Vue d'ensemble. Les paliers <b>cumulatifs</b> au-dessus (Commit ⊆ Best Case ⊆ Pipeline) ajoutent les opportunités <b>ouvertes</b> selon leur catégorie de prévision : par défaut dérivée de l'étape (<b>5-Contractualisation → Commit</b>, <b>4-Négociation → Best Case</b>, <b>1-3 → Pipeline</b>), que le commercial peut <b>surcharger</b> dans la fiche. Le quota est l'objectif CAS de l'exercice (paramétré dans Objectifs).</Tip>
           </div>
         )}
       </Card>
