@@ -1255,6 +1255,10 @@ const { createMaintenance } = require("./handlers/maintenance");
 const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
+exports.upsertMntTicket = _maintenance.upsertMntTicket;
+exports.deleteMntTicket = _maintenance.deleteMntTicket;
+exports.upsertMntIntervention = _maintenance.upsertMntIntervention;
+exports.deleteMntIntervention = _maintenance.deleteMntIntervention;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique

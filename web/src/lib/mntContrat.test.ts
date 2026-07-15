@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STATUT_LABEL, COUVERTURE_LABEL, statutTone, label } from "./mntContrat";
+import { STATUT_LABEL, COUVERTURE_LABEL, statutTone, label, PRIORITE_LABEL, prioriteTone, ticketStatutTone } from "./mntContrat";
 
 describe("mntContrat (front) — libellés & tons", () => {
   it("libellés FR des statuts / couvertures", () => {
@@ -17,5 +17,12 @@ describe("mntContrat (front) — libellés & tons", () => {
     expect(label(STATUT_LABEL, undefined)).toBe("—");
     expect(label(STATUT_LABEL, "actif")).toBe("Actif");
     expect(label(STATUT_LABEL, "zzz")).toBe("zzz");
+  });
+  it("tickets : libellés + tons de priorité sur la palette de risque (ADR-008/014)", () => {
+    expect(PRIORITE_LABEL.critique).toBe("Critique");
+    expect(prioriteTone("basse")).toBe("emerald");
+    expect(prioriteTone("critique")).toBe("plum");
+    expect(ticketStatutTone("resolu")).toBe("emerald");
+    expect(ticketStatutTone("clos")).toBe("neutral");
   });
 });

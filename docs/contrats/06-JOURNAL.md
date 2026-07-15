@@ -31,6 +31,61 @@
 
 ---
 
+## 2026-07-15 — Lot 2 (Tickets & interventions)
+
+**Fait**
+- Domaine PUR `functions/domain/mntTicket.js` : `validateTicket`/`validateIntervention` + énumérations
+  (statuts, 4 priorités) + conversion CRA (`craDaysFromHours`, `monthOf`, `HOURS_PER_DAY=8`).
+- Handler `handlers/maintenance.js` étendu : callables `upsert/deleteMntTicket`,
+  `upsert/deleteMntIntervention`. Chaque intervention **alimente le CRA** via `refreshCra` (doc
+  `timesheets/mnt_<consultant>_<mois>`, source « mnt », additif, sans collision — ADR-013). Double
+  garde RBAC + drapeau conservée ; `auditLog` 6 champs.
+- `index.js` : +4 exports ; `deployed-functions.txt` : +4 (garde CI verte, 144 fns).
+- Front : types `MntTicket`/`MntIntervention`, wrappers `writes.ts`, libellés/tons tickets
+  (`lib/mntContrat.ts`, priorité sur palette risque — ADR-014). Écran `maintenance.tsx` : carte
+  Tickets (Table) + fiche ticket (Modal) avec éditeur d'interventions (consultant via `listConsultants`,
+  date `DateField`, heures, suppression). Contrats inchangés.
+
+**Filet / vérif — TOUT VERT**
+- `functions` **843** (+`mntTicket.test.js`), `web` **82**, `test:rules` **68** (inchangé — CRA écrit
+  en Admin SDK), build OK, **chunk d'entrée 115,3 KB ≤ 120**, no-undef (114), deploy-targets (**144**),
+  indexes, lint : verts.
+
+**Points de contact touchés**
+- **C4** (déploiement) : +4 callables, `deployed-functions.txt` à jour.
+- **C11** : `fpKey` dans la validation ticket/intervention.
+- **CRA / TACE (contact avec l'existant)** : l'intervention écrit un doc CRA maintenance DISTINCT
+  (`mnt_<consultant>_<mois>`, source « mnt ») qui **s'additionne** dans `computeConstat` sans collision.
+  Drapeau éteint ⇒ pas d'intervention ⇒ **TACE strictement inchangée** (garantie « éteint = ERP d'avant »).
+- **C9** : aucun index ajouté (requête `where consultantId ==`, index automatique Firestore).
+- **C2** : rules inchangées (blocs `mnt_tickets`/`mnt_interventions` déjà posés Lot 0 ; écritures callable).
+
+**Appris sur l'existant**
+- `computeConstat` (`domain/timesheet.js:46`) somme `billedDays` **par consultant sur tous les docs**
+  du mois (pas par id) → un doc CRA à id distinct s'additionne proprement. C'est ce qui rend l'alimentation
+  du CRA sûre et non destructrice. *(complète 01-EXISTANT §5)*
+- `consultants` est callable-only (rules read:false) → l'écran charge la liste via `listConsultants`
+  (droit `overview`), pas via `useCollectionData`.
+
+**Échoué / abandonné**
+- Rien. (TS : `Consultant.id` optionnel → normalisation à la charge de la liste consultants.)
+
+**Dette assumée**
+- **Suppression d'un ticket ne cascade pas** ses interventions (elles restent + leur contribution CRA).
+  À traiter (cascade ou blocage) si l'usage le réclame. Noté.
+- Pas de test E2E du callable d'intervention sous émulateur Functions (`test:rules` ne monte que
+  Firestore) : la conversion CRA est couverte par le **domaine** (`craDaysFromHours`) + le chemin
+  `computeConstat` existant. Dette identique aux lots précédents.
+- Taux **8 h/jour** codé (ADR-013) faute de référentiel d'horaires — paramétrable plus tard.
+
+**Décidé**
+- ADR-013 (alimentation CRA, 8 h = 1 j, doc distinct), ADR-014 (4 priorités, palette risque).
+
+**Suivant**
+- Validation + fusion, puis `/5-lot 3` (Événements SLA & échéancier).
+
+---
+
 ## 2026-07-15 — Lot 1 (Contrat & engagements SLA — données)
 
 **Fait**
