@@ -122,6 +122,7 @@ export interface ClickupHealthSummary {
   orphanSample?: { id?: string; name?: string; fp?: string | null }[];
   duplicateSample?: { fp?: string; count?: number }[];
   listId?: string; at?: any;
+  lastError?: string; lastErrorAt?: any; // raison persistée du dernier échec de vérification ClickUp (API-side)
 }
 export type TrendPoint = { date: string; casReel?: number; caf?: number; backlog?: number; pipeline?: number; projeteCas?: number; projeteCaf?: number; fy?: number };
 export interface TrendsSummary { points?: TrendPoint[] }

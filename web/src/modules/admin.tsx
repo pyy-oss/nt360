@@ -657,7 +657,15 @@ const CLICKUP_LISTS = [
 ];
 // Cockpit de QUALITÉ de l'intégration ClickUp : couverture, tâches orphelines, écarts CAF, synchro.
 function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }) {
-  if (!health || health.commandesTotal == null) return null;
+  if (!health) return null;
+  // Bandeau d'échec de la dernière vérification (raison PERSISTÉE par le callable clickupHealth) — rend
+  // la cause VISIBLE au lieu d'un KO muet dans le journal. Affiché même si aucune synchro n'a jamais réussi.
+  const errBanner = health.lastError ? (
+    <div className="mb-2 rounded-lg border border-clay/40 bg-clay/5 px-3 py-2 text-[12px] text-clay">
+      Dernière vérification ClickUp échouée : <b>{health.lastError}</b>
+    </div>
+  ) : null;
+  if (health.commandesTotal == null) return errBanner ? <div className="mt-3">{errBanner}</div> : null;
   const money = (n?: number) => (n ? (n / 1e6).toFixed(1) + " M" : "0");
   const Metric = ({ label, value, tone, sub }: { label: string; value: string | number; tone?: string; sub?: string }) => (
     <div className="rounded-lg bg-panel2 border border-line px-3 py-2">
@@ -669,6 +677,7 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
   const cov = health.coverage || 0;
   return (
     <div className="mt-3">
+      {errBanner}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Metric label="Couverture" value={`${cov}%`} tone={cov >= 90 ? "text-emerald" : cov >= 50 ? "text-gold" : "text-clay"} sub={`${health.linked}/${health.commandesTotal} liées`} />
         <Metric label="Commandes non liées" value={health.unlinked || 0} tone={(health.unlinked || 0) > 0 ? "text-gold" : "text-emerald"} sub={`dont ${health.unlinkedMatchable || 0} rattachables`} />
