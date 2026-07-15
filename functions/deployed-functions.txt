@@ -12,6 +12,7 @@ api
 attachUser
 clickupHealth
 clickupWebhook
+clientNames
 correctionQueue
 createApiKey
 createOrder

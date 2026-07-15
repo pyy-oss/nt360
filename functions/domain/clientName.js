@@ -46,4 +46,28 @@ function buildClientResolver(pairs) {
   };
 }
 
-module.exports = { canonicalKey, buildClientResolver, LEGAL, COUNTRY };
+/** ATELIER DE NORMALISATION — regroupe des noms clients BRUTS par leur CIBLE CANONIQUE EFFECTIVE
+ *  (règles déterministes `canonicalKey` + alias `config/clientAliases`). Donne l'inventaire à normaliser :
+ *  quelles graphies se rejoignent déjà, lesquelles restent isolées, et où un alias a été posé.
+ *  @param {{name:string,count?:number}[]} names comptes agrégés par nom brut (tous docs confondus)
+ *  @param {{from:string,to:string}[]} aliasPairs table config/clientAliases.pairs
+ *  @returns {{canon:string, variants:{name:string,count:number,aliased:boolean}[], total:number, distinct:number, hasVariants:boolean}[]}
+ */
+function groupClientNames(names, aliasPairs) {
+  const resolver = buildClientResolver(aliasPairs);           // nom brut → cible canonique finale
+  const aliasedKeys = new Set((aliasPairs || []).map((p) => canonicalKey(p && p.from)).filter(Boolean));
+  const groups = {};
+  for (const n of names || []) {
+    const raw = String((n && n.name) || "");
+    if (!raw.trim()) continue;
+    const canon = resolver(raw);
+    const g = groups[canon] || (groups[canon] = { canon, variants: [], total: 0 });
+    g.variants.push({ name: raw, count: Number(n && n.count) || 0, aliased: aliasedKeys.has(canonicalKey(raw)) });
+    g.total += Number(n && n.count) || 0;
+  }
+  return Object.values(groups)
+    .map((g) => ({ ...g, variants: g.variants.sort((a, b) => b.count - a.count), distinct: g.variants.length, hasVariants: g.variants.length > 1 }))
+    .sort((a, b) => b.total - a.total);
+}
+
+module.exports = { canonicalKey, buildClientResolver, groupClientNames, LEGAL, COUNTRY };

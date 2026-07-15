@@ -52,6 +52,7 @@ const Codir = from(() => import("./codir"), "Codir");
 const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
+const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -86,6 +87,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "bc", key: "bc", label: "Exécution BC", icon: ClipboardList, Component: BC },
   { id: "client360", key: "overview", label: "Client 360", icon: Contact, Component: Client360 },
   { id: "clients", key: "clients", label: "Clients", icon: Users, Component: Clients },
+  { id: "clientnorm", key: "import", label: "Normalisation clients", icon: Users, Component: ClientNorm },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
   { id: "cleanup", key: "import", label: "Qualité & correction", icon: Eraser, Component: Cleanup },
@@ -103,7 +105,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
-  { label: "Référentiels", ids: ["client360", "clients", "domaines"] },
+  { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "domaines"] },
   { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },
 ];
 

@@ -141,6 +141,16 @@ function splitCols(cols: Col[]): { primary: Col[]; detail: Col[] } {
   return { primary, detail };
 }
 
+// Cellule principale (partagée Table + ListView) : `.cell-txt` (nowrap + troncature) sauf colonnes
+// alignées à droite / d'action / `raw` (contenu riche auto-géré).
+function PrimaryCell({ c, r }: { c: Col; r: any }) {
+  return (
+    <td data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
+      {c.align === "right" || isActionCol(c) || c.raw ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
+    </td>
+  );
+}
+
 // Grille clé/valeur du détail d'une ligne (colonnes secondaires). Responsive, lisible, premium.
 function DetailGrid({ cols, row }: { cols: Col[]; row: any }) {
   return (
@@ -289,11 +299,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
                         </button>
                       </td>
                     )}
-                    {primary.map((c, ci) => (
-                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
-                        {c.align === "right" || isActionCol(c) || c.raw ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
-                      </td>
-                    ))}
+                    {primary.map((c, ci) => <PrimaryCell key={ci} c={c} r={r} />)}
                   </tr>
                   {hasDetail && isOpen && (
                     <tr className="bg-panel2/40">
@@ -306,22 +312,23 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
           </tbody>
         </table>
       </div>
-      {paged && (
+      {paged && (() => {
+        const pbtn = "btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none";
+        return (
         <div className="flex items-center justify-between gap-2 text-xs text-muted">
           <span className="tabnum">{safePage * pageSize + 1}–{Math.min(safePage * pageSize + pageSize, total)} sur {total}</span>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={safePage <= 0}
-              className="btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none" aria-label="Page précédente">
+            <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={safePage <= 0} className={pbtn} aria-label="Page précédente">
               <ChevronLeft size={14} aria-hidden="true" />Préc.
             </button>
             <span className="tabnum px-1" aria-live="polite">{safePage + 1} / {pageCount}</span>
-            <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1}
-              className="btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none" aria-label="Page suivante">
+            <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className={pbtn} aria-label="Page suivante">
               Suiv.<ChevronRight size={14} aria-hidden="true" />
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -468,11 +475,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                         ) : null}
                       </td>
                     )}
-                    {primary.map((c, ci) => (
-                      <td key={ci} data-label={c.header} className={cx("px-3 py-2 border-t border-line/60 tabnum align-middle", c.align === "right" ? "text-right whitespace-nowrap" : "text-left")}>
-                        {c.align === "right" || isActionCol(c) || c.raw ? c.render(r) : <span className="cell-txt">{c.render(r)}</span>}
-                      </td>
-                    ))}
+                    {primary.map((c, ci) => <PrimaryCell key={ci} c={c} r={r} />)}
                   </tr>
                   {isOpen && detail && (
                     <tr className="bg-panel2/40">
