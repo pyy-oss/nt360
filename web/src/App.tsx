@@ -11,6 +11,7 @@ import { NavContext, useNav, type NavIntent } from "./lib/nav";
 import { FilterProvider, useFilters } from "./lib/filters";
 import { FilterBar, FreshnessGuard } from "./modules/_shared";
 import { MODULES, GROUPS } from "./modules";
+import { moduleFlagOn, type MntFeature } from "./lib/mntFeature";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
   const Comp = mod.Component;
@@ -30,6 +31,9 @@ export default function App() {
   const { user, role, loading } = useClaims();
   const can = useCanFn();
   const { data: periods } = useDocData<any>("config/periods");
+  // Drapeau du module Contrats de maintenance (ADR-009). Absent ⇒ éteint : l'onglet reste masqué
+  // même si un rôle porte le droit `maintenance`. C'est le maître-interrupteur du module.
+  const { data: mntFeature } = useDocData<MntFeature>("config/mntFeature");
   const [period, setPeriod] = useState<string>("all");
   const [active, setActive] = useState<string>("overview");
   // Intention de navigation courante (filtre / segment / FP à pré-appliquer par le module cible).
@@ -40,7 +44,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => currentTheme());
 
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
-  const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none"), [can]);
+  // Visible = droit RBAC ET drapeau de fonctionnalité allumé (le cas échéant). Un module sans `flag`
+  // garde son comportement historique (piloté par le seul RBAC).
+  const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none" && moduleFlagOn(m.flag, mntFeature)), [can, mntFeature]);
   const current = MODULES.find((m) => m.id === active) || visible[0];
   const allowed = current && can(current.key) !== "none" ? current : visible[0];
 
