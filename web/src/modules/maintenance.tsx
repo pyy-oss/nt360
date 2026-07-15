@@ -25,7 +25,8 @@ import {
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard } from "../lib/mntDashboard";
-import { FpLink } from "./_shared";
+import { suggestMntContrats, type MntSuggestion } from "../lib/mntSuggest";
+import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
@@ -162,6 +163,24 @@ export const Maintenance: FC<Props> = () => {
   const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
   const atRiskCount = (counts.ambre || 0) + (counts.rouge || 0) + (counts.critique || 0);
 
+  // Suggestions (Lot 7) — affaires du carnet ressemblant à de la maintenance et sans contrat. Le carnet
+  // n'est lu que si l'on a le droit (gate) ; sinon liste vide. Chaque suggestion PRÉ-REMPLIT la fiche
+  // contrat (aucune création automatique). Réutilise fpKey pour le rapprochement commande ↔ contrat.
+  const { rows: commandes } = useCommandesRows(gate);
+  const suggestions = useMemo(() => suggestMntContrats(commandes, contrats, fpKey), [commandes, contrats]);
+  const openSuggestion = (s: MntSuggestion) => {
+    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am });
+    setCId(""); setCEdit(false); setCOpen(true);
+  };
+  const suggestCols = [
+    colText("Client", (s: MntSuggestion) => s.client || "—", (s: MntSuggestion) => s.client || ""),
+    colText("N° FP", (s: MntSuggestion) => <FpLink fp={s.fp} />),
+    colText("Affaire", (s: MntSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
+    colNum("Montant", (s: MntSuggestion) => money(s.cas), (s: MntSuggestion) => s.cas),
+    colText("Signaux", (s: MntSuggestion) => <div className="flex flex-wrap gap-1">{s.reasons.slice(0, 4).map((r, i) => <Badge key={i} tone="steel">{r}</Badge>)}</div>),
+    colText("", (s: MntSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openSuggestion(s)}>Créer</button> : null)),
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       {gate && (contrats.length > 0 || tickets.length > 0) && (
@@ -226,6 +245,13 @@ export const Maintenance: FC<Props> = () => {
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
         {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" />}
       </Card>
+
+      {canWrite && suggestions.length > 0 && (
+        <Card title={`Suggestions de contrats · ${suggestions.length}`}>
+          <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.</Tip>
+          <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />
+        </Card>
+      )}
 
       <Card title="Tickets & interventions"
         actions={canWrite ? <button type="button" onClick={openNewTicket} disabled={contrats.length === 0} className={cx("btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5", contrats.length === 0 && "opacity-50 cursor-not-allowed")}><Plus size={14} /> Nouveau ticket</button> : undefined}>
