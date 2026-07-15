@@ -8,11 +8,11 @@ describe("emailNotify — config & résolution", () => {
     expect(c.enabled).toBe(true);
     expect(c.recipients.alerts).toEqual(["a@x.com"]); // dédup + minuscule + email invalide retiré
     expect(c.recipients.codir).toEqual(["dir@x.com"]);
-    expect(c.triggers).toEqual({ approvals: true, relances: true, alerts: true, codir: true });
+    expect(c.triggers).toEqual({ approvals: true, relances: true, alerts: true, codir: true, maintenance: true });
   });
-  it("triggers désactivables individuellement", () => {
+  it("triggers désactivables individuellement (maintenance additif = défaut true)", () => {
     const c = em.normalizeEmailConfig({ triggers: { relances: false, alerts: false } });
-    expect(c.triggers).toEqual({ approvals: true, relances: false, alerts: false, codir: true });
+    expect(c.triggers).toEqual({ approvals: true, relances: false, alerts: false, codir: true, maintenance: true });
   });
   it("canSend exige enabled + tenant + client + sender", () => {
     expect(em.canSend(em.normalizeEmailConfig({ enabled: true, tenantId: "t", clientId: "c", sender: "s@x.com" }))).toBe(true);
@@ -40,6 +40,19 @@ describe("emailNotify — config & résolution", () => {
     expect(r.html).toContain(">250</b> créance"); // compteur complet, pas tronqué à 200
     expect(r.html).toContain("BC fournisseur");
     expect(r.html).not.toContain("jalon"); // count 0 → section omise
+  });
+  it("buildMntRisqueEmail : digest direction & AM, libellés FR des signaux, données échappées", () => {
+    const items = [{ client: "Client <b>", fp: "FP/2026/1", niveau: "critique", score: 85, signals: [{ type: "sla_rompu", count: 2 }, { type: "sous_facturation", ecart: 150000 }] }];
+    const dir = em.buildMntRisqueEmail(items, "direction");
+    expect(dir.subject).toContain("1 à surveiller");
+    expect(dir.html).toContain("Critique");
+    expect(dir.html).toContain("SLA rompu");
+    expect(dir.html).toContain("Sous-facturation");
+    expect(dir.html).toContain("&lt;b&gt;"); // client échappé
+    const am = em.buildMntRisqueEmail(items, "Awa Dupont");
+    expect(am.subject).toContain("Awa Dupont");
+    expect(am.html).toContain("Bonjour Awa Dupont");
+    expect(em.buildMntRisqueEmail([], "direction").html).toContain("Aucun contrat à risque");
   });
 });
 

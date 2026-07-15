@@ -31,6 +31,55 @@
 
 ---
 
+## 2026-07-15 — Lot 5 (Moteur de risque — DERNIER lot du module)
+
+**Fait**
+- **Moteur PUR** `functions/domain/mntRisque.js` : score [0..100] + palier (Vert/Ambre/Rouge/Critique)
+  par contrat ACTIF, à partir des 4 signaux décidés (SLA rompus via `slaState`, échéance proche ≤ 60 j,
+  quota dépassé, sous-facturation via `echeancier`). Rapprochement facture par `fpKey`. Testé (10 tests).
+  Formule/poids/seuils → **ADR-016**.
+- **C3 (recompute)** : bloc ADDITIF dans `lib/aggregate.js`, DOUBLEMENT gaté (`want("maintenance")` +
+  drapeau `config/mntFeature`). Écrit UN seul chemin nouveau `summaries/mnt_risque` (ADR-003). Horodatages
+  Firestore → ms à la frontière I/O (domaine pur). **Caractérisation** `mntRecomputeGate.test.js` : faux
+  Firestore, recompute complet — drapeau off ⇒ zéro écriture `mnt_*` ; on ⇒ diff = exactement
+  `{summaries/mnt_risque}` (aucun summary existant altéré/retiré).
+- **C7/C8 (notif)** : cron `mntSlaSweep` (quotidien 07:30) — digest de risque à la **direction** (liste
+  `codir`) + à chaque **AM** (ses contrats, nom→email annuaire). Verrouillé par le drapeau ⇒ no-op strict
+  éteint. Trigger `maintenance` ADDITIF dans `emailNotify.TRIGGERS` (défaut `true`), builder
+  `buildMntRisqueEmail`. `deployed-functions.txt` +1 (146 fns).
+- **Rules** : `summaries/mnt_risque` → module `maintenance` (`summaryModule`) + second verrou du drapeau
+  dans `match /summaries` (conjoint toujours vrai pour les summaries existants → comportement inchangé).
+  Test de règles ajouté (double verrou, comme les collections `mnt_*`).
+- **Front** : miroir `web/src/lib/mntRisque.ts` (libellés/tons, **aucun recalcul de score** — le score
+  vient du summary, une seule vérité) + carte « Risque des contrats » (KPI par palier + table à risque)
+  dans `maintenance.tsx`, lue via `useDocData("summaries/mnt_risque")` (gaté). Chunk 19.5 KB (lazy).
+
+**Appris sur l'existant**
+- Les tickets ne portent pas de champ `date` : le mois de quota se dérive de `ouvertLe` (Timestamp).
+- `Kpi` accepte un ton libre (`keyof TONES | string`) → `plum/clay/gold/emerald` passent sans ajout.
+
+**Échoué / abandonné**
+- Rien d'abandonné. `TaskCreate` refusé une fois (paramètres Agent au lieu de `subject`) — corrigé.
+
+**Dette assumée**
+- Poids de score = hypothèse de départ (ADR-016) ; recalibrage possible dans le domaine pur à l'usage.
+- ADR-015 (matérialisation historique des ruptures SLA) reste reporté : le score suffit à la v1 ; seul
+  l'état COURANT est matérialisé (pas la série temporelle des ruptures).
+
+**Décidé**
+- ADR-016 (formule de score + paliers). Réutilise ADR-003 (matérialisation), ADR-008 (palette),
+  ADR-002/005 (SLA/échéancier).
+
+**Suivant**
+- Audit adverse complet du module (sécurité/RBAC, cohérence des chiffres, 10 règles intouchables,
+  non-régression, « éteint = ERP d'avant », vérification adverse des trouvailles).
+- Correctif de lisibilité ClickUp (relabel admin.tsx) — PR séparée, hors périmètre module.
+
+**Vérif** : functions 863 (89 fichiers) · web 88 · test:rules 69 · no-undef 117 · deploy-targets 146 ·
+indexes OK · bundle 115.5 KB · lint web propre.
+
+---
+
 ## 2026-07-15 — Lot 4 (Renouvellements & résiliations via approvals)
 
 **Fait**

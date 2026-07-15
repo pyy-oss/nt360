@@ -7,8 +7,8 @@ import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { where } from "firebase/firestore";
 import { useCan } from "../lib/rbac";
-import { useCollectionData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, EmptyState, Modal, cx } from "../design/components";
+import { useCollectionData, useDocData } from "../lib/hooks";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate, tsMillis } from "../lib/format";
 import { fmt } from "../design/tokens";
@@ -23,6 +23,7 @@ import {
   STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, STATUT_LABEL, ECHEANCE_LABEL, SLA_TYPE_LABEL, COUVERTURE_LABEL,
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
+import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { FpLink } from "./_shared";
 import type { Props } from "./_shared";
 
@@ -57,6 +58,9 @@ export const Maintenance: FC<Props> = () => {
   const { rows: contrats, loading: lc } = useCollectionData<MntContrat>(gate ? "mnt_contrats" : null);
   const { rows: tickets } = useCollectionData<MntTicket>(gate ? "mnt_tickets" : null);
   const { rows: interventions } = useCollectionData<MntIntervention>(gate ? "mnt_interventions" : null);
+  // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
+  // du score. Le doc est gaté (drapeau + droit maintenance) côté rules ; on ne le lit que si `gate`.
+  const { data: risque } = useDocData<RisqueSummary>(gate ? "summaries/mnt_risque" : null);
   // Consultants pour la saisie d'intervention (collection consultants = callable-only → listConsultants).
   const [consultants, setConsultants] = useState<{ id: string; name?: string }[]>([]);
   useEffect(() => { if (!gate) return; listConsultants().then((r) => setConsultants((r.rows || []).filter((c) => c.id).map((c) => ({ id: c.id!, name: c.name || undefined })))).catch(() => setConsultants([])); }, [gate]);
@@ -134,8 +138,38 @@ export const Maintenance: FC<Props> = () => {
     )),
   ];
 
+  // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
+  const risqueItems = risque?.items || [];
+  const atRisk = risqueItems.filter((r) => r.niveau !== "vert");
+  const counts = risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0 };
+  const risqueCols = [
+    colText("Client", (r: RisqueItem) => r.client || "—", (r: RisqueItem) => r.client || ""),
+    colText("N° FP", (r: RisqueItem) => <FpLink fp={r.fp || undefined} />),
+    colText("Niveau", (r: RisqueItem) => <Badge tone={niveauTone(r.niveau)}>{riskLabel(NIVEAU_LABEL, r.niveau)}</Badge>),
+    colNum("Score", (r: RisqueItem) => String(r.score), (r: RisqueItem) => r.score),
+    colText("Signaux", (r: RisqueItem) => (
+      <div className="flex flex-wrap gap-1">
+        {(r.signals || []).map((s, i) => <Badge key={i} tone="steel">{signalText(s)}</Badge>)}
+      </div>
+    )),
+    colText("AM", (r: RisqueItem) => r.am || "—"),
+  ];
+
   return (
     <div className="flex flex-col gap-4">
+      {risque && (
+        <Card title="Risque des contrats">
+          <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <Kpi label="Critique" value={String(counts.critique || 0)} tone="plum" />
+            <Kpi label="Rouge" value={String(counts.rouge || 0)} tone="clay" />
+            <Kpi label="Ambre" value={String(counts.ambre || 0)} tone="gold" />
+            <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
+          </div>
+          {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
+        </Card>
+      )}
+
       <Card title="Contrats de maintenance"
         actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
