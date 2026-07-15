@@ -3281,16 +3281,38 @@ async function runClickupPull() {
   const map = {};
   for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
   const pmUpdates = {}; // assigné ClickUp → PM app (overlay config/orderPm), quand un assigné existe
+  // Un SEUL listTasks paginé par liste (≈15 appels pour ~1400 tâches), indexé par id — et non N getTask
+  // séquentiels (un par commande liée). À l'échelle réelle (≈1400 liens) le N+1 dépassait le timeout 300 s
+  // et ne synchronisait qu'une fraction des tâches (« 209 synchronisées » pour 1400 liens). On scanne
+  // TOUTES les listes pays (une tâche BF/GN peut être liée), en tolérant qu'une liste soit illisible.
+  const listId = String(cfg.defaultListId || CLICKUP_LIST_CI);
+  const taskById = {};
+  let truncated = 0, listErrors = 0;
+  for (const lid of allScanLists(listId)) {
+    let tasks;
+    try { tasks = await clickup.listTasks(token, lid, { includeClosed: true }); }
+    catch (e) { logger.warn("ClickUp pull: liste illisible", { lid, msg: e && e.message }); listErrors++; continue; }
+    if (tasks.truncated) truncated++; // > 5000 tâches : certaines manqueront → repli sur l'état précédent
+    for (const t of tasks) taskById[String(t.id)] = t;
+  }
   let pulled = 0, failed = 0;
   for (const key of keys) {
-    try {
-      const task = await clickup.getTask(token, links[key]);
-      const sync = { ...cf.readTaskSync(task), taskId: links[key] };
-      map[key] = sync;
-      if (sync.pm) pmUpdates[key] = sync.pm; // récupère le PM courant (assigné) de la tâche
-      pulled++;
-    } catch (e) { logger.warn("ClickUp pull: échec", { key, msg: e && e.message }); failed++; }
+    const task = taskById[String(links[key])];
+    // Tâche absente du scan (supprimée côté ClickUp, liste illisible/tronquée) → on GARDE l'état précédent
+    // (déjà recopié dans `map`), comme le faisait le repli sur échec getTask. Pas de régression à vide.
+    if (!task) { failed++; continue; }
+    const sync = { ...cf.readTaskSync(task), taskId: links[key] };
+    // L'endpoint LISTE n'inclut PAS les checklists (→ progress null) ni toujours time_spent, contrairement
+    // à GET /task. On préserve donc la dernière valeur connue quand la lecture liste est nulle, pour ne pas
+    // régresser un avancement / un temps passé déjà remonté.
+    const p = prev[key] || {};
+    if (sync.progress == null && p.progress != null) sync.progress = p.progress;
+    if (sync.timeSpentMs == null && p.timeSpentMs != null) sync.timeSpentMs = p.timeSpentMs;
+    map[key] = sync;
+    if (sync.pm) pmUpdates[key] = sync.pm; // récupère le PM courant (assigné) de la tâche
+    pulled++;
   }
+  if (truncated || listErrors) logger.warn("ClickUp pull: couverture partielle", { truncated, listErrors, pulled, total: keys.length });
   await db.doc("config/clickupSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // App-wins : l'assigné ClickUp ne remplit le PM app QUE pour les commandes sans PM app (cf. C1).
   const pmFilled = await fillOrderPmFromClickup(pmUpdates);
