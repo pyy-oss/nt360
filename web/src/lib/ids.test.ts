@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fpKey, isAgedLost } from "./ids";
+import { fpKey, isAgedLost, plausibleYear } from "./ids";
 
 // Parité avec le serveur (functions/lib/ids.js fpKey, functions/domain/oppLifecycle.js isAgedLost).
 // Ces helpers existent pour que le frontal canonise les N° FP EXACTEMENT comme mergeCommandes, sinon
@@ -38,5 +38,21 @@ describe("isAgedLost (miroir serveur)", () => {
   it("faux : source ≠ salesData ou hors stage actif", () => {
     expect(isAgedLost({ ...base, source: "saisie" })).toBe(false);
     expect(isAgedLost({ ...base, stage: 6 })).toBe(false);
+  });
+});
+
+describe("plausibleYear (miroir serveur)", () => {
+  it("accepte une année dans [2015, année+3]", () => {
+    const now = new Date().getFullYear();
+    expect(plausibleYear(2026)).toBe(2026);
+    expect(plausibleYear(String(now + 3))).toBe(now + 3);
+  });
+  it("rejette sentinelles et millésimes aberrants → 0", () => {
+    expect(plausibleYear(1900)).toBe(0);
+    expect(plausibleYear(0)).toBe(0);
+    expect(plausibleYear(20226)).toBe(0);
+    expect(plausibleYear(new Date().getFullYear() + 4)).toBe(0);
+    expect(plausibleYear("")).toBe(0);
+    expect(plausibleYear(null)).toBe(0);
   });
 });

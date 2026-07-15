@@ -485,7 +485,7 @@ export const Codir: FC<Props> = () => {
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               <StatTile label="CAF YTD" value={fmt(cafYtd)} color={T.emerald} sub="facturé — exercice" />
               <StatTile label="Backlog YTD" value={fmt(backlogYtd)} color={T.clay} sub="RAF glissant" />
-              <StatTile label="CAF acquis" value={fmt(cafEst)} color={T.steel} sub="facturé + backlog (RAF)" />
+              <StatTile label="CAF acquis" value={fmt(cafEst)} color={T.steel} sub="facturé + backlog projetable" />
               <StatTile label="Projeté CAF" value={fmt(cafEstYcForecast)} color={T.gold} sub={`acquis + ${fmt(forecast)} pipeline pondéré`} />
             </div>
 
@@ -496,7 +496,7 @@ export const Codir: FC<Props> = () => {
 
             {/* Indicateurs dérivés — lecture CODIR (couverture, risque de concentration, rythme requis) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <InsightChip label="Couverture acquis" value={pctR(couvertureCert)} hint="facturé + backlog / objectif" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
+              <InsightChip label="Couverture acquis" value={pctR(couvertureCert)} hint="facturé + backlog projetable / objectif" color={couvertureCert >= 0.9 ? T.emerald : couvertureCert >= 0.6 ? T.gold : T.clay} />
               <InsightChip label="Poids du pipeline pondéré" value={pctR(poidsForecast)} hint="pipeline pondéré / CAF projeté" color={T.gold} />
               <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
               <InsightChip label="Rythme facturation requis" value={`${fmt(rythmeRequis)}/mois`} hint={`pour l'objectif · ${monthsRemaining} mois · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />

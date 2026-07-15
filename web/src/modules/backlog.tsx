@@ -163,16 +163,19 @@ function CarryoverCard() {
   const [editFp, setEditFp] = useState<string | null>(null);
   const [seg, setSeg] = useState<"all" | "ms" | "drift" | "none">("all");
   if (!canEdit) return null;
+  // Rattachement jalon → commande par FP CANONIQUE (fpKey), comme le back (aggregate.js/atterrissage.js) —
+  // et non `toUpperCase()` : un jalon au FP formaté autrement (zéros de tête) était rapproché serveur mais
+  // pas ici → `totalReporte` front aurait divergé de `reporteCaf` back (CLAUDE.md : rapprocher via fpKey).
   const msBy = new Map<string, BillingMilestone[]>();
-  for (const m of mstones) if (m.fp) msBy.set(m.fp.toUpperCase(), (m.milestones || []) as BillingMilestone[]);
+  for (const m of mstones) { const k = fpKey(m.fp); if (k) msBy.set(k, (m.milestones || []) as BillingMilestone[]); }
   const rateOf = (o: Order) => ((o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : (o.marginPct || 0));
   // Report N+1 : SOURCE UNIQUE = les jalons (Σ après le 31/12, borné au RAF). Nul sans jalon post-31/12.
   const repOf = (o: OpenOrder) => {
-    const ms = msBy.get((o.fp || "").toUpperCase());
+    const ms = msBy.get(fpKey(o.fp) || "");
     if (!ms) return 0;
     return Math.min(ms.filter((x) => (x.date || "") > cutoff).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
   };
-  const msOf = (o: OpenOrder) => msBy.get((o.fp || "").toUpperCase());
+  const msOf = (o: OpenOrder) => msBy.get(fpKey(o.fp) || "");
   const driftOf = (o: OpenOrder) => { const ms = msOf(o); return !!ms?.length && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(o.projetable); };
   const open: OpenOrder[] = orders
     .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
@@ -283,7 +286,7 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
 }
 // 6 — Prévision (ancrée FY, cohérente avec l'atterrissage)
 export const Prevision: FC<Props> = () => {
-  const { data: bl } = useDocData<BacklogSummary>("summaries/backlog_fy");
+  const { data: bl, loading, error } = useDocData<BacklogSummary>("summaries/backlog_fy");
   const { data: pl } = useDocData<PipelineSummary>("summaries/pipeline");
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
@@ -299,13 +302,21 @@ export const Prevision: FC<Props> = () => {
   const { data: scen } = useDocData<CashScenarioSummary>("summaries/cashScenario");
   // Tendance de facturation (réalisé vs planifié par les jalons) jusqu'au 31/12 — accès facturation.
   const { data: billTrend } = useDocData<BillingTrendSummary>(cfg?.currentFy ? `summaries/billingTrend_${cfg.currentFy}` : null);
+  // Gardes AVANT le vide générique : squelette au 1er snapshot (évite le flash « Aucune donnée » sur des
+  // données qui existent) et ErrorState si l'accès est refusé — aligné sur Suivi Backlog / OrderList.
+  if (loading && !bl && !pl && !att) return <CardSkeleton />;
+  if (error && !bl && !pl && !att) return <ErrorState error={error} />;
   if (!bl && !pl && !att) return <EmptyState />;
   const realiseCas = att?.realiseCas || 0;
-  const backlog = bl?.total || 0;
+  const backlog = bl?.total || 0;                       // RAF brut affiché (glissant)
+  // Backlog qui ENTRE réellement dans le Projeté CAF = RAF PLAFONNÉ au CAS restant (cas − facturé) et net du
+  // report N+1 (atterrissage.js `backlogProjete`). Peut être < RAF brut (sur-RAF dérivé, report post-31/12).
+  // Le fallback DOIT l'utiliser aussi (parité avec le Simulateur, sinon deux « Projeté CAF » divergents).
+  const backlogProj = att?.backlogProjete ?? backlog;
   const pond = att?.pipelinePondere ?? 0; // pipeline de projection (tiéré, fenêtre D Prev)
   const projete = att?.projete ?? (realiseCas + pond);
   const factureN = att?.factureN || 0;
-  const cafProjete = att?.cafProjete ?? (factureN + backlog + pond);
+  const cafProjete = att?.cafProjete ?? (factureN + backlogProj + pond);
   const fy = att?.fy || cfg?.currentFy;
   // Libellé des niveaux de projection DÉRIVÉ de config/projection (comme le Pipeline), et non codé
   // en dur : un poids/niveau modifié en Habilitations se reflète ici (cf. audit intégral F3).
@@ -325,7 +336,7 @@ export const Prevision: FC<Props> = () => {
       {/* Atterrissages : les deux projections issues des composantes ci-dessus. */}
       <div className={cols2}>
         <Kpi label="Projeté CAS (FY)" value={fmt(projete)} sub="Réalisé CAS + Pipeline projeté" />
-        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub="Facturé + Backlog (à facturer) + Pipeline projeté" />
+        <Kpi label="Projeté CAF (FY)" value={fmt(cafProjete)} tone="gold" sub={`Facturé + Backlog projetable (${fmt(backlogProj)}) + Pipeline projeté`} />
       </div>
       {att && (
         <>
@@ -481,7 +492,7 @@ export const Prevision: FC<Props> = () => {
           <Tip>Un point par recalcul (max 1/jour). Le <b>burn-down du backlog</b> et l'écart <b>projeté vs réalisé</b> se lisent dans le temps à mesure que les données sont mises à jour.</Tip>
         </Card>
       )}
-      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme, pondération configurée en Habilitations) = {projDesc}, dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + Backlog (RAF) + pipeline projeté (le backlog y entre, sans double compte).</Tip>
+      <Tip><b>Pipeline projeté</b> (logique de projection moyen terme, pondération configurée en Habilitations) = {projDesc}, dont la clôture prévue (D Prev) tombe dans l'exercice {fy}. Les <b>certitudes glissent</b> : une D Prev déjà passée <b>dans l'année</b> compte toujours — seules celles de {fy ? Number(fy) - 1 : "N-1"} (révolues) ou de {fy ? Number(fy) + 1 : "N+1"}+ (non encore dans l'exercice) sont exclues. <b>Projeté CAS</b> = Réalisé CAS + pipeline projeté. <b>Projeté CAF</b> = Facturé réalisé + <b>Backlog projetable</b> + pipeline projeté (sans double compte). Le <b>Backlog projetable</b> ({fmt(backlogProj)}) = RAF <b>plafonné</b> au CAS restant (cas − facturé) et net du <b>reporté N+1</b> ; il peut donc être inférieur au <b>Backlog (RAF)</b> affiché ({fmt(backlog)}) quand le RAF est surévalué (dérivé) ou qu'une part est reportée après le 31/12.</Tip>
     </div>
   );
 };
@@ -490,14 +501,17 @@ export const Prevision: FC<Props> = () => {
 // le Projeté CAS/CAF et le taux d'atteinte de l'objectif. 100 % client (aucune écriture).
 const M = 1_000_000;
 export const Simulateur: FC<Props> = () => {
-  const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
-  const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
+  const { data: cfg, loading: cfgLoading } = useDocData<PeriodsConfig>("config/periods");
+  const { data: attBase, loading: attLoading } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   // Objectifs isolés (doc gaté « objectifs ») re-fusionnés pour le simulateur ; null si pas d'accès.
   const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
   const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   const [addPipe, setAddPipe] = useState(0);   // pipeline pondéré additionnel (FCFA)
   const [realiz, setRealiz] = useState(100);   // taux de réalisation du pipeline (%)
   const [objOverride, setObjOverride] = useState<string>(""); // objectif CAS simulé (M FCFA), vide = réel
+  // Squelette au 1er snapshot (cfg puis atterrissage) : sinon le message « importer données & recalculer »
+  // clignote sur des données qui existent (message ACTIF et faux avant l'arrivée du summary).
+  if (!att && (cfgLoading || attLoading)) return <CardSkeleton />;
   if (!att) return <EmptyState label="Atterrissage indisponible — importer données & objectifs, puis recalculer." />;
 
   const realiseCas = att.realiseCas || 0;
@@ -745,7 +759,7 @@ const isoToMs = (iso: string) => (iso ? new Date(iso).getTime() || undefined : u
 // (CI/BF/Guinée), données pré-remplies depuis la commande, + champs complémentaires. Ouvre la tâche.
 // Synchro du MONTANT (CA Signé) entre la commande et son opportunité liée (même N° FP), dans un sens
 // ou l'autre. Opp → Commande crée une SURCHARGE persistante (badge •). Commande → Opp écrit l'opp.
-function AmountSyncBtn({ row }: { row: Order }) {
+function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite: boolean }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -783,7 +797,10 @@ function AmountSyncBtn({ row }: { row: Order }) {
   const noOpp = peek != null && !peek.oppFound;
   const ambiguous = !!peek?.ambiguous;
   const hasLines = !!peek?.oppHasLines;
-  const canToOpp = !!peek?.oppFound && !ambiguous && !hasLines;   // écrit l'opp (refusé si opp chiffrée par lignes)
+  // « Commande → Opportunité » ÉCRIT l'opp → exige le droit pipeline EN ÉCRITURE (serveur : requireWrite
+  // 'pipeline'). Sans lui, le bouton était offert puis refusé ("permission-denied"). Les autres sens
+  // (toOrder/clear) relèvent d'« import » (déjà couvert par le montage sous canImport).
+  const canToOpp = !!peek?.oppFound && !ambiguous && !hasLines && canPipelineWrite; // écrit l'opp (refusé si opp chiffrée par lignes ou sans droit pipeline)
   const canToOrder = !!peek?.oppFound && !ambiguous && (oppAmt ?? 0) > 0; // surcharge la commande depuis l'opp
   const valueBox = (label: string, val: ReactNode, hint?: string, tone = "") => (
     <div className="flex-1 rounded-lg border border-line bg-white/[0.03] px-3 py-2">
@@ -827,7 +844,7 @@ function AmountSyncBtn({ row }: { row: Order }) {
 
           <div className="flex flex-col gap-2">
             <button type="button" disabled={busy || !canToOpp} onClick={() => run("toOpp")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
-              Commande → Opportunité <span className="text-faint">· pose {money(row.cas)} sur l'opp{hasLines ? " (refusé : opp chiffrée par lignes)" : ""}</span>
+              Commande → Opportunité <span className="text-faint">· {!canPipelineWrite ? "droit « pipeline » (écriture) requis" : `pose ${money(row.cas)} sur l'opp${hasLines ? " (refusé : opp chiffrée par lignes)" : ""}`}</span>
             </button>
             <button type="button" disabled={busy || !canToOrder} onClick={() => run("toOrder")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
               Opportunité → Commande <span className="text-faint">· surcharge le CAS à {oppAmt != null ? money(oppAmt) : "—"} (persistant)</span>
@@ -951,7 +968,7 @@ function OrderPmFixer({ row }: { row: Order }) {
 // Réconciliation : opportunités GAGNÉES (stage 6) portant un N° FP mais SANS ligne P&L → elles ne
 // comptent pas en commande (CAS/backlog absents). « Inscrire au P&L » crée la commande depuis l'opp
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
-function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
+function ReconcileWonOpps({ commandeFps, canPipelineWrite }: { commandeFps: Set<string>; canPipelineWrite: boolean }) {
   const oppScope = useRecordScope("opportunities");
   const { rows: opps, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   // FP CANONIQUE des deux côtés (comme dataQuality.opps_gagnees_sans_pnl) : sinon une opp au FP
@@ -962,9 +979,9 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
   return (
     <Card title={`Opportunités gagnées sans commande P&L · ${won.length}`}>
       <Table columns={[
-        // FP corrigeable en place : les commerciaux saisissent parfois une mauvaise version du N° FP,
-        // ce qui empêche le rapprochement avec la commande P&L. La correction repatche l'opp (recalcul).
-        colText("FP", (o: Opportunity) => <WonOppFpFixer o={o} />, (o: Opportunity) => o.fp || ""),
+        // FP corrigeable en place UNIQUEMENT avec pipeline:write (patchOpportunity l'exige serveur) — sinon
+        // affichage seul. Les commerciaux saisissent parfois une mauvaise version du N° FP → correction = recalcul.
+        colText("FP", (o: Opportunity) => (canPipelineWrite ? <WonOppFpFixer o={o} /> : <>{o.fp || "—"}</>), (o: Opportunity) => o.fp || ""),
         colText("Client", (o: Opportunity) => o.client || "—", (o: Opportunity) => o.client || ""),
         colText("Affaire", (o: Opportunity) => o.designation || "—", (o: Opportunity) => o.designation || ""),
         colText("Commercial", (o: Opportunity) => o.am || "—", (o: Opportunity) => o.am || ""),
@@ -974,7 +991,7 @@ function ReconcileWonOpps({ commandeFps }: { commandeFps: Set<string> }) {
           : <span className="text-[11px] text-clay">montant manquant</span>), () => 0),
         // Écarter une opp gagnée qu'on ne veut PAS inscrire : passe au statut « Annulé » (stage 9) →
         // quitte cette liste et le pipeline. Un ré-import de la source la rétablit si elle y est gagnée.
-        colText("", (o: Opportunity) => (o.id
+        colText("", (o: Opportunity) => (o.id && canPipelineWrite   // « Annuler » écrit l'opp (stage 9) → pipeline:write requis
           ? <DangerBtn label="Annuler" tone="gold" okMsg="Opportunité annulée (recalcul lancé)" errMsg="Annulation refusée"
               confirm={`Annuler l'opportunité gagnée ${o.fp} (${o.client || "—"}) ? Elle passe au statut « Annulé » et quitte cette liste. Un ré-import de la source la rétablira si elle y figure encore comme gagnée.`}
               fn={() => patchOpportunity({ id: o.id!, stage: 9 })} />
@@ -1076,7 +1093,8 @@ export const OrderList: FC<Props> = () => {
   const rows = useMemo(() => all.filter((r) => match(r, ["bu", "am", "client", "pm"])), [all, match]);
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
-  const canPipeline = useCan("pipeline") !== "none"; // la réconciliation lit les opportunités (droit pipeline)
+  const canPipeline = useCan("pipeline") !== "none"; // la réconciliation LIT les opportunités (droit pipeline)
+  const canPipelineWrite = useCan("pipeline") === "write"; // ÉCRIRE une opp (corriger FP / annuler / sync ⇄) exige pipeline:write
   const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => fpKey(r.fp)).filter(Boolean) as string[]), [all]);
@@ -1104,13 +1122,13 @@ export const OrderList: FC<Props> = () => {
     <div className="flex flex-col gap-2">
       <EmptyState label="Aucune commande. Importez des opportunités (gagnées) ou des fiches affaire, ou créez une commande." action={canImport ? <ImportButton label="Importer un fichier" /> : undefined} />
       {canImport && <Card title="Créer une commande"><OrderForm /></Card>}
-      {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
+      {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} canPipelineWrite={canPipelineWrite} />}
     </div>
   );
   return (
     <div className="flex flex-col gap-2">
     <FilterNote dims="BU / AM / client / PM" />
-    {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} />}
+    {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} canPipelineWrite={canPipelineWrite} />}
     {canImport && <CancelledOrders />}
     <PmWorkload />
     <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
@@ -1158,7 +1176,7 @@ export const OrderList: FC<Props> = () => {
           det(colText("Note ClickUp", (r) => (r.clickupLastComment?.text
             ? <span className="text-[12px]" title={r.clickupLastComment.text}>💬 {r.clickupLastComment.by ? <b>{r.clickupLastComment.by} : </b> : null}{r.clickupLastComment.text.slice(0, 80)}{r.clickupLastComment.text.length > 80 ? "…" : ""}</span>
             : <span className="text-faint">—</span>), (r) => (r.clickupLastComment?.text ? 1 : 0))),
-          ...(canImport ? [colText("Montant", (r: Order) => (r.fp ? <AmountSyncBtn row={r} /> : <span className="text-[11px] text-faint">—</span>), (r) => (r.casSource === "override" ? 1 : 0))] : []),
+          ...(canImport ? [colText("Montant", (r: Order) => (r.fp ? <AmountSyncBtn row={r} canPipelineWrite={canPipelineWrite} /> : <span className="text-[11px] text-faint">—</span>), (r) => (r.casSource === "override" ? 1 : 0))] : []),
           ...(canImport ? [colText("ClickUp", (r: Order) => (r.fp ? (
             <span className="inline-flex items-center gap-2">
               <ClickupBtn row={r} />

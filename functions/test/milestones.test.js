@@ -14,6 +14,14 @@ describe("milestones — jalons de facturation (module pur)", () => {
     expect(normalizeMilestones(n)).toEqual(n); // idempotent
     expect(normalizeMilestones(null)).toEqual([]);
   });
+  it("rejette les millésimes ABERRANTS (plausibleYear) — sentinelle passée et année futur aberrante", () => {
+    const raw = [
+      { date: "1900-05-01", amount: 100 }, // sentinelle passée → écart échu permanent si conservée
+      { date: "2099-01-01", amount: 200 }, // futur aberrant → 100 % reporté N+1, retiré du CAF courant
+      { date: "2026-06-01", amount: 300 }, // plausible → conservé
+    ];
+    expect(normalizeMilestones(raw)).toEqual([{ date: "2026-06-01", amount: 300 }]);
+  });
   it("plafonne à 15 jalons", () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, amount: 1 }));
     expect(normalizeMilestones(many)).toHaveLength(MAX_MILESTONES);
