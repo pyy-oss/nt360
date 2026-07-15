@@ -516,3 +516,24 @@ lot d'introduction (C10 au Lot 0, C8 au Lot 5).
 
 **Fait**
 - [à remplir]
+
+---
+
+## 2026-07-15 — Lots 6 & 7 (dashboard + suggestions)
+
+**Fait**
+- **Lot 6 — Tableau de bord** : carte cockpit en tête du module, dérivée des collections déjà
+  chargées (mnt_contrats, mnt_tickets) + summary de risque. Aucun appel serveur. Domaine PUR
+  `web/src/lib/mntDashboard.ts` (contrats actifs, montant engagé, tickets ouverts/priorité,
+  échéances ≤ 60 j) + test.
+- **Lot 7 — Suggestions de contrats** : repère dans le carnet de commandes (useCommandesRows) les
+  affaires « maintenance » (mots-clés sur la désignation) sans contrat, rapprochées par fpKey. Domaine
+  PUR `web/src/lib/mntSuggest.ts` + test. Aucune création auto : « Créer » ouvre la fiche pré-remplie.
+
+**Appris**
+- `Kpi.value` attend une STRING → `fmt(n)` (et non `money(n)` qui rend un `<span>`).
+- Le carnet n'expose pas de champ « nature/récurrent » dans le summary : l'heuristique s'appuie sur
+  `affaire` (désignation) — silencieuse si le champ manque (zéro faux positif).
+
+**Décidé**
+- Pas d'ADR : additif, front pur, réutilise l'existant. Reste : Lot 8 (import Excel des contrats).

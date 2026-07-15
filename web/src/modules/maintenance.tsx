@@ -10,6 +10,7 @@ import { useCan } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
@@ -23,7 +24,9 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { FpLink } from "./_shared";
+import { computeMntDashboard } from "../lib/mntDashboard";
+import { suggestMntContrats, type MntSuggestion } from "../lib/mntSuggest";
+import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
@@ -154,8 +157,76 @@ export const Maintenance: FC<Props> = () => {
     colText("AM", (r: RisqueItem) => r.am || "—"),
   ];
 
+  // Tableau de bord (Lot 6) — cockpit consolidé en tête du module, dérivé des collections déjà
+  // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
+  const asOfIso = new Date().toISOString().slice(0, 10);
+  const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
+  const atRiskCount = (counts.ambre || 0) + (counts.rouge || 0) + (counts.critique || 0);
+
+  // Suggestions (Lot 7) — affaires du carnet ressemblant à de la maintenance et sans contrat. Le carnet
+  // n'est lu que si l'on a le droit (gate) ; sinon liste vide. Chaque suggestion PRÉ-REMPLIT la fiche
+  // contrat (aucune création automatique). Réutilise fpKey pour le rapprochement commande ↔ contrat.
+  const { rows: commandes } = useCommandesRows(gate);
+  const suggestions = useMemo(() => suggestMntContrats(commandes, contrats, fpKey), [commandes, contrats]);
+  const openSuggestion = (s: MntSuggestion) => {
+    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am });
+    setCId(""); setCEdit(false); setCOpen(true);
+  };
+  const suggestCols = [
+    colText("Client", (s: MntSuggestion) => s.client || "—", (s: MntSuggestion) => s.client || ""),
+    colText("N° FP", (s: MntSuggestion) => <FpLink fp={s.fp} />),
+    colText("Affaire", (s: MntSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
+    colNum("Montant", (s: MntSuggestion) => money(s.cas), (s: MntSuggestion) => s.cas),
+    colText("Signaux", (s: MntSuggestion) => <div className="flex flex-wrap gap-1">{s.reasons.slice(0, 4).map((r, i) => <Badge key={i} tone="steel">{r}</Badge>)}</div>),
+    colText("", (s: MntSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openSuggestion(s)}>Créer</button> : null)),
+  ];
+
   return (
     <div className="flex flex-col gap-4">
+      {gate && (contrats.length > 0 || tickets.length > 0) && (
+        <Card title="Tableau de bord">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald" />
+            <Kpi label="Montant engagé (actifs)" value={fmt(dash.montantEngageActifs)} tone="ink" />
+            <Kpi label="Tickets ouverts" value={String(dash.ticketsOuverts)} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"} />
+            <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"} />
+          </div>
+          <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-3">
+            <div>
+              <div className="text-[11px] text-muted mb-1.5">Contrats par statut</div>
+              <div className="flex flex-wrap gap-1.5">
+                {STATUTS.filter((s) => (dash.parStatut[s] || 0) > 0).map((s) => (
+                  <Badge key={s} tone={statutTone(s)}>{label(STATUT_LABEL, s)} · {dash.parStatut[s]}</Badge>
+                ))}
+                {dash.contratsTotal === 0 && <span className="text-[12px] text-muted">—</span>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-muted mb-1.5">Tickets ouverts par priorité</div>
+              <div className="flex flex-wrap gap-1.5">
+                {PRIORITES.filter((p) => (dash.parPriorite[p] || 0) > 0).map((p) => (
+                  <Badge key={p} tone={prioriteTone(p)}>{label(PRIORITE_LABEL, p)} · {dash.parPriorite[p]}</Badge>
+                ))}
+                {dash.ticketsOuverts === 0 && <span className="text-[12px] text-muted">Aucun ticket ouvert.</span>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-muted mb-1.5">Échéances proches (≤ 60 j)</div>
+              {dash.echeancesProches.length === 0 ? <span className="text-[12px] text-muted">Aucune échéance imminente.</span> : (
+                <div className="flex flex-col gap-1 text-[12px]">
+                  {dash.echeancesProches.slice(0, 5).map((e) => (
+                    <div key={e.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate">{e.client || "—"} · <FpLink fp={e.fp || undefined} /></span>
+                      <Badge tone={e.jours <= 15 ? "clay" : "gold"}>{frDate(e.dateFin)} · {e.jours} j</Badge>
+                    </div>
+                  ))}
+                  {dash.echeancesProches.length > 5 && <span className="text-muted">+{dash.echeancesProches.length - 5} autre(s)</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
       {risque && (
         <Card title="Risque des contrats">
           <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
@@ -174,6 +245,13 @@ export const Maintenance: FC<Props> = () => {
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
         {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" />}
       </Card>
+
+      {canWrite && suggestions.length > 0 && (
+        <Card title={`Suggestions de contrats · ${suggestions.length}`}>
+          <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.</Tip>
+          <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />
+        </Card>
+      )}
 
       <Card title="Tickets & interventions"
         actions={canWrite ? <button type="button" onClick={openNewTicket} disabled={contrats.length === 0} className={cx("btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5", contrats.length === 0 && "opacity-50 cursor-not-allowed")}><Plus size={14} /> Nouveau ticket</button> : undefined}>
