@@ -41,12 +41,12 @@ export const SalesForecast: FC<Props> = ({ period }) => {
               <div><div className="text-[11px] text-muted">Commit / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.commit)}</div></div>
             </div>
             <div className="flex flex-col gap-3">
-              <Bar label="Closed (gagné)" value={r.closed} max={max} tone="bg-emerald" sub={`${r.counts.closed} opp.`} />
+              <Bar label="Closed (gagné)" value={r.closed} max={max} tone="bg-emerald" sub={`${r.counts.closed} cmd.`} />
               <Bar label="Commit" value={r.commit} max={max} tone="bg-gold" sub={`+${r.counts.commit} engagées`} />
               <Bar label="Best Case" value={r.bestCase} max={max} tone="bg-steel" sub={`+${r.counts.bestCase}`} />
               <Bar label="Pipeline" value={r.pipeline} max={max} tone="bg-ink/40" sub={`+${r.counts.pipeline}`} />
             </div>
-            <Tip>Catégories <b>cumulatives</b> (Pipeline ⊇ Best Case ⊇ Commit ⊇ Closed) posées par le commercial dans la fiche opportunité — indépendantes de l'étape. La direction et les managers voient le roll-up de leur <b>hiérarchie</b> ; un commercial voit son périmètre. Le quota est l'objectif CAS de l'exercice (paramétré dans Objectifs).</Tip>
+            <Tip><b>Closed (gagné)</b> = carnet de commandes de l'exercice (CAS, millésime de la commande) — même source que la Vue d'ensemble. Les paliers <b>cumulatifs</b> au-dessus (Commit ⊆ Best Case ⊆ Pipeline) ajoutent les opportunités <b>ouvertes</b> selon la catégorie posée par le commercial dans la fiche — indépendante de l'étape (tant qu'aucune n'est engagée, Commit et Best Case restent au niveau du carnet). Le quota est l'objectif CAS de l'exercice (paramétré dans Objectifs).</Tip>
           </div>
         )}
       </Card>
