@@ -3,6 +3,32 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-012 — Embarquer les engagements SLA dans le document contrat (v1)
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (en cours de Lot 1)
+
+### Contexte
+Le plan (`04-PLAN-INTEGRATION.md §2.1`) prévoyait une collection séparée `mnt_engagementsSla`. En
+pratique, un engagement SLA n'existe pas hors de son contrat, ils sont peu nombreux (1–3) et toujours
+lus avec le contrat. Une collection séparée doublerait la surface (rules, index, callable) sans gain.
+
+### Décision
+Les engagements SLA sont **embarqués** comme tableau `engagements[]` sur `mnt_contrats` en v1
+(validés par `domain/mntContrat.js`). La collection `mnt_engagementsSla` prévue au plan reste **non
+utilisée** (son bloc de règles Lot 0 demeure, inoffensif : lecture refusée sur collection vide).
+
+### Conséquences
+- Écriture atomique (un seul doc), lecture en un seul `onSnapshot`, moins de règles/index.
+- Si un besoin d'historique/lifecycle propre aux engagements apparaît (ex. suivi par événement SLA au
+  Lot 3), on extraira vers une collection dédiée — nouvel ADR à ce moment.
+
+### Ce qu'on saura dans six mois
+Si les engagements doivent être requêtés indépendamment du contrat → l'embarquement aura ses limites.
+
+---
+
 ## Format
 
 ```markdown

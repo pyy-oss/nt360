@@ -31,6 +31,58 @@
 
 ---
 
+## 2026-07-15 — Lot 1 (Contrat & engagements SLA — données)
+
+**Fait**
+- Domaine PUR `functions/domain/mntContrat.js` : `validateMntContrat` / `validateEngagement` +
+  énumérations (statuts, échéances, types SLA, couvertures). N° FP canonicalisé par `fpKey` (ADR-001,
+  C11), montant `number` arrondi **entier XOF**, dates ISO `AAAA-MM-JJ`, statuts en code applicatif.
+- Handler `functions/handlers/maintenance.js` : callables `upsertMntContrat` / `deleteMntContrat`,
+  **double garde** `requireWrite('maintenance')` + drapeau `config/mntFeature` allumé (ADR-009), audit
+  `auditLog` au schéma 6 champs. Id du doc = `safeId(fp)` (1 contrat = 1 affaire, idempotent).
+- Câblage `index.js` (factory injectée) + `deployed-functions.txt` (+2, garde CI verte).
+- Front : types `MntContrat`/`MntEngagement` (`types.ts`), wrappers `writes.ts`, libellés/tons
+  `web/src/lib/mntContrat.ts` (miroir des valeurs, libellés FR), écran `modules/maintenance.tsx`
+  (liste `Table` + fiche `Modal` avec `Select`/`DateField`/`Busy`/`DangerBtn`, RBAC-gated, montant
+  FCFA entier via `fmt`, date `JJ/MM/AAAA`, voix « Enregistrer »).
+- Engagements SLA **embarqués** dans le contrat (ADR-012), pas de collection séparée.
+
+**Filet / vérif — TOUT VERT**
+- `functions` **838** (+ `mntContrat.test.js`), `web` **81** (+ `mntContrat.test.ts`), `test:rules`
+  **68** (inchangé), build OK, **chunk d'entrée 115,0 KB ≤ 120** (module = chunk lazy), gardes
+  no-undef (113), deploy-targets (**140**), indexes, lint — verts.
+
+**Points de contact touchés**
+- **C4** (déploiement) : +2 callables, `deployed-functions.txt` à jour (garde verte).
+- **C11** (rattachement) : `fpKey` au cœur de la validation ; test domaine + `mnt-caracterisation`.
+- **C2** (rules) : **non retouché** — les blocs `mnt_*` + le flag sont déjà en place (Lot 0). Les
+  écritures passent par callable (Admin SDK), `write:false` reste opposable.
+- **C9** (index) : **aucun index ajouté** — la liste lit toute la collection et trie côté client
+  (petite volumétrie). Un index composite viendra dès qu'une requête `where/orderBy` apparaît.
+
+**Appris sur l'existant**
+- `useCollectionData(name=null)` = pas d'abonnement (`web/src/lib/hooks.ts:65`) : on passe `null`
+  quand le rôle n'a pas le droit, évitant un `permission-denied` en console. *(complète 01-EXISTANT)*
+- `Modal` n'accepte que `size` `"sm"|"md"` (pas `"lg"`). Classe d'input partagée = `field`.
+
+**Échoué / abandonné**
+- Rien. (Un `size="lg"` initial a été corrigé en `"md"` — primitive existante, pas d'extension.)
+
+**Dette assumée**
+- Écran Habilitations n'expose toujours pas la clé `maintenance` (Lot 0) : en pratique seule la
+  direction peut créer/lire un contrat une fois le drapeau allumé. Remboursé au lot d'activation.
+- Pas de test end-to-end du callable `upsertMntContrat` sous émulateur Functions (le harnais
+  `test:rules` ne monte que Firestore) : couvert par le test unitaire du **domaine** + la garde RBAC
+  au niveau règles. À compléter si un lot ajoute une logique serveur non triviale.
+
+**Décidé**
+- ADR-012 (engagements SLA embarqués). ADR-001/005/009/010 appliqués.
+
+**Suivant**
+- Validation humaine + fusion, puis `/5-lot 2` (Tickets & interventions).
+
+---
+
 ## 2026-07-15 — Lot 0 (Socle éteint)
 
 **Fait**
