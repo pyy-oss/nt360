@@ -3,6 +3,35 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-015 — Dériver l'état SLA en direct (fonction pure) plutôt qu'une collection matérialisée (v1)
+
+- **Date :** 2026-07-15
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Le plan (`04-PLAN-INTEGRATION.md §2.1`) prévoyait une collection `mnt_evenementsSla`. Or l'état SLA
+d'un ticket se calcule à partir de données déjà présentes (ouverture, transitions, engagement du
+contrat) via une fonction PURE (`domain/mntSla.js`). Matérialiser des événements ajouterait un chemin
+d'écriture et un risque de désynchronisation, sans besoin en Lot 3 (affichage seul).
+
+### Décision
+L'état SLA (respecté / rompu / en cours) est **dérivé en direct** par `slaState`, mirroré front
+(`web/src/lib/mntSla.ts`) — aucune collection `mnt_evenementsSla` en v1. Le ticket gagne deux
+horodatages de transition (`priseEnCompteLe`, `resoluLe`, posés une fois par le callable) pour un SLA
+à la minute. La **matérialisation** (historique des ruptures) est reportée au **Lot 5**, où le
+recompute agrège déjà le risque (ADR-003) — une seule occasion de matérialiser.
+
+### Conséquences
+- Zéro chemin d'écriture d'événement, zéro désynchronisation ; miroir front/back exact (parité testée).
+- L'historique des ruptures SLA n'est pas persisté avant le Lot 5 (acceptable : l'état courant suffit
+  à l'affichage et au futur score).
+
+### Ce qu'on saura dans six mois
+Si un besoin d'audit/historique fin des ruptures apparaît avant le score → anticiper la matérialisation.
+
+---
+
 ## ADR-013 — Alimenter le CRA depuis les interventions (8 h ouvrées = 1 jour), en doc CRA distinct
 
 - **Date :** 2026-07-15
