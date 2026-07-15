@@ -51,6 +51,7 @@ taceHistory
 timesheetKpis
 upsertAssignment
 upsertCandidate
+submitMntDecision
 upsertConsultant
 upsertMntContrat
 upsertMntIntervention

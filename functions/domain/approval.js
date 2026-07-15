@@ -7,8 +7,10 @@
 // Fonctions PURES (aucun I/O) → testables. Validation partagée par les callables.
 
 // Nature de la demande (libellé métier). entityType borne le rattachement.
-const APPROVAL_KINDS = ["remise_opp", "depassement_bc", "commande_manuelle", "autre"];
-const APPROVAL_ENTITIES = ["opportunity", "bcLine", "order", "other"];
+// Natures ajoutées par le module Contrats de maintenance (Lot 4) : renouvellement / résiliation d'un
+// contrat, rattachés à l'entité `mnt_contrat`. Extension ADDITIVE (aucune valeur existante retirée).
+const APPROVAL_KINDS = ["remise_opp", "depassement_bc", "commande_manuelle", "renouvellement_contrat", "resiliation_contrat", "autre"];
+const APPROVAL_ENTITIES = ["opportunity", "bcLine", "order", "mnt_contrat", "other"];
 const APPROVAL_STATES = ["pending", "approved", "rejected"];
 
 // Normalise + valide une demande d'approbation. { ok, error?, value? }.

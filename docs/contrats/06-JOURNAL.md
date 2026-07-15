@@ -31,6 +31,56 @@
 
 ---
 
+## 2026-07-15 — Lot 4 (Renouvellements & résiliations via approvals)
+
+**Fait**
+- Extension ADDITIVE du domaine d'approbation (`domain/approval.js`) : `APPROVAL_KINDS` += `renouvellement_contrat`,
+  `resiliation_contrat` ; `APPROVAL_ENTITIES` += `mnt_contrat`. Aucune valeur retirée.
+- Callable `submitMntDecision` (`handlers/maintenance.js`) : gouverné `maintenance` + drapeau, RÉUTILISE
+  le moteur existant (`validateApprovalRequest`/`approverFor`/`ownerChain`, collection `approvals`,
+  `visibleTo`) — routage vers le manager (sinon direction), audité. La DÉCISION (approuver/rejeter) passe
+  par le callable `decideApproval` et l'écran **Approbations** existants (aucun circuit recréé — ADR-004).
+- `index.js` : +1 export (injection `loadUsersMap`/`anyDirectionUid`), `deployed-functions.txt` +1 (145 fns).
+- Front : wrapper `writes.ts` + boutons « Demander le renouvellement / la résiliation » dans la fiche
+  contrat (Busy), visibles seulement en édition d'un contrat existant + droit `maintenance`.
+
+**C6 — frontière DÉPLACÉE (volontaire)** : le test de caractérisation `mnt-caracterisation.test.js` a été
+mis à jour DANS ce lot — il affirmait « renouvellement rejeté aujourd'hui », il affirme désormais
+« accepté (moteur inchangé, valeurs ajoutées) ». C'est le signal attendu que la frontière C6 a bougé.
+
+**Filet / vérif — TOUT VERT**
+- `functions` **849** (C6 mis à jour, `approval.test.js` non régressé), `web` **85**, `test:rules`
+  **68** (inchangé — écriture `approvals` en Admin SDK), build OK, **chunk 115,5 KB ≤ 120**,
+  no-undef (116), deploy-targets (**145**), indexes, lint : verts.
+
+**Points de contact touchés**
+- **C6** (approbations) : extension additive du domaine + test de frontière mis à jour ; le moteur et
+  les demandes existantes restent valides (non-régression prouvée par `approval.test.js` + le 3ᵉ cas C6).
+- **C4** : +1 callable (`deployed-functions.txt`).
+
+**Appris sur l'existant**
+- `submitForApproval` existant est gouverné `pipeline` ; on a préféré un point d'entrée `maintenance`
+  dédié (`submitMntDecision`) plutôt que de rouvrir la garde — même moteur, cloisonnement propre.
+  `loadUsersMap`/`anyDirectionUid` sont des `async function` (hoisted) → injectables au câblage.
+
+**Échoué / abandonné**
+- Rien.
+
+**Dette assumée**
+- L'e-mail à l'approbateur (best-effort dans `submitForApproval`) n'est pas répliqué dans
+  `submitMntDecision` (la demande reste visible dans Approbations + digests) — à ajouter si besoin.
+- La décision approuvée ne fait pas encore MUTER le contrat (ex. prolonger `dateFin` / passer `resilie`)
+  automatiquement : la décision est tracée, l'application de l'effet reste manuelle en v1. Noté.
+
+**Décidé**
+- Application d'ADR-004 (réutilisation du moteur d'approbation). Aucun nouvel ADR.
+
+**Suivant**
+- Validation + fusion, puis `/5-lot 5` (Moteur de risque — DERNIER lot ; touche le recompute `aggregate.js`,
+  point de contact C3 le plus sensible).
+
+---
+
 ## 2026-07-15 — Lot 3 (Événements SLA & échéancier)
 
 **Fait**

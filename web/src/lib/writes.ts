@@ -1019,3 +1019,9 @@ export async function upsertMntTicket(t: MntTicket) { const res = await httpsCal
 export async function deleteMntTicket(id: string) { await httpsCallable(functions, "deleteMntTicket")({ id }); }
 export async function upsertMntIntervention(i: MntIntervention) { const res = await httpsCallable(functions, "upsertMntIntervention")(i); return res.data as { ok: boolean; id: string }; }
 export async function deleteMntIntervention(id: string) { await httpsCallable(functions, "deleteMntIntervention")({ id }); }
+
+// Décision de contrat (renouvellement / résiliation) soumise au moteur d'approbation (Lot 4, ADR-004).
+export async function submitMntDecision(contratId: string, kind: "renouvellement_contrat" | "resiliation_contrat", note?: string) {
+  const res = await httpsCallable(functions, "submitMntDecision")({ contratId, kind, note });
+  return res.data as { ok: boolean; id: string; approverUid: string };
+}

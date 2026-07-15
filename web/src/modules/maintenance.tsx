@@ -16,7 +16,7 @@ import { fpKey } from "../lib/ids";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
 import type { Invoice } from "../types";
 import {
-  upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants,
+  upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -66,6 +66,7 @@ export const Maintenance: FC<Props> = () => {
   const [cOpen, setCOpen] = useState(false);
   const [cForm, setCForm] = useState<CForm>(emptyContrat);
   const [cEdit, setCEdit] = useState(false);
+  const [cId, setCId] = useState(""); // id du contrat édité (pour les décisions renouvellement/résiliation)
   const setC = <K extends keyof CForm>(k: K, v: CForm[K]) => setCForm((f) => ({ ...f, [k]: v }));
   const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
   const cValid = cForm.fp.trim() && cForm.client.trim() && cForm.dateDebut;
@@ -106,7 +107,7 @@ export const Maintenance: FC<Props> = () => {
     colNum("SLA", (c: MntContrat) => c.engagements?.length || 0),
     colText("", (c: MntContrat) => (
       <div className="flex items-center justify-end gap-1.5">
-        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCEdit(true); setCOpen(true); }}>{canWrite ? "Éditer" : "Voir"}</button>
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCId(c.id || ""); setCEdit(true); setCOpen(true); }}>{canWrite ? "Éditer" : "Voir"}</button>
         {canWrite && <DangerBtn label="Suppr." confirm={`Supprimer le contrat ${c.fp} ?`} fn={() => deleteMntContrat(c.id!)} okMsg="Contrat supprimé" errMsg="Suppression refusée" />}
       </div>
     )),
@@ -136,7 +137,7 @@ export const Maintenance: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Contrats de maintenance"
-        actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
+        actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
         {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" />}
       </Card>
@@ -185,6 +186,15 @@ export const Maintenance: FC<Props> = () => {
               <div><div className="text-[11px] text-muted">Écart</div><div className={cx("tabnum", ech.ecart > 0 ? "text-clay" : "text-emerald")}>{money(ech.ecart)}{ech.ecart > 0 ? " (sous-facturé)" : ""}</div></div>
             </div>
           </div>
+          {cEdit && cId && canWrite && (
+            <div className="mt-4 pt-3 border-t border-line/60">
+              <div className="text-[13px] font-medium mb-2">Décisions <span className="text-[11px] text-muted font-normal">— soumises à validation hiérarchique (Approbations)</span></div>
+              <div className="flex flex-wrap gap-2">
+                <Busy label="Demander le renouvellement" variant="ghost" fn={() => submitMntDecision(cId, "renouvellement_contrat")} okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" />
+                <Busy label="Demander la résiliation" variant="ghost" fn={() => submitMntDecision(cId, "resiliation_contrat")} okMsg="Résiliation soumise à approbation" errMsg="Soumission refusée" />
+              </div>
+            </div>
+          )}
         </Modal>
       )}
 
