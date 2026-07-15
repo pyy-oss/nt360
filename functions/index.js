@@ -3129,24 +3129,26 @@ exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], mem
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
-  let tasks;
-  try { tasks = await clickup.listTasks(token, listId, { includeClosed: true }); }
-  catch (e) {
-    // ÉCHEC de lecture ClickUp (API-side, malgré un token valide : 429 débit, 404 liste, réseau…).
-    // On PERSISTE la raison sur le summary → la carte « Santé de l'intégration » l'affiche (sinon
-    // l'échec est MUET hors toast/logs : impossible à diagnostiquer côté direction). Merge : ne détruit
-    // pas le dernier état sain. Puis on propage l'erreur (le toast reste informatif à l'appel manuel).
-    const reason = `ClickUp ${e.status || ""}: ${e.message || "liste illisible"}`.replace(/\s+:/, " :");
+  // TOUT le diagnostic est enveloppé : n'importe quelle erreur (API ClickUp 429/404/réseau, lecture
+  // loadCommandeRows, ÉCRITURE Firestore d'une valeur illégale…) est rendue LISIBLE — on persiste le
+  // motif réel (`lastError`) ET on propage un HttpsError PORTEUR DU MESSAGE. Sans ça, une erreur
+  // générique (non-HttpsError) repart en « internal » NU côté client, indiagnosticable (incident
+  // « Diagnostic refusé — internal »). `lastError: null` (et non FieldValue.delete) au succès : delete()
+  // est INTERDIT dans un set() sans {merge:true} et lèverait justement une erreur générique.
+  try {
+    const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
+    const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+    const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+    const orders = await loadCommandeRows();
+    const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
+    await db.doc("summaries/clickupHealth").set({ ...health, listId, lastError: null, lastErrorAt: null, at: FieldValue.serverTimestamp() });
+    return { ok: true, ...health };
+  } catch (e) {
+    const status = e && e.status;
+    const reason = String((e && e.message) || (e && e.code) || e || "erreur inconnue").slice(0, 300);
     await db.doc("summaries/clickupHealth").set({ lastError: reason, lastErrorAt: FieldValue.serverTimestamp(), listId }, { merge: true }).catch(() => {});
-    throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "liste illisible"}`);
+    throw new HttpsError(status === 401 || status === 403 ? "permission-denied" : "internal", `Diagnostic ClickUp : ${reason}`);
   }
-  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
-  const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
-  const orders = await loadCommandeRows();
-  const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
-  // Succès : on EFFACE toute raison d'échec antérieure (l'intégration est de nouveau saine).
-  await db.doc("summaries/clickupHealth").set({ ...health, listId, lastError: FieldValue.delete(), lastErrorAt: FieldValue.delete(), at: FieldValue.serverTimestamp() });
-  return { ok: true, ...health };
 });
 
 // listClickupMembers : membres du workspace ClickUp (nom + e-mail) — pour peupler le référentiel PM
