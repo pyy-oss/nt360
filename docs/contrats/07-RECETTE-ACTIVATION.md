@@ -36,6 +36,13 @@ Tout est déjà sur `main`. Vérifier que le déploiement de prod embarque bien 
 
 Allumer `config/mntFeature` puis dérouler ce parcours. **Chaque étape a un critère de succès mécanique.**
 
+> **Contrôle pré-vol (R0) — intégrité du CRA existant.** Le décompte TACE compte désormais les **mois
+> calendaires distincts** (audit Lot 5) : sûr pour toute base alimentée par les callables (id `consultant_mois`
+> déterministe → 1 doc/mois). Avant recette, confirmer qu'il n'existe **aucun doublon historique** :
+> grouper `timesheets` par `(consultantId, month)` **en excluant `source == "mnt"`** et refuser si un groupe
+> a `count > 1`. Si le contrôle est vert (garanti hors pollution manuelle directe), aucun chiffre TACE/marge
+> existant ne bouge. S'il trouve un doublon legacy, le corriger AVANT d'allumer (fusion/suppression).
+
 | # | Action | Critère de succès |
 |---|---|---|
 | R1 | Ouvrir l'onglet **« Contrats de maintenance »** (rôle avec droit `maintenance`) | L'onglet apparaît ; un rôle **sans** le droit ne le voit pas |
