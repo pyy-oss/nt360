@@ -80,16 +80,24 @@ async function applyWrites(db, writes) {
       (keepBySrcFp.get(k) || keepBySrcFp.set(k, new Set()).get(k)).add(path.slice("bcLines/".length));
     }
   }
-  for (const [k, keep] of keepBySrcFp) {
-    const sep = k.indexOf("|");
-    const source = k.slice(0, sep), fp = k.slice(sep + 1);
-    const snap = await db.collection("bcLines").where("fp", "==", fp).get();
-    const stale = snap.docs.filter((d) => d.get("source") === source && !keep.has(d.id));
-    for (let i = 0; i < stale.length; i += 400) {
-      const batch = db.batch();
-      stale.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+  // PERF (audit scalabilité) : au lieu d'UNE requête PAR (source,fp) — N+1 SÉQUENTIEL, plusieurs minutes /
+  // dépassement de timeout à N=10k FP en ré-ingestion — on interroge les bcLines par TRANCHES de FP
+  // (`where fp in`, ≤ 30 valeurs, index mono-champ automatique), puis on détermine les orphelines EN MÉMOIRE.
+  // Équivalence EXACTE : une ligne est supprimée ssi son couple (source,fp) est balayé (présent dans
+  // keepBySrcFp) et son id n'est pas dans le Set conservé. ~30× moins de requêtes.
+  const fps = [...new Set([...keepBySrcFp.keys()].map((k) => k.slice(k.indexOf("|") + 1)))];
+  const staleRefs = [];
+  for (let i = 0; i < fps.length; i += 30) {
+    const snap = await db.collection("bcLines").where("fp", "in", fps.slice(i, i + 30)).get();
+    for (const d of snap.docs) {
+      const keep = keepBySrcFp.get(`${d.get("source")}|${d.get("fp")}`);
+      if (keep && !keep.has(d.id)) staleRefs.push(d.ref);
     }
+  }
+  for (let i = 0; i < staleRefs.length; i += 400) {
+    const batch = db.batch();
+    staleRefs.slice(i, i + 400).forEach((r) => batch.delete(r));
+    await batch.commit();
   }
   // NB : le marquage des opportunités FANTÔMES (I2) N'est PAS fait ici. `applyWrites` sert le chemin
   // DELTA/partiel (importDelta, ré-ingestion) qui ne connaît PAS l'ensemble complet du pipeline — y

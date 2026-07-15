@@ -1832,14 +1832,16 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   const { isAgedLost } = require("./domain/oppLifecycle");
   const [oppSnap, fiscalDoc] = await Promise.all([
     // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
-    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo").get(),
+    // Scan BORNÉ (MAX_SCAN+1 + sliceCapped, comme scoreOpportunities) — pression mémoire maîtrisée à N grand.
+    db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo").limit(MAX_SCAN + 1).get(),
     db.doc("config/fiscal").get(),
   ]);
+  const { docs: oppDocs, capped } = sliceCapped(oppSnap.docs);
   // Population COHÉRENTE avec le reste de la famille pipeline (cf. audit chiffres, divergence D) : NON `stale`
   // ET NON périmée par âge. isAgedLost ne touche que les OUVERTES (1-5) → les catégories Closed/gagné sont
   // conservées ; une opp ouverte périmée n'apparaît plus en Best Case/Pipeline ici alors qu'elle est absente
   // du scoring/vélocité.
-  let opps = oppSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true && !isAgedLost(o));
+  let opps = oppDocs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => o.stale !== true && !isAgedLost(o));
   // Visibilité par enregistrement : sous OWD « private », un non-admin ne prévoit que son périmètre.
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
@@ -1856,7 +1858,7 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
   const quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
   return {
-    ok: true, fiscalYear: targetFy, allPeriods: !periodYear, scoped, quota,
+    ok: true, fiscalYear: targetFy, allPeriods: !periodYear, scoped, quota, capped,
     ...rollup,
     attainment: quota > 0 ? { closed: rollup.closed / quota, commit: rollup.commit / quota, bestCase: rollup.bestCase / quota } : null,
   };
@@ -1908,8 +1910,8 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   const { normalizeTiers } = require("./domain/projection");
   const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
   // probability/ageDays/source nécessaires au pondéré TIÉRÉ et à l'exclusion des périmées (isAgedLost).
-  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "visibleTo").get();
-  let opps = snap.docs.map((d) => d.data()).filter((o) => o.stale !== true);
+  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "visibleTo").limit(MAX_SCAN + 1).get();
+  let opps = sliceCapped(snap.docs).docs.map((d) => d.data()).filter((o) => o.stale !== true);
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
@@ -1923,16 +1925,18 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
   await requireRead(req, "import");
   const { findFuzzyDuplicates } = require("./domain/fuzzy");
   const [ord, inv, opp] = await Promise.all([
-    db.collection("orders").select("client").get(),
-    db.collection("invoices").select("client").get(),
-    db.collection("opportunities").select("client", "visibleTo").get(),
+    db.collection("orders").select("client").limit(MAX_SCAN + 1).get(),
+    db.collection("invoices").select("client").limit(MAX_SCAN + 1).get(),
+    db.collection("opportunities").select("client", "visibleTo").limit(MAX_SCAN + 1).get(),
   ]);
+  // Scans BORNÉS (MAX_SCAN+1 + sliceCapped, comme le jumeau strict `clientNames`) — mémoire maîtrisée à N grand.
+  const ordD = sliceCapped(ord.docs).docs, invD = sliceCapped(inv.docs).docs, oppD = sliceCapped(opp.docs).docs;
   const names = new Set();
-  for (const snap of [ord, inv]) snap.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
+  for (const docs of [ordD, invD]) docs.forEach((d) => { const c = String(d.data().client || "").trim(); if (c) names.add(c); });
   // OWD « private » sur les opportunités : ne PAS divulguer les noms de clients d'opps hors périmètre à un
   // rôle import:read non-admin (parité avec scopedOpps). Commandes/factures ne sont pas record-level scopées.
   const oppPrivate = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
-  opp.forEach((d) => {
+  oppD.forEach((d) => {
     const o = d.data();
     if (oppPrivate && !(Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid))) return;
     const c = String(o.client || "").trim(); if (c) names.add(c);
@@ -1984,8 +1988,9 @@ exports.clientNames = onCallG("clientNames", { memoryMiB: 512, timeoutSeconds: 1
 // mesure, domain/report.js) exécuté sur le périmètre VISIBLE de l'appelant, + définitions de rapport
 // sauvegardées/partagées (reports/*, callable-only). Comble l'écart #6 (aucun reporting self-service).
 async function scopedOpps(req, fields) {
-  const snap = await db.collection("opportunities").select(...fields, "visibleTo").get();
-  let opps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Scan BORNÉ (MAX_SCAN+1 + sliceCapped) — mémoire maîtrisée à N grand (capacityPlan/runReport/…).
+  const snap = await db.collection("opportunities").select(...fields, "visibleTo").limit(MAX_SCAN + 1).get();
+  let opps = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
@@ -2433,14 +2438,15 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
   const [invSnap, ordSnap, aliasDoc] = await Promise.all([
     // bu + alias de montant (montant/montantHt/…) : requis pour dériver TOUS les champs de la facture —
     // sans bu, la commande générée retombait sur « AUTRE » ; sans les alias, un montant hors « amountHt » = 0.
-    db.collection("invoices").select("fp", "client", "bu", "amountHt", "montantHt", "montant", "amount", "amountTtc", "totalHt", "date", "numero").get(),
-    db.collection("orders").select("fp").get(),
+    db.collection("invoices").select("fp", "client", "bu", "amountHt", "montantHt", "montant", "amount", "amountTtc", "totalHt", "date", "numero").limit(MAX_SCAN + 1).get(),
+    db.collection("orders").select("fp").limit(MAX_SCAN + 1).get(),
     db.doc("config/fpAliases").get(),
   ]);
+  // Scans BORNÉS (MAX_SCAN+1 + sliceCapped) — la LECTURE est plafonnée (le plan d'écriture l'était déjà à 500).
   // MÊME canonisation FP que le recompute / correctionQueue (overlay d'alias) → cohérence des orphelines.
   const canonFp = buildFpAliasResolver(((aliasDoc.data() || {}).map) || {});
-  let invoices = invSnap.docs.map((s) => { const v = { id: s.id, ...s.data() }; if (v.fp != null && v.fp !== "") v.fp = canonFp(v.fp); return v; });
-  const orderFps = new Set(ordSnap.docs.map((s) => fpKey(s.data().fp)).filter(Boolean));
+  let invoices = sliceCapped(invSnap.docs).docs.map((s) => { const v = { id: s.id, ...s.data() }; if (v.fp != null && v.fp !== "") v.fp = canonFp(v.fp); return v; });
+  const orderFps = new Set(sliceCapped(ordSnap.docs).docs.map((s) => fpKey(s.data().fp)).filter(Boolean));
   if (!wantAll) { const sel = new Set(ids); invoices = invoices.filter((i) => sel.has(i.id)); }
 
   const { plan, skippedNoFp, skippedExisting } = planFromInvoices(invoices, orderFps);
