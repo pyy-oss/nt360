@@ -1133,7 +1133,7 @@ export const OrderList: FC<Props> = () => {
   // enchaîner évite la contention de N transactions concurrentes sur le même doc d'annulations.
   const orderBulk: BulkAction[] = canImport ? [
     { label: "Annuler", tone: "danger", confirm: "Annuler les commandes sélectionnées ? Elles sortent du carnet, du CAS et du backlog (conservées, rétablissables). L'annulation survit à un ré-import.",
-      okMsg: (rs) => `${rs.length} commande${rs.length > 1 ? "s" : ""} annulée${rs.length > 1 ? "s" : ""}`, errMsg: "Annulation refusée",
+      okMsg: (rs) => { const n = rs.filter((x) => x.fp).length; return `${n} commande${n > 1 ? "s" : ""} annulée${n > 1 ? "s" : ""}`; }, errMsg: "Annulation refusée",
       run: async (rs) => { for (const r of rs.filter((x) => x.fp)) await setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client }); } },
   ] : [];
   if (loading && !all.length) return <CardSkeleton />;

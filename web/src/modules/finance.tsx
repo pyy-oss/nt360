@@ -193,10 +193,10 @@ export const InvoiceList: FC<Props> = () => {
   // (N transactions concurrentes sur un doc unique → tempête de retries / timeouts sur grande sélection).
   const invoiceBulk: BulkAction[] = canImport ? [
     { label: "Annuler", tone: "danger", confirm: "Annuler les factures sélectionnées ? Elles sortent de la facturation, du cash et des créances (conservées, rétablissables). L'annulation survit à un ré-import.",
-      okMsg: (rs) => `${rs.length} facture${rs.length > 1 ? "s" : ""} annulée${rs.length > 1 ? "s" : ""}`, errMsg: "Annulation refusée",
+      okMsg: (rs) => { const n = rs.filter((x) => x.id).length; return `${n} facture${n > 1 ? "s" : ""} annulée${n > 1 ? "s" : ""}`; }, errMsg: "Annulation refusée",
       run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client }); } },
     { label: "Rétablir", confirm: "Rétablir les factures sélectionnées ? Elles réintègrent la facturation et le cash.",
-      okMsg: (rs) => `${rs.length} facture${rs.length > 1 ? "s" : ""} rétablie${rs.length > 1 ? "s" : ""}`, errMsg: "Rétablissement refusé",
+      okMsg: (rs) => { const n = rs.filter((x) => x.id).length; return `${n} facture${n > 1 ? "s" : ""} rétablie${n > 1 ? "s" : ""}`; }, errMsg: "Rétablissement refusé",
       run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, false); } },
   ] : [];
   return (
