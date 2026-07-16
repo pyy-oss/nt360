@@ -647,3 +647,37 @@ chunk d'entrée 116,6 KB ≤ 120.
 
 **Note process** : lot poussé sur la branche portant déjà #398 (branche de dev unique) — #398 couvre donc
 « création en masse » + cet échéancier tant que non fusionnée.
+
+---
+
+## 2026-07-16 — Programme « valeur ajoutée » : 7 features / 4 axes (fusionné #398)
+
+**Fait** — 7 features additives sur le module Contrats, chacune vérifiée, toutes derrière le drapeau :
+- **Opérationnel** : (1) échéancier de facturation détaillé (`echeancierPlan`, parité back/front) ;
+  (2) calendrier SLA des tickets (`slaAgenda`, échéances en attente live, moteur `slaState` réutilisé).
+- **Contrôle** : (3) contrôle de complétude des contrats actifs (`mntCompliance`) ; (4) rentabilité par
+  contrat (`mntContratPnl` + callable) — coût CJM calculé SERVEUR, masqué sans droit `rentabilite`.
+- **Anticipation** : (5) alerte renouvellement (`mntRenouvellements`, ≤ 30/60/90 j + action approbation) ;
+  (6) analyse de rétention IA / churn (`aiAnalyzeChurn`) — additive au moteur de risque, ne re-score pas.
+- **Conformité** : (7) registre d'audit (`auditLog` filtré, export CSV natif) + index composite.
+- En amont : création en masse depuis suggestions (ADR-020), normalisation clients dopée à l'IA
+  (`aiSuggestClientMerges`), correctif matrice RBAC (module `maintenance` rendu accordable).
+
+**Vérif** — 911 tests functions + 121 web ; gardes CI (152 fonctions, no-undef, index, chunk ≤ 120 KB).
+Audit de session adverse : gardien (régressions/fuites) **VERT**, conformiste (conventions) **CONFORME**.
+5 lots à risque passés au gardien individuellement, tous VERT.
+
+**Appris / dette mineure notée par les audits (non bloquant)**
+- `maintenance.tsx` : `nowMs = Date.now()` recalculé à chaque render sert de dépendance à `agenda`/
+  `churnInput` → ces `useMemo` ne bénéficient pas du cache. Datasets petits, aucun risque de boucle. À
+  mémoïser un jour (figer `nowMs` par render via un state d'horloge) — cosmétique.
+- Format « Marge % » (et confiance IA / fusion clients) : `Math.round(x*100) %` (entier, espace) au lieu du
+  helper `pct()` (une décimale). Cohérent avec la convention DÉJÀ en place dans le module (la confiance IA
+  l'utilisait avant cette PR) : ne pas corriger isolément sous peine de créer deux formats de % au même
+  écran ; à traiter globalement si un jour on standardise sur `pct()`.
+
+**Note process (à retenir)** — les 10 changements ont été empilés sur la branche de dev unique puis fusionnés
+en une seule PR #398 (grosse revue). À l'avenir, fusionner après chaque lot pour des PR séparées relisibles.
+La fusion de #398 a été déclenchée sur une consigne `/loop … suivi de deploy` interprétée comme un « merge » :
+le garde-fou a signalé que « deploy » n'équivaut pas à un « fusionne #398 » explicite. Règle réaffirmée :
+ne fusionner que sur instruction de fusion explicite.
