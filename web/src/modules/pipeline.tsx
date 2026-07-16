@@ -16,6 +16,7 @@ import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
+import { isDormantClosing } from "../lib/ids"; // miroir client de l'exclusion dormante (parité recompute)
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
 
 // Libellés courts d'étape pour le funnel de transitions (from→to).
@@ -168,7 +169,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
         {(funnelC?.total ?? 0) > 0 ? (
           <>
             <div className={grid4}>
-              <Kpi label="Taux de gain" value={pct(funnelC?.winRate)} tone={(funnelC?.winRate ?? 0) >= 0.5 ? "emerald" : "gold"} sub={`gagné ${funnelC?.won ?? 0} / perdu ${funnelC?.lost ?? 0}`} />
+              <Kpi label="Taux de gain (transitions)" value={pct(funnelC?.winRate)} tone={(funnelC?.winRate ?? 0) >= 0.5 ? "emerald" : "gold"} sub={`gagné ${funnelC?.won ?? 0} / perdu ${funnelC?.lost ?? 0}`} />
               <Kpi label="Progressions" value={String(funnelC?.advanced ?? 0)} tone="emerald" sub="avancées d'étape" />
               <Kpi label="Reculs" value={String(funnelC?.regressed ?? 0)} tone="clay" sub="retours en arrière" />
               <Kpi label="Transitions" value={String(funnelC?.total ?? 0)} sub="mouvements journalisés" />
@@ -423,6 +424,15 @@ export const OppList: FC<Props> = () => {
   const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { data: cfDoc } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields"); // champs custom (Lot 7b)
   const customDefs = cfDoc?.fields || [];
+  // Exercice courant : borne l'exclusion DORMANTE (D Prev d'un millésime révolu) de Certitudes/Top, comme
+  // le recompute → ces cartes ne sur-comptent plus par rapport au cockpit (parité « Commit »).
+  const { data: periodsCfg } = useDocData<PeriodsConfig>("config/periods");
+  const currentFy = periodsCfg?.currentFy;
+  // Drapeau `excludeDormant` (config/projection, défaut ACTIVÉ) : les dormantes ne sont retirées que s'il
+  // est actif — MIROIR de overviewCalc.ts/aggregate.js. Sans ce gate, drapeau ÉTEINT, Certitudes/Top
+  // sous-compteraient (le cockpit, lui, les inclut alors) → l'inverse de l'incohérence corrigée.
+  const { data: projCfg } = useDocData<{ excludeDormant?: boolean }>("config/projection");
+  const excludeDormant = projCfg?.excludeDormant !== false;
   const { match } = useFilters();
   const clientKey = useClientKey(); // canonicalise le client pour matcher les options canoniques du filtre
   const canWrite = useCan("pipeline") === "write";
@@ -475,17 +485,21 @@ export const OppList: FC<Props> = () => {
   const setStage = (s: string) => setF((prev) => ({ ...prev, stage: s, probability: prev.probability || String(DEFAULT_PROBA[Number(s)] ?? "") }));
   // Toutes ces dérivations plein-tableau sont MÉMOÏSÉES (avant tout retour anticipé → hooks inconditionnels,
   // React #310) : sinon chaque frappe dans la modale d'édition les rejouait sur toute la collection.
-  const top = useMemo(() => [...rows].sort((a, b) => pw(b) - pw(a)).slice(0, 10), [rows, pw]);
   // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
   // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
   const bookedFps = useMemo(() => new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]), [cmd]);
   const isBooked = useCallback((o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp)))), [bookedFps]);
-  // Certitudes = opportunités ACTIVES (1..5) quasi-certaines (IdC ≥ 90 %) PAS encore au carnet : une opp
-  // déjà adossée au P&L est réalisée (dans le CAS) → l'inclure double-compterait le pondéré (parité
-  // chaine/atterrissage/Cockpit `Commit`, invariant « même métrique = même nombre »).
+  // Assiette PIPELINE (parité Cockpit/Commit) : opp ACTIVE (1..5), PAS encore au carnet P&L (sinon réalisée
+  // → double-compte) et NON DORMANTE (D Prev d'un millésime révolu → exclue de la prévision, comme le
+  // recompute serveur). Certitudes ET Top s'y adossent, sinon ils sur-comptent vs le cockpit (invariant
+  // « même métrique = même nombre »). `stale`/`isAgedLost` sont déjà retirés en amont dans `rows`.
+  const pipelineEligible = useCallback((o: Opportunity) =>
+    (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && !isBooked(o) && !(excludeDormant && isDormantClosing(o, currentFy)), [isBooked, currentFy, excludeDormant]);
+  const top = useMemo(() => rows.filter(pipelineEligible).sort((a, b) => pw(b) - pw(a)).slice(0, 10), [rows, pipelineEligible, pw]);
+  // Certitudes = opportunités de l'assiette pipeline quasi-certaines (IdC ≥ 90 %).
   const certitudes = useMemo(() => rows
-    .filter((o) => (o.stage || 0) >= 1 && (o.stage || 0) <= 5 && p01(o.probability || 0) >= 0.9 && !isBooked(o))
-    .sort((a, b) => pw(b) - pw(a)), [rows, isBooked, pw]);
+    .filter((o) => pipelineEligible(o) && p01(o.probability || 0) >= 0.9)
+    .sort((a, b) => pw(b) - pw(a)), [rows, pipelineEligible, pw]);
   const certTotal = useMemo(() => certitudes.reduce((s, o) => s + pw(o), 0), [certitudes, pw]);
   const today = new Date().toISOString().slice(0, 10);
   // Prochaines actions commerciales échéancées (opps ACTIVES avec date d'action), triées par échéance.
