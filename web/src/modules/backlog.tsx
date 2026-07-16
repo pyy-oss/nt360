@@ -1006,7 +1006,7 @@ function ReconcileWonOpps({ commandeFps, canPipelineWrite }: { commandeFps: Set<
               confirm={`Annuler l'opportunité gagnée ${o.fp} (${o.client || "—"}) ? Elle passe au statut « Annulé » et quitte cette liste. Un ré-import de la source la rétablira si elle y figure encore comme gagnée.`}
               fn={() => patchOpportunity({ id: o.id!, stage: 9 })} />
           : null), () => 0),
-      ]} rows={won} colsKey="won-opps" />
+      ]} rows={won} colsKey="won-opps" searchKeys={[(o: Opportunity) => o.fp || "", (o: Opportunity) => o.client || "", (o: Opportunity) => o.am || ""]} rowKey={(o: Opportunity) => o.id || o.fp || ""} bulk={[]} />
       <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. <b>« Inscrire au P&L »</b> crée la commande depuis l'opportunité (CAS = montant de l'opp). <b>« Annuler »</b> écarte l'opp (statut « Annulé ») si elle ne doit pas devenir une commande. Le <b>N° FP est corrigeable</b> (les versions saisies par les commerciaux sont parfois erronées) : la correction peut suffire à rapprocher l'affaire d'une ligne P&L existante. Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
     </Card>
   );

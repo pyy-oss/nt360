@@ -119,7 +119,7 @@ export const Habilitations: FC<Props> = () => {
       </Card>
       {isDirection && <CreateUserCard />}
       <Card title="Utilisateurs & rôles">
-        <ListView colsKey="admin-users" pageSize={25} searchKeys={[(u: UserRow) => u.email || "", (u: UserRow) => u.name || ""]} placeholder="Rechercher un utilisateur (email, nom)…" columns={[
+        <ListView colsKey="admin-users" pageSize={25} searchKeys={[(u: UserRow) => u.email || "", (u: UserRow) => u.name || ""]} rowKey={(u: UserRow) => u.id || u.email || ""} bulk={[]} placeholder="Rechercher un utilisateur (email, nom)…" columns={[
           colText("Email", (u) => u.email), colText("Nom", (u) => u.name),
           isDirection
             ? colText("Actif", (u: UserRow) => <ActiveToggle uid={u.id!} active={u.active} />, (u: UserRow) => (u.active ? 1 : 0))

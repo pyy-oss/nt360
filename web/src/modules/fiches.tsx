@@ -368,7 +368,7 @@ export const Fiches: FC<Props> = () => {
           Circuit à 6 étapes (AC → DC → DRO → AC → DGA → CDG/DF). Champs financiers masqués pour les rôles non habilités.
         </p>
         {loading ? <div className="py-8 text-center text-faint">Chargement…</div>
-          : <Table columns={cols} rows={rows} colsKey="fiches" empty="Aucune fiche d'affaire — créez-en une pour numériser une affaire." />}
+          : <Table columns={cols} rows={rows} colsKey="fiches" empty="Aucune fiche d'affaire — créez-en une pour numériser une affaire." searchKeys={[(r: Fiche) => r.numero_fp, (r: Fiche) => r.client, (r: Fiche) => r.affaire, (r: Fiche) => r.commercial]} rowKey={(r: Fiche) => r._id || r.numero_fp || ""} bulk={[]} />}
       </Card>
 
       {openId && <FicheDetail id={openId} role={role} onClose={() => setOpenId(null)} onChanged={load} />}
