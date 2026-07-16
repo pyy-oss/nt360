@@ -186,6 +186,8 @@ export function FreshnessGuard() {
 
 export type Props = { period: string };
 export const grid4 = "grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4";
+// Rangée de 5 KPI de tête (cockpit) : sans elle, `grid4` laisse un 5e KPI orphelin sur une 2e ligne.
+export const grid5 = "grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-5";
 export const cols2 = "grid gap-2 sm:gap-3 md:grid-cols-2";
 
 export const objToArr = (o: Record<string, number> = {}) =>

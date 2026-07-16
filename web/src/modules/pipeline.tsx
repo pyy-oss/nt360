@@ -11,7 +11,7 @@ import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
+import { Props, grid4, grid5, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
@@ -450,6 +450,9 @@ export const OppList: FC<Props> = () => {
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
+  // Vue de la page : « Liste » (la liste des opportunités, en tête) vs « Analyses » (certitudes, top,
+  // motifs, actions). Dégonfle l'écran sans rien masquer définitivement — on atterrit sur la donnée.
+  const [view, setView] = useState<"liste" | "analyses">("liste");
   // Sous-filtre par ÉTAPE (phase) — ne s'applique qu'au segment « Actives » (étapes 1..5). 0 = toutes.
   // C'est un filtre d'affichage (pas une métrique recalculée) → aucune divergence de chiffres possible.
   const [stageF, setStageF] = useState(0);
@@ -528,7 +531,14 @@ export const OppList: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <FilterNote dims="BU / AM / client" />
+        <div className="flex items-center gap-3 flex-wrap">
+          <FilterNote dims="BU / AM / client" />
+          {/* Bascule Liste / Analyses (idiome Segmented de l'ERP) : la liste en tête, les analyses repliées. */}
+          <Segmented value={view} onChange={(v) => setView(v as typeof view)} ariaLabel="Basculer entre la liste et les analyses" options={[
+            { value: "liste", label: "Liste" },
+            { value: "analyses", label: "Analyses" },
+          ]} />
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           {meAm && <button onClick={() => setMine((m) => !m)} className={cx("btn-ghost !px-3 !py-1.5 text-sm", mine && "!text-gold !border-gold/50")} title="Filtrer sur mes opportunités (AM = moi)">{mine ? "Mon pipeline ✓" : "Mon pipeline"}</button>}
           {canWrite && <button onClick={openNew} className="btn-gold !px-3 !py-1.5 text-sm">+ Ajouter une opportunité</button>}
@@ -628,6 +638,7 @@ export const OppList: FC<Props> = () => {
           {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
         </Modal>
       )}
+      {view === "analyses" && (<>
       {actions.length > 0 && (
         <Card title={`Prochaines actions commerciales · ${actions.length}`}>
           <Table columns={[
@@ -672,6 +683,8 @@ export const OppList: FC<Props> = () => {
           colText("P&L", (o: Opportunity) => pnlFlag(o)),
         ]} rows={top} empty="Aucune opportunité." />
       </Card>
+      </>)}
+      {view === "liste" && (<>
       {canWrite && <OppBulkExcel />}
       <Card title={`Toutes les opportunités · ${shownOpps.length.toLocaleString("fr-FR")}`} actions={
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -733,6 +746,7 @@ export const OppList: FC<Props> = () => {
           ]}
         />
       </Card>
+      </>)}
     </div>
   );
 };
@@ -775,7 +789,8 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const maxLadder = Math.max(pipe, objectif, 1);
   return (
     <div className="flex flex-col gap-4">
-      <div className={grid4}>
+      {/* 5 KPI de tête sur UNE rangée propre (`grid5`) — `grid4` laissait le 5e orphelin en 2e ligne. */}
+      <div className={grid5}>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir la liste" /></button>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`en valeur · gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)} en nombre`} /></button>
