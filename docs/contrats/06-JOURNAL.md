@@ -564,3 +564,17 @@ lot d'introduction (C10 au Lot 0, C8 au Lot 5).
 
 **Vérif** : functions 881 tests, web 101 tests, build OK, lint propre, deploy-targets/no-undef OK,
 chunk d'entrée 116,3 KB ≤ 120, maintenance 26,9 KB (lazy).
+
+---
+
+## 2026-07-16 — Remédiation vérif adverse (import Lot 8 + prévision)
+
+**Échoué (détecté par gardien, corrigé)**
+- Import contrats : `set(merge:true)` avec `engagements:[]` REMPLAÇAIT le tableau stocké → ré-importer un
+  contrat effaçait ses engagements SLA (perte de données, contraire au périmètre « en-tête only »). Idem
+  montant/devise à colonne vide → zéroïsés. Corrigé : la MISE À JOUR est désormais NON EFFAÇANTE
+  (`domain/mntImport.updatePatch` — écrit seulement les cellules renseignées, JAMAIS `engagements`). +2 tests.
+
+**Appris**
+- Firestore ne fusionne pas les éléments d'un array en merge : fournir `[]` écrase. Un import « en-tête »
+  doit exclure explicitement les champs structurés (engagements) du payload de merge.

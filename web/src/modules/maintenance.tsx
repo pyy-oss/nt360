@@ -72,7 +72,7 @@ const ImportContratsCard: FC = () => {
           ) : null}
         </div>
       )}
-      <Tip>Colonnes attendues : <b>N° FP</b>, <b>Client</b>, BU, AM, <b>Statut</b> (Actif/Suspendu/Échu/Résilié/Brouillon), <b>Périodicité</b> (Mensuel/Trimestriel/Annuel), <b>Date début</b> (AAAA-MM-JJ ou JJ/MM/AAAA), Date fin, Montant engagé, Devise. Rapprochement par <b>N° FP</b> (1 contrat = 1 affaire) : ré-importer met à jour. Les <b>engagements SLA</b> s'ajoutent ensuite dans chaque fiche. « <b>Aperçu</b> » ne modifie rien.</Tip>
+      <Tip>Colonnes attendues : <b>N° FP</b>, <b>Client</b>, BU, AM, <b>Statut</b> (Actif/Suspendu/Échu/Résilié/Brouillon), <b>Périodicité</b> (Mensuel/Trimestriel/Annuel), <b>Date début</b> (AAAA-MM-JJ ou JJ/MM/AAAA), Date fin, Montant engagé, Devise. Rapprochement par <b>N° FP</b> (1 contrat = 1 affaire) : ré-importer <b>met à jour sans effacer</b> — seules les colonnes <b>renseignées</b> sont écrites, les champs laissés vides et les <b>engagements SLA</b> (saisis en fiche) sont <b>préservés</b>. « <b>Aperçu</b> » ne modifie rien.</Tip>
     </Card>
   );
 };

@@ -5,10 +5,31 @@
 const { validateMntContrat } = require("./mntContrat");
 const { safeId } = require("../lib/sheets");
 
+// Une cellule est « renseignée » si elle porte une valeur non vide. Sert à la MISE À JOUR NON EFFAÇANTE :
+// une colonne absente/vide ne doit JAMAIS écraser la valeur stockée (montant, devise, BU, AM, date fin).
+const provided = (v) => v != null && String(v).trim() !== "";
+// Montant : présent seulement s'il contient un chiffre (« N/A »/« à revoir » ⇒ non fourni, pas 0).
+const providedNum = (v) => provided(v) && /[0-9]/.test(String(v));
+
+// Patch de MISE À JOUR d'un contrat existant : les champs REQUIS (toujours validés donc toujours présents)
+// sont écrits ; les champs optionnels/dérivés ne le sont QUE si la cellule était renseignée. Les
+// ENGAGEMENTS SLA ne sont JAMAIS touchés par l'import (ils restent saisis en fiche, ADR-012) — sans quoi
+// un `set(merge:true)` avec `engagements:[]` remplacerait le tableau stocké (Firestore ne fusionne pas les
+// arrays) et effacerait les engagements. Miroir de la garantie « cellule vide = champ non touché » (oppImport).
+function updatePatch(value, raw) {
+  const p = { client: value.client, statut: value.statut, echeanceType: value.echeanceType, dateDebut: value.dateDebut };
+  if (provided(raw.bu)) p.bu = value.bu;
+  if (provided(raw.am)) p.am = value.am;
+  if (provided(raw.dateFin)) p.dateFin = value.dateFin;
+  if (providedNum(raw.montantEngage)) p.montantEngage = value.montantEngage;
+  if (provided(raw.deviseEngage)) p.deviseEngage = value.deviseEngage;
+  return p;
+}
+
 /**
  * @param {{raw:object, line:number}[]} rows lignes parsées (parsers/mntImport)
  * @param {Set<string>|string[]} existingIds ids des contrats déjà en base (mnt_contrats)
- * @returns {{toCreate:{line,id,value}[], toUpdate:{line,id,value}[], errors:{line,error,fp}[]}}
+ * @returns {{toCreate:{line,id,value}[], toUpdate:{line,id,value,patch}[], errors:{line,error,fp}[]}}
  */
 function planMntContratsImport(rows, existingIds) {
   const existing = existingIds instanceof Set ? existingIds : new Set(existingIds || []);
@@ -19,11 +40,14 @@ function planMntContratsImport(rows, existingIds) {
   for (const row of rows || []) {
     const v = validateMntContrat(row.raw);
     if (!v.ok) { errors.push({ line: row.line, error: v.error, fp: (row.raw && row.raw.fp) || null }); continue; }
-    byId.set(safeId(v.value.fp), { line: row.line, id: safeId(v.value.fp), value: v.value });
+    byId.set(safeId(v.value.fp), { line: row.line, id: safeId(v.value.fp), value: v.value, raw: row.raw });
   }
   const toCreate = [], toUpdate = [];
-  for (const rec of byId.values()) (existing.has(rec.id) ? toUpdate : toCreate).push(rec);
+  for (const rec of byId.values()) {
+    if (existing.has(rec.id)) toUpdate.push({ line: rec.line, id: rec.id, value: rec.value, patch: updatePatch(rec.value, rec.raw) });
+    else toCreate.push({ line: rec.line, id: rec.id, value: rec.value }); // création : doc complet (engagements:[] neuf)
+  }
   return { toCreate, toUpdate, errors };
 }
 
-module.exports = { planMntContratsImport };
+module.exports = { planMntContratsImport, updatePatch };

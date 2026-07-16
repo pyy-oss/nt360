@@ -54,4 +54,31 @@ describe("planMntContratsImport", () => {
     expect(toCreate).toHaveLength(1);
     expect(toCreate[0].value.client).toBe("NOUVEAU");
   });
+  it("mise à jour NON EFFAÇANTE : patch sans engagements, cellules vides non écrasées", () => {
+    // Contrat existant (FP_2026_1) réimporté avec les seuls champs REQUIS renseignés (le reste vide).
+    const { toUpdate } = planMntContratsImport(
+      [{ raw: { fp: "FP/2026/1", client: "ACME", statut: "actif", echeanceType: "mensuel", dateDebut: "2026-01-01", bu: "", am: "", dateFin: "", montantEngage: "", deviseEngage: "" }, line: 2 }],
+      new Set(["FP_2026_1"]),
+    );
+    expect(toUpdate).toHaveLength(1);
+    const p = toUpdate[0].patch;
+    expect(p).not.toHaveProperty("engagements"); // JAMAIS touchés par l'import (préservés en base)
+    expect(p).not.toHaveProperty("montantEngage"); // colonne vide → montant stocké préservé
+    expect(p).not.toHaveProperty("deviseEngage");
+    expect(p).not.toHaveProperty("bu");
+    expect(p).not.toHaveProperty("am");
+    expect(p).not.toHaveProperty("dateFin");
+    expect(p.statut).toBe("actif"); // requis → toujours écrit
+  });
+  it("mise à jour : les cellules RENSEIGNÉES sont bien écrites", () => {
+    const { toUpdate } = planMntContratsImport(
+      [{ raw: { fp: "FP/2026/1", client: "ACME", statut: "suspendu", echeanceType: "annuel", dateDebut: "2026-01-01", montantEngage: "5000000", deviseEngage: "EUR", bu: "ICT" }, line: 2 }],
+      new Set(["FP_2026_1"]),
+    );
+    const p = toUpdate[0].patch;
+    expect(p.montantEngage).toBe(5000000);
+    expect(p.deviseEngage).toBe("EUR");
+    expect(p.bu).toBe("ICT");
+    expect(p.statut).toBe("suspendu");
+  });
 });
