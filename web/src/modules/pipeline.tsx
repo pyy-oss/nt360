@@ -505,9 +505,15 @@ export const OppList: FC<Props> = () => {
     for (const o of rows) { const s = o.stage || 0; if (s >= 1 && s <= 5) c[s] = (c[s] || 0) + 1; }
     return c;
   }, [rows]);
+  // Actives HORS phases 1..5 (étape 0/absente ou aberrante) : segOf les classe « active » (repli), mais
+  // aucune pastille 1..5 ne les couvre → sans ce bucket « Sans phase » elles seraient inatteignables et
+  // la somme des pastilles ne retomberait pas sur le total « Actives » (piège populations divergentes).
+  const activeNoStage = segCounts.active - [1, 2, 3, 4, 5].reduce((s, k) => s + (activeStageCounts[k] || 0), 0);
   const shownOpps = useMemo(() => {
     const base = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
-    return seg === "active" && stageF ? base.filter((o) => (o.stage || 0) === stageF) : base;
+    if (seg !== "active" || !stageF) return base;
+    // stageF = -1 → « Sans phase » (actives hors 1..5) ; sinon étape exacte.
+    return stageF === -1 ? base.filter((o) => !((o.stage || 0) >= 1 && (o.stage || 0) <= 5)) : base.filter((o) => (o.stage || 0) === stageF);
   }, [rows, seg, stageF]);
   const pnlFlag = (o: Opportunity): ReactNode =>
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
@@ -675,9 +681,10 @@ export const OppList: FC<Props> = () => {
           {/* Sous-filtre par phase (étapes 1..5), visible seulement pour « Actives » — précise la vue
               « opportunités ouvertes » sans introduire de métrique parallèle. */}
           {seg === "active" && (
-            <Segmented value={String(stageF)} onChange={(v) => setStageF(Number(v))} ariaLabel="Filtrer par étape du pipeline" options={[
+            <Segmented value={stageF === -1 ? "none" : String(stageF)} onChange={(v) => setStageF(v === "none" ? -1 : Number(v))} ariaLabel="Filtrer par étape du pipeline" options={[
               { value: "0", label: "Toutes phases", count: segCounts.active },
               ...[1, 2, 3, 4, 5].map((s) => ({ value: String(s), label: `${s}·${STAGE_SHORT[s]}`, count: activeStageCounts[s] || 0 })),
+              ...(activeNoStage > 0 ? [{ value: "none", label: "Sans phase", count: activeNoStage }] : []),
             ]} />
           )}
           {canImport && <ImportButton label="Importer (LIVE / Sales)" />}
