@@ -74,15 +74,19 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const s5 = (arr) => arr.slice(0, 5).map((r) => ({ fp: r.value.fp, client: r.value.client, statut: r.value.statut }));
     const samples = { create: s5(plan.toCreate), update: s5(plan.toUpdate), errors: plan.errors.slice(0, 10) };
     if (!apply) return { ok: true, applied: false, created, updated, skipped, rowsParsed: report.rowsParsed, samples };
-    // Application : écritures batchées (limite Firestore 500/batch → chunks de 400).
-    const all = [...plan.toCreate, ...plan.toUpdate];
+    // Application : écritures batchées (limite Firestore 500/batch → chunks de 400). La MISE À JOUR est
+    // NON EFFAÇANTE — on écrit le `patch` (seuls les champs renseignés + JAMAIS `engagements`, préservés) ;
+    // la CRÉATION pose le doc complet. Le classement create/update est décidé par le plan (pas au write).
+    const all = [
+      ...plan.toCreate.map((r) => ({ mode: "create", id: r.id, value: r.value })),
+      ...plan.toUpdate.map((r) => ({ mode: "update", id: r.id, patch: r.patch })),
+    ];
     for (let i = 0; i < all.length; i += 400) {
       const batch = db.batch();
       for (const rec of all.slice(i, i + 400)) {
         const ref = db.doc(`mnt_contrats/${rec.id}`);
-        const base = { ...rec.value, updatedAt: FieldValue.serverTimestamp() };
-        if (existing.has(rec.id)) batch.set(ref, base, { merge: true });
-        else batch.set(ref, { ...base, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        if (rec.mode === "update") batch.set(ref, { ...rec.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        else batch.set(ref, { ...rec.value, updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
       }
       await batch.commit();
     }

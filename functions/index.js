@@ -1906,10 +1906,9 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // Visibilité par enregistrement : sous OWD « private », un non-admin ne prévoit que son périmètre.
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
   if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
-  const currentFy = (fiscalDoc.data() || {}).currentFy || new Date().getUTCFullYear();
+  const fiscalFy = (fiscalDoc.data() || {}).currentFy || 0;
   // EXERCICE SÉLECTIONNÉ. `period` = année ("2026") ou "all"/absent (cumul, référence quota = exercice courant).
   const periodYear = plausibleYear(String(req.data?.period || ""));
-  const targetFy = periodYear || currentFy;
   // GAGNÉ (« Closed ») = CARNET de l'exercice, PAS les opps gagnées filtrées par closingDate. L'année de
   // gain fiable est celle de la COMMANDE (`yearPo`, dérivée du P&L/N° FP) ; sur une opp gagnée, `closingDate`
   // est la date de clôture PRÉVUE — souvent nulle ou d'un autre millésime — donc inexploitable pour le
@@ -1919,15 +1918,21 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // au carnet serait comptée DEUX FOIS (dans Closed=CAS carnet ET dans le palier ouvert) → on l'exclut,
   // exactement comme le reste de la famille pipeline (chaine/pipeline/atterrissage excluent les FP bookés).
   const cmdSnap = await db.collection("commandesRows").get();
-  let closedAmount = 0, closedCount = 0; const bookedFps = new Set();
+  let closedAmount = 0, closedCount = 0, maxYearPo = 0; const bookedFps = new Set();
   for (const chunk of cmdSnap.docs) {
     for (const o of (chunk.data() || {}).rows || []) {
       const k = fpKey(o.fp); if (k) bookedFps.add(k);
+      maxYearPo = Math.max(maxYearPo, plausibleYear(o.yearPo) || 0); // repli exercice = max PO borné (parité aggregate)
       if (periodYear && plausibleYear(o.yearPo) !== periodYear) continue; // filtre millésime carnet
       closedAmount += Number(o.cas) || 0;
       closedCount++;
     }
   }
+  // Exercice courant : config/fiscal en priorité, PUIS repli sur max(yearPo borné) — MÊME règle
+  // qu'aggregate.js (sinon l'ensemble « dormant » diverge entre le forecast et le pondéré du Cockpit
+  // quand config/fiscal.currentFy n'est pas encore écrit). Année civile en dernier recours seulement.
+  const currentFy = fiscalFy || maxYearPo || new Date().getUTCFullYear();
+  const targetFy = periodYear || currentFy;
   // DÉDUP (parité aggregate.js) : sinon des doublons de FP salesData (ids hérités) ou une opp 'saisie'
   // ré-importée en LIVE gonflent le pipeline prévisionnel. Intra-source salesData : garder le PLUS RÉCENT
   // (updatedAt) par FP ; inter-source : une 'saisie' dont le FP est couvert par une 'salesData' est écartée.

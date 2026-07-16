@@ -337,8 +337,12 @@ async function recomputeCore(db, only) {
   const sup = suppliers(orders, bcLines, creditLines);
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
-  const plSummary = pipeline(opps, asOf, tiers, orders); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, ...stamp } }); // global (rétro-compat)
+  // Doc GLOBAL = pipeline « Tout » (rétro-compat ; Actualité + export CODIR). MÊME assiette que
+  // summaries/pipeline_all : dormantes exclues si le drapeau est actif, sinon le « Pipeline actif pondéré »
+  // de l'export CODIR divergerait du Cockpit « Tout » (violation « même métrique = même nombre »).
+  const plOpps = excludeDormant ? opps.filter((o) => !isDormantClosing(o, currentFy)) : opps;
+  const plSummary = pipeline(plOpps, asOf, tiers, orders); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, dormant, excludeDormant, ...stamp } }); // global (rétro-compat)
   let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Suivi BC ⇄ ClickUp : avancement achat + retards remontés de la liste « Commandes Fournisseurs »
