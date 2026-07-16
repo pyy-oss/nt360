@@ -25,12 +25,13 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, slaAgenda, type SlaAgendaItem } from "../lib/mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, type SlaAgendaItem, type MntComplianceItem } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+const MNT_COMPLIANCE_LABEL: Record<string, string> = { sans_sla: "Sans engagement SLA", sans_echeance: "Sans date de fin", echeance_depassee: "Échéance dépassée", montant_nul: "Montant nul" };
 const opt = (map: Record<string, string>, vals: readonly string[]) => vals.map((v) => ({ value: v, label: map[v] || v }));
 const digits = (s: string) => s.replace(/[^\d]/g, "");
 const decimals = (s: string) => s.replace(/[^\d.,]/g, "").replace(",", ".");
@@ -228,6 +229,16 @@ export const Maintenance: FC<Props> = () => {
   // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
   const asOfIso = new Date().toISOString().slice(0, 10);
   const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
+  // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
+  // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
+  const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
+  const openContrat = (id: string) => { const c = contratById[id]; if (!c) return; setCForm(toContratForm(c)); setCId(id); setCEdit(true); setCOpen(true); };
+  const complianceCols = [
+    colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
+    colText("N° FP", (r: MntComplianceItem) => <FpLink fp={r.fp || undefined} />),
+    colText("Manques", (r: MntComplianceItem) => <div className="flex flex-wrap gap-1">{r.issues.map((k) => <Badge key={k} tone={k === "echeance_depassee" ? "clay" : "gold"}>{MNT_COMPLIANCE_LABEL[k]}</Badge>)}</div>),
+    colText("", (r: MntComplianceItem) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openContrat(r.id)}>Corriger</button> : null)),
+  ];
   const atRiskCount = (counts.ambre || 0) + (counts.rouge || 0) + (counts.critique || 0);
 
   // Suggestions (Lot 7) — affaires du carnet ressemblant à de la maintenance et sans contrat. Le carnet
@@ -392,6 +403,19 @@ export const Maintenance: FC<Props> = () => {
         <Card title={`Calendrier SLA · ${agenda.length}`}>
           <Tip>Échéances SLA <b>en attente</b> des tickets ouverts (prise en compte / résolution), calculées <b>en direct</b> — <b>rompues d'abord</b>, puis les plus proches. Un ticket dont le contrat n'a pas l'engagement du type n'apparaît pas.</Tip>
           <Table columns={agendaCols} rows={agenda} colsKey="mnt_sla_agenda" />
+        </Card>
+      )}
+
+      {gate && compliance.activeTotal > 0 && (
+        <Card title="Conformité des contrats">
+          <Tip>Contrôle des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> non dépassée et un <b>montant d'engagement</b>. « Corriger » ouvre la fiche.</Tip>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <Kpi label="Conformes" value={`${compliance.conformes}/${compliance.activeTotal}`} tone={compliance.items.length === 0 ? "emerald" : "gold"} />
+            <Kpi label="Sans SLA" value={String(compliance.byIssue.sans_sla)} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
+            <Kpi label="Échéance manquante/dépassée" value={String(compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee)} tone={compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee ? "clay" : "ink"} />
+            <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
+          </div>
+          {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}
         </Card>
       )}
 

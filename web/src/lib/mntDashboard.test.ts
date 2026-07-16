@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, slaAgenda, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -88,5 +88,34 @@ describe("slaAgenda — calendrier SLA des tickets ouverts", () => {
     const c2 = { id: "C2", engagements: [{ type: "resolution", couverture: "h24", seuilHeures: 24 }] };
     const tickets = [{ id: "T2", contratId: "C2", statut: "ouvert", ouvertMs: 0, priseEnCompteMs: null, resoluMs: null }];
     expect(slaAgenda(tickets, [c2], 5 * H).map((x) => x.slaType)).toEqual(["resolution"]);
+  });
+});
+
+describe("mntCompliance — conformité des contrats actifs", () => {
+  const base = { id: "C", client: "ACME", statut: "actif", montantEngage: 1_000_000, dateFin: "2027-01-01", engagements: [{ type: "resolution" }] };
+  it("ne juge que les contrats actifs ; un contrat complet est conforme", () => {
+    const r = mntCompliance([{ ...base }, { ...base, id: "B", statut: "brouillon", engagements: [] }], asOf);
+    expect(r.activeTotal).toBe(1);      // le brouillon est ignoré
+    expect(r.conformes).toBe(1);
+    expect(r.items).toEqual([]);
+  });
+  it("repère chaque manque : SLA, date de fin, échéance dépassée, montant nul", () => {
+    const r = mntCompliance([
+      { ...base, id: "A", engagements: [] },                       // sans_sla
+      { ...base, id: "B", dateFin: null },                         // sans_echeance
+      { ...base, id: "C", dateFin: "2026-01-01" },                 // echeance_depassee (asOf 2026-07-15)
+      { ...base, id: "D", montantEngage: 0 },                      // montant_nul
+    ], asOf);
+    expect(r.byIssue).toEqual({ sans_sla: 1, sans_echeance: 1, echeance_depassee: 1, montant_nul: 1 });
+    expect(r.conformes).toBe(0);
+    expect(r.activeTotal).toBe(4);
+  });
+  it("trie par nombre de manques décroissant", () => {
+    const r = mntCompliance([
+      { ...base, id: "A", engagements: [{ type: "resolution" }], dateFin: null },      // 1 manque
+      { ...base, id: "B", engagements: [], dateFin: null, montantEngage: 0 },          // 3 manques
+    ], asOf);
+    expect(r.items[0].id).toBe("B");
+    expect(r.items[0].issues.length).toBe(3);
   });
 });

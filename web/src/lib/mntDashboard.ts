@@ -29,7 +29,7 @@ export interface MntDashboard {
   echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 60] jours
 }
 
-type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; montantEngage?: number; dateFin?: string | null };
+type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
 type TicketLike = { statut?: string; priorite?: string };
 
 /** Agrège les contrats + tickets à une date donnée (asOfIso, AAAA-MM-JJ). PUR. */
@@ -70,6 +70,45 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
     ticketsTotal: (tickets || []).length,
     ticketsOuverts, parPriorite, echeancesProches,
   };
+}
+
+// --- Contrôle de complétude / conformité des contrats (Lot 3/7 « valeur ajoutée » — conformité) ---
+// Vue front PURE : parmi les contrats ACTIFS (ceux en vigueur), repère les MANQUES de conformité qui
+// rendent un contrat inexploitable ou hors-cadre — aucun engagement SLA, pas de date de fin, échéance déjà
+// dépassée (contrat encore « actif » alors qu'il aurait dû être renouvelé/échu), montant d'engagement nul.
+// Aucune I/O ni métrique persistée → pas de miroir back. On ne juge QUE les contrats actifs (les brouillons
+// sont en cours de saisie, les échus/résiliés sont sortis). « conforme » = actif sans aucun manque.
+export type MntComplianceIssue = "sans_sla" | "sans_echeance" | "echeance_depassee" | "montant_nul";
+export interface MntComplianceItem { id: string; fp: string | null; client: string; issues: MntComplianceIssue[] }
+export interface MntComplianceResult {
+  items: MntComplianceItem[];                       // contrats actifs avec ≥ 1 manque, plus de manques d'abord
+  byIssue: Record<MntComplianceIssue, number>;
+  activeTotal: number;
+  conformes: number;
+}
+
+/** Contrôle de conformité des contrats ACTIFS à la date asOfIso (AAAA-MM-JJ). PUR. */
+export function mntCompliance(contrats: ContratLike[], asOfIso: string): MntComplianceResult {
+  const asOf = parseIso(asOfIso);
+  const items: MntComplianceItem[] = [];
+  const byIssue: Record<MntComplianceIssue, number> = { sans_sla: 0, sans_echeance: 0, echeance_depassee: 0, montant_nul: 0 };
+  let activeTotal = 0;
+  for (const c of contrats || []) {
+    if ((c.statut || "brouillon") !== "actif") continue;
+    activeTotal++;
+    const issues: MntComplianceIssue[] = [];
+    if (!(c.engagements && c.engagements.length)) issues.push("sans_sla");
+    const fin = parseIso(c.dateFin);
+    if (!c.dateFin) issues.push("sans_echeance");
+    else if (fin != null && asOf != null && fin < asOf) issues.push("echeance_depassee");
+    if (!(Number(c.montantEngage) > 0)) issues.push("montant_nul");
+    if (issues.length) {
+      for (const k of issues) byIssue[k]++;
+      items.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", issues });
+    }
+  }
+  items.sort((a, b) => b.issues.length - a.issues.length || a.client.localeCompare(b.client));
+  return { items, byIssue, activeTotal, conformes: activeTotal - items.length };
 }
 
 // --- Calendrier SLA des tickets (Lot 2/7 « valeur ajoutée » — opérationnel) ---
