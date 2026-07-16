@@ -785,7 +785,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
       {/* Signal COMPACT (le cockpit ne duplique plus la carte dormante pleine : son détail — 4 KPI + Tip —
           vit dans « Pipeline », et l'alerte est aussi dans le Centre d'alertes). Un clic ouvre le détail. */}
       {data.dormant && (data.dormant.count ?? 0) > 0 && (
-        <button onClick={() => jump("pipeline")} className="text-left w-full rounded-xl border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
+        <button onClick={() => jump("pipeline")} className="text-left w-full rounded-lg border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
           <span className="text-[12.5px] text-muted"><b className="text-clay">{data.dormant.count} opportunité(s) dormante(s)</b> · {fmt(data.dormant.brut)} brut — millésime révolu, à requalifier{data.excludeDormant ? " · exclues de la prévision cumulée" : ""}.</span>
           <span className="text-gold text-xs underline shrink-0">Détail dans Pipeline</span>
         </button>
