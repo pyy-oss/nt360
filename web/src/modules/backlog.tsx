@@ -638,7 +638,7 @@ function OrderForm({ onDone }: { onDone?: () => void }) {
   };
   return (
     <div className="mb-3 rounded-lg border border-line bg-panel2 p-3">
-      <div className="grid gap-2.5 sm:grid-cols-3">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3">
         <Field label="N° FP (obligatoire)" v={fp} set={setFp} placeholder="FP/2026/13" />
         <Field label="CAS (obligatoire)" v={cas} set={setCas} placeholder="0" mode="decimal" />
         <Field label="RAF (vide = dérivé)" v={raf} set={setRaf} placeholder="auto" mode="decimal" />
