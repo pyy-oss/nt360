@@ -55,6 +55,7 @@ upsertCandidate
 submitMntDecision
 upsertConsultant
 upsertMntContrat
+importMntContrats
 upsertMntIntervention
 upsertMntTicket
 upsertTimesheet

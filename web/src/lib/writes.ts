@@ -1017,6 +1017,17 @@ export async function upsertMntContrat(c: MntContrat) {
 export async function deleteMntContrat(id: string) {
   await httpsCallable(functions, "deleteMntContrat")({ id });
 }
+export type MntImportResult = {
+  ok: boolean; applied: boolean; created: number; updated: number; skipped: number; rowsParsed: number;
+  samples?: { create: { fp: string; client: string; statut: string }[]; update: { fp: string; client: string; statut: string }[]; errors: { line: number; error: string; fp: string | null }[] };
+};
+/** Importe/actualise en masse les contrats de maintenance depuis un classeur (.xlsx/.csv). `apply=false` =
+ *  APERÇU (dry-run) ; `apply=true` = applique (upsert par N° FP). Double-gaté (droit `maintenance` + drapeau). */
+export async function importMntContrats(file: File, apply: boolean): Promise<MntImportResult> {
+  const fileB64 = await fileToBase64(file);
+  const res = await httpsCallable(functions, "importMntContrats", { timeout: 300_000 })({ fileB64, filename: file.name, apply });
+  return res.data as MntImportResult;
+}
 
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
 import type { MntTicket, MntIntervention } from "../types";

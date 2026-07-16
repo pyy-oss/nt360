@@ -537,3 +537,30 @@ lot d'introduction (C10 au Lot 0, C8 au Lot 5).
 
 **Décidé**
 - Pas d'ADR : additif, front pur, réutilise l'existant. Reste : Lot 8 (import Excel des contrats).
+
+---
+
+## 2026-07-16 — Lot 8 (import Excel des contrats)
+
+**Fait**
+- Import EN MASSE des contrats depuis un classeur (.xlsx/.csv), calqué sur `importOpportunities`
+  (aperçu dry-run puis apply). Parseur PUR `parsers/mntImport.js` (en-têtes FR tolérants, statut/
+  périodicité → codes, dates → ISO) + plan PUR `domain/mntImport.js` (validation via validateMntContrat,
+  classement création/mise à jour par id=safeId(fp), dédup intra-fichier, erreurs par ligne). Tests +5.
+- Callable `importMntContrats` (handlers/maintenance.js) DOUBLEMENT gaté (requireWrite + drapeau),
+  écritures batchées (chunks 400), cap 2000 lignes, scan borné des existants, auditLog. Exporté par nom
+  (index.js + deployed-functions.txt → 148 fonctions).
+- Front : carte « Importer des contrats (Excel) » (maintenance.tsx, écriture only) — input fichier,
+  « Aperçu » (compteurs création/MàJ/erreurs + lignes fautives), « Importer (N) ». Wrapper writes.ts.
+
+**Décidé (périmètre)**
+- Import limité à l'EN-TÊTE du contrat (1 ligne = 1 affaire = 1 FP). Les engagements SLA, structurés,
+  restent saisis en fiche (le doc plat ne les porte pas). Additif, aucune colonne existante touchée.
+
+**Appris**
+- `safeId` remplace `/` par `_` (id = `FP_2026_1`), pas `-` (corrigé dans le test).
+- Le module ne lit rien de mnt_* à drapeau éteint : l'import est inaccessible (callable refuse), donc
+  invariant « éteint = ERP d'avant » préservé.
+
+**Vérif** : functions 881 tests, web 101 tests, build OK, lint propre, deploy-targets/no-undef OK,
+chunk d'entrée 116,3 KB ≤ 120, maintenance 26,9 KB (lazy).

@@ -1294,6 +1294,7 @@ exports.staffingPlan = _staffing.staffingPlan;
 const { createMaintenance } = require("./handlers/maintenance");
 const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
+exports.importMntContrats = _maintenance.importMntContrats;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;
 exports.deleteMntTicket = _maintenance.deleteMntTicket;
