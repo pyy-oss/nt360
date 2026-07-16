@@ -27,7 +27,7 @@ function useAnchoredPanel(open: boolean, anchor: HTMLElement | null) {
   return pos;
 }
 
-function Panel({ anchor, onClose, children, minWidth }: { anchor: HTMLElement | null; onClose: () => void; children: ReactNode; minWidth?: number }) {
+export function Panel({ anchor, onClose, children, minWidth }: { anchor: HTMLElement | null; onClose: () => void; children: ReactNode; minWidth?: number }) {
   const pos = useAnchoredPanel(true, anchor);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -211,3 +211,4 @@ export function DateField({ value, onChange, ariaLabel, placeholder = "jj/mm/aaa
     </>
   );
 }
+

@@ -13,6 +13,34 @@ export function Eyebrow({ children, color, as: As = "div" }: { children: ReactNo
   return <As className="text-xs uppercase tracking-wider text-dim mb-2 font-semibold" style={color ? { color } : undefined}>{children}</As>;
 }
 
+// Champ de formulaire STANDARD : étiquette au-dessus + contrôle + indice/erreur optionnels. Espacement
+// unique (label↔champ = gap-1), typographie de label canonique (text-[11px] text-muted) — reprend le
+// gabarit historique le plus soigné (module maintenance) pour supprimer les dizaines de réimplémentations
+// manuelles de `<label><span text-[11px]>…` disséminées dans les écrans. `error` prime sur `hint`.
+export function Field({ label, hint, error, required, htmlFor, className, children }:
+  { label: ReactNode; hint?: ReactNode; error?: ReactNode; required?: boolean; htmlFor?: string; className?: string; children: ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} className={cx("flex flex-col gap-1", className)}>
+      <span className="text-[11px] text-muted">{label}{required && <span className="text-clay"> *</span>}</span>
+      {children}
+      {error ? <span className="text-[11px] text-clay">{error}</span> : hint ? <span className="text-[11px] text-faint">{hint}</span> : null}
+    </label>
+  );
+}
+
+// Section de formulaire : titre discret + grille aérée. Sert à découper les longs formulaires (identité /
+// montants / dates / suivi) — gouttières `gap-x-4 gap-y-3`, plus d'air que les grilles historiques `gap-2.5`.
+export function FormSection({ title, cols = 2, className, children }:
+  { title?: ReactNode; cols?: 1 | 2 | 3; className?: string; children: ReactNode }) {
+  const grid = cols === 1 ? "grid-cols-1" : cols === 3 ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 sm:grid-cols-2";
+  return (
+    <div className={cx("space-y-3", className)}>
+      {title && <Eyebrow>{title}</Eyebrow>}
+      <div className={cx("grid gap-x-4 gap-y-3", grid)}>{children}</div>
+    </div>
+  );
+}
+
 export function Card({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={cx("card p-3 sm:p-4 animate-fade-in", className)}>
@@ -616,14 +644,16 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
   return createPortal(
     <div className="fixed inset-0 z-[100] grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
+      {/* Carte en COLONNE : en-tête + pied FIXES, seul le corps défile → sur un long formulaire le titre et
+          les actions (« Enregistrer ») restent toujours visibles (fin du défilement du CTA hors écran). */}
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}
-        className={cx("relative card p-4 sm:p-5 w-full max-h-[90vh] overflow-y-auto animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
-        <div className="flex items-start justify-between gap-3 mb-2">
+        className={cx("relative card w-full max-h-[90vh] flex flex-col animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
+        <div className="flex items-start justify-between gap-3 shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3">
           {title ? <h2 id={titleId} className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
           <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>
         </div>
-        {children && <div className="text-[13px] text-muted leading-relaxed">{children}</div>}
-        {actions && <div className="flex items-center justify-end gap-2 mt-4">{actions}</div>}
+        {children && <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-4 sm:pb-5 text-[13px] text-muted leading-relaxed">{children}</div>}
+        {actions && <div className="flex items-center justify-end gap-2 shrink-0 px-4 sm:px-5 py-3 border-t border-line/60">{actions}</div>}
       </div>
     </div>,
     document.body,

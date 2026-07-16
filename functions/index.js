@@ -3802,6 +3802,81 @@ exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, t
   }
 });
 
+// === WEBHOOK ENTRANT ODOO (docs/ODOO_WEBHOOK.md) — reçoit les MàJ Odoo sur opportunités / commandes / factures.
+// Auth : signature HMAC-SHA256 (hex) du corps BRUT via le secret partagé config/odooWebhook.secret (en-tête
+// X-Signature) — même schéma que clickupWebhook. Contrat JSON façonné côté Odoo (docs/ODOO_WEBHOOK.md) :
+//   POST { object: "opportunity"|"order"|"invoice", records: [ {…} ] }
+// Upsert idempotent : commandes/factures par id déterministe (safeId(fp) / safeId(numero)), opportunités par
+// rapprochement fp puis odooId (création odoo_… sinon). Odoo est source AUTORITAIRE (create + update).
+const ODOO_MAX_RECORDS = 500;
+exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
+  const { verifySignature } = require("./lib/clickupWebhook"); // HMAC-SHA256 générique (réutilisé)
+  const { mapOdooRecord } = require("./domain/odooSync");
+  const { safeId } = require("./lib/sheets");
+  const cfg = (await db.doc("config/odooWebhook").get()).data() || {};
+  if (!cfg.secret) { logger.warn("odooWebhook : aucun secret configuré"); res.status(503).json({ error: "webhook non configuré" }); return; }
+  if (cfg.enabled === false) { res.status(200).json({ ok: true, ignored: "integration disabled" }); return; }
+  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}), "utf8");
+  const signature = req.get("X-Signature") || req.get("x-signature") || "";
+  if (!verifySignature(raw, signature, cfg.secret)) { logger.warn("odooWebhook : signature invalide"); res.status(401).json({ error: "signature invalide" }); return; }
+  const body = req.body || {};
+  const object = String(body.object || "");
+  const records = Array.isArray(body.records) ? body.records : (body.record ? [body.record] : []);
+  if (!records.length) { res.status(400).json({ error: "aucun enregistrement (records[] requis)" }); return; }
+  const truncated = records.length > ODOO_MAX_RECORDS;
+  const batch = records.slice(0, ODOO_MAX_RECORDS);
+  const results = [], errors = [];
+  let wrote = false;
+  try {
+    for (const rec of batch) {
+      const m = mapOdooRecord(object, rec);
+      if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); continue; }
+      // Résolution de l'id cible.
+      let id = m.id; // commandes/factures : déterministe
+      if (!id) {
+        // opportunités : rapprocher par fp CANONIQUE puis par odooId ; sinon créer un id déterministe.
+        let found = null;
+        if (m.key.fp) { const s = await db.collection("opportunities").where("fp", "==", m.key.fp).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
+        if (!found && m.key.odooId) { const s = await db.collection("opportunities").where("odooId", "==", m.key.odooId).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
+        // Aucune correspondance → création avec un id DÉTERMINISTE (odooId prioritaire, sinon fp) : le map
+        // garantit fp || odooId, donc un renvoi du même enregistrement retombe sur le même id (idempotent).
+        id = found || ("odoo_" + safeId(m.key.odooId || m.key.fp));
+      }
+      const ref = db.doc(`${m.collection}/${id}`);
+      const exists = (await ref.get()).exists;
+      const doc = { ...m.doc, updatedAt: FieldValue.serverTimestamp() };
+      if (m.collection === "opportunities") doc.oppId = id;
+      if (!exists) doc.createdAt = FieldValue.serverTimestamp();
+      await ref.set(doc, { merge: true });
+      wrote = true;
+      results.push({ id, object: m.object, action: exists ? "updated" : "created", fp: m.key.fp || null });
+      await db.collection("auditLog").add({ uid: "odoo:webhook", action: exists ? "odoo_update" : "odoo_create", module: "pipeline", entity: m.object, entityId: id, detail: { fp: m.key.fp || null, odooId: m.key.odooId || null }, ts: FieldValue.serverTimestamp() });
+    }
+    if (wrote) await requestRecompute(null); // recompute différé/coalescé (un seul pour tout le lot)
+    res.status(200).json({ ok: true, object, written: results.length, failed: errors.length, truncated, results, errors });
+  } catch (e) {
+    logger.error("odooWebhook : traitement échoué", { object, msg: e && e.message, stack: e && e.stack });
+    res.status(500).json({ error: "erreur interne", written: results.length, errors });
+  }
+});
+
+// Configure le webhook entrant Odoo (secret partagé HMAC + activation). Direction. Le secret n'est JAMAIS
+// relu côté client (write-only) : le callable renvoie seulement s'il est défini et l'état d'activation.
+exports.setOdooWebhook = onCallG("setOdooWebhook", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const patch = {};
+  if (typeof req.data?.enabled === "boolean") patch.enabled = req.data.enabled;
+  const secret = String(req.data?.secret || "");
+  if (secret) { if (secret.length < 16) throw new HttpsError("invalid-argument", "secret trop court (≥ 16 caractères)"); patch.secret = secret; }
+  if (Object.keys(patch).length === 0) throw new HttpsError("invalid-argument", "rien à mettre à jour (secret ou enabled requis)");
+  patch.updatedAt = FieldValue.serverTimestamp();
+  await db.doc("config/odooWebhook").set(patch, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "odoo_webhook_config", module: "habilitations", entity: "config", entityId: "odooWebhook", detail: { enabled: patch.enabled, secretSet: !!secret }, ts: FieldValue.serverTimestamp() });
+  const cur = (await db.doc("config/odooWebhook").get()).data() || {};
+  return { ok: true, enabled: cur.enabled !== false, hasSecret: !!cur.secret };
+});
+
 // setupClickupWebhook : enregistre (ou met à jour) LE webhook workspace pointant vers clickupWebhook.
 // L'endpoint (URL déployée de la fonction) est fourni par l'admin. Le secret HMAC renvoyé À LA CRÉATION
 // est persisté dans config/clickupWebhook (serveur uniquement). Direction.

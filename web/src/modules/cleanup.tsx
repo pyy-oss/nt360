@@ -12,6 +12,7 @@ import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast } from "../design/components";
+import { DateField } from "../design/inputs";
 import { T, pct } from "../design/tokens";
 import {
   deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
@@ -187,7 +188,7 @@ function DateFix({ save }: { save: (v: string) => Promise<void> }) {
   const [v, setV] = useState("");
   return (
     <span className="inline-flex items-center gap-1">
-      <input type="date" className="field !py-1 text-xs" aria-label="Date" value={v} onChange={(e) => setV(e.target.value)} />
+      <DateField value={v} onChange={setV} ariaLabel="Date" className="!py-1 text-xs w-40" />
       <Busy variant="ghost" label="OK" okMsg="Date corrigée (recalcul lancé)" errMsg="Correction refusée" fn={() => { if (!v) throw new Error("date requise"); return save(v); }} />
     </span>
   );

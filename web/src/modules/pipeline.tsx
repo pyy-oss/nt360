@@ -5,12 +5,13 @@ import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { p01 } from "../lib/projection";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, det, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, Field, FormSection, useToast, cx, colText, colNum, det, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
@@ -427,6 +428,7 @@ export const OppList: FC<Props> = () => {
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
+  const amOpts = useAmOptions(), clientOpts = useClientOptions(); // autocomplete Client/AM (mêmes sources que les filtres)
   const prefill = (o: Opportunity, patch: boolean) => { setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
@@ -513,44 +515,44 @@ export const OppList: FC<Props> = () => {
                 }} />
             </>
           }>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <FormSection>
             {/* En correction d'opp importée, le client vient de la source (non modifiable) ; on l'affiche en lecture. */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Client
-              <input data-autofocus className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Account Manager
-              <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">N° FP
-              <input className="field" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Business Unit
-              <Select ariaLabel="Business Unit" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Montant{f.lines.length ? " (dérivé des lignes)" : ""}
-              <input className="field" aria-label="Montant" placeholder="Montant" value={f.lines.length ? String(linesTotal(f.lines)) : f.amount} disabled={f.lines.length > 0} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Étape
-              <Select ariaLabel="Étape du pipeline" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} /></label>
+            <Field label="Client">
+              <Combo value={f.client} onChange={(v) => setF({ ...f, client: v })} ariaLabel="Client" placeholder="Client" disabled={f.patch} autoFocus allowCreate options={clientOpts.map((c) => ({ value: c, label: c }))} /></Field>
+            <Field label="Account Manager">
+              <Combo value={f.am} onChange={(v) => setF({ ...f, am: v })} ariaLabel="Account Manager" placeholder="AM" allowCreate options={amOpts.map((a) => ({ value: a, label: a }))} /></Field>
+            <Field label="N° FP">
+              <input className="field" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></Field>
+            <Field label="Business Unit">
+              <Select ariaLabel="Business Unit" value={f.bu} onChange={(v) => setF({ ...f, bu: v })} options={bus.map((b) => ({ value: b, label: b }))} /></Field>
+            <Field label={`Montant${f.lines.length ? " (dérivé des lignes)" : ""}`}>
+              <input className="field" aria-label="Montant" placeholder="Montant" value={f.lines.length ? String(linesTotal(f.lines)) : f.amount} disabled={f.lines.length > 0} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
+            <Field label="Étape">
+              <Select ariaLabel="Étape du pipeline" value={f.stage} onChange={setStage} options={[1, 2, 3, 4, 5, 6, 7, 8, 9].map((s) => ({ value: String(s), label: `${s} · ${STAGE_SHORT[s]}` }))} /></Field>
             {/* Proba = IdC : éditable aussi en correction (la projection pondère par palier d'IdC). */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">IdC (%)
-              <input className="field" aria-label="IdC en pourcentage" placeholder="IdC 0..100" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></label>
+            <Field label="IdC (%)">
+              <input className="field" aria-label="IdC en pourcentage" placeholder="IdC 0..100" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></Field>
             {/* MB prévisionnel : % de marge brute PRÉVISIONNELLE (prévision commerciale, non confidentielle). */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">MB prévisionnel (%)
-              <input className="field" aria-label="MB prévisionnel en pourcentage" placeholder="MB prév. %" value={f.mbPrev} onChange={(e) => setF({ ...f, mbPrev: e.target.value })} /></label>
+            <Field label="MB prévisionnel (%)">
+              <input className="field" aria-label="MB prévisionnel en pourcentage" placeholder="MB prév. %" value={f.mbPrev} onChange={(e) => setF({ ...f, mbPrev: e.target.value })} /></Field>
             {/* DR (Deal Registration / demande de remise) — Oui / Non. */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">DR
-              <Select ariaLabel="DR (Oui / Non)" value={f.dr} onChange={(v) => setF({ ...f, dr: v })} options={[{ value: "non", label: "Non" }, { value: "oui", label: "Oui" }]} /></label>
+            <Field label="DR">
+              <Select ariaLabel="DR (Oui / Non)" value={f.dr} onChange={(v) => setF({ ...f, dr: v })} options={[{ value: "non", label: "Non" }, { value: "oui", label: "Oui" }]} /></Field>
             {/* Prévision gouvernée (Lot 5) : catégorie posée par le commercial (Commit/Best Case/…). */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Prévision
-              <Select ariaLabel="Catégorie de prévision" value={f.forecastCategory} onChange={(v) => setF({ ...f, forecastCategory: v })} options={FORECAST_OPTIONS} /></label>
+            <Field label="Prévision">
+              <Select ariaLabel="Catégorie de prévision" value={f.forecastCategory} onChange={(v) => setF({ ...f, forecastCategory: v })} options={FORECAST_OPTIONS} /></Field>
             {/* Champs custom (Lot 7b) : définis par la direction, rendus dynamiquement. */}
             {customDefs.filter((d) => d.active).map((d) => (
               d.type === "checkbox" ? (
                 <label key={d.key} className="flex items-center gap-2 text-[12px] text-ink self-end">
                   <input type="checkbox" aria-label={d.label} checked={f.custom[d.key] === true} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.checked } })} />{d.label}</label>
               ) : (
-                <label key={d.key} className="flex flex-col gap-1 text-[11px] text-muted">{d.label}
+                <Field key={d.key} label={d.label}>
                   {d.type === "select" ? (
                     <Select ariaLabel={d.label} value={String(f.custom[d.key] ?? "")} onChange={(v) => setF({ ...f, custom: { ...f.custom, [d.key]: v } })} options={[{ value: "", label: "—" }, ...d.options.map((o) => ({ value: o, label: o }))]} />
                   ) : (
                     <input className="field" type={d.type === "number" ? "number" : d.type === "date" ? "date" : "text"} aria-label={d.label} value={String(f.custom[d.key] ?? "")} onChange={(e) => setF({ ...f, custom: { ...f.custom, [d.key]: e.target.value } })} />
-                  )}</label>
+                  )}</Field>
               )
             ))}
             {/* Lignes produit / CPQ-lite (Lot 8) : détail chiffrable ; le montant est dérivé de la somme. */}
@@ -569,19 +571,19 @@ export const OppList: FC<Props> = () => {
               ))}
               {f.lines.length > 0 && <div className="text-right text-[12px] font-semibold tabnum">Total : {money(linesTotal(f.lines))}</div>}
             </div>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">D Prev
-              <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></label>
+            <Field label="D Prev">
+              <DateField ariaLabel="Date de clôture prévue" value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} placeholder="D Prev" /></Field>
             {/* Suivi commercial (Lot B) : prochaine action + échéance (date maîtrisée → relances honnêtes). */}
-            <label className="flex flex-col gap-1 text-[11px] text-muted sm:col-span-2">Prochaine action
-              <input className="field" aria-label="Prochaine action commerciale" placeholder="Ex. relancer DAF, envoyer proposition…" value={f.nextStep} onChange={(e) => setF({ ...f, nextStep: e.target.value })} /></label>
-            <label className="flex flex-col gap-1 text-[11px] text-muted">Échéance action
-              <DateField ariaLabel="Échéance de la prochaine action" value={f.nextStepDate} onChange={(v) => setF({ ...f, nextStepDate: v })} placeholder="jj/mm/aaaa" /></label>
+            <Field label="Prochaine action" className="sm:col-span-2">
+              <input className="field" aria-label="Prochaine action commerciale" placeholder="Ex. relancer DAF, envoyer proposition…" value={f.nextStep} onChange={(e) => setF({ ...f, nextStep: e.target.value })} /></Field>
+            <Field label="Échéance action">
+              <DateField ariaLabel="Échéance de la prochaine action" value={f.nextStepDate} onChange={(v) => setF({ ...f, nextStepDate: v })} placeholder="jj/mm/aaaa" /></Field>
             {/* Motif de perte : pertinent uniquement pour une opp Perdue (étape 7) → analytique win/loss. */}
             {Number(f.stage) === 7 && (
-              <label className="flex flex-col gap-1 text-[11px] text-muted">Motif de perte
-                <input className="field" aria-label="Motif de perte" placeholder="Ex. prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></label>
+              <Field label="Motif de perte">
+                <input className="field" aria-label="Motif de perte" placeholder="Ex. prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></Field>
             )}
-          </div>
+          </FormSection>
           {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
         </Modal>
       )}

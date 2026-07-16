@@ -101,10 +101,10 @@ export const Reports: FC<Props> = () => {
         </Card>
       )}
 
-      <Card title="Rapports sauvegardés" actions={canWrite ? (
+      <Card title="Rapports enregistrés" actions={canWrite ? (
         <div className="flex flex-wrap items-center justify-end gap-2">
           <input className="field !py-1 w-full sm:w-40 text-xs" value={name} onChange={(e) => setName(e.target.value)} aria-label="Nom du rapport" placeholder="Nom du rapport…" />
-          <Busy variant="ghost" label="Sauvegarder" okMsg="Rapport sauvegardé" errMsg="Échec" fn={async () => { if (!name.trim()) throw new Error("nom requis"); await saveReport(name.trim(), buildDef()); setName(""); await loadSaved(); }} />
+          <Busy variant="ghost" label="Enregistrer" okMsg="Rapport enregistré" errMsg="Échec" fn={async () => { if (!name.trim()) throw new Error("nom requis"); await saveReport(name.trim(), buildDef()); setName(""); await loadSaved(); }} />
         </div>) : undefined}>
         {saved.length ? (
           <div className="flex flex-col">
