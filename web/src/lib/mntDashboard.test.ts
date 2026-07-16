@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, slaAgenda, mntCompliance, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -117,5 +117,26 @@ describe("mntCompliance — conformité des contrats actifs", () => {
     ], asOf);
     expect(r.items[0].id).toBe("B");
     expect(r.items[0].issues.length).toBe(3);
+  });
+});
+
+describe("mntRenouvellements — contrats actifs à renouveler", () => {
+  const c = (id: string, statut: string, dateFin: string | null) => ({ id, client: id, statut, dateFin });
+  it("classe par urgence (≤30 critique, ≤60 proche, ≤90 à venir) et exclut > horizon", () => {
+    const r = mntRenouvellements([
+      c("A", "actif", "2026-07-25"), // +10 j → critique
+      c("B", "actif", "2026-08-29"), // +45 j → proche
+      c("C", "actif", "2026-09-28"), // +75 j → a_venir
+      c("D", "actif", "2026-11-12"), // +120 j → exclu
+    ], asOf);
+    expect(r.map((x) => [x.id, x.bucket])).toEqual([["A", "critique"], ["B", "proche"], ["C", "a_venir"]]);
+  });
+  it("exclut les non-actifs, les sans date de fin, et les déjà échus (jours < 0)", () => {
+    const r = mntRenouvellements([
+      c("A", "brouillon", "2026-07-25"),
+      c("B", "actif", null),
+      c("C", "actif", "2026-06-01"), // passé
+    ], asOf);
+    expect(r).toEqual([]);
   });
 });

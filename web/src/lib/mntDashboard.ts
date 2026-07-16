@@ -72,6 +72,32 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
   };
 }
 
+// --- Renouvellements à anticiper (Lot 5/7 « valeur ajoutée » — anticipation) ---
+// Vue front PURE : contrats ACTIFS dont la date de fin approche, dans un horizon (défaut 90 j), classés par
+// urgence — critique (≤ 30 j), proche (≤ 60 j), à venir (≤ 90 j). Sert à déclencher un renouvellement AVANT
+// l'échéance (l'action passe par le moteur d'approbation existant). Les contrats DÉJÀ échus relèvent du
+// contrôle de conformité (échéance dépassée), pas d'ici. Aucune I/O, aucune métrique persistée.
+export type MntRenouvellementBucket = "critique" | "proche" | "a_venir";
+export interface MntRenouvellement { id: string; fp: string | null; client: string; dateFin: string; jours: number; bucket: MntRenouvellementBucket }
+
+/** Contrats actifs dont la fin tombe dans [0 .. horizon] jours, plus urgent d'abord. PUR. */
+export function mntRenouvellements(contrats: ContratLike[], asOfIso: string, horizonJours = 90): MntRenouvellement[] {
+  const asOf = parseIso(asOfIso);
+  if (asOf == null) return [];
+  const out: MntRenouvellement[] = [];
+  for (const c of contrats || []) {
+    if ((c.statut || "brouillon") !== "actif") continue;
+    const fin = parseIso(c.dateFin);
+    if (fin == null) continue;
+    const jours = Math.round((fin - asOf) / DAY);
+    if (jours < 0 || jours > horizonJours) continue;
+    const bucket: MntRenouvellementBucket = jours <= 30 ? "critique" : jours <= 60 ? "proche" : "a_venir";
+    out.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", dateFin: c.dateFin as string, jours, bucket });
+  }
+  out.sort((a, b) => a.jours - b.jours);
+  return out;
+}
+
 // --- Contrôle de complétude / conformité des contrats (Lot 3/7 « valeur ajoutée » — conformité) ---
 // Vue front PURE : parmi les contrats ACTIFS (ceux en vigueur), repère les MANQUES de conformité qui
 // rendent un contrat inexploitable ou hors-cadre — aucun engagement SLA, pas de date de fin, échéance déjà

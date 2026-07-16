@@ -26,7 +26,7 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, slaAgenda, mntCompliance, type SlaAgendaItem, type MntComplianceItem } from "../lib/mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -233,6 +233,17 @@ export const Maintenance: FC<Props> = () => {
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
   // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
   const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
+  // Renouvellements à anticiper (Lot 5/7) : contrats actifs dont la fin approche (≤ 90 j), plus urgent d'abord.
+  const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
+  const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
+  const renouvCols = [
+    colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
+    colText("Client", (r: MntRenouvellement) => r.client || "—", (r: MntRenouvellement) => r.client || ""),
+    colText("N° FP", (r: MntRenouvellement) => <FpLink fp={r.fp || undefined} />),
+    colText("Fin", (r: MntRenouvellement) => frDate(r.dateFin)),
+    colNum("Jours restants", (r: MntRenouvellement) => String(r.jours), (r: MntRenouvellement) => r.jours),
+    colText("", (r: MntRenouvellement) => (canWrite ? <Busy variant="ghost" label="Demander le renouvellement" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} /> : null)),
+  ];
   // Rentabilité par contrat (Lot 4/7) : callable gouverné (coût CJM serveur, masqué sans droit rentabilité).
   // Chargé à l'ouverture du module ; « Recalculer » rafraîchit après édition.
   const [pnl, setPnl] = useState<{ rows: MntContratPnlRow[]; hasCost: boolean } | null>(null);
@@ -412,6 +423,13 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
+        </Card>
+      )}
+
+      {gate && renouvellements.length > 0 && (
+        <Card title={`Renouvellements à anticiper · ${renouvellements.length}`}>
+          <Tip>Contrats <b>actifs</b> dont la fin approche (≤ 90 j) — <b>critique ≤ 30 j</b>. « Demander le renouvellement » soumet la décision au <b>circuit d'approbation</b> (comme depuis la fiche).</Tip>
+          <Table columns={renouvCols} rows={renouvellements} colsKey="mnt_renouv" />
         </Card>
       )}
 
