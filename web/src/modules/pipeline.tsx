@@ -94,6 +94,12 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       </div>
+      {monthsAsc(data.byWeek).filter((x) => x.name !== "?").length > 0 && (
+        <Card title="Écoulement hebdomadaire du closing (pondéré)">
+          <AreaTrend data={monthsAsc(data.byWeek).filter((x) => x.name !== "?")} color={T.steel} name="Pondéré" h={200} />
+          <Tip>Granularité <b>hebdomadaire</b> (semaine ISO de la <b>D Prev</b>) de l'écoulement du pondéré projeté — même population et même pondération que l'écoulement mensuel, en plus fin pour le pilotage à court terme. Fondé sur la seule <b>date de clôture prévue</b> (la source n'ayant pas de date de création, ce n'est pas un « entrant »).</Tip>
+        </Card>
+      )}
       {/* Le CLASSEMENT par commercial (pondéré / taux de transfo. / R-O …) vit désormais UNIQUEMENT dans
           AM 360° (source unique summaries/ams). Il était ici recalculé depuis un AUTRE agrégat
           (pipeline_${period}.byAmConv) → un même AM pouvait afficher un pondéré/transfo. différent selon

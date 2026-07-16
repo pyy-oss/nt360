@@ -12,6 +12,22 @@ const { isDormantClosing } = require("./oppLifecycle");
 
 const CONFIANCE_MIN = 0.9;
 const isActive = (o) => o.stage >= 1 && o.stage <= 5;
+
+// Semaine ISO 8601 (`AAAA-Www`) d'une date `AAAA-MM-JJ` — granularité HEBDO du closing (D Prev).
+// Pure/déterministe (ne dépend que de l'entrée, aucune horloge). Sert à ventiler l'écoulement du
+// pipeline par semaine, complément fin du mensuel `byMonth`. La clé zéro-padée trie lexicographiquement.
+// NB : pas de date de CRÉATION en source → c'est bien un écoulement du closing prévu, jamais un « entrant ».
+function isoWeek(iso) {
+  const dt = new Date(String(iso).slice(0, 10) + "T00:00:00Z");
+  if (isNaN(dt.getTime())) return "?";
+  const day = (dt.getUTCDay() + 6) % 7; // Lundi=0 … Dimanche=6
+  dt.setUTCDate(dt.getUTCDate() - day + 3); // jeudi de la semaine ISO → porte le millésime de semaine
+  const year = dt.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(year, 0, 4)); // le 4 janvier est toujours en semaine 1
+  const week = 1 + Math.round(((dt.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+  return `${year}-W${String(week).padStart(2, "0")}`;
+}
+
 // Éligible « certain » (IdC ≥ 90 %) — conservé pour les certitudes.
 const isEligible = (o) => isActive(o) && p01(o.probability || 0) >= CONFIANCE_MIN;
 
@@ -134,6 +150,8 @@ function pipeline(opps, asOf, tiers, orders) {
     byAM: groupSum(proj, (o) => o.am, pw),
     byBU: groupSum(proj, (o) => o.bu, pw),
     byMonth: groupSum(proj, month, pw),
+    // Écoulement HEBDO du closing (D Prev) — même population/pondération que byMonth, granularité semaine.
+    byWeek: groupSum(proj, (o) => (o.closingDate ? isoWeek(o.closingDate) : "?"), pw),
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
@@ -144,4 +162,4 @@ function pipeline(opps, asOf, tiers, orders) {
   };
 }
 
-module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, CONFIANCE_MIN };
+module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, isoWeek, CONFIANCE_MIN };

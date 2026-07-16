@@ -48,6 +48,7 @@ export interface PipelineSummary {
   tierBreakdown?: TierBucket[];
   conv?: number; wonCount?: number; lostCount?: number;
   byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
+  byWeek?: Record<string, number>; // écoulement HEBDO du closing (clés ISO « AAAA-Www »), miroir de byMonth
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
   closing?: ClosingAnalysis | null;
