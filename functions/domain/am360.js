@@ -6,6 +6,7 @@
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
 const { fpKey, plausibleYear } = require("../lib/ids");
+const { isDormantClosing } = require("./oppLifecycle");
 
 // AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
 // en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
@@ -17,8 +18,12 @@ const normAm = (a) => (a && String(a).trim().toUpperCase()) || "—";
  * @param {object[]} opps opportunités (am, stage, probability, weighted)
  * @param {object[]} objectives objectifs (scope, scopeValue, fiscalYear, targetCas)
  * @param {number|string} fy exercice courant (pour le R/O)
+ * @param {object[]} tiers niveaux de projection (poids/activation)
+ * @param {boolean} excludeDormant retirer du pondéré les opps DORMANTES (année de closing < exercice) —
+ *   MÊME assiette que le Cockpit « Tout » (pipeline_all) : sinon le pondéré par AM inclut des espoirs
+ *   périmés que le Cockpit masque (violation « même métrique = même nombre »). Défaut : activé.
  */
-function am360(orders, invoices, opps, objectives, fy, tiers) {
+function am360(orders, invoices, opps, objectives, fy, tiers, excludeDormant = true) {
   const pw = (o) => projectionWeight(o, tiers || normalizeTiers());
   // FP → AM (depuis les commandes) pour rattacher les factures à un commercial. Clé CANONIQUE (fpKey) :
   // orders.fp est canonisé (mergeCommandes), invoices.fp reste au format source → sans fpKey, une facture
@@ -54,7 +59,11 @@ function am360(orders, invoices, opps, objectives, fy, tiers) {
       // « Pondéré » = PROJECTION tiérée (défauts 100/20/5, configurables en Habilitations), cohérent avec pipeline/
       // atterrissage : NET du carnet — une opp active dont le FP porte déjà une commande est déjà dans le CAS,
       // l'inclure ici la double-compterait (parité chaine/atterrissage.alreadyBooked). activeCount reste brut.
-      const projActive = active.filter((o) => { const k = fpKey(o.fp); return !(k && bookedFps.has(k)); });
+      const projActive = active.filter((o) => {
+        const k = fpKey(o.fp); if (k && bookedFps.has(k)) return false; // déjà au carnet (parité chaine/atterrissage)
+        if (excludeDormant && isDormantClosing(o, fy)) return false;      // dormante (parité Cockpit « Tout »)
+        return true;
+      });
       const pipelinePondere = sum(projActive, pw);
 
       const ob = objByAm[am.toUpperCase()];
