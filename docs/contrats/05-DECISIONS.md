@@ -3,6 +3,47 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-019 — Suggestions de contrats : jugement IA (Claude) en surcouche de l'heuristique, l'IA propose et l'humain valide
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Les suggestions de contrats (Lot 7) reposaient sur une **heuristique de mots-clés** côté client
+(`web/src/lib/mntSuggest.suggestMntContrats`) : deux faiblesses connues — des **faux positifs** (un mot-clé
+présent dans une affaire ponctuelle) et des **faux négatifs** (une affaire récurrente sans mot-clé évident,
+ex. « support applicatif annuel »). L'ERP dispose déjà d'un patron IA éprouvé — l'assistant du Centre de
+correction (`lib/aiCorrection.js` + `domain/aiCorrection.js`, Opus 4.8, réflexion adaptative, gestion du
+`refusal`, normalisation défensive) — et d'un secret `ANTHROPIC_API_KEY` (Secret Manager).
+
+### Décision
+- Ajouter un **jugement IA** en **surcouche**, sans supprimer l'heuristique (elle reste l'affichage
+  instantané par défaut ; l'IA se lance sur clic explicite « Doper à l'IA »).
+- **Calquer strictement le patron du Centre de correction** : partie PURE `domain/mntSuggest.js`
+  (construction du prompt + normalisation défensive), pont LLM `lib/mntSuggestAi.js`, callable
+  `aiSuggestMntContrats` **double-gardé** (`requireWrite('maintenance')` + drapeau `config/mntFeature`) +
+  `rateLimit` (20/min) + secret. Modèle `claude-opus-4-8`, `thinking:{type:"adaptive"}`, `refusal` géré.
+- **« L'IA propose, l'humain valide »** : le callable **n'écrit rien** ; il renvoie des propositions
+  (`{fp, confidence, reason, echeance?}`) affichées avec leur justification. Chaque « Créer » ouvre la fiche
+  **pré-remplie** — aucune création automatique. La sortie brute est TOUJOURS re-validée
+  (`normalizeMntSuggestions` : fp rapproché par `fpKey` — aucune hallucination, confiance bornée, échéance
+  validée contre l'énumération ERP, dé-doublonnage par FP canonique).
+- **Parité « même métrique = même nombre »** : les candidats (affaires SANS contrat) sont fournis par le
+  FRONT depuis le carnet fusionné (seule autorité), jamais re-dérivés côté serveur ; le serveur re-borne
+  (≤ 60) et re-filtre les affaires déjà sous contrat par `fpKey`.
+
+### Conséquences
+- Additif : aucune nouvelle collection, aucun schéma modifié, aucune dépendance ajoutée (SDK déjà présent).
+  Drapeau éteint ⇒ callable refusé ⇒ ERP strictement inchangé.
+- Coût borné : 1 requête Opus par clic, lot ≤ 60, `rateLimit` anti-abus, audit d'usage (jamais le contenu).
+
+### Ce qu'on saura dans six mois
+Si l'IA retient durablement des affaires non pertinentes (faux positifs) ou en manque (faux négatifs) →
+ajuster le prompt (`buildMntSuggestPrompt`) ou le pool de candidats, pas la barrière de normalisation.
+
+---
+
 ## ADR-018 — Interaction maintenance↔CRA : activité gatée par le drapeau, jamais valorisée au TJM
 
 - **Date :** 2026-07-15

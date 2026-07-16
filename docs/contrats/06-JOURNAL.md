@@ -578,3 +578,27 @@ chunk d'entrée 116,3 KB ≤ 120, maintenance 26,9 KB (lazy).
 **Appris**
 - Firestore ne fusionne pas les éléments d'un array en merge : fournir `[]` écrase. Un import « en-tête »
   doit exclure explicitement les champs structurés (engagements) du payload de merge.
+
+---
+
+## 2026-07-16 — Doper les suggestions de contrats à l'IA (ADR-019)
+
+**Fait**
+- Suggestions de contrats passées d'une heuristique mots-clés à un **jugement IA** (Claude Opus 4.8,
+  réflexion adaptative, `refusal` géré), en **surcouche** — l'heuristique reste l'affichage instantané,
+  l'IA se lance sur clic « Doper à l'IA ».
+- Patron du Centre de correction calqué à l'identique : `domain/mntSuggest.js` (prompt + normalisation
+  défensive, PUR), `lib/mntSuggestAi.js` (pont LLM), callable `aiSuggestMntContrats` double-gardé
+  (`requireWrite('maintenance')` + drapeau) + `rateLimit` + secret `ANTHROPIC_API_KEY`.
+- Front : bouton + tableau IA (Confiance en %, Analyse), « Créer » pré-remplit la fiche (dont l'échéance
+  suggérée). Pool de candidats fourni par le carnet fusionné (parité « même métrique = même nombre »).
+- 6 tests (normalisation défensive : fp halluciné rejeté, confiance illisible/bornée, échéance validée,
+  dé-doublonnage par FP canonique). `aiSuggestMntContrats` ajouté à `deployed-functions.txt`.
+
+**Appris**
+- Le patron « l'IA propose, l'humain valide » du Centre de correction se réutilise tel quel : la vraie
+  barrière n'est pas le prompt mais la **normalisation défensive** (rapprochement `fpKey`, bornage,
+  énumérations ERP) — l'IA ne fait qu'alimenter des propositions, jamais une écriture.
+
+**Vérif** : functions mntSuggest 6/6, deploy-targets (149 fonctions) + no-undef OK, build web OK,
+chunk d'entrée 116,6 KB ≤ 120.

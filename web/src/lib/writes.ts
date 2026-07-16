@@ -1029,6 +1029,17 @@ export async function importMntContrats(file: File, apply: boolean): Promise<Mnt
   return res.data as MntImportResult;
 }
 
+// Suggestion IA de contrats — l'IA (Claude) juge quelles affaires du carnet (candidats fournis) relèvent
+// d'une prestation récurrente. « L'IA propose, l'humain valide » : renvoie des propositions PRÉ-REMPLI-ables,
+// aucune écriture. Double-gaté serveur (droit `maintenance` + drapeau) + secret ANTHROPIC_API_KEY.
+import type { MntCandidate } from "./mntSuggest";
+export type MntAiSuggestion = { fp: string; client: string; bu: string; am: string; affaire: string; cas: number; confidence: number; reason: string; echeance: string | null };
+export type MntAiSuggestResult = { ok: boolean; suggestions: MntAiSuggestion[]; model: string; truncated: boolean; analyzed: number; total: number };
+export async function aiSuggestMntContrats(candidates: MntCandidate[]): Promise<MntAiSuggestResult> {
+  const res = await httpsCallable(functions, "aiSuggestMntContrats", { timeout: 300_000 })({ candidates });
+  return res.data as MntAiSuggestResult;
+}
+
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
 import type { MntTicket, MntIntervention } from "../types";
 export async function upsertMntTicket(t: MntTicket) { const res = await httpsCallable(functions, "upsertMntTicket")(t); return res.data as { ok: boolean; id: string }; }

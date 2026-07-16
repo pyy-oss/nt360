@@ -1292,9 +1292,10 @@ exports.staffingPlan = _staffing.staffingPlan;
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
 // par défaut → aucune écriture). Extraction dans handlers/maintenance.js (patron d'injection).
 const { createMaintenance } = require("./handlers/maintenance");
-const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid });
+const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.importMntContrats = _maintenance.importMntContrats;
+exports.aiSuggestMntContrats = _maintenance.aiSuggestMntContrats;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;
 exports.deleteMntTicket = _maintenance.deleteMntTicket;
