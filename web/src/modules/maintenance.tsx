@@ -25,7 +25,7 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard } from "../lib/mntDashboard";
+import { computeMntDashboard, slaAgenda, type SlaAgendaItem } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -135,6 +135,22 @@ export const Maintenance: FC<Props> = () => {
   const ticketsSorted = useMemo(() => [...tickets].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [tickets]);
   const contratById = useMemo(() => Object.fromEntries(contrats.map((c) => [c.id!, c])), [contrats]);
   const nowMs = Date.now();
+  // Calendrier SLA (Lot 2/7) : échéances SLA en attente des tickets ouverts, live. Horodatages convertis en
+  // millis (tsMillis) avant l'appel → la vue PURE slaAgenda reste testable ; même moteur slaState que la fiche.
+  const agenda = useMemo(() => slaAgenda(
+    tickets.map((t) => ({
+      id: t.id, contratId: t.contratId, client: t.client, titre: t.titre, priorite: t.priorite, statut: t.statut,
+      ouvertMs: t.ouvertLe ? tsMillis(t.ouvertLe) : null,
+      priseEnCompteMs: t.priseEnCompteLe ? tsMillis(t.priseEnCompteLe) : null,
+      resoluMs: t.resoluLe ? tsMillis(t.resoluLe) : null,
+    })),
+    contrats, nowMs), [tickets, contrats, nowMs]);
+  // Restant lisible : « 2 j 3 h » ou « En retard de … » (rompu). Zéro dépendance externe (arrondi h).
+  const fmtRemaining = (ms: number) => {
+    const h = Math.floor(Math.abs(ms) / 3_600_000), d = Math.floor(h / 24);
+    const txt = d > 0 ? `${d} j ${h % 24} h` : `${h} h`;
+    return ms < 0 ? `En retard de ${txt}` : txt;
+  };
   const openNewTicket = () => { setTForm({ statut: "ouvert", priorite: "moyenne" }); setTOpen(true); };
   const openEditTicket = (t: MntTicket) => { setTForm({ ...t }); setTOpen(true); };
   // Sélection d'un contrat : renseigne contratId + reporte fp/client (rattachement).
@@ -180,6 +196,15 @@ export const Maintenance: FC<Props> = () => {
         {canWrite && <DangerBtn label="Suppr." confirm={`Supprimer le ticket « ${t.titre} » ?`} fn={() => deleteMntTicket(t.id!)} okMsg="Ticket supprimé" errMsg="Suppression refusée" />}
       </div>
     )),
+  ];
+
+  const agendaCols = [
+    colText("État", (a: SlaAgendaItem) => <Badge tone={slaTone(a.state)}>{SLA_STATE_LABEL[a.state]}</Badge>, (a: SlaAgendaItem) => (a.state === "rompu" ? 0 : 1)),
+    colText("Restant", (a: SlaAgendaItem) => <span className={cx("text-[12px] whitespace-nowrap", a.remainingMs < 0 && "text-clay")}>{fmtRemaining(a.remainingMs)}</span>, (a: SlaAgendaItem) => a.remainingMs),
+    colText("Client", (a: SlaAgendaItem) => a.client || "—", (a: SlaAgendaItem) => a.client || ""),
+    colText("Ticket", (a: SlaAgendaItem) => <span className="truncate max-w-[220px] inline-block align-bottom" title={a.titre}>{a.titre || "—"}</span>),
+    colText("SLA", (a: SlaAgendaItem) => label(SLA_TYPE_LABEL, a.slaType)),
+    colText("Priorité", (a: SlaAgendaItem) => <Badge tone={prioriteTone(a.priorite)}>{label(PRIORITE_LABEL, a.priorite)}</Badge>),
   ];
 
   // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
@@ -360,6 +385,13 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
+        </Card>
+      )}
+
+      {gate && agenda.length > 0 && (
+        <Card title={`Calendrier SLA · ${agenda.length}`}>
+          <Tip>Échéances SLA <b>en attente</b> des tickets ouverts (prise en compte / résolution), calculées <b>en direct</b> — <b>rompues d'abord</b>, puis les plus proches. Un ticket dont le contrat n'a pas l'engagement du type n'apparaît pas.</Tip>
+          <Table columns={agendaCols} rows={agenda} colsKey="mnt_sla_agenda" />
         </Card>
       )}
 

@@ -3,6 +3,8 @@
 // nouvel appel serveur : le cockpit consolide ce que le module lit déjà. Testable sans React.
 // Convention ERP : dates ISO AAAA-MM-JJ, montants FCFA entiers, statuts en code applicatif.
 
+import { slaState } from "./mntSla";
+
 export const ECHEANCE_PROCHE_JOURS = 60; // aligné sur le signal « échéance proche » du moteur de risque
 const DAY = 86400000;
 
@@ -68,4 +70,60 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
     ticketsTotal: (tickets || []).length,
     ticketsOuverts, parPriorite, echeancesProches,
   };
+}
+
+// --- Calendrier SLA des tickets (Lot 2/7 « valeur ajoutée » — opérationnel) ---
+// Vue front PURE : pour chaque ticket OUVERT, ses échéances SLA ENCORE EN ATTENTE (prise en compte tant
+// qu'il n'est pas pris en charge ; résolution tant qu'il n'est pas résolu), avec l'état live (rompu / en
+// cours) calculé par le MÊME moteur slaState que la fiche (horloge jours ouvrés ou h24, ADR-002). Aucune
+// I/O ni métrique persistée → pas de miroir back (comme le tableau de bord). Les horodatages sont fournis
+// EN MILLIS (le module convertit les Timestamp via tsMillis avant l'appel) → fonction trivialement testable.
+export interface SlaAgendaItem {
+  ticketId: string; contratId: string; client: string; titre: string; priorite: string;
+  slaType: "prise_en_compte" | "resolution"; dueMs: number; state: "rompu" | "en_cours"; remainingMs: number;
+}
+type TicketMs = {
+  id?: string; contratId?: string; client?: string; titre?: string; priorite?: string; statut?: string;
+  ouvertMs?: number | null; priseEnCompteMs?: number | null; resoluMs?: number | null;
+};
+type Eng = { type?: string; couverture?: string; seuilHeures?: number };
+type ContratEng = { id?: string; engagements?: Eng[] };
+
+/** Échéances SLA en attente des tickets ouverts, triées « rompu d'abord » puis par échéance la plus proche. PUR. */
+export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: number): SlaAgendaItem[] {
+  // 1ᵉʳ engagement de chaque type par contrat (la fiche impose au plus un par type utile ici).
+  const engByContrat = new Map<string, { prise_en_compte?: Eng; resolution?: Eng }>();
+  for (const c of contrats || []) {
+    if (!c.id) continue;
+    const slot: { prise_en_compte?: Eng; resolution?: Eng } = {};
+    for (const e of c.engagements || []) {
+      if (e.type === "prise_en_compte" && !slot.prise_en_compte) slot.prise_en_compte = e;
+      else if (e.type === "resolution" && !slot.resolution) slot.resolution = e;
+    }
+    engByContrat.set(c.id, slot);
+  }
+  const out: SlaAgendaItem[] = [];
+  for (const t of tickets || []) {
+    const st = t.statut || "ouvert";
+    if (st !== "ouvert" && st !== "en_cours") continue; // seuls les tickets OUVERTS
+    if (t.ouvertMs == null) continue;
+    const engs = engByContrat.get(t.contratId || "") || {};
+    const pending: { slaType: SlaAgendaItem["slaType"]; eng: any }[] = [];
+    if (t.priseEnCompteMs == null && engs.prise_en_compte) pending.push({ slaType: "prise_en_compte", eng: engs.prise_en_compte });
+    if (t.resoluMs == null && engs.resolution) pending.push({ slaType: "resolution", eng: engs.resolution });
+    for (const p of pending) {
+      const s = slaState(p.eng, t.ouvertMs, null, nowMs); // markMs=null → SLA encore en cours (état vivant)
+      out.push({
+        ticketId: t.id || "", contratId: t.contratId || "", client: t.client || "", titre: t.titre || "",
+        priorite: t.priorite || "moyenne", slaType: p.slaType, dueMs: s.dueMs,
+        state: s.state === "rompu" ? "rompu" : "en_cours", remainingMs: s.dueMs - nowMs,
+      });
+    }
+  }
+  // Rompus d'abord (les plus en retard en tête), puis les échéances les plus proches.
+  out.sort((a, b) => {
+    if (a.state !== b.state) return a.state === "rompu" ? -1 : 1;
+    return a.dueMs - b.dueMs;
+  });
+  return out;
 }

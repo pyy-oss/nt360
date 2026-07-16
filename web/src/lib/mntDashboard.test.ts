@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, slaAgenda, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -53,5 +53,40 @@ describe("computeMntDashboard", () => {
     expect(d.ticketsTotal).toBe(5);
     expect(d.ticketsOuverts).toBe(3);
     expect(d.parPriorite).toEqual({ haute: 2, basse: 1 });
+  });
+});
+
+describe("slaAgenda — calendrier SLA des tickets ouverts", () => {
+  const H = 3600000;
+  const c1 = { id: "C1", engagements: [
+    { type: "prise_en_compte", couverture: "h24", seuilHeures: 4 },
+    { type: "resolution", couverture: "h24", seuilHeures: 24 },
+  ] };
+
+  it("liste les SLA en attente d'un ticket ouvert, rompu d'abord", () => {
+    const now = 5 * H; // prise en compte (dûe à 4h) dépassée, résolution (dûe à 24h) en cours
+    const tickets = [{ id: "T1", contratId: "C1", client: "ACME", titre: "Panne", priorite: "haute", statut: "ouvert", ouvertMs: 0, priseEnCompteMs: null, resoluMs: null }];
+    const a = slaAgenda(tickets, [c1], now);
+    expect(a.map((x) => x.slaType)).toEqual(["prise_en_compte", "resolution"]);
+    expect(a[0].state).toBe("rompu");
+    expect(a[0].remainingMs).toBe(-1 * H); // 4h - 5h
+    expect(a[1].state).toBe("en_cours");
+    expect(a[1].remainingMs).toBe(19 * H);
+  });
+
+  it("un ticket pris en charge n'a plus de SLA de prise en compte en attente", () => {
+    const tickets = [{ id: "T1", contratId: "C1", statut: "en_cours", ouvertMs: 0, priseEnCompteMs: 2 * H, resoluMs: null }];
+    expect(slaAgenda(tickets, [c1], 5 * H).map((x) => x.slaType)).toEqual(["resolution"]);
+  });
+
+  it("un ticket résolu/clos est exclu du calendrier", () => {
+    const tickets = [{ id: "T1", contratId: "C1", statut: "resolu", ouvertMs: 0, priseEnCompteMs: 1 * H, resoluMs: 3 * H }];
+    expect(slaAgenda(tickets, [c1], 100 * H)).toEqual([]);
+  });
+
+  it("sans engagement du type, aucune échéance n'est inventée", () => {
+    const c2 = { id: "C2", engagements: [{ type: "resolution", couverture: "h24", seuilHeures: 24 }] };
+    const tickets = [{ id: "T2", contratId: "C2", statut: "ouvert", ouvertMs: 0, priseEnCompteMs: null, resoluMs: null }];
+    expect(slaAgenda(tickets, [c2], 5 * H).map((x) => x.slaType)).toEqual(["resolution"]);
   });
 });
