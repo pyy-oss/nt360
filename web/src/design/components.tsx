@@ -277,7 +277,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
   const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
   const { primary, detail } = splitCols(cols);
   const hasDetail = detail.length > 0;
-  const filterCols = cols.filter((c) => c.filter);
+  const filterCols = columns.filter((c) => c.filter); // sur `columns` (toutes) : un filtre survit au masquage de sa colonne
   const filtersActive = Object.values(colFilters).some((a) => a && a.length);
   const selectable = !!bulk && !!rowKey;
   const kOf = (r: any) => (rowKey ? rowKey(r) : "");
@@ -289,7 +289,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
     let base = rows.map((r, i) => ({ r, i }));
     const s = searchKeys && q.trim() ? q.trim().toLowerCase() : "";
     if (s) base = base.filter(({ r }) => searchKeys!.some((k) => String(k(r) ?? "").toLowerCase().includes(s)));
-    if (filtersActive) base = base.filter(({ r }) => passColFilters(r, cols, colFilters));
+    if (filtersActive) base = base.filter(({ r }) => passColFilters(r, columns, colFilters));
     const key = sort ? primary[sort.i]?.sort : null;
     if (!key || !sort) return base;
     const dir = sort.dir;
@@ -479,7 +479,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   // Un `expand` explicite du module reste prioritaire ; sinon on génère la grille de détail.
   const { primary, detail: detailCols } = splitCols(cols);
   const hasDetail = !!expand || detailCols.length > 0;
-  const filterCols = cols.filter((c) => c.filter);
+  const filterCols = columns.filter((c) => c.filter); // sur `columns` (toutes) : un filtre survit au masquage de sa colonne
   const filtersActive = Object.values(colFilters).some((a) => a && a.length);
   const selectable = !!bulk && !!rowKey;
   const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
@@ -493,7 +493,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     let r = !s ? rows : rows.filter((row) => searchKeys.some((k) => String(k(row) ?? "").toLowerCase().includes(s)));
-    if (filtersActive) r = r.filter((row) => passColFilters(row, cols, colFilters));
+    if (filtersActive) r = r.filter((row) => passColFilters(row, columns, colFilters));
     if (sort && primary[sort.i]?.sort) {
       const key = primary[sort.i].sort!;
       r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
