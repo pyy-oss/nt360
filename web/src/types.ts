@@ -51,6 +51,10 @@ export interface PipelineSummary {
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
   closing?: ClosingAnalysis | null;
+  // Opportunités DORMANTES (année de closing < exercice) : volume/valeur/ancienneté. Global (indépendant
+  // de la période) ; `excludeDormant` = drapeau appliqué (exclues du pondéré cumulé vs simple signal).
+  dormant?: { count?: number; brut?: number; ageMin?: number; ageMax?: number; ageAvg?: number };
+  excludeDormant?: boolean;
 }
 
 export interface BacklogSummary {

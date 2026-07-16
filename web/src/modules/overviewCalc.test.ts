@@ -101,4 +101,25 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(withAlias.certitudes).toBe(0);
     expect(withAlias.facture).toBe(400); // facture rattachée à la commande via le FP redirigé
   });
+
+  // Exclusion des DORMANTES en mode « Tout » (miroir aggregate.js) : une opp ouverte de closing d'un
+  // millésime révolu ne doit plus alimenter le pondéré/certitudes cumulé quand l'option est active.
+  it("période « all » : exclut les opportunités dormantes (année de closing < exercice) du pondéré", () => {
+    const dormOpps = [
+      { bu: "ICT", am: "X", client: "ACME", amount: 1000, stage: 3, probability: 0.95, closingDate: "2026-06-01" }, // exercice
+      { bu: "ICT", am: "X", client: "ACME", amount: 8000, stage: 3, probability: 0.95, closingDate: "2024-06-01" }, // DORMANTE
+    ];
+    // Sans currentFy : aucune exclusion (rétrocompat) → les deux certitudes comptent.
+    const nofy = computeFilteredOverview([] as any, [] as any, dormOpps as any, "all", mkMatch({ bu: "ICT" }));
+    expect(nofy.certitudes).toBe(9000);
+    // Avec currentFy=2026 et option active : la dormante 2024 est retirée.
+    const withFy = computeFilteredOverview([] as any, [] as any, dormOpps as any, "all", mkMatch({ bu: "ICT" }), undefined, null, undefined, 2026, true);
+    expect(withFy.certitudes).toBe(1000);
+    // Option désactivée : rien n'est exclu même avec currentFy.
+    const off = computeFilteredOverview([] as any, [] as any, dormOpps as any, "all", mkMatch({ bu: "ICT" }), undefined, null, undefined, 2026, false);
+    expect(off.certitudes).toBe(9000);
+    // En vue d'année (2026), l'exclusion ne change rien (le filtre de millésime écarte déjà la 2024).
+    const yr = computeFilteredOverview([] as any, [] as any, dormOpps as any, "2026", mkMatch({ bu: "ICT" }), undefined, null, undefined, 2026, true);
+    expect(yr.certitudes).toBe(1000);
+  });
 });

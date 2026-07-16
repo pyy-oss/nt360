@@ -41,6 +41,18 @@ export function isAgedLost(o: { source?: string; stage?: number; ageDays?: numbe
   return p01(Number(o.probability)) <= AGE_LOST_IDC;
 }
 
+/** Vrai si l'opportunité est DORMANTE (miroir de functions/domain/oppLifecycle.js) : OUVERTE (1-5) mais
+ *  dont l'ANNÉE de clôture prévue est ANTÉRIEURE à l'exercice courant → exclue de la prévision cumulée
+ *  (« Tout ») sur option. Millésime BORNÉ (plausibleYear) : un closingDate aberrant n'est jamais dormant. */
+export function isDormantClosing(o: { stage?: number; closingDate?: string | null }, currentFy?: number): boolean {
+  const fy = Number(currentFy) || 0;
+  if (!o || !fy) return false;
+  const stage = Number(o.stage) || 0;
+  if (stage < 1 || stage > 5) return false;
+  const y = plausibleYear(Number(String(o.closingDate || "").slice(0, 4)));
+  return y > 0 && y < fy;
+}
+
 /** Résolveur de RÉCONCILIATION N° FP (miroir EXACT de functions/lib/ids.js buildFpAliasResolver) : la table
  *  config/fpAliases.map (clé canonique source → N° FP cible P&L) redirige un FP d'opp/facture vers le FP du
  *  P&L, comme le fait le recompute serveur AVANT l'overview. Sans ce miroir, la Vue d'ensemble filtrée ne

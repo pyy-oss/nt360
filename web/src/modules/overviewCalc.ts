@@ -5,7 +5,7 @@
 import type { Dim } from "../lib/filters";
 import type { Order, Invoice, Opportunity } from "../types";
 import { projectionWeight, normalizeTiers, p01, type Tier } from "../lib/projection";
-import { fpKey, isAgedLost, buildFpAliasResolver, plausibleYear } from "../lib/ids";
+import { fpKey, isAgedLost, isDormantClosing, buildFpAliasResolver, plausibleYear } from "../lib/ids";
 
 export type FilteredOverview = {
   certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
@@ -20,6 +20,7 @@ export function computeFilteredOverview(
   match: (row: { bu?: string; am?: string; client?: string }, dims?: Dim[]) => boolean,
   tiers?: Tier[], fpAliasMap?: Record<string, string> | null,
   clientKey?: (raw?: string | null) => string,
+  currentFy?: number, excludeDormant = true,
 ): FilteredOverview {
   const t = tiers || normalizeTiers();
   // CANONICALISATION du client EN MIROIR du serveur (aggregate.js normalise les noms au recompute ; les
@@ -76,7 +77,10 @@ export function computeFilteredOverview(
     const o = k ? byFp.get(k) : undefined;
     return m({ bu: o?.bu ?? i.bu, am: o?.am, client: o?.client ?? i.client }, DIMS);
   });
-  const oppP = opps.filter((o) => inPeriod(yr(o.closingDate)) && m(o, DIMS));
+  // « Tout » : on écarte les DORMANTES (année de closing < exercice) si l'option est active — MIROIR
+  // EXACT de aggregate.js (filtre de population avant pondéré/certitudes/conversion). Les onglets d'année
+  // filtrent déjà par millésime, donc l'exclusion n'y change rien. currentFy absent ⇒ aucune exclusion.
+  const oppP = opps.filter((o) => inPeriod(yr(o.closingDate)) && !(period === "all" && excludeDormant && isDormantClosing(o, currentFy)) && m(o, DIMS));
   const commandes = S(ordP, (o) => o.cas);
   const backlog = S(ordAll, (o) => Math.max(o.raf || 0, 0));
   const backlogCount = ordAll.filter((o) => (o.raf || 0) > 0).length;

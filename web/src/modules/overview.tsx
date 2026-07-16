@@ -124,7 +124,9 @@ export const Overview: FC<Props> = ({ period }) => {
   // (parité serveur/finance.tsx) avant recalcul du CAF filtré.
   const cancelledInv = new Set((cxlInv?.items || []).map((e) => e.id));
   const liveInvoices = cancelledInv.size ? allInvoices.filter((i) => !cancelledInv.has(i.id!)) : allInvoices;
-  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases?.map, clientKey) : null;
+  // Exclusion des DORMANTES (miroir aggregate) : `currentFy` (exercice) + drapeau config/projection.
+  const excludeDormant = (projCfg as { excludeDormant?: boolean } | null)?.excludeDormant !== false;
+  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases?.map, clientKey, Number(fy) || undefined, excludeDormant) : null;
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).

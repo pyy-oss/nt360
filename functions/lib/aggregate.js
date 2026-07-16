@@ -6,7 +6,7 @@ const { overview } = require("../domain/chaine");
 const { normalizeTiers } = require("../domain/projection");
 const { billingTrend } = require("../domain/billing");
 const { backlogFy } = require("../domain/backlog");
-const { pipeline } = require("../domain/pipeline");
+const { pipeline, dormantSummary } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage, projetableBacklog } = require("../domain/atterrissage");
@@ -19,7 +19,7 @@ const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
 const { oppFunnel } = require("../domain/oppFunnel");
 const { dataQuality } = require("../domain/dataQuality");
-const { isAgedLost } = require("../domain/oppLifecycle");
+const { isAgedLost, isDormantClosing } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
 const { enrichBu, enrichLinks } = require("./enrich");
@@ -300,6 +300,13 @@ async function recomputeCore(db, only) {
   const stamp = { updatedAt: FieldValue.serverTimestamp() };
   const asOf = new Date().toISOString().slice(0, 10); // aujourd'hui : borne basse fenêtre D Prev (atterrissage)
   const yearOf = (d) => (d ? String(d).slice(0, 4) : "");
+  // OPPORTUNITÉS DORMANTES (D Prev d'un millésime révolu, année < exercice courant). Le drapeau
+  // `config/projection.excludeDormant` (ACTIVÉ par défaut : absent ⇒ true) les retire de la prévision
+  // CUMULÉE (« Tout ») — les onglets d'année les écartent déjà par le filtre de millésime. Le volume/
+  // valeur/ancienneté est calculé une fois sur l'assiette active GLOBALE et surfacé en tuile dédiée
+  // (transparence : exclu du pondéré mais visible). Miroir front : overviewCalc.ts + pipeline.tsx.
+  const excludeDormant = projCfg.excludeDormant !== false;
+  const dormant = dormantSummary(opps, currentFy, asOf);
   const w = []; // écritures {path, data}
 
   // Réconciliation du drapeau `linked` persisté sur les factures (source du KPI « non rattachées »
@@ -617,7 +624,13 @@ async function recomputeCore(db, only) {
     // Opportunités de la période = D Prev (closingDate) dans l'année sélectionnée. Les certitudes
     // GLISSENT sur l'exercice : une D Prev déjà passée DANS l'année compte toujours (cohérent avec
     // l'atterrissage). On écarte l'obsolète HORS année (N-1) et le prévu en N+1+. "Tout" = tout.
-    const oppP = period === "all" ? opps : opps.filter((o) => yearOf(o.closingDate) === period);
+    // « Tout » : on retire les DORMANTES (année de closing < exercice courant) si le drapeau est actif —
+    // sinon un espoir périmé (D Prev d'un millésime révolu, jamais reclassé) gonfle la prévision cumulée.
+    // Les onglets d'année filtrent déjà par millésime (== period), donc l'exclusion n'y change rien.
+    // Filtre de POPULATION (avant overview/pipeline/clients) ⇒ pondéré cohérent partout (invariant miroir).
+    const oppP = period === "all"
+      ? (excludeDormant ? opps.filter((o) => !isDormantClosing(o, currentFy)) : opps)
+      : opps.filter((o) => yearOf(o.closingDate) === period);
     // Chaîne NON additive : CAS(période, figé) · Facturé=CAF(inv datées, figé) · Backlog GLISSANT
     // (bf global, indépendant de la période) · Certitudes = pondéré des opps de la période (D Prev).
     if (want("overview")) {
@@ -629,7 +642,10 @@ async function recomputeCore(db, only) {
       w.push({ path: `summaries/overviewMargin_${period}`, data: { period, mb: ovMb, pmb: ovR.pmb, ...stamp } });
     }
     // `ord` (commandes de la période) → exclusion « déjà au carnet » IDENTIQUE à overview_${period} (parité Certitudes/Commit).
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord), ...stamp } });
+    // `dormant` (global, indépendant de la période) embarqué dans CHAQUE summary pipeline → la tuile
+    // « Opportunité dormante » s'affiche quelle que soit la période choisie. `excludeDormant` tracé pour
+    // que le front libelle correctement (exclu du pondéré vs simple signal).
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord), dormant, excludeDormant, ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec

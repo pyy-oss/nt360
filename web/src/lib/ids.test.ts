@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fpKey, isAgedLost, plausibleYear } from "./ids";
+import { fpKey, isAgedLost, isDormantClosing, plausibleYear } from "./ids";
 
 // Parité avec le serveur (functions/lib/ids.js fpKey, functions/domain/oppLifecycle.js isAgedLost).
 // Ces helpers existent pour que le frontal canonise les N° FP EXACTEMENT comme mergeCommandes, sinon
@@ -54,5 +54,21 @@ describe("plausibleYear (miroir serveur)", () => {
     expect(plausibleYear(new Date().getFullYear() + 4)).toBe(0);
     expect(plausibleYear("")).toBe(0);
     expect(plausibleYear(null)).toBe(0);
+  });
+});
+
+// Miroir EXACT de functions/domain/oppLifecycle.js isDormantClosing (parité de l'exclusion des dormantes).
+describe("isDormantClosing (miroir serveur)", () => {
+  const FY = 2026;
+  it("ouverte de closing d'un millésime révolu ⇒ dormante", () => {
+    expect(isDormantClosing({ stage: 3, closingDate: "2024-05-01" }, FY)).toBe(true);
+    expect(isDormantClosing({ stage: 1, closingDate: "2025-12-31" }, FY)).toBe(true);
+  });
+  it("exercice courant/futur, gagnée/perdue, closingDate aberrant ou FY inconnu ⇒ non dormante", () => {
+    expect(isDormantClosing({ stage: 3, closingDate: "2026-01-01" }, FY)).toBe(false);
+    expect(isDormantClosing({ stage: 3, closingDate: "2027-01-01" }, FY)).toBe(false);
+    expect(isDormantClosing({ stage: 6, closingDate: "2023-01-01" }, FY)).toBe(false);
+    expect(isDormantClosing({ stage: 3, closingDate: "1900-01-01" }, FY)).toBe(false);
+    expect(isDormantClosing({ stage: 3, closingDate: "2024-01-01" }, 0)).toBe(false);
   });
 });

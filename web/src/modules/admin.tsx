@@ -192,6 +192,7 @@ function OpsHealthCard() {
 // (pondéré pipeline, atterrissage, conversion). Enregistrer recalcule immédiatement côté serveur.
 const DEFAULT_PROJ: ProjectionConfigInput = {
   certitudes: { active: true, weight: 1 }, forecast: { active: true, weight: 0.2 }, pipe: { active: true, weight: 0.05 },
+  excludeDormant: true, // absent du doc ⇒ ACTIVÉ (miroir aggregate/forecastRollup)
 };
 const PROJ_TIERS = [
   { key: "certitudes", label: "Certitudes", band: "IdC ≥ 90 %" },
@@ -206,6 +207,7 @@ function ProjectionConfigCard() {
     forecast: { ...DEFAULT_PROJ.forecast, ...(data?.forecast || {}) },
     pipe: { ...DEFAULT_PROJ.pipe, ...(data?.pipe || {}) },
     cashOpening: data?.cashOpening ?? 0,
+    excludeDormant: data?.excludeDormant !== false, // absent ⇒ activé
   };
   return <ProjectionConfigForm key={JSON.stringify(data || {})} initial={init} />;
 }
@@ -213,6 +215,7 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
   const p1 = (v: number) => String(+(v * 100).toFixed(2));
   const [st, setSt] = useState(() => Object.fromEntries(PROJ_TIERS.map((t) => [t.key, { active: initial[t.key].active, weight: p1(initial[t.key].weight) }])) as Record<string, { active: boolean; weight: string }>);
   const [cashOpening, setCashOpening] = useState(String(initial.cashOpening ?? 0));
+  const [excludeDormant, setExcludeDormant] = useState(initial.excludeDormant !== false);
   const num = (s: string) => Number(String(s).replace(",", "."));
   const set = (k: string, patch: Partial<{ active: boolean; weight: string }>) => setSt((s) => ({ ...s, [k]: { ...s[k], ...patch } }));
   const build = (): ProjectionConfigInput => ({
@@ -220,6 +223,7 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
     forecast: { active: st.forecast.active, weight: num(st.forecast.weight) / 100 },
     pipe: { active: st.pipe.active, weight: num(st.pipe.weight) / 100 },
     cashOpening: Number.isFinite(num(cashOpening)) ? num(cashOpening) : 0,
+    excludeDormant,
   });
   return (
     <Card title="Niveaux de projection du pipeline" actions={<Busy label="Enregistrer" okMsg="Réglages appliqués (recalcul complet lancé)" fn={() => callSetProjectionConfig(build())} />}>
@@ -248,7 +252,14 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
           <input className="field !py-1 w-40" inputMode="numeric" value={cashOpening} onChange={(e) => setCashOpening(e.target.value)} placeholder="0" aria-label="Solde d'ouverture trésorerie" />
         </label>
       </div>
-      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
+      <div className="mt-3 border-t border-line/60 pt-3 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-[190px]">
+          <Toggle checked={excludeDormant} onChange={setExcludeDormant} ariaLabel="Exclure les opportunités dormantes" />
+          <span className="text-ink font-medium">Exclure les opportunités dormantes</span>
+        </div>
+        <span className="text-[11px] text-faint">année de clôture antérieure à l'exercice courant</span>
+      </div>
+      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Les <b>opportunités dormantes</b> (clôture prévue d'un <b>millésime révolu</b>, jamais reclassée) sont retirées de la <b>prévision cumulée</b> (« Tout ») quand l'option est active — elles restent visibles dans la tuile <b>« Opportunité dormante »</b> du Pipeline (les onglets d'année les écartent déjà). Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
     </Card>
   );
 }
