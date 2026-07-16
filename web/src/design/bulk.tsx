@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, X, Columns3, Filter } from "lucide-react";
 import { cx, useToast, useConfirm, type Col, type BulkAction } from "./components";
+import { Select } from "./inputs";
 import { trackWrite } from "../lib/activity";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
 
@@ -115,12 +116,14 @@ export function BulkBar({ selected, actions, cols, exportName, onClear }:
   const toast = useToast();
   const [ask, confirmNode] = useConfirm();
   const [busy, setBusy] = useState("");
+  const [picks, setPicks] = useState<Record<number, string>>({});
   const n = selected.length;
-  const run = async (a: BulkAction) => {
+  const run = async (a: BulkAction, picked?: string) => {
+    if (a.pick && !picked) return; // aucune valeur choisie
     if (a.confirm && !(await ask(a.confirm, { tone: a.tone === "danger" ? "clay" : "gold", confirmLabel: a.label }))) return;
     setBusy(a.label);
     try {
-      await trackWrite(Promise.resolve(a.run(selected)), a.label);
+      await trackWrite(Promise.resolve(a.run(selected, picked)), a.label);
       toast(typeof a.okMsg === "function" ? a.okMsg(selected) : (a.okMsg || `${n} élément${n > 1 ? "s" : ""} traité${n > 1 ? "s" : ""}`), "ok");
       onClear();
     } catch (e: any) {
@@ -141,12 +144,20 @@ export function BulkBar({ selected, actions, cols, exportName, onClear }:
         <button type="button" onClick={exportSel} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5" title="Exporter la sélection en CSV (Excel)">
           <Download size={14} aria-hidden="true" />Exporter
         </button>
-        {(actions || []).map((a, i) => (
-          <button key={i} type="button" disabled={!!busy} onClick={() => run(a)}
-            className={cx("btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5 disabled:opacity-40", a.tone === "danger" && "text-clay")}>
-            {a.icon as ReactNode}{busy === a.label ? "…" : a.label}
-          </button>
-        ))}
+        {(actions || []).map((a, i) => {
+          const pv = a.pick ? (picks[i] ?? a.pick.options[0]?.value ?? "") : undefined;
+          return (
+            <span key={i} className="inline-flex items-center gap-1">
+              {a.pick && (
+                <Select ariaLabel={a.pick.placeholder || a.label} value={pv!} onChange={(v) => setPicks((p) => ({ ...p, [i]: v }))} options={a.pick.options} className="!py-0.5 text-xs" />
+              )}
+              <button type="button" disabled={!!busy} onClick={() => run(a, pv)}
+                className={cx("btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5 disabled:opacity-40", a.tone === "danger" && "text-clay")}>
+                {a.icon as ReactNode}{busy === a.label ? "…" : a.label}
+              </button>
+            </span>
+          );
+        })}
         <button type="button" onClick={onClear} className="btn-ghost !px-2 !py-1 text-xs" aria-label="Tout désélectionner" title="Tout désélectionner">
           <X size={14} aria-hidden="true" />
         </button>

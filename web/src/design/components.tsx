@@ -226,7 +226,10 @@ function useColVisibility(storageKey: string | undefined, columns: Col[]) {
 // `run` est asynchrone (tracé + toast comme Busy) ; la sélection est vidée au succès.
 export type BulkAction = {
   label: string; icon?: ReactNode; tone?: "default" | "danger";
-  run: (rows: any[]) => Promise<any> | any;
+  // `pick` : petit sélecteur de valeur affiché AVANT le bouton (ex. statut cible) ; la valeur choisie
+  // est passée en 2ᵉ argument de `run`. Sans `pick`, `run` ne reçoit que les lignes.
+  pick?: { options: { value: string; label: string }[]; placeholder?: string };
+  run: (rows: any[], picked?: string) => Promise<any> | any;
   okMsg?: string | ((rows: any[]) => string); errMsg?: string; confirm?: ReactNode;
 };
 

@@ -7,7 +7,7 @@ import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
@@ -323,6 +323,13 @@ export const BC: FC<Props> = () => {
   useEffect(() => { if (intent?.segment === "late" || intent?.segment === "open") setFlt(intent.segment as "late" | "open"); }, [intent]);
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []); // stable sur la session (pas de bascule minuit mi-session)
   const isLate = (r: BcLine) => isBcLate(r, today); // colonne « Retard » par ligne (table paginée)
+  // Action en masse (même droit que le sélecteur de statut par ligne) : passer N lignes BC à un statut
+  // cible. Appels séquentiels (chaque écriture déclenche un recompute coalescé) ; réutilise setBcStatus.
+  const bcBulk: BulkAction[] = canWrite ? [
+    { label: "Passer au statut", pick: { options: BC_STAGES.map((s) => ({ value: s, label: bcLabel(s) })), placeholder: "Statut cible" },
+      okMsg: (rs) => { const k = rs.filter((r) => r.id).length; return `${k} ligne${k > 1 ? "s" : ""} BC mise${k > 1 ? "s" : ""} à jour`; }, errMsg: "Mise à jour refusée",
+      run: async (rs, status) => { for (const r of rs.filter((x) => x.id)) await setBcStatus(r.id!, status!); } },
+  ] : [];
   // byStatus + lateCount + filtered en UNE seule passe MÉMOÏSÉE (le retard n'est plus parcouru deux fois).
   const { byStatus, solde, lateCount, filtered } = useMemo(() => {
     const bs: Record<string, number> = {};
@@ -353,7 +360,7 @@ export const BC: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           rowKey={(r) => r.id || r.bcNumber || ""}
-          bulk={[]}
+          bulk={bcBulk}
           columns={[
             // Essentiels EN LIGNE (N° BC, Fournisseur, XOF, Retard, Statut) ; le secondaire (FP, Type,
             // ETA contrat/réel) est replié dans le détail via det() → tableau étroit, sans scroll.
