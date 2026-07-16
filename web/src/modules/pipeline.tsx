@@ -190,6 +190,15 @@ export const Am360: FC<Props> = () => {
   const sel = rows.find((r) => r.am === am) || rows[0];
   // Rang par prise de commande (CAS) — classement de performance du leaderboard.
   const rankOf = new Map([...rows].sort((a, b) => b.cas - a.cas).map((r, i) => [r.am, i + 1] as const));
+  // Synthèse portefeuille (Total) : agrégats des colonnes du classement + R/O global (réalisé exercice /
+  // objectif) — DC lit la performance de l'équipe d'un coup d'œil, sans additionner mentalement les lignes.
+  const totCas = rows.reduce((s, r) => s + (r.cas || 0), 0);
+  const totFacture = rows.reduce((s, r) => s + (r.facture || 0), 0);
+  const totBacklog = rows.reduce((s, r) => s + (r.backlog || 0), 0);
+  const totPipe = rows.reduce((s, r) => s + (r.pipelinePondere || 0), 0);
+  const totTarget = rows.reduce((s, r) => s + (r.targetCas || 0), 0);
+  const totCasFy = rows.reduce((s, r) => s + (r.casFy || 0), 0);
+  const globalRo = totTarget > 0 ? totCasFy / totTarget : null;
   return (
     <div className="flex flex-col gap-4">
       <Card title="Commercial (Account Manager)">
@@ -221,6 +230,15 @@ export const Am360: FC<Props> = () => {
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
           colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
         ]} rows={rows} colsKey="pipeline-am360" />
+        <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line/60 pt-2 text-[12px] text-muted">
+          <span className="font-semibold text-ink">Total portefeuille</span>
+          <span>{rows.length.toLocaleString("fr-FR")} commercial(aux)</span>
+          <span>CAS <b className="tabnum text-ink">{money(totCas)}</b></span>
+          <span>Facturé <b className="tabnum text-ink">{money(totFacture)}</b></span>
+          <span>Backlog <b className="tabnum text-ink">{money(totBacklog)}</b></span>
+          <span>Pipeline pond. <b className="tabnum text-ink">{money(totPipe)}</b></span>
+          {globalRo != null && <span>R/O global <b className={cx("tabnum", globalRo >= 1 ? "text-emerald" : globalRo >= 0.7 ? "text-gold" : "text-clay")}>{pct(globalRo)}</b></span>}
+        </div>
       </Card>
       <Tip>Vue par commercial <b>sans marge</b> (la rentabilité par AM reste dans « Rentabilité »). Le <b>facturé</b> est rattaché au commercial via la clé N° FP de ses commandes. Le <b>R/O</b> compare le CAS de l'exercice à l'objectif CAS « commercial » de l'année.</Tip>
     </div>
