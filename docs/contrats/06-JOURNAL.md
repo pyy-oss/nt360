@@ -681,3 +681,36 @@ en une seule PR #398 (grosse revue). À l'avenir, fusionner après chaque lot po
 La fusion de #398 a été déclenchée sur une consigne `/loop … suivi de deploy` interprétée comme un « merge » :
 le garde-fou a signalé que « deploy » n'équivaut pas à un « fusionne #398 » explicite. Règle réaffirmée :
 ne fusionner que sur instruction de fusion explicite.
+
+---
+
+## 2026-07-16 — Correctif : échéancier « doublé » sur les contrats à durée multiple exacte
+
+**Symptôme signalé** — une 2ᵉ ligne d'échéance apparaissait, doublant le montant du contrat, sur
+« certains » contrats et pas d'autres. Reproduction : elle ne tombait que sur les contrats dont la durée
+est un multiple ENTIER de la périodicité (annuel `dateDebut`→`dateDebut+12 mois`, mensuel de 12 mois pile,
+etc.). Comme la création en masse pose `dateFin = dateDebut + 12 mois` pour un contrat annuel, tous les
+contrats créés en masse tombaient dans le cas piégé.
+
+**Cause** — dans `mntEcheancier.js`, le plafond de durée valait `Math.floor(monthsBetween(dateDebut,
+dateFin)/per) + 1`. Le `+ 1` compte l'échéance émise à `dateDebut` (correct pour le décompte *asOf*), mais
+appliqué à `dateFin` il compte AUSSI l'échéance tombant PILE sur `dateFin`. Or `dateFin` est la borne de
+**renouvellement** (exclusive) : les contrats ne se reconduisent pas d'office (rappel métier de l'utilisateur).
+L'échéance du jour de `dateFin` est donc la 1ʳᵉ du contrat SUIVANT, pas du contrat courant → +1 échéance
+fantôme, donc +1× le montant. Sur une durée partielle (mensuel 01/01→30/06) le `floor` masquait le bug
+(`floor(5/1)+1 = 6`, juste par accident), d'où « certains cas oui, d'autres non ».
+
+**Fix** — helper pur `periodsInContract(dateDebut, dateFin, per)` : compte les débuts de période dont la
+DATE RÉELLE (`addMonthsIso`) est **strictement < dateFin**. Correct pour les deux cas — exact (annuel
+12 mois → 1, non 2) comme partiel (mensuel 01/01→30/06 → 6). Appliqué à l'identique au plafond de
+`echeancier` ET de `echeancierPlan`, back (`mntEcheancier.js`) et miroir front (`mntSla.ts`) — parité stricte.
+
+**Chasse aux bugs similaires** — revue ciblée des autres générateurs de séries mensuelles/décomptes de
+périodes (agent). Aucun autre off-by-one : les autres séries utilisent un horizon/span explicite ou des
+bornes inclusives voulues ; le `+ 1` du décompte *asOf* (`periodsDue`) reste correct et distinct (il compte
+l'échéance de `dateDebut`, borne de gauche INCLUSIVE — sémantique opposée à `dateFin`).
+
+**Vérif** — 4 tests ajoutés (annuel 12 mois → 1 ; mensuel 12 mois → 12 ; lignes datées ; miroir front).
+functions 914/914, web 123/123, build OK, lint OK, chunk 116,9 KB ≤ 120, gardes CI (152 fonctions,
+no-undef, index) OK. Correctif purement additif (nouvelle fonction pure + resserrement d'un plafond) ;
+aucune colonne ni signature touchée ; comportement inchangé hors le cas piégé.

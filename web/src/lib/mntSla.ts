@@ -64,9 +64,10 @@ export function echeancier(contrat: { echeanceType?: string; montantEngage?: num
   // Miroir back : contrat non démarré (asOf < dateDebut) → 0 échéance due (pas de fausse sous-facturation).
   if (parse(contrat.dateDebut) && String(asOfIso) >= String(contrat.dateDebut)) {
     periodsDue = Math.floor(monthsBetween(contrat.dateDebut, asOfIso) / per) + 1;
+    // dateFin = borne de RENOUVELLEMENT (EXCLUSIVE) : l'échéance tombant pile sur dateFin (reconduction)
+    // n'est pas comptée. On compte les débuts de période dont la date est < dateFin. Miroir mntEcheancier.js.
     if (parse(contrat.dateFin || undefined)) {
-      const total = Math.floor(monthsBetween(contrat.dateDebut, contrat.dateFin || undefined) / per) + 1;
-      periodsDue = Math.min(periodsDue, Math.max(0, total));
+      periodsDue = Math.min(periodsDue, periodsInContract(contrat.dateDebut, contrat.dateFin, per));
     }
     periodsDue = Math.max(0, periodsDue);
   }
@@ -87,6 +88,22 @@ export function addMonthsIso(iso: string | null | undefined, n: number): string 
 }
 
 const MAX_PERIODS = 240;
+
+// Nombre de débuts de période (dateDebut, +pas, +2·pas, …) dont la DATE est STRICTEMENT avant dateFin
+// (borne de renouvellement exclusive). Miroir EXACT de mntEcheancier.periodsInContract : compté par dates
+// réelles (addMonthsIso) pour gérer fins de mois ET durées partielles — un mensuel 01/01→30/06 = 6, un
+// annuel 01/01/26→01/01/27 = 1 (l'échéance du 01/01/27 est le renouvellement, non comptée).
+function periodsInContract(dateDebut: string | null | undefined, dateFin: string | null | undefined, per: number): number {
+  if (!parse(dateDebut || undefined) || !parse(dateFin || undefined)) return 0;
+  let n = 0;
+  while (n < MAX_PERIODS) {
+    const start = addMonthsIso(dateDebut, n * per);
+    if (!start || String(start) >= String(dateFin)) break;
+    n++;
+  }
+  return n;
+}
+
 export type EcheancePeriod = { index: number; dateEcheance: string | null; montant: number; cumulEngage: number; statut: "facture" | "du" | "a_venir" };
 export type EcheancierPlan = { periods: EcheancePeriod[]; periodsDue: number; engage: number; facture: number; ecart: number };
 
@@ -101,7 +118,8 @@ export function echeancierPlan(
   const agg = echeancier(contrat, factureTotal, asOfIso);
   let total = agg.periodsDue;
   if (parse(contrat.dateDebut) && parse(contrat.dateFin || undefined)) {
-    total = Math.max(0, Math.floor(monthsBetween(contrat.dateDebut, contrat.dateFin || undefined) / per) + 1);
+    // dateFin exclusive (borne de renouvellement) — débuts de période < dateFin. Miroir back mntEcheancier.js.
+    total = periodsInContract(contrat.dateDebut, contrat.dateFin, per);
   }
   total = Math.min(Math.max(0, total), MAX_PERIODS);
   const periods: EcheancePeriod[] = [];
