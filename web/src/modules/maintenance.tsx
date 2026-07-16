@@ -119,6 +119,7 @@ export const Maintenance: FC<Props> = () => {
   const [cForm, setCForm] = useState<CForm>(emptyContrat);
   const [cEdit, setCEdit] = useState(false);
   const [cId, setCId] = useState(""); // id du contrat édité (pour les décisions renouvellement/résiliation)
+  const [viewC, setViewC] = useState<MntContrat | null>(null); // fiche contrat en CONSULTATION (lecture seule)
   const setC = <K extends keyof CForm>(k: K, v: CForm[K]) => setCForm((f) => ({ ...f, [k]: v }));
   const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
   const cValid = cForm.fp.trim() && cForm.client.trim() && cForm.dateDebut;
@@ -127,7 +128,9 @@ export const Maintenance: FC<Props> = () => {
   const rmEng = (i: number) => setC("engagements", cForm.engagements.filter((_, j) => j !== i));
   // Échéancier du contrat ouvert : factures de l'affaire (par N° FP canonique) → engagé vs facturé.
   // Lecture bornée par la requête (where fp==) ; nécessite le droit `facturation` (sinon écart neutre).
-  const openFp = cOpen && cForm.fp ? fpKey(cForm.fp) : "";
+  // Édition OU consultation ouverte : `cForm` reflète le contrat visé dans les deux cas → l'échéancier
+  // (ech/plan/factureTotal) est partagé, garantissant la parité entre la fiche d'édition et la consultation.
+  const openFp = (cOpen || !!viewC) && cForm.fp ? fpKey(cForm.fp) : "";
   const { rows: cInvoices } = useCollectionData<Invoice>(openFp ? "invoices" : null, openFp ? [where("fp", "==", openFp)] : [], openFp || "");
   const factureTotal = useMemo(() => cInvoices.reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices]);
   const ech = useMemo(() => echeancier({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
@@ -178,7 +181,10 @@ export const Maintenance: FC<Props> = () => {
     colNum("SLA", (c: MntContrat) => c.engagements?.length || 0),
     colText("", (c: MntContrat) => (
       <div className="flex items-center justify-end gap-1.5">
-        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCId(c.id || ""); setCEdit(true); setCOpen(true); }}>{canWrite ? "Éditer" : "Voir"}</button>
+        {/* Consulter : fiche 360° en LECTURE SEULE (engagements, échéancier, tickets, interventions, P&L,
+            risque). `cForm` est aussi renseigné → l'échéancier partage la même assiette que l'édition. */}
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setViewC(c); }}>Consulter</button>
+        {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCId(c.id || ""); setCEdit(true); setCOpen(true); }}>Éditer</button>}
         {canWrite && <DangerBtn label="Suppr." confirm={`Supprimer le contrat ${c.fp} ?`} fn={() => deleteMntContrat(c.id!)} okMsg="Contrat supprimé" errMsg="Suppression refusée" />}
       </div>
     )),
@@ -650,6 +656,91 @@ export const Maintenance: FC<Props> = () => {
           )}
         </Modal>
       )}
+
+      {/* --- Fiche contrat — CONSULTATION (lecture seule, 360°) --- */}
+      {viewC && (() => {
+        const vc = viewC;
+        const vfp = fpKey(vc.fp || "");
+        const vcTickets = tickets.filter((t) => (t.contratId && t.contratId === vc.id) || (!!vfp && fpKey(t.fp || "") === vfp));
+        const vcTicketIds = new Set(vcTickets.map((t) => t.id));
+        const vcInterv = interventions.filter((i) => (i.contratId && i.contratId === vc.id) || (i.ticketId && vcTicketIds.has(i.ticketId)) || (!!vfp && fpKey(i.fp || "") === vfp));
+        const vcHeures = vcInterv.reduce((s, i) => s + (Number(i.heures) || 0), 0);
+        const vcPnl = pnl?.rows.find((r) => fpKey(r.fp || "") === vfp);
+        const vcRisk = risqueItems.find((r) => fpKey(r.fp || "") === vfp);
+        const openTk = vcTickets.filter((t) => t.statut === "ouvert" || t.statut === "en_cours").length;
+        const resoEng = (vc.engagements || []).find((e) => e.type === "resolution"); // engagement de résolution → état SLA des tickets
+        return (
+          <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="md"
+            actions={canWrite ? <button type="button" className="btn-ghost !px-3 !py-1.5 text-sm" onClick={() => { setCId(vc.id || ""); setCEdit(true); setViewC(null); setCOpen(true); }}>Éditer</button> : undefined}>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div><div className="text-[11px] text-muted">Client</div><div className="font-display text-lg leading-tight">{vc.client || "—"}</div></div>
+                <div><div className="text-[11px] text-muted">N° FP</div><div className="text-[15px]"><FpLink fp={vc.fp} /></div></div>
+                <Badge tone={statutTone(vc.statut)}>{label(STATUT_LABEL, vc.statut)}</Badge>
+                {vcRisk && vcRisk.niveau !== "vert" && <Badge tone={niveauTone(vcRisk.niveau)}>Risque {riskLabel(NIVEAU_LABEL, vcRisk.niveau)}</Badge>}
+              </div>
+              <div className="flex flex-wrap gap-x-8 gap-y-2 text-[13px] border-y border-line/60 py-3">
+                <div><div className="text-[11px] text-muted">Montant engagé</div><div className="tabnum">{money(vc.montantEngage)}</div></div>
+                <div><div className="text-[11px] text-muted">Période</div><div className="tabnum">{frDate(vc.dateDebut)} → {vc.dateFin ? frDate(vc.dateFin) : "—"}</div></div>
+                <div><div className="text-[11px] text-muted">Périodicité</div><div>{label(ECHEANCE_LABEL, vc.echeanceType)}</div></div>
+                <div><div className="text-[11px] text-muted">Tickets ouverts</div><div className={cx("tabnum", openTk > 0 && "text-gold")}>{openTk} <span className="text-faint">/ {vcTickets.length}</span></div></div>
+              </div>
+              {vcRisk && vcRisk.niveau !== "vert" && (vcRisk.signals || []).length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5"><span className="text-[12px] text-muted">Signaux de risque :</span>{vcRisk.signals.map((s, i) => <Badge key={i} tone="clay">{signalText(s)}</Badge>)}</div>
+              )}
+              <div>
+                <div className="text-[13px] font-medium mb-1.5">Engagements SLA</div>
+                {(vc.engagements || []).length === 0 ? <div className="text-[12px] text-muted">Aucun engagement SLA.</div> : (
+                  <div className="flex flex-wrap gap-2">
+                    {(vc.engagements || []).map((e, i) => (
+                      <div key={i} className="rounded-lg border border-line/60 px-3 py-1.5 text-[12.5px]">
+                        <div className="font-medium">{label(SLA_TYPE_LABEL, e.type)}</div>
+                        <div className="text-muted text-[11.5px]">{label(COUVERTURE_LABEL, e.couverture)} · seuil {e.seuilHeures} h{e.quota != null ? ` · quota ${e.quota}` : ""}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-[13px] font-medium mb-1.5">Facturation récurrente <span className="text-[11px] text-muted font-normal">— engagé (échéances × montant) vs facturé (affaire)</span></div>
+                <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
+                  <div><div className="text-[11px] text-muted">Engagé à ce jour</div><div className="tabnum">{money(ech.engage)}</div></div>
+                  <div><div className="text-[11px] text-muted">Facturé (ERP)</div><div className="tabnum">{money(ech.facture)}</div></div>
+                  <div><div className="text-[11px] text-muted">Écart</div><div className={cx("tabnum", ech.ecart > 0 ? "text-clay" : "text-emerald")}>{money(ech.ecart)}{ech.ecart > 0 ? " (sous-facturé)" : ""}</div></div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[13px] font-medium mb-1.5">Tickets · {vcTickets.length}</div>
+                {vcTickets.length === 0 ? <div className="text-[12px] text-muted">Aucun ticket sous ce contrat.</div> : (
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-line/60">
+                    <table className="w-full text-[12px]">
+                      <thead className="sticky top-0 bg-panel2 text-muted"><tr className="text-left"><th className="px-2 py-1 font-medium">Titre</th><th className="px-2 py-1 font-medium">Priorité</th><th className="px-2 py-1 font-medium">Statut</th><th className="px-2 py-1 font-medium">SLA résolution</th></tr></thead>
+                      <tbody>
+                        {vcTickets.map((t) => {
+                          const st = resoEng && t.ouvertLe ? slaState(resoEng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs) : null;
+                          return (
+                            <tr key={t.id} className="border-t border-line/40">
+                              <td className="px-2 py-1">{t.titre || "—"}</td>
+                              <td className="px-2 py-1"><Badge tone={prioriteTone(t.priorite)}>{label(PRIORITE_LABEL, t.priorite)}</Badge></td>
+                              <td className="px-2 py-1"><Badge tone={ticketStatutTone(t.statut)}>{label(TICKET_STATUT_LABEL, t.statut)}</Badge></td>
+                              <td className="px-2 py-1">{st ? <Badge tone={slaTone(st.state)}>{SLA_STATE_LABEL[st.state]}</Badge> : "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-x-8 gap-y-2 text-[13px] border-t border-line/60 pt-3">
+                <div><div className="text-[11px] text-muted">Interventions</div><div className="tabnum">{vcInterv.length} · {vcHeures} h</div></div>
+                {vcPnl && <div><div className="text-[11px] text-muted">Revenu engagé</div><div className="tabnum">{money(vcPnl.revenue)}</div></div>}
+                {vcPnl && vcPnl.marge != null && <div><div className="text-[11px] text-muted">Marge</div><div className={cx("tabnum", vcPnl.marge >= 0 ? "text-emerald" : "text-clay")}>{money(vcPnl.marge)}{vcPnl.margePct != null ? ` · ${Math.round(vcPnl.margePct * 100)} %` : ""}</div></div>}
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* --- Fiche ticket + interventions --- */}
       {tOpen && (
