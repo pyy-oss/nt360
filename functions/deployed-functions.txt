@@ -14,6 +14,7 @@ attachUser
 clickupHealth
 clickupWebhook
 clientNames
+odooWebhook
 correctionQueue
 createApiKey
 createOrder
@@ -132,6 +133,7 @@ sendTestEmail
 setNotificationConfig
 setOrderPm
 setOutboundWebhook
+setOdooWebhook
 setPermissions
 setProjectionConfig
 setRecordAccess
