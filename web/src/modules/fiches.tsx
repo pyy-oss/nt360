@@ -357,7 +357,7 @@ export const Fiches: FC<Props> = () => {
         actions={<div className="flex items-center gap-2">
           <Select className="!py-1 text-xs" ariaLabel="Filtrer par statut" value={statut} onChange={setStatut}
             options={[{ value: "", label: "Statut · tous" }, ...Object.entries(STATUT_LABEL).map(([v, l]) => ({ value: v, label: l }))]} />
-          {canCreate && <button className="btn-primary !px-3 !py-1 text-xs font-semibold" onClick={() => setCreating(true)}>+ Nouvelle fiche</button>}
+          {canCreate && <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => setCreating(true)}>+ Nouvelle fiche</button>}
         </div>}>
         <p className="text-[12px] text-muted mb-3">
           Alternative à l'import du fichier P&L : la fiche calcule le prix de revient / marge et alimente le P&L de la commande à sa validation finale.

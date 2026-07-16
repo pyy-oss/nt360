@@ -227,7 +227,7 @@ function PptxBtn({ build }: { build: () => Promise<void> }) {
     catch (e: any) { toast("Export PPTX échoué : " + String(e?.message || e), "err"); }
     finally { setBusy(false); }
   };
-  return <button type="button" onClick={onClick} disabled={busy} className="btn-primary !px-2.5 !py-1 text-xs font-semibold">{busy ? "Génération…" : "Exporter (PowerPoint)"}</button>;
+  return <button type="button" onClick={onClick} disabled={busy} className="btn-gold !px-2.5 !py-1 text-xs">{busy ? "Génération…" : "Exporter (PowerPoint)"}</button>;
 }
 
 // ── BULLETIN HEBDO « Hot Topics Opérations » — commentaires / points clés (Phase 1, saisie manuelle) ──
@@ -316,7 +316,7 @@ function BulletinEditor({ fy, week, initial, onClose, onSaved }: { fy: number; w
               <textarea className="field !py-1 w-full font-mono text-[11px]" rows={6} value={pasted} onChange={(e) => setPasted(e.target.value)} aria-label="Texte du bulletin à importer"
                 placeholder={"Engagements fournisseurs :\n• WESTCON : BP BF 111K$ -> On Hold\nProjets :\n• CORIS Holding\n\t◦ Projet HUAWEI : contrat attendu"} />
               <div className="flex items-center gap-2">
-                <button type="button" className="btn-primary !px-2.5 !py-1 text-xs font-semibold" onClick={() => doImport("replace")} disabled={!pasted.trim()}>Structurer (remplacer)</button>
+                <button type="button" className="btn-gold !px-2.5 !py-1 text-xs" onClick={() => doImport("replace")} disabled={!pasted.trim()}>Structurer (remplacer)</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => doImport("append")} disabled={!pasted.trim()}>Ajouter à la suite</button>
                 <button type="button" className="text-[11px] text-faint hover:text-ink ml-auto" onClick={() => { setImportOpen(false); setPasted(""); }}>Annuler</button>
               </div>

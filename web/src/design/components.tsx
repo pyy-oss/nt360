@@ -644,14 +644,16 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
   return createPortal(
     <div className="fixed inset-0 z-[100] grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
+      {/* Carte en COLONNE : en-tête + pied FIXES, seul le corps défile → sur un long formulaire le titre et
+          les actions (« Enregistrer ») restent toujours visibles (fin du défilement du CTA hors écran). */}
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}
-        className={cx("relative card p-4 sm:p-5 w-full max-h-[90vh] overflow-y-auto animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
-        <div className="flex items-start justify-between gap-3 mb-2">
+        className={cx("relative card w-full max-h-[90vh] flex flex-col animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
+        <div className="flex items-start justify-between gap-3 shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3">
           {title ? <h2 id={titleId} className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
           <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>
         </div>
-        {children && <div className="text-[13px] text-muted leading-relaxed">{children}</div>}
-        {actions && <div className="flex items-center justify-end gap-2 mt-4">{actions}</div>}
+        {children && <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-4 sm:pb-5 text-[13px] text-muted leading-relaxed">{children}</div>}
+        {actions && <div className="flex items-center justify-end gap-2 shrink-0 px-4 sm:px-5 py-3 border-t border-line/60">{actions}</div>}
       </div>
     </div>,
     document.body,
