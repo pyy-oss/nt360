@@ -2,10 +2,71 @@
 // colonnes) — séparé de components.tsx pour rester HORS du chunk d'entrée. Table/ListView chargent ces
 // pièces via React.lazy. Réutilise le toast + la confirmation accessible + le traçage d'écriture.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, X, Columns3 } from "lucide-react";
+import { Download, X, Columns3, Filter } from "lucide-react";
 import { cx, useToast, useConfirm, type Col, type BulkAction } from "./components";
 import { trackWrite } from "../lib/activity";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
+
+// Menu « Filtres » : pour chaque colonne filtrable, la liste de ses valeurs DISTINCTES en cases à cocher.
+// Cumulable avec recherche/tri/pagination. Valeurs plafonnées (lisibilité). `value` = { entête: [valeurs] }.
+const FILTER_VALUES_CAP = 60;
+export function ColumnFilterMenu({ columns, rows, value, onChange }:
+  { columns: Col[]; rows: any[]; value: Record<string, string[]>; onChange: (v: Record<string, string[]>) => void }) {
+  const active = Object.values(value).reduce((n, a) => n + (a && a.length ? 1 : 0), 0);
+  const toggle = (header: string, v: string) => {
+    const cur = value[header] || [];
+    const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v];
+    onChange({ ...value, [header]: next });
+  };
+  return (
+    <details className="relative shrink-0 [&_summary::-webkit-details-marker]:hidden">
+      <summary className={cx("btn-ghost !px-2.5 !py-1 text-xs cursor-pointer list-none inline-flex items-center gap-1.5", active > 0 && "text-gold")} title="Filtrer par colonne">
+        <Filter size={14} aria-hidden="true" />Filtres{active > 0 && <span className="rounded-full bg-gold/15 text-gold px-1.5 leading-tight tabnum">{active}</span>}
+      </summary>
+      <div role="menu" className="absolute right-0 z-30 mt-1 w-64 max-h-80 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
+        {active > 0 && (
+          <button type="button" onClick={() => onChange({})} className="w-full text-left px-2 py-1.5 rounded text-[12px] text-clay hover:bg-panel2">Réinitialiser les filtres</button>
+        )}
+        {columns.map((c) => {
+          const vals = [...new Set(rows.map((r) => c.filter!(r)).filter((v) => v != null && v !== ""))].sort() as string[];
+          if (!vals.length) return null;
+          const capped = vals.slice(0, FILTER_VALUES_CAP);
+          return (
+            <div key={c.header} className="mt-1 pt-1 border-t border-line/60 first:border-0 first:mt-0 first:pt-0">
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-faint">{c.header}</div>
+              {capped.map((v) => {
+                const on = (value[c.header] || []).includes(v);
+                return (
+                  <label key={v} className="flex items-center gap-2 px-2 py-1.5 rounded text-[13px] cursor-pointer hover:bg-panel2">
+                    <input type="checkbox" checked={on} onChange={() => toggle(c.header, v)} className="accent-gold" aria-label={`${c.header} : ${v}`} />
+                    <span className="truncate">{v}</span>
+                  </label>
+                );
+              })}
+              {vals.length > FILTER_VALUES_CAP && <div className="px-2 py-1 text-[11px] text-faint">+{vals.length - FILTER_VALUES_CAP} autres valeurs (affiner par la recherche)</div>}
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+// Export CSV des colonnes VISIBLES + lignes courantes (après recherche/filtre/tri). Exporte « ce qu'on voit ».
+export function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: string }) {
+  if (!rows.length) return null;
+  const onClick = () => {
+    const visible = cols.filter((c) => (c.header || "").trim() !== "");
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    downloadCsv(`nt360-${name || "export"}-${stamp}.csv`, buildCsv(visible, rows));
+  };
+  return (
+    <button type="button" onClick={onClick} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5" title="Exporter les lignes affichées en CSV (Excel)">
+      <Download size={14} aria-hidden="true" />CSV
+    </button>
+  );
+}
 
 // Identité stable d'une colonne (miroir de components.colId) : `key` explicite sinon l'entête.
 const colId = (c: Col, i: number) => c.key || c.header || `col${i}`;

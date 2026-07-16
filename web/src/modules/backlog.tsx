@@ -1166,10 +1166,10 @@ export const OrderList: FC<Props> = () => {
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
-          det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
-          det(colText("Commercial", (r) => r.am, (r) => r.am)),
+          det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu, (r) => r.bu || "—")),
+          det(colText("Commercial", (r) => r.am, (r) => r.am, (r) => r.am || "—")),
           // Affectation à un Project Manager (PMO) — éditable en place pour le droit « import ».
-          det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "")),
+          det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "", (r: Order) => r.pm || "—")),
           // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans
           // ouvrir la modale : les montants saisis à la source sont parfois erronés. Les commandes de
           // source « fiche »/« opp gagnée » se corrigent à la source (fiche / opportunité).

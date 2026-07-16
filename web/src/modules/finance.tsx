@@ -221,12 +221,12 @@ export const InvoiceList: FC<Props> = () => {
             colText("Numéro", (r) => r.numero, (r) => r.numero),
             det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Client", (r) => r.client, (r) => r.client),
-            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
+            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu, (r) => r.bu || "—")),
             det(colText("Rattach.", (r) => (r.linked !== true ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>), (r) => (r.linked !== true ? 0 : 1))),
             det(colText("Date", (r) => frDate(r.date), (r) => r.date || "")),
             colText("Échéance", (r) => frDate(r.dueDate), (r) => r.dueDate || ""),
             colNum("Montant HT", (r) => money(r.amountHt), (r) => r.amountHt),
-            colText("Statut", (r) => (cancelled.has(r.id!) ? <Badge tone="clay">Annulée</Badge> : (r.paymentStatus || "—")), (r) => (cancelled.has(r.id!) ? "zzz" : r.paymentStatus || "")),
+            colText("Statut", (r) => (cancelled.has(r.id!) ? <Badge tone="clay">Annulée</Badge> : (r.paymentStatus || "—")), (r) => (cancelled.has(r.id!) ? "zzz" : r.paymentStatus || ""), (r) => (cancelled.has(r.id!) ? "Annulée" : (r.paymentStatus || "—"))),
             // Actions groupées en UNE colonne (entête vide → jamais repliée) : rattacher, dates, assainir,
             // annuler/rétablir. Reste toujours visible en ligne (cf. socle design : colonnes d'action).
             ...(canImport ? [colText("", (r: Invoice) => (r.id ? (

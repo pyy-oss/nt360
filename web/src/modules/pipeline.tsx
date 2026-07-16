@@ -658,9 +658,9 @@ export const OppList: FC<Props> = () => {
             colText("Client", (r) => r.client, (r) => r.client),
             colText("Affaire", (r) => r.designation || "—", (r) => r.designation || ""),
             colText("Commercial", (r) => r.am, (r) => r.am),
-            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
+            det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu, (r) => r.bu || "—")),
             colNum("Montant", (r) => money(r.amount), (r) => r.amount),
-            colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage),
+            colText("Étape", (r) => r.stageLabel || r.stage, (r) => r.stage, (r) => String(r.stageLabel || r.stage || "—")),
             det(colNum("Proba", (r) => pct(p01(r.probability)), (r) => p01(r.probability))),
             colNum("Pondéré", (r) => money(pw(r)), (r) => pw(r)),
             // MB prévisionnel (%) + DR — saisis dans la fiche, désormais RÉAFFICHÉS (cf. audit : champs write-only).

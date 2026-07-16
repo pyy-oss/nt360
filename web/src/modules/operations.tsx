@@ -360,12 +360,12 @@ export const BC: FC<Props> = () => {
             colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
             det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
-            det(colText("Type", (r) => r.expenseType, (r) => r.expenseType)),
+            det(colText("Type", (r) => r.expenseType, (r) => r.expenseType, (r) => r.expenseType || "—")),
             colNum("XOF", (r) => <BcAmount row={r} />, (r) => r.amountXof || 0),
             det(colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || "")),
             det(colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || "")),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
-            colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
+            colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || "", (r) => bcLabel(r.status)),
             // Actions groupées en UNE colonne (entête vide → toujours en ligne) : ClickUp, fiabiliser, assainir.
             ...((cuOn || canWrite) ? [colText("", (r: BcLine) => (
               <div className="flex items-center justify-end gap-1.5">
