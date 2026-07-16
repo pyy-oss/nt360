@@ -5,7 +5,7 @@ import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast } from "../design/components";
 import { Bars, DonutBU, GroupedBars, MultiLine } from "../design/charts";
-import { DateField } from "../design/inputs";
+import { DateField, Select } from "../design/inputs";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
@@ -22,10 +22,8 @@ const Fld = ({ label, children }: { label: string; children: ReactNode }) => (
   <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
 );
 const Sel = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: string[]; ph: string }) => (
-  <select className="field !py-1.5" value={v} onChange={(e) => set(e.target.value)}>
-    <option value="">{ph}</option>
-    {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-  </select>
+  <Select className="!py-1.5" value={v} onChange={set} ariaLabel={ph} placeholder={ph}
+    options={opts.map((o) => ({ value: o, label: o }))} />
 );
 
 // 5 — Suivi Backlog
@@ -923,9 +921,8 @@ function ClickupBtn({ row }: { row: Order }) {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <Fld label="Liste (pays)">
-            <select className="field !py-1.5" value={listId} onChange={(e) => setListId(e.target.value)}>
-              {CLICKUP_COUNTRY_LISTS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-            </select>
+            <Select className="!py-1.5" value={listId} onChange={setListId} ariaLabel="Liste (pays)"
+              options={CLICKUP_COUNTRY_LISTS.map((l) => ({ value: l.id, label: l.label }))} />
           </Fld>
           <Fld label="Nature"><Sel v={nature} set={setNature} opts={OPT_NATURE} ph="—" /></Fld>
           <Fld label="Domaine"><Sel v={domaine} set={setDomaine} opts={OPT_DOMAINE} ph="—" /></Fld>
