@@ -1129,10 +1129,12 @@ export const OrderList: FC<Props> = () => {
   ) : undefined;
   // Action en masse (même droit que par ligne) : annulation en LOT, réutilisant l'overlay `setCancellation`
   // (statut persistant, rétablissable via la carte « Commandes annulées », survit au ré-import).
+  // Appels SÉQUENTIELS (pas Promise.all) : `setCancellation` sérialise déjà l'overlay par transaction serveur ;
+  // enchaîner évite la contention de N transactions concurrentes sur le même doc d'annulations.
   const orderBulk: BulkAction[] = canImport ? [
     { label: "Annuler", tone: "danger", confirm: "Annuler les commandes sélectionnées ? Elles sortent du carnet, du CAS et du backlog (conservées, rétablissables). L'annulation survit à un ré-import.",
       okMsg: (rs) => `${rs.length} commande${rs.length > 1 ? "s" : ""} annulée${rs.length > 1 ? "s" : ""}`, errMsg: "Annulation refusée",
-      run: (rs) => Promise.all(rs.filter((r) => r.fp).map((r) => setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client }))) },
+      run: async (rs) => { for (const r of rs.filter((x) => x.fp)) await setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client }); } },
   ] : [];
   if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return (

@@ -188,13 +188,16 @@ export const InvoiceList: FC<Props> = () => {
   const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
   // Actions en masse (réservées à qui peut importer, comme les actions par ligne) : annulation / rétablissement
   // en LOT, réutilisant l'overlay `setCancellation` (statut persistant, rétablissable, survit au ré-import).
+  // NB : `setCancellation` sérialise déjà le read-modify-write de l'overlay (transaction serveur). On enchaîne
+  // les appels SÉQUENTIELLEMENT (pas Promise.all) pour ne pas mettre en contention le même doc d'annulations
+  // (N transactions concurrentes sur un doc unique → tempête de retries / timeouts sur grande sélection).
   const invoiceBulk: BulkAction[] = canImport ? [
     { label: "Annuler", tone: "danger", confirm: "Annuler les factures sélectionnées ? Elles sortent de la facturation, du cash et des créances (conservées, rétablissables). L'annulation survit à un ré-import.",
       okMsg: (rs) => `${rs.length} facture${rs.length > 1 ? "s" : ""} annulée${rs.length > 1 ? "s" : ""}`, errMsg: "Annulation refusée",
-      run: (rs) => Promise.all(rs.filter((r) => r.id).map((r) => setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client }))) },
+      run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client }); } },
     { label: "Rétablir", confirm: "Rétablir les factures sélectionnées ? Elles réintègrent la facturation et le cash.",
       okMsg: (rs) => `${rs.length} facture${rs.length > 1 ? "s" : ""} rétablie${rs.length > 1 ? "s" : ""}`, errMsg: "Rétablissement refusé",
-      run: (rs) => Promise.all(rs.filter((r) => r.id).map((r) => setCancellation("invoices", r.id!, false))) },
+      run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, false); } },
   ] : [];
   return (
     <div className="flex flex-col gap-3">
