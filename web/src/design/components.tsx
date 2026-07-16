@@ -17,7 +17,7 @@ export function Card({ title, actions, children, className }: { title?: ReactNod
   return (
     <section className={cx("card p-3 sm:p-4 animate-fade-in", className)}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           {title ? <Eyebrow as="h3">{title}</Eyebrow> : <span />}
           {actions}
         </div>
@@ -617,7 +617,7 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
     <div className="fixed inset-0 z-[100] grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}
-        className={cx("relative card p-4 sm:p-5 w-full animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
+        className={cx("relative card p-4 sm:p-5 w-full max-h-[90vh] overflow-y-auto animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
         <div className="flex items-start justify-between gap-3 mb-2">
           {title ? <h2 id={titleId} className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
           <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>

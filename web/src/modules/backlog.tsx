@@ -270,7 +270,7 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
       </div>
       <div className="flex flex-col gap-2">
         {rows.map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={i} className="flex flex-wrap items-center gap-2">
             <DateField className="!py-1 text-xs w-36" value={r.date} onChange={(v) => set(i, { date: v })} ariaLabel="Date du jalon" placeholder="date jalon" />
             <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label="Montant du jalon" />
             <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label="Supprimer le jalon">×</button>

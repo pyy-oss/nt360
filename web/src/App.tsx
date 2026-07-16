@@ -173,7 +173,7 @@ export default function App() {
                   key={g.label}
                   onClick={() => { if (!g.mods.some((m) => m.id === allowed?.id)) openManual(g.mods[0].id); }}
                   aria-pressed={on}
-                  className={cx("whitespace-nowrap rounded-full px-3.5 py-1.5 min-h-[34px] text-[13px] font-semibold transition-colors",
+                  className={cx("whitespace-nowrap rounded-full px-3.5 py-1.5 min-h-[36px] text-[13px] font-semibold transition-colors",
                     on ? "bg-panel text-ink ring-1 ring-gold/60" : "text-muted hover:text-ink hover:bg-panel/50")}
                 >
                   {g.label}

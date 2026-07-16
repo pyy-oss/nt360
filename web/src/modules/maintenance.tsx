@@ -279,7 +279,7 @@ export const Maintenance: FC<Props> = () => {
             {cForm.engagements.length === 0 ? <div className="text-[12px] text-muted">Aucun engagement.</div> : (
               <div className="flex flex-col gap-2">
                 {cForm.engagements.map((e, i) => (
-                  <div key={i} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end border border-line/60 rounded-lg p-2">
+                  <div key={i} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 items-end border border-line/60 rounded-lg p-2">
                     <Field label="Type"><Select value={e.type} onChange={(v) => setEng(i, "type", v)} options={opt(SLA_TYPE_LABEL, SLA_TYPES)} ariaLabel="Type SLA" /></Field>
                     <Field label="Couverture"><Select value={e.couverture} onChange={(v) => setEng(i, "couverture", v)} options={opt(COUVERTURE_LABEL, COUVERTURES)} ariaLabel="Couverture" /></Field>
                     <Field label="Seuil (h ouvrées)"><input className="field tabnum" inputMode="numeric" value={e.seuilHeures} onChange={(ev) => setEng(i, "seuilHeures", digits(ev.target.value))} /></Field>
@@ -335,7 +335,7 @@ export const Maintenance: FC<Props> = () => {
                   </div>
                 )}
                 {canWrite && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end border border-line/60 rounded-lg p-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 items-end border border-line/60 rounded-lg p-2">
                     <Field label="Consultant"><Select value={iForm.consultantId} onChange={(v) => setIForm((f) => ({ ...f, consultantId: v }))} options={consultants.map((c) => ({ value: c.id, label: c.name || c.id }))} ariaLabel="Consultant" placeholder="Choisir…" /></Field>
                     <Field label="Date"><DateField value={iForm.date} onChange={(v) => setIForm((f) => ({ ...f, date: v }))} ariaLabel="Date intervention" /></Field>
                     <Field label="Heures"><input className="field tabnum" inputMode="decimal" value={iForm.heures} onChange={(e) => setIForm((f) => ({ ...f, heures: decimals(e.target.value) }))} placeholder="0" /></Field>

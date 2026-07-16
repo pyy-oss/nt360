@@ -64,7 +64,7 @@ export const Actualite: FC<Props> = () => {
               <div key={i} className="flex items-start gap-2 text-[13px]">
                 <span className="grid place-items-center w-5 h-5 rounded-full bg-gold/20 text-gold text-[11px] font-bold shrink-0 mt-0.5">{r.priority}</span>
                 <span className="text-ink flex-1">{r.text}</span>
-                {r.module && canGo(r.module) && <button onClick={() => go(r.module!)} className="text-gold text-xs underline shrink-0 min-h-[32px]">Ouvrir</button>}
+                {r.module && canGo(r.module) && <button onClick={() => go(r.module!)} className="text-gold text-xs underline shrink-0 min-h-[36px] inline-flex items-center">Ouvrir</button>}
               </div>
             ))}
           </div>
@@ -98,7 +98,7 @@ export const Actualite: FC<Props> = () => {
                   <div className="flex items-center gap-x-2 gap-y-1 flex-wrap mt-1.5">
                     {(b.refs || []).slice(0, 8).map((r, j) => <span key={j} className="rounded bg-panel2 text-faint px-1.5 py-0.5 text-[11px]">{r}</span>)}
                     {b.action && <span className="text-[12px] text-steel">→ {b.action}</span>}
-                    {clickable && <button onClick={() => open(b)} className="text-gold text-xs underline min-h-[32px]">Ouvrir</button>}
+                    {clickable && <button onClick={() => open(b)} className="text-gold text-xs underline min-h-[36px] inline-flex items-center">Ouvrir</button>}
                   </div>
                 )}
               </div>

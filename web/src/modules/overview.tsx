@@ -106,7 +106,7 @@ export const Overview: FC<Props> = ({ period }) => {
   const clientKey = useClientKey();
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
-    <div className="flex gap-2 items-center">
+    <div className="flex flex-wrap gap-2 items-center justify-end">
       {fresh && <span className="text-[11px] text-faint mr-1" title="Recompute planifié chaque jour à 05:00 ; « Recalculer » force la mise à jour.">Données à jour {fresh}</span>}
       {isDirection && <Busy variant="ghost" label="Recalculer" fn={callRecompute} okMsg="Agrégats recalculés" />}
       {canExport && <Busy variant="ghost" label="Export CODIR" fn={async () => { const r = await callExportReport(period); setUrl(r.url || null); }} okMsg="Export généré" />}
