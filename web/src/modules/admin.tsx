@@ -496,7 +496,7 @@ function CreateUserCard() {
   };
   return (
     <Card title="Créer un utilisateur" actions={
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-wrap gap-2 items-center justify-end">
         <Busy variant="ghost" label="Rattacher un compte existant" okMsg="Compte existant rattaché" errMsg="Rattachement refusé" fn={attach} />
         <Busy label="Créer le compte" okMsg="Compte créé" errMsg="Création refusée" fn={create} />
       </div>
@@ -630,7 +630,7 @@ function FxRatesCard() {
       </div>}>
       <div className="flex flex-col gap-1.5">
         {list.length ? list.map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={i} className="flex flex-wrap items-center gap-2">
             <input className="field !py-1 w-28 uppercase" placeholder="EUR" value={r.cur} onChange={(e) => set(i, "cur", e.target.value)} aria-label={`Devise ${i + 1}`} />
             <span className="text-muted text-xs" aria-hidden="true">= 1 unité →</span>
             <input className="field !py-1 w-36" inputMode="decimal" placeholder="655.957" value={r.rate} onChange={(e) => set(i, "rate", e.target.value)} aria-label={`Taux XOF pour ${r.cur || `devise ${i + 1}`}`} />
@@ -665,7 +665,7 @@ function RefListCard({ kind, title, placeholder, tip, upper, clickupImport }: { 
   };
   return (
     <Card title={title} actions={
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2 justify-end">
         {clickupImport && <Busy variant="ghost" label="Importer depuis ClickUp" errMsg="Import ClickUp refusé" fn={importClickup} />}
         <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Ajouter</button>
         <Busy label="Enregistrer" okMsg="Référentiel enregistré" fn={save} />
@@ -1189,8 +1189,8 @@ function ApiKeysCard() {
   useEffect(() => { load().catch(() => {}); }, []);
   return (
     <Card title="Clés API (API REST /v1)" actions={
-      <div className="flex items-center gap-2">
-        <input className="field !py-1 w-40 text-xs" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Libellé de la clé" placeholder="Libellé (ex. CRM externe)" />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <input className="field !py-1 w-full sm:w-40 text-xs" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Libellé de la clé" placeholder="Libellé (ex. CRM externe)" />
         <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={canRead} onChange={(e) => setCanRead(e.target.checked)} />read</label>
         <label className="flex items-center gap-1 text-[11px] text-muted"><input type="checkbox" checked={canWriteScope} onChange={(e) => setCanWriteScope(e.target.checked)} />write</label>
         <Busy variant="ghost" label="Créer" okMsg="Clé créée" errMsg="Échec" fn={async () => {

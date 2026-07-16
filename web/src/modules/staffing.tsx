@@ -282,7 +282,7 @@ function Vivier({ canWrite }: { canWrite: boolean }) {
   if (loading) return <Card title="Vivier — recrutement"><div className="text-[13px] text-muted py-2">Chargement…</div></Card>;
   return (
     <Card title="Vivier — recrutement" actions={
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         {r && CAND_STATUS.slice(0, 3).map((s) => <Badge key={s.value} tone={s.tone}>{s.label} · {r.counts[s.value]}</Badge>)}
         {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Candidat"}</button>}
       </div>}>
@@ -355,7 +355,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
   const delta = g ? g.occupancyPct - (k!.plannedOccupancyPct || 0) : 0;
   return (
     <Card title="CRA — activité constatée (6 mois)" actions={canWrite && (
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         <Busy variant="ghost" label="Synchroniser ClickUp" okMsg="Jours facturés synchronisés" errMsg="Synchro ClickUp indisponible"
           fn={async () => { const r = await syncClickupTimesheets(); await load(); bump(); if (!r.upserts) throw new Error(`Aucune entrée exploitable (${r.entries} entrée(s) ClickUp, ${r.mapped} consultant(s) mappé(s)). Renseignez l'« ID ClickUp » des consultants.`); }} />
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setImportPaste(importPaste == null ? "" : null); setAdding(false); }}>{importPaste != null ? "Fermer" : "Importer (coller)"}</button>
@@ -363,7 +363,7 @@ function ConstatCra({ consultants, canWrite }: { consultants: Consultant[]; canW
       </div>)}>
       {canWrite && importPaste != null && (
         <div className="border-b border-hair pb-3 mb-3 flex flex-col gap-2">
-          <div className="text-[11px] text-muted">Collez un tableau (depuis ClickUp/Excel) — une ligne par CRA : <code>Nom &nbsp;AAAA-MM&nbsp; jours&nbsp;facturés&nbsp; congés&nbsp; internes</code> (séparateur tabulation, « ; » ou « , »).</div>
+          <div className="text-[11px] text-muted">Collez un tableau (depuis ClickUp/Excel) — une ligne par CRA : <code>Nom · AAAA-MM · jours facturés · congés · internes</code> (séparateur tabulation, « ; » ou « , »).</div>
           <textarea className="field !py-1 w-full font-mono text-[12px]" rows={5} value={importPaste} onChange={(e) => setImportPaste(e.target.value)} aria-label="Coller les CRA"
             placeholder={"Alice\t2026-01\t18\t2\t0\nBob\t2026-01\t20\t0\t0"} />
           <div className="flex items-center gap-2">
@@ -477,7 +477,7 @@ function PlanDeCharge({ canWrite }: { canWrite: boolean }) {
   const overN = plan.flags.over.length, idleN = new Set(plan.flags.idle.map((x) => x.id)).size;
   return (
     <Card title="Plan de charge" actions={
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         {overN > 0 && <Badge tone="clay">{overN} sur-charge(s)</Badge>}
         {idleN > 0 && <Badge tone="gold">{idleN} en intercontrat</Badge>}
         {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Affectation"}</button>}
@@ -578,7 +578,7 @@ export const Staffing: FC<Props> = () => {
       <ConstatCra consultants={rows} canWrite={canWrite} />
       <TaceTrendCard />
       <Card title="Staffing — ressources" actions={
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           {counts.map((c) => <Badge key={c.value} tone={c.tone}>{c.label} · {c.n}</Badge>)}
           {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditing(editing === "new" ? null : "new")}>{editing === "new" ? "Fermer" : "+ Consultant"}</button>}
         </div>}>

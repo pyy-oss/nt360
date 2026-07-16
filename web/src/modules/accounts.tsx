@@ -62,8 +62,8 @@ export const Client360: FC<Props> = ({ period }) => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Client 360" actions={
-        <div className="flex items-center gap-2">
-          <input className="field w-56 !py-1 text-xs" aria-label="Rechercher un client" placeholder="Nom du client…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <input className="field w-full sm:w-56 !py-1 text-xs" aria-label="Rechercher un client" placeholder="Nom du client…" value={q} onChange={(e) => setQ(e.target.value)} />
           {q.trim() && <Busy variant="ghost" label="Ouvrir" okMsg="Compte chargé" errMsg="Chargement refusé" fn={() => open(q.trim())} />}
         </div>
       }>

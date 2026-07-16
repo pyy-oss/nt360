@@ -219,11 +219,11 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
         {fiche.pmMasked && <div className="text-[12px] text-steel">Vue Chef de projet — données financières confidentielles masquées.</div>}
 
         {/* Entête */}
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-          <Info k="Client" v={editVal(mode === "edit", <TxtField value={draft.client} onChange={(v) => setDraft({ ...draft, client: v })} aria="Client" />, fiche.client)} />
-          <Info k="Affaire" v={editVal(mode === "edit", <TxtField value={draft.affaire} onChange={(v) => setDraft({ ...draft, affaire: v })} aria="Affaire" w="w-56" />, fiche.affaire)} />
-          <Info k="Commercial" v={editVal(mode === "edit", <TxtField value={draft.commercial} onChange={(v) => setDraft({ ...draft, commercial: v })} aria="Commercial" />, fiche.commercial)} />
-          <Info k="N° DC" v={etape === 2 && canAct ? <TxtField value={dc} onChange={setDc} aria="N° de DC" w="w-40" placeholder="N° de DC" /> : (fiche.numero_dc || <span className="text-faint">— (défini par le DRO)</span>)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+          <Info k="Client" v={editVal(mode === "edit", <TxtField value={draft.client} onChange={(v) => setDraft({ ...draft, client: v })} aria="Client" w="w-full" />, fiche.client)} />
+          <Info k="Affaire" v={editVal(mode === "edit", <TxtField value={draft.affaire} onChange={(v) => setDraft({ ...draft, affaire: v })} aria="Affaire" w="w-full" />, fiche.affaire)} />
+          <Info k="Commercial" v={editVal(mode === "edit", <TxtField value={draft.commercial} onChange={(v) => setDraft({ ...draft, commercial: v })} aria="Commercial" w="w-full" />, fiche.commercial)} />
+          <Info k="N° DC" v={etape === 2 && canAct ? <TxtField value={dc} onChange={setDc} aria="N° de DC" w="w-full" placeholder="N° de DC" /> : (fiche.numero_dc || <span className="text-faint">— (défini par le DRO)</span>)} />
           <Info k="Date fiche" v={editVal(mode === "edit", <DateField value={draft.date_fiche || ""} onChange={(v) => setDraft({ ...draft, date_fiche: v })} ariaLabel="Date fiche" />, fiche.date_fiche || "—")} />
           <Info k="Éditée par" v={editVal(mode === "edit", <TxtField value={draft.editeur_ac || ""} onChange={(v) => setDraft({ ...draft, editeur_ac: v })} aria="Éditée par" />, fiche.editeur_ac || "—")} />
         </div>

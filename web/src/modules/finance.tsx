@@ -144,7 +144,7 @@ export const Facturation: FC<Props> = ({ period }) => {
 function FpFixer({ id }: { id: string }) {
   const [v, setV] = useState("");
   return (
-    <span className="inline-flex gap-1 items-center">
+    <span className="inline-flex flex-wrap gap-1 items-center">
       <input className="field w-32 !py-1 text-xs" aria-label="N° FP à rattacher" placeholder="FP/2026/…" value={v} onChange={(e) => setV(e.target.value)} />
       <Busy variant="ghost" label="Rattacher" okMsg="Facture rattachée" fn={() => setInvoiceFp(id, v)} />
     </span>
@@ -158,7 +158,7 @@ function InvoiceDateFixer({ inv }: { inv: Invoice }) {
   const [due, setDue] = useState(inv.dueDate || "");
   const changed = date !== (inv.date || "") || due !== (inv.dueDate || "");
   return (
-    <span className="inline-flex gap-1 items-center">
+    <span className="inline-flex flex-wrap gap-1 items-center">
       <DateField className="w-36 !py-1 text-xs" ariaLabel="Date de facturation" value={date} onChange={setDate} placeholder="facturation" />
       <DateField className="w-36 !py-1 text-xs" ariaLabel="Date d'échéance" value={due} onChange={setDue} placeholder="échéance" />
       {changed && inv.id && <Busy variant="ghost" label="MàJ" okMsg="Facture mise à jour" fn={() => patchInvoice({ id: inv.id!, date: date || null, dueDate: due || null })} />}
@@ -215,7 +215,7 @@ export const InvoiceList: FC<Props> = () => {
             // Actions groupées en UNE colonne (entête vide → jamais repliée) : rattacher, dates, assainir,
             // annuler/rétablir. Reste toujours visible en ligne (cf. socle design : colonnes d'action).
             ...(canImport ? [colText("", (r: Invoice) => (r.id ? (
-              <div className="flex items-center justify-end gap-1.5">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
                 {r.linked !== true && !cancelled.has(r.id) && <FpFixer id={r.id} />}
                 {!cancelled.has(r.id) && <InvoiceDateFixer inv={r} />}
                 <DangerBtn label="Suppr." confirm={`Supprimer la facture ${r.numero || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("invoices", r.id!)} />
