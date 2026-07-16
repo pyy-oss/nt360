@@ -6,7 +6,7 @@ import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, ListView, Badge, Tip, Busy, DangerBtn, Toggle, Eyebrow, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { trackWrite } from "../lib/activity";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setStaffingTargets, setMntFeature, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
@@ -66,13 +66,16 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <Rubrique>Sécurité &amp; accès</Rubrique>}
       {isDirection && <MntFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
-      {isDirection && <ApiKeysCard />}
 
-      {isDirection && <Rubrique>Intégrations &amp; automatisation</Rubrique>}
+      {/* Tous les paramètres d'intégration API dans un seul bloc : ClickUp (bidirectionnel), Odoo (webhook
+          entrant), webhook sortant, API REST publique (clés), champs custom, automatisations. */}
+      {isDirection && <Rubrique>Intégrations API &amp; automatisation</Rubrique>}
       {isDirection && <ClickupCard />}
+      {isDirection && <OdooWebhookCard />}
       {isDirection && <OutboundWebhookCard />}
-      {isDirection && <AutomationCard />}
+      {isDirection && <ApiKeysCard />}
       {isDirection && <CustomFieldsCard />}
+      {isDirection && <AutomationCard />}
 
       {isDirection && <Rubrique>Réglages de calcul</Rubrique>}
       {isDirection && <ProjectionConfigCard />}
@@ -1315,6 +1318,37 @@ function OutboundWebhookCard() {
           {EVENTS.map((e) => <label key={e.key} className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={curEv.includes(e.key)} onChange={() => toggleEv(e.key)} />{e.label}</label>)}
         </div>
         <Tip>nt360 enverra un POST JSON <code>{'{ event, data, ts }'}</code> à l'URL à chaque événement souscrit. {data?.enabled ? "Actif." : "Inactif (URL vide)."}</Tip>
+      </div>
+    </Card>
+  );
+}
+
+// Webhook ENTRANT Odoo (opportunités / commandes / factures). `config/odooWebhook` n'est PAS lisible côté
+// client (il porte le secret) : l'état est lu via le callable `odooWebhookStatus` (jamais le secret). Le
+// secret partagé est écrit seul (≥ 16 car.) ; laisser vide conserve l'existant. `enabled` = interrupteur (gate).
+function OdooWebhookCard() {
+  const [status, setStatus] = useState<{ enabled: boolean; hasSecret: boolean } | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [secret, setSecret] = useState("");
+  useEffect(() => { odooWebhookStatus().then((s) => { setStatus(s); setEnabled(s.enabled); }).catch(() => setStatus({ enabled: false, hasSecret: false })); }, []);
+  const live = !!status && status.hasSecret && status.enabled;
+  const save = async () => {
+    const patch: { secret?: string; enabled?: boolean } = { enabled };
+    if (secret.trim()) patch.secret = secret.trim();
+    const r = await setOdooWebhook(patch);
+    setStatus({ enabled: r.enabled, hasSecret: r.hasSecret }); setSecret("");
+  };
+  return (
+    <Card title="Webhook entrant — Odoo" actions={<Busy label="Enregistrer" okMsg="Intégration Odoo enregistrée" errMsg="Enregistrement refusé" fn={save} />}>
+      <div className="flex flex-col gap-2 text-[13px]">
+        <div className="flex items-center gap-2">
+          {status == null ? <Badge>chargement…</Badge> : live ? <Badge tone="emerald">Active</Badge> : status.hasSecret ? <Badge tone="clay">Désactivée</Badge> : <Badge tone="clay">Secret manquant</Badge>}
+          <span className="text-[11px] text-muted">Réception des mises à jour Odoo (source autoritaire) — opportunités, commandes, factures.</span>
+        </div>
+        <label className="flex items-center gap-2"><Toggle checked={enabled} onChange={setEnabled} ariaLabel="Activer l'intégration Odoo" />Activer la réception (interrupteur — coupe l'intégration sans supprimer le secret)</label>
+        <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">Secret partagé HMAC (≥ 16 caractères — écrit seul, jamais réaffiché)</span>
+          <input className="field !py-1" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="Secret partagé Odoo" placeholder={status?.hasSecret ? "•••••••• (laisser vide pour conserver)" : "collez le secret partagé"} /></label>
+        <Tip>Odoo pousse ses mises à jour en <b>POST JSON signé</b> (<code>X-Signature</code>, HMAC-SHA256 du corps) vers la fonction <code>odooWebhook</code>. Le secret partagé signe le corps ; il est stocké côté serveur et <b>jamais réaffiché</b>. Contrat + exemple : <code>docs/ODOO_WEBHOOK.md</code>.</Tip>
       </div>
     </Card>
   );

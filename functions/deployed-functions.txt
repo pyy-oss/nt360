@@ -134,6 +134,7 @@ setNotificationConfig
 setOrderPm
 setOutboundWebhook
 setOdooWebhook
+odooWebhookStatus
 setPermissions
 setProjectionConfig
 setRecordAccess

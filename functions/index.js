@@ -3877,6 +3877,15 @@ exports.setOdooWebhook = onCallG("setOdooWebhook", { memoryMiB: 256, timeoutSeco
   return { ok: true, enabled: cur.enabled !== false, hasSecret: !!cur.secret };
 });
 
+// État de l'intégration Odoo pour l'écran d'administration (config/odooWebhook n'est PAS lisible côté client
+// — allowlist fail-closed — car il PORTE le secret). Ne renvoie JAMAIS le secret : uniquement s'il est posé
+// (`hasSecret`) + l'interrupteur (`enabled`). « Live » = `hasSecret && enabled`.
+exports.odooWebhookStatus = onCallG("odooWebhookStatus", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cur = (await db.doc("config/odooWebhook").get()).data() || {};
+  return { enabled: cur.enabled !== false, hasSecret: !!cur.secret };
+});
+
 // setupClickupWebhook : enregistre (ou met à jour) LE webhook workspace pointant vers clickupWebhook.
 // L'endpoint (URL déployée de la fonction) est fourni par l'admin. Le secret HMAC renvoyé À LA CRÉATION
 // est persisté dans config/clickupWebhook (serveur uniquement). Direction.
