@@ -31,8 +31,14 @@ describe("mntContrat — validation d'un contrat", () => {
     expect(validateMntContrat({ ...base, echeanceType: "hebdo" }).ok).toBe(false);
     expect(STATUTS).toContain("actif");
   });
-  it("rejette une date de fin antérieure à la date de début", () => {
+  it("rejette une date de fin ≤ à la date de début (couverture nulle interdite)", () => {
     expect(validateMntContrat({ ...base, dateDebut: "2026-06-01", dateFin: "2026-01-01" }).ok).toBe(false);
+    expect(validateMntContrat({ ...base, dateDebut: "2026-06-01", dateFin: "2026-06-01" }).ok).toBe(false); // égalité rejetée
+  });
+  it("rejette une devise ≠ XOF, normalise la casse et le défaut (module à devise pivot, ADR-024)", () => {
+    expect(validateMntContrat({ ...base, deviseEngage: "EUR" }).ok).toBe(false);
+    expect(validateMntContrat({ ...base, deviseEngage: "xof" }).value.deviseEngage).toBe("XOF"); // casse normalisée
+    expect(validateMntContrat({ ...base, deviseEngage: "" }).value.deviseEngage).toBe("XOF");    // défaut
   });
   it("accepte une date de fin absente (contrat sans échéance) mais rejette une date mal formée", () => {
     expect(validateMntContrat({ ...base, dateFin: "" }).ok).toBe(true);

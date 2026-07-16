@@ -44,14 +44,20 @@ function validateMntContrat(d) {
   if (!dateDebut) return { ok: false, error: "date de début invalide (AAAA-MM-JJ)" };
   const dateFin = o.dateFin ? isoDate(o.dateFin) : null;
   if (o.dateFin && !dateFin) return { ok: false, error: "date de fin invalide (AAAA-MM-JJ)" };
-  if (dateFin && dateFin < dateDebut) return { ok: false, error: "la date de fin précède la date de début" };
+  // dateFin est la borne de RENOUVELLEMENT (exclusive) : une fin ≤ début donne un contrat à couverture NULLE
+  // (0 échéance) — on l'interdit plutôt que de créer un contrat dégénéré silencieux (audit info).
+  if (dateFin && dateFin <= dateDebut) return { ok: false, error: "la date de fin doit être postérieure à la date de début" };
   // Montant d'engagement PROPRE au contrat (ADR-005) — entier XOF (le FCFA n'a pas de subdivision).
   // Un montant NÉGATIF (format comptable « (500 000) », « 500000- », signe parasite) est une donnée
   // aberrante : on la REJETTE explicitement plutôt que de la coercer à 0 en silence — sinon un import de
   // mise à jour effacerait un montant stocké sans alerte (audit m1). Absent/vide → num()=0 → accepté.
   const montantEngage = Math.round(num(o.montantEngage));
   if (montantEngage < 0) return { ok: false, error: "montant engagé invalide (négatif)" };
+  // Module à DEVISE PIVOT : montantEngage est traité comme un ENTIER XOF partout (échéancier, rentabilité),
+  // sans conversion. On REJETTE toute devise ≠ XOF plutôt que de stocker une étiquette trompeuse sur un
+  // montant traité en FCFA (audit info : sinon « 1500 EUR » compté comme 1500 FCFA en silence). ADR-024.
   const deviseEngage = (String(o.deviseEngage || "XOF").toUpperCase().trim()) || "XOF";
+  if (deviseEngage !== "XOF") return { ok: false, error: "devise non supportée (XOF/FCFA uniquement)" };
   const rawEng = Array.isArray(o.engagements) ? o.engagements : [];
   const engagements = [];
   for (const e of rawEng) { const v = validateEngagement(e); if (!v.ok) return { ok: false, error: v.error }; engagements.push(v.value); }

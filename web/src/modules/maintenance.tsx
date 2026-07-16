@@ -13,6 +13,7 @@ import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
+import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
@@ -97,7 +98,11 @@ const contratPayload = (f: CForm): MntContrat => ({
 export const Maintenance: FC<Props> = () => {
   const canRead = useCan("maintenance");
   const canWrite = canRead === "write";
-  const gate = canRead !== "none";
+  // Défense en profondeur : le gate exige le DROIT `maintenance` ET le drapeau config/mntFeature — même
+  // invariant que la nav (App) et les rules Firestore. Si un futur refactor rendait ce composant atteignable
+  // hors du filtre de nav, aucun abonnement mnt_ ne partirait drapeau éteint (audit info). Doc minuscule.
+  const { data: mntFeature } = useDocData<MntFeature>("config/mntFeature");
+  const gate = canRead !== "none" && isMntEnabled(mntFeature);
   const { rows: contrats, loading: lc } = useCollectionData<MntContrat>(gate ? "mnt_contrats" : null);
   const { rows: tickets } = useCollectionData<MntTicket>(gate ? "mnt_tickets" : null);
   const { rows: interventions } = useCollectionData<MntIntervention>(gate ? "mnt_interventions" : null);

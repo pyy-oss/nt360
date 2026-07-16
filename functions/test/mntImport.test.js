@@ -83,13 +83,21 @@ describe("planMntContratsImport", () => {
   });
   it("mise à jour : les cellules RENSEIGNÉES sont bien écrites", () => {
     const { toUpdate } = planMntContratsImport(
-      [{ raw: { fp: "FP/2026/1", client: "ACME", statut: "suspendu", echeanceType: "annuel", dateDebut: "2026-01-01", montantEngage: "5000000", deviseEngage: "EUR", bu: "ICT" }, line: 2 }],
+      [{ raw: { fp: "FP/2026/1", client: "ACME", statut: "suspendu", echeanceType: "annuel", dateDebut: "2026-01-01", montantEngage: "5000000", deviseEngage: "XOF", bu: "ICT" }, line: 2 }],
       new Set(["FP_2026_1"]),
     );
     const p = toUpdate[0].patch;
     expect(p.montantEngage).toBe(5000000);
-    expect(p.deviseEngage).toBe("EUR");
+    expect(p.deviseEngage).toBe("XOF");
     expect(p.bu).toBe("ICT");
     expect(p.statut).toBe("suspendu");
+  });
+  it("rejette une ligne à devise ≠ XOF (module à devise pivot, ADR-024)", () => {
+    const { toCreate, errors } = planMntContratsImport(
+      [{ raw: { fp: "FP/2026/9", client: "ACME", statut: "actif", echeanceType: "mensuel", dateDebut: "2026-01-01", montantEngage: "1500", deviseEngage: "EUR" }, line: 2 }],
+      new Set(),
+    );
+    expect(toCreate).toHaveLength(0);
+    expect(errors[0].error).toMatch(/devise/i);
   });
 });

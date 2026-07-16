@@ -3,6 +3,34 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-024 — Le contrat de maintenance est XOF-only : une devise ≠ XOF est rejetée (pas de conversion en v1)
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+`montantEngage` est traité comme un **entier XOF** partout dans le module (échéancier, rentabilité), sans
+conversion. Le champ `deviseEngage` était accepté tel quel (juste mis en majuscules) : un import « Montant
+1500 / Devise EUR » stockait `montantEngage=1500` **traité comme 1500 FCFA** — erreur d'unité silencieuse
+contraire au pivot XOF de l'ERP (audit info).
+
+### Décision
+`validateMntContrat` **rejette** toute `deviseEngage ≠ "XOF"` (après normalisation de casse ; absent/vide →
+`XOF` par défaut). Pas de conversion `fx.js` en v1 : le contrat est **XOF-only**. Fail-loud (erreur de
+validation visible à l'import/saisie) plutôt que coercition silencieuse — cohérent avec le rejet du montant
+négatif (audit m1).
+
+### Conséquences
+- Plus d'erreur d'unité silencieuse ; une ligne d'import en devise étrangère est signalée, pas avalée.
+- Un besoin multi-devises (contrats facturés en EUR) nécessiterait une conversion au `FIXED_PEG`/`fxRates`
+  et un nouvel ADR — non couvert en v1.
+
+### Ce qu'on saura dans six mois
+Si des contrats en devise étrangère se multiplient → ouvrir la conversion (fx.js) par un ADR dédié.
+
+---
+
 ## ADR-023 — « Normalisation clients IA » est un référentiel séparé, always-on (hors kill-switch mntFeature)
 
 - **Date :** 2026-07-16
