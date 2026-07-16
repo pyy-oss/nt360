@@ -820,6 +820,16 @@ export async function fuzzyDuplicateClients(threshold?: number) {
   return res.data as { ok: boolean; pairs: FuzzyPair[]; scanned: number; threshold: number };
 }
 
+// NORMALISATION IA — l'IA (Claude) juge quelles graphies désignent la MÊME entité et propose des fusions
+// `variant → canonique` (au-delà du fuzzy Levenshtein). « L'IA propose, l'humain valide » : aucune écriture,
+// les propositions s'ajoutent à la table d'alias que la direction enregistre (setClientAliases).
+export type ClientMergeSuggestion = { from: string; to: string; confidence: number; reason: string; existingTarget: boolean };
+export type ClientMergeResult = { ok: boolean; suggestions: ClientMergeSuggestion[]; model: string; truncated: boolean; analyzed: number; total: number };
+export async function aiSuggestClientMerges(names: { name: string; count: number }[]): Promise<ClientMergeResult> {
+  const res = await httpsCallable(functions, "aiSuggestClientMerges", { timeout: 300_000 })({ names });
+  return res.data as ClientMergeResult;
+}
+
 /** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
  *  entière ; recalcule tous les agrégats client. */
 export async function setClientAliases(pairs: { from: string; to: string }[]) {

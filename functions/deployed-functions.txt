@@ -29,6 +29,7 @@ curateNewsNow
 decideApproval
 activityKpis
 aiSuggestCorrections
+aiSuggestClientMerges
 capacityPlan
 dedupe
 dedupeClickupTasks
