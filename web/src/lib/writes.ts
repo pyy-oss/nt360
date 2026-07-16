@@ -314,6 +314,18 @@ export async function setOutboundWebhook(cfg: OutboundWebhookConfig & { test?: b
   return res.data as OutboundWebhookConfig & { ok: boolean };
 }
 
+/** Webhook ENTRANT Odoo (opportunités / commandes / factures). Le secret partagé est écrit côté serveur,
+ *  jamais relu (config/odooWebhook non lisible client). `enabled` = interrupteur (kill-switch). */
+export async function setOdooWebhook(cfg: { secret?: string; enabled?: boolean }) {
+  const res = await httpsCallable(functions, "setOdooWebhook")(cfg);
+  return res.data as { ok: boolean; enabled: boolean; hasSecret: boolean };
+}
+/** État de l'intégration Odoo (jamais le secret) : `hasSecret` (secret posé) + `enabled` (interrupteur). */
+export async function odooWebhookStatus() {
+  const res = await httpsCallable(functions, "odooWebhookStatus")();
+  return res.data as { enabled: boolean; hasSecret: boolean };
+}
+
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
  *  base64 (à télécharger via downloadBase64). Réservé au droit « pipeline ». */
 export async function exportOpportunities() {
