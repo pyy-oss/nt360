@@ -625,3 +625,25 @@ chunk d'entrée 116,6 KB ≤ 120.
   telle quelle pour EXTRAIRE (`.exec` puis `m[1..3]`) elle rend `NaN`. Séparer validation et extraction.
 
 **Vérif** : web mntSuggest 11/11, suite web 109/109, build OK, lint OK, chunk d'entrée 116,6 KB <= 120.
+
+---
+
+## 2026-07-16 — Lot 1/7 « valeur ajoutée » : échéancier de facturation DÉTAILLÉ (opérationnel)
+
+**Fait**
+- `echeancier` ne donnait qu'un agrégat (engagé/facturé/écart). Ajout de `echeancierPlan` (domain/mntEcheancier.js
+  + miroir web/src/lib/mntSla.ts) : la **liste datée** des échéances, chacune marquée `facture` (couverte par le
+  facturé cumulé de l'affaire), `du` (échéance passée non couverte) ou `a_venir`. Agrégats strictement
+  identiques à `echeancier` (parité). Sans date de fin : on ne liste QUE les échéances dues (pas de projection).
+- Helper `addMonthsIso` (clamp fin de mois) pour dater chaque échéance (dateDebut + i × périodicité).
+- Surface dans la fiche contrat : table « Détail des échéances » (#, date, montant, cumul engagé, statut),
+  sous l'agrégat existant. Aucun callable, aucun schéma — pur affichage dérivé.
+
+**Appris**
+- Couverture SANS allocation facture↔période inventée : modèle CUMULATIF (1ʳᵉ échéance dont l'engagé cumulé
+  dépasse le facturé total = 1ʳᵉ non couverte). Honnête, et cohérent avec le signal « sous-facturation » du risque.
+
+**Vérif** : parité back mntSla 13/13, front mntSla 8/8, build OK, lint OK, chunk 116,6 KB <= 120.
+
+**Note process** : lot poussé sur la branche portant déjà #398 (branche de dev unique) — #398 couvre donc
+« création en masse » + cet échéancier tant que non fusionnée.

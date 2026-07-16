@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { businessMsBetween, addBusinessMs, slaState, echeancier, monthsBetween } from "./mntSla";
+import { businessMsBetween, addBusinessMs, slaState, echeancier, monthsBetween, addMonthsIso, echeancierPlan } from "./mntSla";
 
 const H = 3600000;
 const wed10 = Date.UTC(2026, 2, 4, 10);
@@ -36,5 +36,26 @@ describe("mntSla (front, miroir) — échéancier", () => {
     expect(e.periodsDue).toBe(0);
     expect(e.engage).toBe(0);
     expect(e.ecart).toBe(0);
+  });
+});
+
+describe("mntSla (front, miroir) — échéancier DÉTAILLÉ", () => {
+  it("addMonthsIso : miroir back (clamp fin de mois)", () => {
+    expect(addMonthsIso("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsIso("2026-11-30", 3)).toBe("2027-02-28");
+    expect(addMonthsIso("2026/01/01", 1)).toBeNull();
+  });
+  it("liste datée : facturé / dû / à venir (miroir back)", () => {
+    const c = { echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-01", dateFin: "2026-06-30" };
+    const p = echeancierPlan(c, 2500000, "2026-03-15");
+    expect(p.periods.length).toBe(6);
+    expect(p.periods.map((x) => x.statut)).toEqual(["facture", "facture", "du", "a_venir", "a_venir", "a_venir"]);
+    const agg = echeancier(c, 2500000, "2026-03-15");
+    expect({ periodsDue: p.periodsDue, engage: p.engage, facture: p.facture, ecart: p.ecart }).toEqual(agg);
+  });
+  it("sans date de fin : ne liste que les dues", () => {
+    const p = echeancierPlan({ echeanceType: "mensuel", montantEngage: 500000, dateDebut: "2026-01-01" }, 0, "2026-03-15");
+    expect(p.periods.length).toBe(3);
+    expect(p.periods.every((x) => x.statut === "du")).toBe(true);
   });
 });

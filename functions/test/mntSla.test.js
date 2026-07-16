@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 const { businessMsBetween, addBusinessMs, slaState } = require("../domain/mntSla");
-const { echeancier, monthsBetween } = require("../domain/mntEcheancier");
+const { echeancier, monthsBetween, addMonthsIso, echeancierPlan } = require("../domain/mntEcheancier");
 
 const H = 3600000;
 // Repères UTC : 2026-03-04 est un MERCREDI ; 2026-03-06 vendredi ; 2026-03-07 samedi ; 2026-03-09 lundi.
@@ -62,5 +62,40 @@ describe("mntEcheancier — engagé vs facturé", () => {
     const t = echeancier({ echeanceType: "trimestriel", montantEngage: 3000000, dateDebut: "2026-01-01", dateFin: "2026-06-30" }, 0, "2027-01-01");
     expect(t.periodsDue).toBe(2); // 2 trimestres sur un contrat de 6 mois
     expect(t.engage).toBe(6000000);
+  });
+});
+
+describe("mntEcheancier — addMonthsIso", () => {
+  it("ajoute des mois, jour ramené au dernier du mois si dépassement", () => {
+    expect(addMonthsIso("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsIso("2026-01-15", 3)).toBe("2026-04-15");
+    expect(addMonthsIso("2026-11-30", 3)).toBe("2027-02-28");
+  });
+  it("rejette une date illisible", () => {
+    expect(addMonthsIso("2026/01/01", 1)).toBeNull();
+  });
+});
+
+describe("mntEcheancier — échéancier DÉTAILLÉ (echeancierPlan)", () => {
+  it("liste datée : facturé (couvert cumulé) / dû (passé non couvert) / à venir, agrégats = echeancier", () => {
+    // Contrat mensuel 1M, début 01/01, fin 30/06 (6 échéances) ; 2,5M facturé ; asOf 15/03 (3 dues).
+    const c = { echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-01", dateFin: "2026-06-30" };
+    const p = echeancierPlan(c, 2500000, "2026-03-15");
+    expect(p.periods.length).toBe(6);               // toute la durée du contrat
+    expect(p.periods.map((x) => x.dateEcheance)).toEqual(["2026-01-01", "2026-02-01", "2026-03-01", "2026-04-01", "2026-05-01", "2026-06-01"]);
+    // cumul 1M,2M couverts par 2,5M facturé → facturé ; 3M > 2,5M et échéance ≤ asOf → dû ; avril+ futur → à venir.
+    expect(p.periods.map((x) => x.statut)).toEqual(["facture", "facture", "du", "a_venir", "a_venir", "a_venir"]);
+    // Parité stricte avec l'agrégat.
+    const agg = echeancier(c, 2500000, "2026-03-15");
+    expect({ periodsDue: p.periodsDue, engage: p.engage, facture: p.facture, ecart: p.ecart }).toEqual(agg);
+  });
+  it("sans date de fin : ne liste QUE les échéances dues (aucune projection spéculative)", () => {
+    const p = echeancierPlan({ echeanceType: "mensuel", montantEngage: 500000, dateDebut: "2026-01-01" }, 0, "2026-03-15");
+    expect(p.periods.length).toBe(3);               // = periodsDue, pas de futur inventé
+    expect(p.periods.every((x) => x.statut === "du")).toBe(true); // rien de facturé, toutes passées
+  });
+  it("contrat non démarré (asOf < début) : aucune échéance", () => {
+    const p = echeancierPlan({ echeanceType: "mensuel", montantEngage: 500000, dateDebut: "2026-09-01" }, 0, "2026-07-15");
+    expect(p.periods.length).toBe(0);
   });
 });

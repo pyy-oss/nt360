@@ -13,7 +13,7 @@ import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
-import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
+import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
@@ -124,6 +124,9 @@ export const Maintenance: FC<Props> = () => {
   const { rows: cInvoices } = useCollectionData<Invoice>(openFp ? "invoices" : null, openFp ? [where("fp", "==", openFp)] : [], openFp || "");
   const factureTotal = useMemo(() => cInvoices.reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices]);
   const ech = useMemo(() => echeancier({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
+  // Échéancier DÉTAILLÉ (liste datée) : chaque échéance marquée facturée (couverte par le facturé cumulé) /
+  // dûe (passée non couverte) / à venir. Même assiette que l'agrégat `ech` (parité echeancierPlan/echeancier).
+  const plan = useMemo(() => echeancierPlan({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
 
   // --- Tickets ---
   const [tOpen, setTOpen] = useState(false);
@@ -432,6 +435,35 @@ export const Maintenance: FC<Props> = () => {
               <div><div className="text-[11px] text-muted">Facturé (ERP)</div><div className="tabnum">{money(ech.facture)}</div></div>
               <div><div className="text-[11px] text-muted">Écart</div><div className={cx("tabnum", ech.ecart > 0 ? "text-clay" : "text-emerald")}>{money(ech.ecart)}{ech.ecart > 0 ? " (sous-facturé)" : ""}</div></div>
             </div>
+            {plan.periods.length > 0 && (
+              <div className="mt-3">
+                <div className="text-[11px] text-muted mb-1.5">Détail des échéances <span className="text-faint">— {plan.periods.length} échéance(s) · statut par couverture cumulée du facturé</span></div>
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-line/60">
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-panel2 text-muted">
+                      <tr className="text-left">
+                        <th className="px-2 py-1 font-medium">#</th>
+                        <th className="px-2 py-1 font-medium">Échéance</th>
+                        <th className="px-2 py-1 font-medium text-right">Montant</th>
+                        <th className="px-2 py-1 font-medium text-right">Cumul engagé</th>
+                        <th className="px-2 py-1 font-medium">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plan.periods.map((p) => (
+                        <tr key={p.index} className="border-t border-line/40">
+                          <td className="px-2 py-1 tabnum text-faint">{p.index}</td>
+                          <td className="px-2 py-1 whitespace-nowrap">{frDate(p.dateEcheance || undefined)}</td>
+                          <td className="px-2 py-1 tabnum text-right">{money(p.montant)}</td>
+                          <td className="px-2 py-1 tabnum text-right text-muted">{money(p.cumulEngage)}</td>
+                          <td className="px-2 py-1"><Badge tone={echeanceStatutTone(p.statut)}>{ECHEANCE_STATUT_LABEL[p.statut]}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
           {cEdit && cId && canWrite && (
             <div className="mt-4 pt-3 border-t border-line/60">
