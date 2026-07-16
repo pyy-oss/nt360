@@ -839,7 +839,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <Tip>Échelle <b>cumulée</b> par <b>palier d'IdC</b> (dérivée de la projection, NET du carnet) : <b>Commit</b> = quasi-certain (≥ 90 %) · <b>Best Case</b> ajoute le Forecast · <b>Pipeline</b> ajoute le Pipe. Confrontée à l'objectif CAS de l'exercice. Poids/paliers réglés dans Habilitations. À distinguer de la <b>Prévision commerciale</b> (catégories Commit/Best Case posées <i>manuellement</i> par le commercial dans la fiche).</Tip>
       </Card>
       <div className={cols2}>
-        <Card title="Top commerciaux (pipeline pondéré)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
+        <Card title="Top commerciaux (pipeline pondéré · tous millésimes)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
           {topAm.length ? <Table columns={[
             colText("Commercial", (r) => r.am, (r) => r.am),
             colNum("Pondéré", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),

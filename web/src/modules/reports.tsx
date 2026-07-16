@@ -14,7 +14,7 @@ const GROUP_OPTS: { value: ReportGroupBy; label: string }[] = [
   { value: "client", label: "Client" }, { value: "forecastCategory", label: "Catégorie de prévision" },
 ];
 const MEASURE_OPTS: { value: ReportMeasure; label: string }[] = [
-  { value: "count", label: "Nombre d'opportunités" }, { value: "amount", label: "Σ Montant" }, { value: "weighted", label: "Σ Pondéré" },
+  { value: "count", label: "Nombre d'opportunités" }, { value: "amount", label: "Σ Montant" }, { value: "weighted", label: "Σ Pondéré (brut)" },
 ];
 const STAGE_OPTS = [{ value: "", label: "Toutes étapes" }, ...[1, 2, 3, 4, 5, 6, 7].map((s) => ({ value: String(s), label: `Étape ${s}` }))];
 
@@ -98,6 +98,7 @@ export const Reports: FC<Props> = () => {
             colNum("Montant", (r: { amount: number }) => money(r.amount), (r: { amount: number }) => r.amount),
             colNum("Pondéré", (r: { weighted: number }) => money(r.weighted), (r: { weighted: number }) => r.weighted),
           ]} rows={res.rows} />
+          {measure === "weighted" && <Tip>Le <b>Σ Pondéré</b> est <b>brut</b> : il somme le pondéré tiéré de <b>toutes les opportunités filtrées</b> (y compris gagnées, déjà au carnet P&amp;L et dormantes). Il diffère donc du « Pondéré » du <b>cockpit</b>, qui est <b>net du carnet</b> et hors dormantes — filtrez sur « ouvertes seulement » pour vous rapprocher du pipeline.</Tip>}
         </Card>
       )}
 
