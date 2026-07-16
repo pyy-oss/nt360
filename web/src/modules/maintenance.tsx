@@ -17,6 +17,7 @@ import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
 import type { Invoice } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
+  importMntContrats, type MntImportResult,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -37,6 +38,44 @@ const decimals = (s: string) => s.replace(/[^\d.,]/g, "").replace(",", ".");
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
+
+// Import EN MASSE des contrats (Lot 8) : « Aperçu » (dry-run) puis « Importer ». Rapprochement par N° FP
+// (ré-import = mise à jour). Rendu seulement en écriture ; le callable est doublement gaté (droit + drapeau).
+const ImportContratsCard: FC = () => {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<MntImportResult | null>(null);
+  return (
+    <Card title="Importer des contrats (Excel)">
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="file" accept=".xlsx,.xls,.csv" aria-label="Fichier de contrats"
+          className="text-xs file:btn-ghost file:!px-2.5 file:!py-1 file:text-xs file:mr-2"
+          onChange={(e) => { setFile(e.target.files?.[0] || null); setPreview(null); }} />
+        {file && <Busy variant="ghost" label="Aperçu" okMsg="Aperçu prêt" errMsg="Fichier illisible"
+          fn={async () => { setPreview(await importMntContrats(file, false)); }} />}
+        {preview && (preview.created + preview.updated) > 0 && (
+          <Busy variant="gold" label={`Importer (${preview.created + preview.updated})`} okMsg="Contrats importés" errMsg="Import refusé"
+            fn={async () => { await importMntContrats(file!, true); setFile(null); setPreview(null); }} />
+        )}
+      </div>
+      {preview && (
+        <div className="mt-3 text-[13px] flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="emerald">{preview.created} création(s)</Badge>
+            <Badge tone="gold">{preview.updated} mise(s) à jour</Badge>
+            {preview.skipped > 0 && <Badge tone="clay">{preview.skipped} erreur(s)</Badge>}
+            <span className="text-faint text-[12px]">· {preview.rowsParsed} ligne(s) lue(s)</span>
+          </div>
+          {preview.samples?.errors?.length ? (
+            <ul className="text-[12px] text-clay list-disc pl-4">
+              {preview.samples.errors.map((e, i) => <li key={i}>Ligne {e.line}{e.fp ? ` (${e.fp})` : ""} : {e.error}</li>)}
+            </ul>
+          ) : null}
+        </div>
+      )}
+      <Tip>Colonnes attendues : <b>N° FP</b>, <b>Client</b>, BU, AM, <b>Statut</b> (Actif/Suspendu/Échu/Résilié/Brouillon), <b>Périodicité</b> (Mensuel/Trimestriel/Annuel), <b>Date début</b> (AAAA-MM-JJ ou JJ/MM/AAAA), Date fin, Montant engagé, Devise. Rapprochement par <b>N° FP</b> (1 contrat = 1 affaire) : ré-importer met à jour. Les <b>engagements SLA</b> s'ajoutent ensuite dans chaque fiche. « <b>Aperçu</b> » ne modifie rien.</Tip>
+    </Card>
+  );
+};
 
 // ---------------------------------------------------------------------------------------------------
 // Fiche contrat (création / édition) — Lot 1.
@@ -245,6 +284,8 @@ export const Maintenance: FC<Props> = () => {
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
         {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" />}
       </Card>
+
+      {canWrite && <ImportContratsCard />}
 
       {canWrite && suggestions.length > 0 && (
         <Card title={`Suggestions de contrats · ${suggestions.length}`}>

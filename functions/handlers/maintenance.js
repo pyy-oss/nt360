@@ -47,6 +47,49 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id };
   });
 
+  // IMPORT EN MASSE des contrats depuis un classeur (.xlsx/.csv). `apply=false` = APERÇU (dry-run,
+  // n'écrit rien) ; `apply=true` = applique (upsert par id = safeId(fp), idempotent). Double garde
+  // (requireWrite + drapeau) comme toute écriture mnt_. Parseur/plan PURS (parsers/mntImport +
+  // domain/mntImport) ; exceljs requis PARESSEUSEMENT (readWorkbook async). Budget aligné import (512/300).
+  const importMntContrats = onCallG("importMntContrats", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const fileB64 = req.data && req.data.fileB64;
+    const apply = !!(req.data && req.data.apply);
+    if (!fileB64 || typeof fileB64 !== "string") throw new HttpsError("invalid-argument", "fichier manquant");
+    const { readWorkbook } = require("../lib/xlsxRead");
+    const { parseMntContratsImport } = require("../parsers/mntImport");
+    const { planMntContratsImport } = require("../domain/mntImport");
+    let wb;
+    try { wb = await readWorkbook(Buffer.from(fileB64, "base64")); }
+    catch (e) { throw new HttpsError("invalid-argument", "classeur illisible (.xlsx/.csv attendu)"); }
+    const { rows, report } = parseMntContratsImport(wb);
+    const CAP = 2000; // borne le volume traité (protège mémoire/temps ; au-delà, découper le fichier)
+    if (rows.length > CAP) throw new HttpsError("invalid-argument", `trop de lignes (${rows.length} > ${CAP}) — découpez le fichier`);
+    // Contrats existants (petite collection, callable-only) — scan borné par prudence.
+    const snap = await db.collection("mnt_contrats").limit(MAX_SCAN + 1).get();
+    const existing = new Set(sliceCapped(snap.docs).docs.map((d) => d.id));
+    const plan = planMntContratsImport(rows, existing);
+    const created = plan.toCreate.length, updated = plan.toUpdate.length, skipped = plan.errors.length;
+    const s5 = (arr) => arr.slice(0, 5).map((r) => ({ fp: r.value.fp, client: r.value.client, statut: r.value.statut }));
+    const samples = { create: s5(plan.toCreate), update: s5(plan.toUpdate), errors: plan.errors.slice(0, 10) };
+    if (!apply) return { ok: true, applied: false, created, updated, skipped, rowsParsed: report.rowsParsed, samples };
+    // Application : écritures batchées (limite Firestore 500/batch → chunks de 400).
+    const all = [...plan.toCreate, ...plan.toUpdate];
+    for (let i = 0; i < all.length; i += 400) {
+      const batch = db.batch();
+      for (const rec of all.slice(i, i + 400)) {
+        const ref = db.doc(`mnt_contrats/${rec.id}`);
+        const base = { ...rec.value, updatedAt: FieldValue.serverTimestamp() };
+        if (existing.has(rec.id)) batch.set(ref, base, { merge: true });
+        else batch.set(ref, { ...base, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      }
+      await batch.commit();
+    }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_mnt_contrats", module: "maintenance", entity: "mnt_contrat", entityId: "(masse)", detail: { created, updated, skipped, rowsParsed: report.rowsParsed }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, applied: true, created, updated, skipped, rowsParsed: report.rowsParsed, samples };
+  });
+
   const deleteMntContrat = onCallG("deleteMntContrat", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
@@ -142,7 +185,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id: ref.id, approverUid };
   });
 
-  return { upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
