@@ -90,6 +90,16 @@ export const Pipeline: FC<Props> = ({ period }) => {
       <Card title="Funnel pondéré par étape">
         <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} interval={0} />
       </Card>
+      {data.phase0 && ((data.phase0.budget?.count || 0) + (data.phase0.gele?.count || 0) + (data.phase0.dev?.count || 0)) > 0 && (
+        <Card title="Phases amont — répartition des opportunités actives">
+          <HBars rows={[
+            { name: "Budget", v: data.phase0.budget?.brut || 0, sub: `${data.phase0.budget?.count || 0} opp.` },
+            { name: "Gelé", v: data.phase0.gele?.brut || 0, sub: `${data.phase0.gele?.count || 0} opp.` },
+            { name: "Dev", v: data.phase0.dev?.brut || 0, sub: `${data.phase0.dev?.count || 0} opp.` },
+          ]} colorFn={(r) => (r.name === "Gelé" ? T.clay : r.name === "Budget" ? T.steel : T.gold)} />
+          <Tip>Classement <b>transverse</b> des opportunités <b>actives</b> (n'affecte ni l'étape, ni le pondéré) : <b>Budget</b> = désignation « budget… » ; <b>Dev</b> = offre pas encore déposée (avant l'étape 3-Transmise) ; <b>Gelé</b> = non déposée et âgée de plus de <b>{data.geleMonths ?? 6} mois</b> (réglable en Habilitations). Montants <b>bruts</b> (non pondérés).</Tip>
+        </Card>
+      )}
       <div className={cols2}>
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>

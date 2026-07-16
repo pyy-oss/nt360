@@ -31,6 +31,25 @@ function isoWeek(iso) {
 // Éligible « certain » (IdC ≥ 90 %) — conservé pour les certitudes.
 const isEligible = (o) => isActive(o) && p01(o.probability || 0) >= CONFIANCE_MIN;
 
+// Classification transverse des opportunités ACTIVES en « phases amont » (mutuellement exclusives) —
+// dérivée des SEULS champs existants (désignation, étape, âge), sans aucune nouvelle donnée source :
+//   BUDGET : désignation commençant par « budget » (offre budgétaire — prioritaire) ;
+//   sinon, si l'offre n'est PAS encore déposée (étape < 3 « Transmise ») :
+//     GELE : âge > seuil (paramétrable, défaut 6 mois) — dossier enlisé ;
+//     DEV  : sinon — offre en cours d'élaboration, non encore déposée.
+//   étape ≥ 3 (déposée) et non budgétaire → aucune phase amont (dans le funnel normal).
+// Tag TRANSVERSE : ne modifie ni l'étape, ni le pondéré ; sert au seul pilotage « Vue d'ensemble ».
+const DAYS_PER_MONTH = 30.44; // 365,25/12 — seuil GELE exprimé en MOIS → jours (comparé à ageDays « Âge Auto »)
+function classifyPhase0(o, geleDays) {
+  if (!isActive(o)) return null; // uniquement les opps actives (étapes 1..5)
+  if (String(o.designation || "").trim().toLowerCase().startsWith("budget")) return "budget";
+  if ((o.stage || 0) < 3) { // avant « 3-Transmise » = offre pas encore déposée
+    const age = Number(o.ageDays);
+    return Number.isFinite(age) && age > geleDays ? "gele" : "dev"; // âge inconnu → dev (jamais gelé par défaut)
+  }
+  return null; // étape ≥ 3, non budgétaire → funnel normal
+}
+
 // Analyse temporelle du closing (D Prev) sur les opps ACTIVES — uniquement à partir de la
 // closingDate réelle (aucune date de création/étape en source → pas de vélocité/âge inventés).
 // `pw` = pondération de projection liée aux niveaux configurés.
@@ -92,10 +111,17 @@ function dormantSummary(opps, currentFy, asOf) {
   return { count, brut, ageMin: ageMin || 0, ageMax: ageMax || 0, ageAvg: aged ? Math.round(ageSum / aged) : 0 };
 }
 
-function pipeline(opps, asOf, tiers, orders) {
+function pipeline(opps, asOf, tiers, orders, geleMonths = 6) {
   const t = tiers || normalizeTiers();
   const pw = (o) => projectionWeight(o, t);
   const active = opps.filter(isActive);
+  // Phases amont (tag transverse, dérivé) : ventile les opps actives en Budget / Gelé / Dev.
+  const geleDays = (geleMonths > 0 ? geleMonths : 6) * DAYS_PER_MONTH;
+  const phase0 = { budget: { count: 0, brut: 0 }, gele: { count: 0, brut: 0 }, dev: { count: 0, brut: 0 } };
+  for (const o of active) {
+    const p = classifyPhase0(o, geleDays);
+    if (p) { phase0[p].count++; phase0[p].brut += o.amount || 0; }
+  }
   // PARITÉ chaine/atterrissage (audit cohérence chiffres, divergence A) : une opp active dont le FP porte
   // DÉJÀ une commande (P&L) est déjà comptée dans le CAS. La garder dans le « pondéré PROJETÉ »
   // (tot.weighted, tierBreakdown, ventilations, top) la double-compterait → même libellé « Commit »/
@@ -152,6 +178,9 @@ function pipeline(opps, asOf, tiers, orders) {
     byMonth: groupSum(proj, month, pw),
     // Écoulement HEBDO du closing (D Prev) — même population/pondération que byMonth, granularité semaine.
     byWeek: groupSum(proj, (o) => (o.closingDate ? isoWeek(o.closingDate) : "?"), pw),
+    // Phases amont (tag transverse) : ventilation des opps ACTIVES par Budget / Gelé / Dev — volume + brut.
+    phase0,
+    geleMonths, // seuil GELE appliqué (mois) — affiché dans la légende front
     conv: wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : 0,
     wonCount,
     lostCount,
@@ -162,4 +191,4 @@ function pipeline(opps, asOf, tiers, orders) {
   };
 }
 
-module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, isoWeek, CONFIANCE_MIN };
+module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, isoWeek, classifyPhase0, CONFIANCE_MIN };

@@ -271,6 +271,7 @@ async function recomputeCore(db, only) {
   const alertThr = (await db.doc("config/alerts").get()).data() || {}; // seuils d'alerte configurables
   const projCfg = (await db.doc("config/projection").get()).data() || {}; // niveaux de projection configurables
   const tiers = normalizeTiers(projCfg); // Certitudes/Forecast/Pipe : poids + activation (défauts si absent)
+  const geleMonths = Number(projCfg.geleMonths) > 0 ? Number(projCfg.geleMonths) : 6; // seuil « Gelé » (mois), défaut 6
   // Jalons de facturation par projet (≤ 15) : SOURCE UNIQUE du report N+1 (Σ des jalons après le 31/12
   // de l'exercice). Aucun mécanisme manuel concurrent. Keyé par le fpKey STOCKÉ (champ `fp`).
   // Jalons RATTACHÉS À UNE COMMANDE ACTIVE uniquement : on écarte ceux dont le FP n'est plus dans `orders`
@@ -341,7 +342,7 @@ async function recomputeCore(db, only) {
   // summaries/pipeline_all : dormantes exclues si le drapeau est actif, sinon le « Pipeline actif pondéré »
   // de l'export CODIR divergerait du Cockpit « Tout » (violation « même métrique = même nombre »).
   const plOpps = excludeDormant ? opps.filter((o) => !isDormantClosing(o, currentFy)) : opps;
-  const plSummary = pipeline(plOpps, asOf, tiers, orders); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
+  const plSummary = pipeline(plOpps, asOf, tiers, orders, geleMonths); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
   if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, dormant, excludeDormant, ...stamp } }); // global (rétro-compat)
   let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
@@ -649,7 +650,7 @@ async function recomputeCore(db, only) {
     // `dormant` (global, indépendant de la période) embarqué dans CHAQUE summary pipeline → la tuile
     // « Opportunité dormante » s'affiche quelle que soit la période choisie. `excludeDormant` tracé pour
     // que le front libelle correctement (exclu du pondéré vs simple signal).
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord), dormant, excludeDormant, ...stamp } });
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord, geleMonths), dormant, excludeDormant, ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec
