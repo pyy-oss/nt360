@@ -46,6 +46,24 @@ describe("Combo — recherche + sélection + création", () => {
     render(<Combo value="ict" onChange={() => {}} options={OPTS} ariaLabel="BU" />);
     expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("ICT");
   });
+  it("allowCreate : committe le texte tapé à la perte de focus (« taper = valeur »)", () => {
+    const onChange = vi.fn();
+    render(<Combo value="" onChange={onChange} options={OPTS} allowCreate ariaLabel="Client" />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "ACME" } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith("ACME");
+  });
+  it("sans allowCreate : la perte de focus n'enregistre PAS un texte libre", () => {
+    const onChange = vi.fn();
+    render(<Combo value="" onChange={onChange} options={OPTS} ariaLabel="BU" />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "zzz" } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("MonthField — sélecteur mois/année", () => {

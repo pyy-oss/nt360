@@ -26,7 +26,7 @@ function ContactForm({ account, contact, canWrite, onDone }: { account: string; 
         <input className="field !py-1 w-40" value={f.name || ""} onChange={(e) => set("name", e.target.value)} aria-label="Nom du contact" /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Rôle</span>
         <Select className="!py-1 w-32" value={f.role || ""} onChange={(v) => set("role", v)} ariaLabel="Rôle" placeholder="—"
-          options={CONTACT_ROLES.map((r) => ({ value: r, label: r }))} /></label>
+          options={[{ value: "", label: "—" }, ...CONTACT_ROLES.map((r) => ({ value: r, label: r }))]} /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Email</span>
         <input className="field !py-1 w-48" value={f.email || ""} onChange={(e) => set("email", e.target.value)} aria-label="Email" placeholder="nom@client.com" /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Téléphone</span>

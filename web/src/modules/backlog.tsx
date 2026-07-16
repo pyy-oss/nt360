@@ -24,7 +24,7 @@ const Fld = ({ label, children }: { label: string; children: ReactNode }) => (
 );
 const Sel = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: string[]; ph: string }) => (
   <Select className="!py-1.5" value={v} onChange={set} ariaLabel={ph} placeholder={ph}
-    options={opts.map((o) => ({ value: o, label: o }))} />
+    options={[{ value: "", label: ph }, ...opts.map((o) => ({ value: o, label: o }))]} />
 );
 
 // 5 — Suivi Backlog

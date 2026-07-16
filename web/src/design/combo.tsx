@@ -17,16 +17,17 @@ const noAcc = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g
 
 export function Combo({ value, onChange, options, loadOptions, ariaLabel, placeholder = "Rechercher…",
   allowCreate = false, createLabel = (q: string) => `Créer « ${q} »`, clearable = true, disabled, className,
-  emptyLabel = "Aucun résultat", minChars = 0 }:
+  emptyLabel = "Aucun résultat", minChars = 0, autoFocus = false }:
   { value: string; onChange: (v: string) => void; options?: ComboOpt[]; loadOptions?: (q: string) => Promise<ComboOpt[]>;
     ariaLabel?: string; placeholder?: string; allowCreate?: boolean; createLabel?: (q: string) => string;
-    clearable?: boolean; disabled?: boolean; className?: string; emptyLabel?: ReactNode; minChars?: number }) {
+    clearable?: boolean; disabled?: boolean; className?: string; emptyLabel?: ReactNode; minChars?: number; autoFocus?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
   const [remote, setRemote] = useState<ComboOpt[] | null>(null);
   const [busy, setBusy] = useState(false);
   const inp = useRef<HTMLInputElement>(null);
+  const skipBlur = useRef(false); // évite un double-commit quand une option vient d'être choisie (commit → blur programmatique)
   const lid = useId();
   const optId = (i: number) => `${lid}-opt-${i}`;
 
@@ -48,7 +49,14 @@ export function Combo({ value, onChange, options, loadOptions, ariaLabel, placeh
     return () => clearTimeout(t);
   }, [q, open]); // eslint-disable-line
 
-  const commit = (o: ComboOpt) => { if (o.disabled) return; onChange(o.value); setQ(""); setOpen(false); inp.current?.blur(); };
+  const commit = (o: ComboOpt) => { if (o.disabled) return; skipBlur.current = true; onChange(o.value); setQ(""); setOpen(false); inp.current?.blur(); };
+  // Perte de focus : en saisie libre (allowCreate), on committe le texte tapé mais non sélectionné — sinon
+  // un clic direct sur le bouton d'action (hors panneau) enregistrait une valeur vide (« taper = valeur »).
+  const onBlur = () => {
+    if (skipBlur.current) { skipBlur.current = false; return; }
+    if (allowCreate) { const t = q.trim(); if (t && t !== value) onChange(t); }
+    setQ(""); setOpen(false);
+  };
   const move = (d: number) => setHi((h) => {
     if (!rows.length) return 0;
     let n = h;
@@ -73,10 +81,11 @@ export function Combo({ value, onChange, options, loadOptions, ariaLabel, placeh
           ref={inp} type="text" role="combobox" aria-autocomplete="list" aria-expanded={open} aria-label={ariaLabel}
           aria-controls={open ? lid : undefined} aria-activedescendant={open && rows[hi] ? optId(hi) : undefined}
           disabled={disabled} placeholder={value && !open ? undefined : placeholder}
+          {...(autoFocus ? { "data-autofocus": true } : {})}
           className="flex-1 min-w-0 bg-transparent outline-none py-2 text-sm text-ink placeholder:text-muted"
           value={open ? q : (selectedLabel as string) || ""}
           onChange={(e) => { setQ(e.target.value); if (!open) setOpen(true); }}
-          onFocus={() => setOpen(true)} onKeyDown={onKey}
+          onFocus={() => setOpen(true)} onKeyDown={onKey} onBlur={onBlur}
         />
         {busy && <Loader2 size={14} className="shrink-0 animate-spin text-gold" />}
         {clearable && value && !disabled && (

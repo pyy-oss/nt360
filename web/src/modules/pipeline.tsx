@@ -518,7 +518,7 @@ export const OppList: FC<Props> = () => {
           <FormSection>
             {/* En correction d'opp importée, le client vient de la source (non modifiable) ; on l'affiche en lecture. */}
             <Field label="Client">
-              <Combo value={f.client} onChange={(v) => setF({ ...f, client: v })} ariaLabel="Client" placeholder="Client" disabled={f.patch} allowCreate options={clientOpts.map((c) => ({ value: c, label: c }))} /></Field>
+              <Combo value={f.client} onChange={(v) => setF({ ...f, client: v })} ariaLabel="Client" placeholder="Client" disabled={f.patch} autoFocus allowCreate options={clientOpts.map((c) => ({ value: c, label: c }))} /></Field>
             <Field label="Account Manager">
               <Combo value={f.am} onChange={(v) => setF({ ...f, am: v })} ariaLabel="Account Manager" placeholder="AM" allowCreate options={amOpts.map((a) => ({ value: a, label: a }))} /></Field>
             <Field label="N° FP">
