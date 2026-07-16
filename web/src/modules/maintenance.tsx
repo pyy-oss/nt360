@@ -17,7 +17,7 @@ import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
 import type { Invoice } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
-  importMntContrats, type MntImportResult,
+  importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -26,7 +26,7 @@ import {
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard } from "../lib/mntDashboard";
-import { suggestMntContrats, type MntSuggestion } from "../lib/mntSuggest";
+import { suggestMntContrats, mntCandidatePool, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
@@ -207,10 +207,21 @@ export const Maintenance: FC<Props> = () => {
   // contrat (aucune création automatique). Réutilise fpKey pour le rapprochement commande ↔ contrat.
   const { rows: commandes } = useCommandesRows(gate);
   const suggestions = useMemo(() => suggestMntContrats(commandes, contrats, fpKey), [commandes, contrats]);
-  const openSuggestion = (s: MntSuggestion) => {
-    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am });
+  // Lot d'affaires SANS contrat soumis à l'IA (bornage aligné sur le plafond serveur). L'IA juge le FOND,
+  // au-delà des seuls mots-clés — d'où un pool plus large que les suggestions heuristiques instantanées.
+  const candidatePool = useMemo(() => mntCandidatePool(commandes, contrats, fpKey), [commandes, contrats]);
+  const [aiSug, setAiSug] = useState<MntAiSuggestResult | null>(null);
+  // Le carnet évolue (temps réel) : une analyse IA obsolète (affaire désormais sous contrat) doit disparaître.
+  const aiRows = useMemo(() => {
+    if (!aiSug) return [];
+    const have = new Set(contrats.map((c) => fpKey(c.fp)).filter(Boolean));
+    return aiSug.suggestions.filter((s) => !have.has(fpKey(s.fp)));
+  }, [aiSug, contrats]);
+  const prefill = (s: { fp: string; client: string; bu: string; am: string; echeance?: string | null }) => {
+    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am, ...(s.echeance && (ECHEANCES as readonly string[]).includes(s.echeance) ? { echeanceType: s.echeance } : {}) });
     setCId(""); setCEdit(false); setCOpen(true);
   };
+  const openSuggestion = (s: MntSuggestion) => prefill(s);
   const suggestCols = [
     colText("Client", (s: MntSuggestion) => s.client || "—", (s: MntSuggestion) => s.client || ""),
     colText("N° FP", (s: MntSuggestion) => <FpLink fp={s.fp} />),
@@ -218,6 +229,17 @@ export const Maintenance: FC<Props> = () => {
     colNum("Montant", (s: MntSuggestion) => money(s.cas), (s: MntSuggestion) => s.cas),
     colText("Signaux", (s: MntSuggestion) => <div className="flex flex-wrap gap-1">{s.reasons.slice(0, 4).map((r, i) => <Badge key={i} tone="steel">{r}</Badge>)}</div>),
     colText("", (s: MntSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openSuggestion(s)}>Créer</button> : null)),
+  ];
+  // Confiance IA → ton (visuel aligné sur l'échelle de risque : forte = vert, moyenne = or, faible = argile).
+  const confTone = (c: number) => (c >= 0.75 ? "emerald" : c >= 0.5 ? "gold" : "clay");
+  const aiCols = [
+    colText("Client", (s: MntAiSuggestion) => s.client || "—", (s: MntAiSuggestion) => s.client || ""),
+    colText("N° FP", (s: MntAiSuggestion) => <FpLink fp={s.fp} />),
+    colText("Affaire", (s: MntAiSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
+    colNum("Montant", (s: MntAiSuggestion) => money(s.cas), (s: MntAiSuggestion) => s.cas),
+    colNum("Confiance", (s: MntAiSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: MntAiSuggestion) => s.confidence),
+    colText("Analyse", (s: MntAiSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>),
+    colText("", (s: MntAiSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => prefill(s)}>Créer</button> : null)),
   ];
 
   return (
@@ -287,10 +309,24 @@ export const Maintenance: FC<Props> = () => {
 
       {canWrite && <ImportContratsCard />}
 
-      {canWrite && suggestions.length > 0 && (
-        <Card title={`Suggestions de contrats · ${suggestions.length}`}>
-          <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.</Tip>
-          <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />
+      {canWrite && (suggestions.length > 0 || candidatePool.length > 0) && (
+        <Card title={aiSug ? `Suggestions IA · ${aiRows.length}` : `Suggestions de contrats · ${suggestions.length}`}
+          actions={candidatePool.length > 0 ? (
+            <Busy variant="gold" label={aiSug ? "Réanalyser à l'IA" : "Doper à l'IA"}
+              okMsg="Analyse IA prête" errMsg="Analyse IA indisponible"
+              fn={async () => { setAiSug(await aiSuggestMntContrats(candidatePool)); }} />
+          ) : undefined}>
+          {aiSug ? (
+            <>
+              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
+              {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" />}
+            </>
+          ) : (
+            <>
+              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. « Créer » ouvre une fiche <b>pré-remplie</b>.</Tip>
+              {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />}
+            </>
+          )}
         </Card>
       )}
 

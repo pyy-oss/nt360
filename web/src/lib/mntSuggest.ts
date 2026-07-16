@@ -55,3 +55,37 @@ export function suggestMntContrats(
   out.sort((a, b) => b.score - a.score || b.cas - a.cas || a.client.localeCompare(b.client));
   return out.slice(0, cap);
 }
+
+// Candidat envoyé à l'IA (affaire du carnet SANS contrat). L'IA juge le FOND — on ne pré-filtre donc PAS
+// sur les mots-clés (sinon on lui cache justement les affaires récurrentes SANS mot-clé évident, tout
+// l'intérêt de « doper à l'IA »). On borne le lot en priorisant les signaux mots-clés puis le montant.
+export interface MntCandidate { fp: string; client: string; bu: string; am: string; affaire: string; cas: number }
+
+/**
+ * Construit le lot de candidats à soumettre à l'IA : TOUTES les affaires du carnet sans contrat, bornées.
+ * Priorité d'inclusion : affaires à signaux mots-clés d'abord, puis le plus gros montant.
+ * @param cap borne le lot (défaut 60 — aligné sur le plafond serveur)
+ */
+export function mntCandidatePool(
+  orders: OrderLike[],
+  contrats: ContratLike[],
+  normalizeFp: (v?: string | null) => string | null,
+  cap = 60,
+): MntCandidate[] {
+  const have = new Set((contrats || []).map((c) => normalizeFp(c.fp)).filter((x): x is string => !!x));
+  const seen = new Set<string>();
+  const out: (MntCandidate & { _kw: number })[] = [];
+  for (const o of orders || []) {
+    const fp = normalizeFp(o.fp);
+    if (!fp || have.has(fp) || seen.has(fp)) continue;
+    seen.add(fp);
+    const text = `${norm(o.affaire)} ${norm(o.client)}`;
+    const kw = MNT_KEYWORDS.filter((k) => text.includes(k)).length;
+    out.push({
+      fp: o.fp || fp, client: o.client || "", bu: o.bu || "", am: o.am || "",
+      affaire: o.affaire || "", cas: Number(o.cas) || 0, _kw: kw,
+    });
+  }
+  out.sort((a, b) => b._kw - a._kw || b.cas - a.cas || a.client.localeCompare(b.client));
+  return out.slice(0, cap).map(({ _kw, ...c }) => c);
+}

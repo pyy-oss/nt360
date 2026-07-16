@@ -4,11 +4,12 @@
 // read = drapeau + droit `maintenance`, write:false). DOUBLE garde à l'écriture : requireWrite +
 // drapeau config/mntFeature ALLUMÉ (ADR-009). Exports déclarés dans index.js (déploiement par nom).
 const { safeId } = require("../lib/sheets");
+const { fpKey } = require("../lib/ids");
 const { isMntEnabled } = require("../domain/mntFeature");
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { monthOf, craDaysFromHours } = require("../domain/mntTicket");
 
-function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid }) {
+function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée mnt_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `maintenance`.
   async function assertMntEnabled() {
@@ -93,6 +94,61 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_mnt_contrats", module: "maintenance", entity: "mnt_contrat", entityId: "(masse)", detail: { created, updated, skipped, rowsParsed: report.rowsParsed }, ts: FieldValue.serverTimestamp() });
     return { ok: true, applied: true, created, updated, skipped, rowsParsed: report.rowsParsed, samples };
   });
+
+  // SUGGESTIONS IA — juge quelles affaires du carnet (candidats fournis par le front, seule autorité du
+  // carnet fusionné → parité « même métrique = même nombre ») relèvent d'une prestation RÉCURRENTE et
+  // devraient porter un contrat. « L'IA propose, l'humain valide » : renvoie des propositions PRÉ-REMPLI-ables,
+  // AUCUNE écriture. Double garde (requireWrite + drapeau) comme le reste du module + limite anti-coût.
+  // Budget aligné sur l'assistant du Centre de correction (512/300, secret ANTHROPIC_API_KEY).
+  const aiSuggestMntContrats = onCallG(
+    "aiSuggestMntContrats",
+    { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 },
+    async (req) => {
+      await requireWrite(req, "maintenance");
+      await assertMntEnabled();
+      // Coût : chaque appel = 1 requête Opus (réflexion adaptative). 20/min/compte suffisent au travail humain.
+      if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) {
+        throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+      }
+      const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();
+      if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+
+      // Candidats fournis par le front (affaires du carnet SANS contrat) — bornés + assainis. On NE reçoit
+      // que le nécessaire au jugement ; on re-borne côté serveur (garde-fou coût/exfiltration).
+      const raw = Array.isArray(req.data?.candidates) ? req.data.candidates : [];
+      if (!raw.length) throw new HttpsError("invalid-argument", "aucun candidat à analyser");
+      const CAP = 60; // même borne que l'assistant du Centre de correction (coût + latence)
+      const truncated = raw.length > CAP;
+      const candidates = raw.slice(0, CAP).map((c) => ({
+        fp: String((c && c.fp) || "").slice(0, 40),
+        client: String((c && c.client) || "").slice(0, 120),
+        bu: String((c && c.bu) || "").slice(0, 40),
+        am: String((c && c.am) || "").slice(0, 80),
+        affaire: String((c && c.affaire) || "").slice(0, 200),
+        cas: Number(c && c.cas) || 0,
+      })).filter((c) => fpKey(c.fp));
+      if (!candidates.length) throw new HttpsError("invalid-argument", "aucun candidat exploitable (N° FP requis)");
+
+      // Sécurité additionnelle : on écarte tout candidat DÉJÀ sous contrat (le carnet du front peut dater d'un
+      // instant t ; on rapproche par fpKey comme partout ailleurs).
+      const snap = await db.collection("mnt_contrats").limit(MAX_SCAN + 1).get();
+      const have = new Set(sliceCapped(snap.docs).docs.map((d) => fpKey((d.data() || {}).fp)).filter(Boolean));
+      const pool = candidates.filter((c) => !have.has(fpKey(c.fp)));
+      if (!pool.length) throw new HttpsError("failed-precondition", "toutes les affaires proposées portent déjà un contrat.");
+
+      const { aiSuggestMntContrats: runAi } = require("../lib/mntSuggestAi");
+      let out;
+      try {
+        out = await runAi(apiKey, pool);
+      } catch (e) {
+        if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+        throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de suggestions (réessayez).");
+      }
+      // Audit : USAGE uniquement (tailles, modèle, coût) — jamais le contenu des affaires.
+      if (logOps) await logOps({ kind: "ai", action: "suggestMntContrats", status: "ok", uid: req.auth.uid, detail: { candidates: pool.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
+      return { ok: true, suggestions: out.suggestions, model: out.model, truncated, analyzed: pool.length, total: raw.length };
+    },
+  );
 
   const deleteMntContrat = onCallG("deleteMntContrat", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "maintenance");
@@ -189,7 +245,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id: ref.id, approverUid };
   });
 
-  return { upsertMntContrat, importMntContrats, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
