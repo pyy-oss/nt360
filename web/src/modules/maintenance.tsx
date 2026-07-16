@@ -18,7 +18,7 @@ import type { Invoice, Order } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
-  mntContratPnl, type MntContratPnlRow,
+  mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -259,6 +259,37 @@ export const Maintenance: FC<Props> = () => {
       colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : `${Math.round(r.margePct * 100)} %`), (r: MntContratPnlRow) => r.margePct || 0),
     ] : []),
   ] : [];
+  // Analyse de rétention IA (Lot 6/7) : contrats à risque (moteur existant) enrichis de stats tickets +
+  // proximité d'échéance → l'IA rend motifs de churn + reco. Parité : on part de ce que l'écran affiche.
+  const churnInput = useMemo<ChurnInput[]>(() => {
+    const openByFp = new Map<string, number>(), breachByFp = new Map<string, number>();
+    for (const t of tickets) {
+      const k = fpKey(t.fp || ""); if (!k) continue;
+      if (t.statut === "ouvert" || t.statut === "en_cours") openByFp.set(k, (openByFp.get(k) || 0) + 1);
+      const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
+      if (eng && t.ouvertLe && slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs).state === "rompu") breachByFp.set(k, (breachByFp.get(k) || 0) + 1);
+    }
+    const finJours = (fp?: string | null) => {
+      const c = contrats.find((x) => fpKey(x.fp) === fpKey(fp || ""));
+      if (!c?.dateFin) return null;
+      const finMs = Date.parse(`${c.dateFin}T00:00:00Z`), asMs = Date.parse(`${asOfIso}T00:00:00Z`);
+      return Number.isFinite(finMs) ? Math.round((finMs - asMs) / 86400000) : null;
+    };
+    return atRisk.map((r) => {
+      const k = fpKey(r.fp || "") || "";
+      return { fp: r.fp || "", client: r.client || "", niveau: r.niveau, signals: (r.signals || []).map((s) => signalText(s)), joursEcheance: finJours(r.fp), ticketsOuverts: openByFp.get(k) || 0, slaBreaches: breachByFp.get(k) || 0 };
+    });
+  }, [atRisk, tickets, contrats, contratById, nowMs, asOfIso]);
+  const [churn, setChurn] = useState<ChurnResult | null>(null);
+  const CHURN_LABEL: Record<string, string> = { eleve: "Élevé", moyen: "Moyen", faible: "Faible" };
+  const churnCols = [
+    colText("Risque churn", (a: ChurnAnalysis) => <Badge tone={a.churnRisk === "eleve" ? "clay" : a.churnRisk === "moyen" ? "gold" : "steel"}>{CHURN_LABEL[a.churnRisk]}</Badge>, (a: ChurnAnalysis) => (a.churnRisk === "eleve" ? 0 : a.churnRisk === "moyen" ? 1 : 2)),
+    colText("Client", (a: ChurnAnalysis) => a.client || "—", (a: ChurnAnalysis) => a.client || ""),
+    colText("N° FP", (a: ChurnAnalysis) => <FpLink fp={a.fp} />),
+    colText("Motifs", (a: ChurnAnalysis) => <div className="flex flex-wrap gap-1">{a.drivers.map((d, i) => <Badge key={i} tone="steel">{d}</Badge>)}</div>),
+    colText("Reco de rétention", (a: ChurnAnalysis) => <span className="text-[12px]">{a.recommendation || "—"}</span>),
+  ];
+
   const openContrat = (id: string) => { const c = contratById[id]; if (!c) return; setCForm(toContratForm(c)); setCId(id); setCEdit(true); setCOpen(true); };
   const complianceCols = [
     colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
@@ -423,6 +454,19 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
+        </Card>
+      )}
+
+      {gate && churnInput.length > 0 && (
+        <Card title={churn ? `Analyse de rétention IA · ${churn.analyses.length}` : "Analyse de rétention IA"}
+          actions={<Busy variant="gold" label={churn ? "Réanalyser" : "Analyser le churn (IA)"} okMsg="Analyse prête" errMsg="Analyse IA indisponible" fn={async () => setChurn(await aiAnalyzeChurn(churnInput))} />}>
+          {!churn ? (
+            <Tip>L'<b>IA</b> lit les <b>{churnInput.length}</b> contrat(s) à risque (moteur ci-dessus) + les stats tickets et rend, par contrat, les <b>motifs de non-renouvellement</b> et une <b>reco de rétention</b>. Elle ne re-score pas — elle explique et recommande.</Tip>
+          ) : churn.analyses.length === 0 ? (
+            <EmptyState label="L'IA n'a produit aucune analyse sur ce lot." />
+          ) : (
+            <Table columns={churnCols} rows={churn.analyses} colsKey="mnt_churn" />
+          )}
         </Card>
       )}
 

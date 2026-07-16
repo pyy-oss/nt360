@@ -1332,6 +1332,7 @@ const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, re
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.importMntContrats = _maintenance.importMntContrats;
 exports.aiSuggestMntContrats = _maintenance.aiSuggestMntContrats;
+exports.aiAnalyzeChurn = _maintenance.aiAnalyzeChurn;
 exports.mntContratPnl = _maintenance.mntContratPnl;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;

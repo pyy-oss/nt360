@@ -1058,6 +1058,16 @@ export async function mntContratPnl(): Promise<{ ok: boolean; rows: MntContratPn
   return res.data as { ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean };
 }
 
+// Analyse de rétention IA (Lot 6/7) — l'IA lit les contrats à risque + stats tickets et rend, par contrat,
+// les motifs de churn + une reco de rétention. « L'IA propose », aucune écriture. Droit `maintenance` + secret.
+export type ChurnInput = { fp: string; client: string; niveau: string; signals: string[]; joursEcheance: number | null; ticketsOuverts: number; slaBreaches: number };
+export type ChurnAnalysis = { fp: string; client: string; churnRisk: "eleve" | "moyen" | "faible"; drivers: string[]; recommendation: string };
+export type ChurnResult = { ok: boolean; analyses: ChurnAnalysis[]; model: string; truncated: boolean; analyzed: number; total: number };
+export async function aiAnalyzeChurn(contrats: ChurnInput[]): Promise<ChurnResult> {
+  const res = await httpsCallable(functions, "aiAnalyzeChurn", { timeout: 300_000 })({ contrats });
+  return res.data as ChurnResult;
+}
+
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
 import type { MntTicket, MntIntervention } from "../types";
 export async function upsertMntTicket(t: MntTicket) { const res = await httpsCallable(functions, "upsertMntTicket")(t); return res.data as { ok: boolean; id: string }; }
