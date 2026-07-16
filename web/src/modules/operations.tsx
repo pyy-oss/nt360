@@ -501,6 +501,13 @@ function StatusSelect({ id, status }: { id: string; status: string }) {
 }
 
 // 11/12 — Clients / Domaines
+// Statut d'un client dans le portefeuille de la période — dérivé de l'activité (pas d'invention) :
+// carnet acquis (CAS > 0) → Actif ; sinon pondéré ouvert (forecast > 0) → Prospect ; sinon reliquat
+// de facturation seule. Une entité de clients_${period} porte toujours au moins l'une de ces valeurs.
+const clientStatut = (r: EntityRow): "Actif" | "Prospect" | "Facturation" =>
+  (r.cas || 0) > 0 ? "Actif" : (r.forecast || 0) > 0 ? "Prospect" : "Facturation";
+const STATUT_TONE: Record<string, "emerald" | "gold" | "steel"> = { Actif: "emerald", Prospect: "gold", Facturation: "steel" };
+
 export function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data, loading, error } = useDocData<EntitySummary>(`summaries/${kind}_${period}`);
   const canMargin = useCanSeeMargin();
@@ -514,33 +521,122 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
   const scope = kind === "domaines" ? "bu" : "client";
   const obj = useObjectives(period);
   const roOf = (r: EntityRow) => obj.get(scope, r.key);
+  // Perspective DO/PM (Clients uniquement) : nb d'affaires (FP distincts au carnet), nb de commandes et
+  // PM référent (dominant par CAS) par client. Lus depuis le carnet — gaté sur l'accès « overview »
+  // (même porte que la Vue d'ensemble / FP 360°), sinon aucun abonnement (perf + RBAC opposable).
+  const canOverview = useCan("overview") !== "none";
+  const wantCmd = kind === "clients" && canOverview;
+  const { rows: cmdRows } = useCommandesRows(wantCmd);
+  const cmdBy = useMemo(() => {
+    const m = new Map<string, { fps: Set<string>; orders: number; pmCas: Map<string, number> }>();
+    if (!wantCmd) return m;
+    for (const o of cmdRows) {
+      const k = (o.client || "").trim();
+      if (!k) continue;
+      const e = m.get(k) || { fps: new Set<string>(), orders: 0, pmCas: new Map<string, number>() };
+      if (o.fp) e.fps.add(fpDocId(o.fp)); // FP canonicalisé → une affaire = un N° FP (pas de double-compte casse/zéros)
+      e.orders += 1;
+      const pm = (o.pm || "").trim();
+      if (pm) e.pmCas.set(pm, (e.pmCas.get(pm) || 0) + (o.cas || 0));
+      m.set(k, e);
+    }
+    return m;
+  }, [cmdRows, wantCmd]);
+  // PM référent = celui qui pèse le plus de CAS sur le client (repli « — »).
+  const domPm = (k: string) => {
+    const e = cmdBy.get(k);
+    if (!e || !e.pmCas.size) return "";
+    return [...e.pmCas.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  };
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   const rows = data.rows || [];
   const hasObj = rows.some((r) => roOf(r));
+  const isClients = kind === "clients";
+  // Totaux du portefeuille (Autres (N) inclus : valeur réelle agrégée, pas un doublon).
+  const tot = rows.reduce((s, r) => {
+    s.cas += r.cas || 0; s.facture += r.facture || 0; s.backlog += r.backlog || 0;
+    s.forecast += r.forecast || 0; s.projete += r.projete || 0;
+    s.reste += Math.max((r.cas || 0) - (r.facture || 0), 0);
+    return s;
+  }, { cas: 0, facture: 0, backlog: 0, forecast: 0, projete: 0, reste: 0 });
+  const realRows = rows.filter((r) => !r.isOther); // entités réelles (hors ligne de traîne agrégée)
+  const top5 = realRows.slice(0, 5).reduce((s, r) => s + (r.cas || 0), 0); // rows déjà triées CAS desc (byEntity)
+  const concentration = tot.cas > 0 ? top5 / tot.cas : 0;
+  const otherRow = rows.find((r) => r.isOther); // longue traîne agrégée éventuelle (> 100 clients)
+  const resteOf = (r: EntityRow) => Math.max((r.cas || 0) - (r.facture || 0), 0);
+  const tauxFactOf = (r: EntityRow) => ((r.cas || 0) > 0 ? Math.min((r.facture || 0) / (r.cas || 0), 1) : 0);
   return (
     <div className="flex flex-col gap-4">
+      {/* Portefeuille clients (Base Clients) — synthèse 4 perspectives : DC (carnet/pipeline), DF
+          (facturation/encaissement), DO·PM (affaires livrées). Agrégats existants uniquement. */}
+      {isClients && (
+        <>
+          <div className={grid4}>
+            <Kpi label="CAS du portefeuille" value={fmt(tot.cas)} tone="steel" sub={`${realRows.length.toLocaleString("fr-FR")} client(s)${otherRow ? " + traîne" : ""}`} />
+            <Kpi label="Pipeline pondéré" value={fmt(tot.forecast)} tone="gold" sub="opportunités ouvertes (pondérées)" />
+            <Kpi label="Facturé (CAF)" value={fmt(tot.facture)} tone="emerald" />
+            <Kpi label="Backlog (RAF)" value={fmt(tot.backlog)} tone="clay" />
+          </div>
+          <div className={grid4}>
+            <Kpi label="Projeté" value={fmt(tot.projete)} tone="gold" sub="CAS + pipeline pondéré" />
+            <Kpi label="Reste à encaisser" value={fmt(tot.reste)} tone="clay" sub="CAS non encore facturé" />
+            <Kpi label="Concentration top 5" value={pct(concentration)} tone={concentration >= 0.6 ? "clay" : "steel"} sub="part du CAS des 5 premiers" />
+            <Kpi label="Taux de facturation" value={tot.cas > 0 ? pct(Math.min(tot.facture / tot.cas, 1)) : "—"} sub="facturé / CAS du portefeuille" />
+          </div>
+        </>
+      )}
       <Card title={kind === "clients" ? "CAS par client (top 10)" : "CAS par domaine"}>
         <HBars rows={rows.slice(0, 10).map((r) => ({ name: r.key, v: r.cas || 0 }))} colorFn={(r) => (kind === "domaines" ? (BU_COL[r.name] || T.faint) : T.gold)} />
       </Card>
-      <Card title={kind === "clients" ? "Clients" : "Domaines (BU)"}>
-        <Table columns={[
-          // « Autres (N) » (longue traîne agrégée, cf. audit intégral A2) : non cliquable (pas une entité réelle).
-          colText(kind === "clients" ? "Client" : "BU", (r) => (r.isOther ? <span className="text-faint italic">{r.key}</span> : <EntityLink kind={kind} value={r.key} />), (r) => r.key),
-          colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
-          colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
-          // Marges masquées pour les rôles sans accès « Rentabilité ».
-          ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0), colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0)] : []),
-          // R/O (Réalisé / Objectif) au périmètre — affiché si un objectif existe pour l'exercice.
-          // R/O (Réalisé / Objectif) : comparaison secondaire → repliée dans le détail (det).
-          ...(hasObj ? [
-            det(colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas))),
-            det(colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced))),
-            ...(canMargin ? [det(colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin)))] : []),
-          ] : []),
-        ]} rows={rows} colsKey={`entity-${kind}`} />
-        {hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre {kind === "domaines" ? "BU" : "client"}. Les objectifs se définissent dans « Objectifs ».</Tip>}
+      <Card title={isClients ? "Portefeuille clients" : "Domaines (BU)"}>
+        {isClients ? (
+          <Table columns={[
+            // « Autres (N) » (longue traîne agrégée, cf. audit intégral A2) : non cliquable (pas une entité réelle).
+            colText("Client", (r) => (r.isOther ? <span className="text-faint italic">{r.key}</span> : <EntityLink kind="clients" value={r.key} />), (r) => r.key),
+            // Statut de portefeuille — filtrable par colonne (Actif / Prospect / Facturation).
+            colText("Statut", (r) => (r.isOther ? <span className="text-faint">—</span> : <Badge tone={STATUT_TONE[clientStatut(r)]}>{clientStatut(r)}</Badge>), (r) => clientStatut(r), (r) => (r.isOther ? "" : clientStatut(r))),
+            // DC — carnet acquis + pipeline pondéré ouvert + projeté.
+            colNum("CAS", (r) => money(r.cas), (r) => r.cas || 0),
+            det(colNum("Part", (r) => (tot.cas > 0 && !r.isOther ? pct((r.cas || 0) / tot.cas) : "—"), (r) => (tot.cas > 0 ? (r.cas || 0) / tot.cas : 0))),
+            colNum("Pipeline pond.", (r) => money(r.forecast), (r) => r.forecast || 0),
+            det(colNum("Projeté", (r) => money(r.projete), (r) => r.projete || 0)),
+            // DF — facturation & encaissement.
+            colNum("Facturé", (r) => money(r.facture), (r) => r.facture || 0),
+            colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog || 0),
+            det(colNum("Reste à encaisser", (r) => money(resteOf(r)), (r) => resteOf(r))),
+            det(colNum("Taux fact.", (r) => ((r.cas || 0) > 0 ? pct(tauxFactOf(r)) : "—"), (r) => tauxFactOf(r))),
+            // Marges masquées pour les rôles sans accès « Rentabilité ».
+            ...(canMargin ? [det(colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0)), det(colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0))] : []),
+            // DO·PM — affaires livrées (carnet), gaté sur l'accès « overview ».
+            ...(wantCmd ? [
+              colNum("Affaires", (r: EntityRow) => (r.isOther ? "—" : (cmdBy.get(r.key)?.fps.size ?? 0)), (r: EntityRow) => cmdBy.get(r.key)?.fps.size ?? 0),
+              det(colNum("Commandes", (r: EntityRow) => (r.isOther ? "—" : (cmdBy.get(r.key)?.orders ?? 0)), (r: EntityRow) => cmdBy.get(r.key)?.orders ?? 0)),
+              det(colText("PM référent", (r: EntityRow) => (r.isOther ? "—" : (domPm(r.key) || "—")), (r: EntityRow) => domPm(r.key), (r: EntityRow) => (r.isOther ? "" : domPm(r.key)))),
+            ] : []),
+            // R/O (Réalisé / Objectif) : comparaison secondaire → repliée dans le détail (det).
+            ...(hasObj ? [
+              det(colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas))),
+              det(colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced))),
+              ...(canMargin ? [det(colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin)))] : []),
+            ] : []),
+          ]} rows={rows} colsKey="entity-clients" searchKeys={[(r) => r.key, (r) => domPm(r.key)]} searchPlaceholder="Rechercher un client…" />
+        ) : (
+          <Table columns={[
+            colText("BU", (r) => (r.isOther ? <span className="text-faint italic">{r.key}</span> : <EntityLink kind="domaines" value={r.key} />), (r) => r.key),
+            colNum("CAS", (r) => money(r.cas), (r) => r.cas), colNum("Facturé", (r) => money(r.facture), (r) => r.facture),
+            colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog),
+            ...(canMargin ? [colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0), colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0)] : []),
+            ...(hasObj ? [
+              det(colNum("R/O CAS", (r: EntityRow) => roBadge(r.cas, roOf(r)?.targetCas))),
+              det(colNum("R/O Fact.", (r: EntityRow) => roBadge(r.facture, roOf(r)?.targetInvoiced))),
+              ...(canMargin ? [det(colNum("R/O Marge", (r: EntityRow) => roBadge(mbOf(r), roOf(r)?.targetMargin)))] : []),
+            ] : []),
+          ]} rows={rows} colsKey="entity-domaines" />
+        )}
+        {isClients && <Tip>Portefeuille de la période <b>{period}</b> lu depuis les agrégats existants : <b>CAS</b> (carnet acquis), <b>Pipeline pondéré</b> (opportunités ouvertes, projection tiérée), <b>Facturé/Backlog</b> (P&L). Le <b>statut</b> classe chaque client (Actif / Prospect / Facturation). Colonnes <b>Affaires / Commandes / PM référent</b> visibles avec l'accès Vue d'ensemble. Recherche, filtre par colonne, tri et export disponibles. Au-delà de 100 clients, la traîne est agrégée en « Autres (N) ».{hasObj ? " R/O = réalisé / objectif de la période au périmètre client (défini dans « Objectifs »)." : ""}</Tip>}
+        {!isClients && hasObj && <Tip>R/O = réalisé de la période / objectif {period} au périmètre BU. Les objectifs se définissent dans « Objectifs ».</Tip>}
       </Card>
     </div>
   );
