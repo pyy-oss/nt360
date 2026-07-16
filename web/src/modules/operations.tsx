@@ -109,6 +109,7 @@ export const PnlProjet: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire]}
           rowKey={(r) => r.id || r.fp || ""}
+          bulk={[]}
           expand={affaireDetail}
           columns={[
             colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
@@ -351,6 +352,8 @@ export const BC: FC<Props> = () => {
           colsKey="bc"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
+          rowKey={(r) => r.id || r.bcNumber || ""}
+          bulk={[]}
           columns={[
             // Essentiels EN LIGNE (N° BC, Fournisseur, XOF, Retard, Statut) ; le secondaire (FP, Type,
             // ETA contrat/réel) est replié dans le détail via det() → tableau étroit, sans scroll.

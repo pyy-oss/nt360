@@ -200,6 +200,8 @@ export const InvoiceList: FC<Props> = () => {
           colsKey="factures"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
+          rowKey={(r) => r.id || r.numero || ""}
+          bulk={[]}
           columns={[
             // Essentiels EN LIGNE (Numéro, Client, Échéance, Montant, Statut) ; le secondaire (FP, BU,
             // Rattachement, Date d'émission) est replié dans le détail via det() → tableau étroit, lisible.

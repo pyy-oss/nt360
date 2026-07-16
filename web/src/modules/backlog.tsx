@@ -224,6 +224,8 @@ function CarryoverCard() {
         rows={shown}
         colsKey="backlog-projets"
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire || ""]}
+        rowKey={(r) => r.fp || ""}
+        bulk={[]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
@@ -1149,6 +1151,8 @@ export const OrderList: FC<Props> = () => {
         initialSearch={intent?.search}
         expand={orderActions}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.pm || "", (r) => r.affaire || ""]}
+        rowKey={(r) => r.fp || ""}
+        bulk={[]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
