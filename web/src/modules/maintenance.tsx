@@ -14,7 +14,7 @@ import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
-import type { Invoice } from "../types";
+import type { Invoice, Order } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
@@ -26,7 +26,7 @@ import {
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard } from "../lib/mntDashboard";
-import { suggestMntContrats, mntCandidatePool, type MntSuggestion } from "../lib/mntSuggest";
+import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
@@ -217,30 +217,89 @@ export const Maintenance: FC<Props> = () => {
     const have = new Set(contrats.map((c) => fpKey(c.fp)).filter(Boolean));
     return aiSug.suggestions.filter((s) => !have.has(fpKey(s.fp)));
   }, [aiSug, contrats]);
-  const prefill = (s: { fp: string; client: string; bu: string; am: string; echeance?: string | null }) => {
-    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am, ...(s.echeance && (ECHEANCES as readonly string[]).includes(s.echeance) ? { echeanceType: s.echeance } : {}) });
+  // Commande par FP CANONIQUE (première rencontrée — même ordre que les constructeurs de suggestions) :
+  // source de la date de commande + du CAS pour pré-remplir un contrat. Échéance IA par FP (si suggérée).
+  const orderByFp = useMemo(() => {
+    const m = new Map<string, Order>();
+    for (const o of commandes) { const k = fpKey(o.fp); if (k && !m.has(k)) m.set(k, o); }
+    return m;
+  }, [commandes]);
+  type SugLike = { fp?: string; client?: string; bu?: string; am?: string; cas?: number; echeance?: string | null };
+  const keyOf = (s: SugLike) => fpKey(s.fp || "") || "";
+  // Brouillon pré-rempli (dateFin = date commande + 12 mois, montant = CAS…). Repli sur la suggestion si la
+  // commande n'est plus en mémoire (le carnet vit) — les dates tombent alors sur le millésime / aujourd'hui.
+  const draftFor = (s: SugLike) => {
+    const o = orderByFp.get(keyOf(s));
+    return buildContratDraft(o || { fp: s.fp, client: s.client, bu: s.bu, am: s.am, cas: s.cas }, asOfIso, s.echeance ?? undefined);
+  };
+  const prefill = (s: SugLike) => {
+    const f = toContratForm(draftFor(s));
+    // Le Select BU du formulaire n'accepte que BU_OPTS ; une BU hors liste retombe sur « AUTRE » (le serveur
+    // cleanBu gère la valeur réelle à l'écriture). La création en masse, elle, écrit la BU brute nettoyée serveur.
+    setCForm({ ...f, bu: BU_OPTS.includes(f.bu) ? f.bu : "AUTRE" });
     setCId(""); setCEdit(false); setCOpen(true);
   };
-  const openSuggestion = (s: MntSuggestion) => prefill(s);
+
+  // Sélection multiple (par FP canonique) → création EN MASSE. On boucle l'écriture GOUVERNÉE existante
+  // (upsertMntContrat), tolérante par ligne — même patron que « appliquer en lot » du Centre de correction.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const toggleSel = (k: string) => setSel((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const visibleKeys = (aiSug ? aiRows : suggestions).map(keyOf).filter(Boolean);
+  const allSelected = visibleKeys.length > 0 && visibleKeys.every((k) => sel.has(k));
+  const toggleAll = () => setSel(allSelected ? new Set() : new Set(visibleKeys));
+  const bulkCreate = async () => {
+    let ok = 0; const fails: string[] = [];
+    for (const s of (aiSug ? aiRows : suggestions)) {
+      const k = keyOf(s); if (!sel.has(k)) continue;
+      try { await upsertMntContrat(draftFor(s)); ok++; } catch { fails.push(k); }
+    }
+    setSel(new Set());
+    return { ok, fails: fails.length };
+  };
+  const selCol = <T extends SugLike>() => colText("", (s: T) => {
+    const k = keyOf(s);
+    return <input type="checkbox" className="accent-gold" checked={sel.has(k)} onChange={() => toggleSel(k)} aria-label={`Sélectionner ${s.fp || ""}`} />;
+  });
+  // Échéance dérivée (date commande + 12 mois), visible pour que rien ne soit « inventé » en silence.
+  const echCol = <T extends SugLike>() => colText("Échéance", (s: T) => {
+    const d = draftFor(s);
+    return <span className="text-[12px] whitespace-nowrap" title={`Début ${frDate(d.dateDebut)}`}>{frDate(d.dateFin || undefined)}</span>;
+  }, (s: T) => draftFor(s).dateFin || "");
+  const createBtn = <T extends SugLike>() => colText("", (s: T) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => prefill(s)}>Créer</button> : null));
   const suggestCols = [
+    ...(canWrite ? [selCol<MntSuggestion>()] : []),
     colText("Client", (s: MntSuggestion) => s.client || "—", (s: MntSuggestion) => s.client || ""),
     colText("N° FP", (s: MntSuggestion) => <FpLink fp={s.fp} />),
     colText("Affaire", (s: MntSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
     colNum("Montant", (s: MntSuggestion) => money(s.cas), (s: MntSuggestion) => s.cas),
+    echCol<MntSuggestion>(),
     colText("Signaux", (s: MntSuggestion) => <div className="flex flex-wrap gap-1">{s.reasons.slice(0, 4).map((r, i) => <Badge key={i} tone="steel">{r}</Badge>)}</div>),
-    colText("", (s: MntSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openSuggestion(s)}>Créer</button> : null)),
+    createBtn<MntSuggestion>(),
   ];
   // Confiance IA → ton (visuel aligné sur l'échelle de risque : forte = vert, moyenne = or, faible = argile).
   const confTone = (c: number) => (c >= 0.75 ? "emerald" : c >= 0.5 ? "gold" : "clay");
   const aiCols = [
+    ...(canWrite ? [selCol<MntAiSuggestion>()] : []),
     colText("Client", (s: MntAiSuggestion) => s.client || "—", (s: MntAiSuggestion) => s.client || ""),
     colText("N° FP", (s: MntAiSuggestion) => <FpLink fp={s.fp} />),
     colText("Affaire", (s: MntAiSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
     colNum("Montant", (s: MntAiSuggestion) => money(s.cas), (s: MntAiSuggestion) => s.cas),
+    echCol<MntAiSuggestion>(),
     colNum("Confiance", (s: MntAiSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: MntAiSuggestion) => s.confidence),
     colText("Analyse", (s: MntAiSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>),
-    colText("", (s: MntAiSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => prefill(s)}>Créer</button> : null)),
+    createBtn<MntAiSuggestion>(),
   ];
+  // Barre d'actions de sélection (montée quand ≥ 1 ligne cochée) — réutilisée par les deux tables.
+  const bulkBar = canWrite ? (
+    <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px]">
+      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" className="accent-gold" checked={allSelected} onChange={toggleAll} aria-label="Tout sélectionner" />
+        <span className="text-muted">{sel.size > 0 ? `${sel.size} sélectionné(s)` : "Tout sélectionner"}</span>
+      </label>
+      {sel.size > 0 && <Busy variant="gold" label={`Créer ${sel.size} contrat(s)`} okMsg={(r: { ok: number; fails: number }) => `${r.ok} contrat(s) créé(s)${r.fails ? ` — ${r.fails} échec(s)` : ""}`} errMsg="Création refusée" fn={bulkCreate} />}
+      {sel.size > 0 && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setSel(new Set())}>Effacer</button>}
+    </div>
+  ) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -314,17 +373,17 @@ export const Maintenance: FC<Props> = () => {
           actions={candidatePool.length > 0 ? (
             <Busy variant="gold" label={aiSug ? "Réanalyser à l'IA" : "Doper à l'IA"}
               okMsg="Analyse IA prête" errMsg="Analyse IA indisponible"
-              fn={async () => { setAiSug(await aiSuggestMntContrats(candidatePool)); }} />
+              fn={async () => { const r = await aiSuggestMntContrats(candidatePool); setSel(new Set()); setAiSug(r); }} />
           ) : undefined}>
           {aiSug ? (
             <>
-              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
-              {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" />}
+              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. Coche des lignes pour <b>créer en masse</b>, ou « Créer » pour ouvrir une fiche <b>pré-remplie</b> (échéance = date de commande + 12 mois). Rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
+              {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <>{bulkBar}<Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" /></>}
             </>
           ) : (
             <>
-              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. « Créer » ouvre une fiche <b>pré-remplie</b>.</Tip>
-              {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />}
+              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. Coche des lignes pour <b>créer en masse</b> (échéance = date de commande + 12 mois), ou « Créer » pour une fiche <b>pré-remplie</b>.</Tip>
+              {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <>{bulkBar}<Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" /></>}
             </>
           )}
         </Card>

@@ -4,6 +4,9 @@
 // canonicalisation fpKey. Heuristique par mots-clés sur la désignation (affaire) + le client — jamais
 // une création automatique : chaque suggestion ouvre la fiche contrat PRÉ-REMPLIE, l'humain valide.
 
+import type { MntContrat } from "../types";
+import { ECHEANCES } from "./mntContrat";
+
 // Mots-clés (normalisés sans accents) qui trahissent une prestation récurrente / de maintenance.
 export const MNT_KEYWORDS = [
   "maintenance", "tma", "support", "infogerance", "hebergement", "licence", "abonnement",
@@ -20,7 +23,7 @@ export interface MntSuggestion {
   score: number; reasons: string[];
 }
 
-type OrderLike = { fp?: string; client?: string; bu?: string; am?: string; affaire?: string | null; cas?: number };
+type OrderLike = { fp?: string; client?: string; bu?: string; am?: string; affaire?: string | null; cas?: number; dateCommande?: string | null; yearPo?: number };
 type ContratLike = { fp?: string };
 
 /**
@@ -88,4 +91,49 @@ export function mntCandidatePool(
   }
   out.sort((a, b) => b._kw - a._kw || b.cas - a.cas || a.client.localeCompare(b.client));
   return out.slice(0, cap).map(({ _kw, ...c }) => c);
+}
+
+// --- Brouillon de contrat pré-rempli depuis une commande (Lot 9 : création en masse depuis les suggestions) ---
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const validIso = (s?: string | null): string | null => (s && ISO.test(s) ? s : null);
+
+/** Ajoute `n` mois à une date ISO AAAA-MM-JJ (jour ramené au dernier jour du mois si dépassement). PUR. */
+export function addMonths(iso: string, n: number): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!m) return null;
+  let y = Number(m[1]);
+  let mo = Number(m[2]) - 1 + n;
+  let d = Number(m[3]);
+  y += Math.floor(mo / 12);
+  mo = ((mo % 12) + 12) % 12;
+  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate(); // 0 du mois suivant = dernier jour du mois courant
+  if (d > last) d = last;
+  return `${y}-${String(mo + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * Brouillon de contrat pré-rempli depuis une commande, prêt à écrire via `upsertMntContrat`. PUR.
+ * Règle métier (ADR-020) : `dateDebut` = date de la commande (repli AAAA-01-01 sur le millésime PO
+ * plausible, sinon aujourd'hui) ; `dateFin` = dateDebut + 12 mois ; `montantEngage` = CAS de la commande ;
+ * `statut` = brouillon (jamais actif d'office) ; `echeanceType` = échéance suggérée ou « annuel ».
+ * @param o        commande source (fp, client, bu, am, cas, dateCommande, yearPo)
+ * @param todayIso date du jour ISO (injectée → fonction pure) utilisée en dernier repli
+ * @param echeance périodicité suggérée (IA) — retenue seulement si dans l'énumération
+ */
+export function buildContratDraft(
+  o: OrderLike,
+  todayIso: string,
+  echeance?: string | null,
+): MntContrat {
+  const curY = Number(String(todayIso).slice(0, 4)) || 0;
+  const yr = Number(o.yearPo) || 0;
+  const yearPlausible = yr >= 2015 && yr <= curY + 3; // même bornage que plausibleYear (ids)
+  const dateDebut = validIso(o.dateCommande) || (yearPlausible ? `${yr}-01-01` : todayIso);
+  const dateFin = addMonths(dateDebut, 12) || dateDebut;
+  const ech = echeance && (ECHEANCES as readonly string[]).includes(echeance) ? echeance : "annuel";
+  return {
+    fp: o.fp || "", client: o.client || "", bu: o.bu || "", am: o.am || "",
+    statut: "brouillon", echeanceType: ech, dateDebut, dateFin,
+    montantEngage: Math.max(0, Math.round(Number(o.cas) || 0)), deviseEngage: "XOF", engagements: [],
+  };
 }

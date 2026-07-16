@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { suggestMntContrats } from "./mntSuggest";
+import { suggestMntContrats, addMonths, buildContratDraft } from "./mntSuggest";
 
 // fpKey de test simplifié : normalise la casse/espaces (suffisant pour l'appariement du test).
 const fk = (v?: string | null) => String(v || "").trim().toUpperCase();
@@ -35,5 +35,56 @@ describe("suggestMntContrats", () => {
     ];
     expect(suggestMntContrats(orders, [], fk)).toHaveLength(2);
     expect(suggestMntContrats(orders, [], fk, 1)).toHaveLength(1);
+  });
+});
+
+describe("addMonths — arithmétique de date ISO", () => {
+  it("ajoute 12 mois (même jour, année +1)", () => {
+    expect(addMonths("2025-03-15", 12)).toBe("2026-03-15");
+  });
+  it("ramène le jour au dernier du mois si dépassement (29/02 → 28/02)", () => {
+    expect(addMonths("2024-02-29", 12)).toBe("2025-02-28");
+    expect(addMonths("2025-11-30", 3)).toBe("2026-02-28");
+  });
+  it("rejette une date illisible", () => {
+    expect(addMonths("15/03/2025", 12)).toBeNull();
+    expect(addMonths("", 12)).toBeNull();
+  });
+});
+
+describe("buildContratDraft — brouillon pré-rempli depuis une commande", () => {
+  const today = "2026-07-16";
+
+  it("dateDebut = date commande, dateFin = +12 mois, montant = CAS arrondi (FCFA entier)", () => {
+    const d = buildContratDraft({ fp: "FP/2026/1", client: "ACME", bu: "ICT", am: "DATCHA", cas: 4999999.6, dateCommande: "2026-02-10" }, today);
+    expect(d.dateDebut).toBe("2026-02-10");
+    expect(d.dateFin).toBe("2027-02-10");
+    expect(d.montantEngage).toBe(5000000);
+    expect(d.deviseEngage).toBe("XOF");
+    expect(d.statut).toBe("brouillon");   // jamais actif d'office
+    expect(d.echeanceType).toBe("annuel"); // défaut cohérent avec un terme de 12 mois
+    expect(d.engagements).toEqual([]);
+    expect(d.fp).toBe("FP/2026/1");
+  });
+
+  it("retient l'échéance suggérée si valide, ignore une valeur hors énumération", () => {
+    expect(buildContratDraft({ cas: 0, dateCommande: "2026-01-01" }, today, "mensuel").echeanceType).toBe("mensuel");
+    expect(buildContratDraft({ cas: 0, dateCommande: "2026-01-01" }, today, "hebdomadaire").echeanceType).toBe("annuel");
+  });
+
+  it("sans date de commande : repli sur le 1er janvier du millésime PO plausible", () => {
+    const d = buildContratDraft({ fp: "FP/2025/9", cas: 100, yearPo: 2025 }, today);
+    expect(d.dateDebut).toBe("2025-01-01");
+    expect(d.dateFin).toBe("2026-01-01");
+  });
+
+  it("sans date ni millésime plausible : repli sur aujourd'hui", () => {
+    const d = buildContratDraft({ cas: 100, yearPo: 1900 }, today);
+    expect(d.dateDebut).toBe(today);
+    expect(d.dateFin).toBe("2027-07-16");
+  });
+
+  it("montant négatif ramené à 0", () => {
+    expect(buildContratDraft({ cas: -50, dateCommande: "2026-01-01" }, today).montantEngage).toBe(0);
   });
 });
