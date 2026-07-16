@@ -105,6 +105,10 @@ export function useClientOptions(): string[] {
   const { data } = useDocData<EntitySummary>("summaries/clients_all");
   return (data?.rows || []).map((r) => r.key).filter(Boolean);
 }
+export function useSupplierOptions(): string[] {
+  const { data } = useDocData<{ bySupplier?: { name?: string }[] }>("summaries/suppliers");
+  return (data?.bySupplier || []).map((s) => s.name || "").filter(Boolean);
+}
 
 export function useCommandesRows(enabled = true) {
   const canMargin = useCanSeeMargin();

@@ -9,9 +9,10 @@ import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
-import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, FpLink } from "./_shared";
+import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, useSupplierOptions, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
@@ -204,6 +205,7 @@ function CreditEditor({ name, authorized, opening, openingDate }: { name: string
 // Import BC fournisseurs — 2 modes : Batch (Excel « Logistics / PO List ») ou Unitaire (PDF).
 const EMPTY_BC = { bcNumber: "", supplier: "", fp: "", expenseType: "Hardware", currency: "XOF", amount: "", amountXof: "", status: "a_emettre", description: "", dateIn: "" };
 function BcImport() {
+  const supplierOpts = useSupplierOptions();
   const [mode, setMode] = useState<"batch" | "unitaire">("batch");
   const [f, setF] = useState(EMPTY_BC);
   const [pdf, setPdf] = useState<File | null>(null);
@@ -257,7 +259,7 @@ function BcImport() {
           <p className="text-[13px] text-muted">Joignez le PDF d'un bon de commande : les champs sont <b className="text-ink">extraits automatiquement</b> et pré-remplis (n° BC, fournisseur, montant, date…) — vérifiez puis enregistrez. Le PDF est conservé pour traçabilité.</p>
           <div className="flex flex-wrap gap-2 items-center">
             <input className="field" placeholder="N° BC" aria-label="Numéro de BC" value={f.bcNumber} onChange={(e) => setF({ ...f, bcNumber: e.target.value })} />
-            <input className="field" placeholder="Fournisseur" aria-label="Fournisseur" value={f.supplier} onChange={(e) => setF({ ...f, supplier: e.target.value })} />
+            <Combo className="min-w-[180px]" placeholder="Fournisseur" ariaLabel="Fournisseur" allowCreate value={f.supplier} onChange={(v) => setF({ ...f, supplier: v })} options={supplierOpts.map((s) => ({ value: s, label: s }))} />
             <input className="field w-40" placeholder="N° FP (optionnel)" aria-label="Numéro FP" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
             <Select className="w-40" ariaLabel="Type de dépense" value={f.expenseType} onChange={(v) => setF({ ...f, expenseType: v })} options={["Hardware", "Licence", "Software", "Support", "Service Pro", "Mixte"].map((t) => ({ value: t, label: t }))} />
             <input className="field w-20 uppercase" placeholder="Devise" aria-label="Devise" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} />
@@ -393,6 +395,7 @@ function BcClickupBtn({ bcNumber, linked }: { bcNumber?: string; linked: boolean
 function BcFixer({ id, fp, amountXof, supplier, currency, amount }: { id: string; fp?: string; amountXof?: number; supplier?: string; currency?: string; amount?: number }) {
   const [nf, setNf] = useState("");
   const [sup, setSup] = useState("");
+  const supplierOpts = useSupplierOptions();
   const noFp = !fp;
   const noAmt = !((amountXof || 0) > 0);
   const noSup = !(supplier && supplier.trim());
@@ -404,7 +407,7 @@ function BcFixer({ id, fp, amountXof, supplier, currency, amount }: { id: string
         <Busy variant="ghost" label="FP" okMsg="FP rattaché" fn={() => patchBcLine({ id, fp: nf })} />
       </>}
       {noSup && <>
-        <input className="field w-28 !py-1 text-xs" aria-label="Fournisseur" placeholder="Fournisseur" value={sup} onChange={(e) => setSup(e.target.value)} />
+        <Combo className="w-40 !py-0.5 text-xs" placeholder="Fournisseur" ariaLabel="Fournisseur" allowCreate value={sup} onChange={setSup} options={supplierOpts.map((s) => ({ value: s, label: s }))} />
         <Busy variant="ghost" label="Frns" okMsg="Fournisseur corrigé" errMsg="Fournisseur invalide"
           fn={() => { if (!sup.trim()) throw new Error("saisir un fournisseur"); return patchBcLine({ id, supplier: sup }); }} />
       </>}
