@@ -3,6 +3,8 @@
 // nouvel appel serveur : le cockpit consolide ce que le module lit déjà. Testable sans React.
 // Convention ERP : dates ISO AAAA-MM-JJ, montants FCFA entiers, statuts en code applicatif.
 
+import { slaState } from "./mntSla";
+
 export const ECHEANCE_PROCHE_JOURS = 60; // aligné sur le signal « échéance proche » du moteur de risque
 const DAY = 86400000;
 
@@ -27,7 +29,7 @@ export interface MntDashboard {
   echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 60] jours
 }
 
-type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; montantEngage?: number; dateFin?: string | null };
+type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
 type TicketLike = { statut?: string; priorite?: string };
 
 /** Agrège les contrats + tickets à une date donnée (asOfIso, AAAA-MM-JJ). PUR. */
@@ -68,4 +70,125 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
     ticketsTotal: (tickets || []).length,
     ticketsOuverts, parPriorite, echeancesProches,
   };
+}
+
+// --- Renouvellements à anticiper (Lot 5/7 « valeur ajoutée » — anticipation) ---
+// Vue front PURE : contrats ACTIFS dont la date de fin approche, dans un horizon (défaut 90 j), classés par
+// urgence — critique (≤ 30 j), proche (≤ 60 j), à venir (≤ 90 j). Sert à déclencher un renouvellement AVANT
+// l'échéance (l'action passe par le moteur d'approbation existant). Les contrats DÉJÀ échus relèvent du
+// contrôle de conformité (échéance dépassée), pas d'ici. Aucune I/O, aucune métrique persistée.
+export type MntRenouvellementBucket = "critique" | "proche" | "a_venir";
+export interface MntRenouvellement { id: string; fp: string | null; client: string; dateFin: string; jours: number; bucket: MntRenouvellementBucket }
+
+/** Contrats actifs dont la fin tombe dans [0 .. horizon] jours, plus urgent d'abord. PUR. */
+export function mntRenouvellements(contrats: ContratLike[], asOfIso: string, horizonJours = 90): MntRenouvellement[] {
+  const asOf = parseIso(asOfIso);
+  if (asOf == null) return [];
+  const out: MntRenouvellement[] = [];
+  for (const c of contrats || []) {
+    if ((c.statut || "brouillon") !== "actif") continue;
+    const fin = parseIso(c.dateFin);
+    if (fin == null) continue;
+    const jours = Math.round((fin - asOf) / DAY);
+    if (jours < 0 || jours > horizonJours) continue;
+    const bucket: MntRenouvellementBucket = jours <= 30 ? "critique" : jours <= 60 ? "proche" : "a_venir";
+    out.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", dateFin: c.dateFin as string, jours, bucket });
+  }
+  out.sort((a, b) => a.jours - b.jours);
+  return out;
+}
+
+// --- Contrôle de complétude / conformité des contrats (Lot 3/7 « valeur ajoutée » — conformité) ---
+// Vue front PURE : parmi les contrats ACTIFS (ceux en vigueur), repère les MANQUES de conformité qui
+// rendent un contrat inexploitable ou hors-cadre — aucun engagement SLA, pas de date de fin, échéance déjà
+// dépassée (contrat encore « actif » alors qu'il aurait dû être renouvelé/échu), montant d'engagement nul.
+// Aucune I/O ni métrique persistée → pas de miroir back. On ne juge QUE les contrats actifs (les brouillons
+// sont en cours de saisie, les échus/résiliés sont sortis). « conforme » = actif sans aucun manque.
+export type MntComplianceIssue = "sans_sla" | "sans_echeance" | "echeance_depassee" | "montant_nul";
+export interface MntComplianceItem { id: string; fp: string | null; client: string; issues: MntComplianceIssue[] }
+export interface MntComplianceResult {
+  items: MntComplianceItem[];                       // contrats actifs avec ≥ 1 manque, plus de manques d'abord
+  byIssue: Record<MntComplianceIssue, number>;
+  activeTotal: number;
+  conformes: number;
+}
+
+/** Contrôle de conformité des contrats ACTIFS à la date asOfIso (AAAA-MM-JJ). PUR. */
+export function mntCompliance(contrats: ContratLike[], asOfIso: string): MntComplianceResult {
+  const asOf = parseIso(asOfIso);
+  const items: MntComplianceItem[] = [];
+  const byIssue: Record<MntComplianceIssue, number> = { sans_sla: 0, sans_echeance: 0, echeance_depassee: 0, montant_nul: 0 };
+  let activeTotal = 0;
+  for (const c of contrats || []) {
+    if ((c.statut || "brouillon") !== "actif") continue;
+    activeTotal++;
+    const issues: MntComplianceIssue[] = [];
+    if (!(c.engagements && c.engagements.length)) issues.push("sans_sla");
+    const fin = parseIso(c.dateFin);
+    if (!c.dateFin) issues.push("sans_echeance");
+    else if (fin != null && asOf != null && fin < asOf) issues.push("echeance_depassee");
+    if (!(Number(c.montantEngage) > 0)) issues.push("montant_nul");
+    if (issues.length) {
+      for (const k of issues) byIssue[k]++;
+      items.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", issues });
+    }
+  }
+  items.sort((a, b) => b.issues.length - a.issues.length || a.client.localeCompare(b.client));
+  return { items, byIssue, activeTotal, conformes: activeTotal - items.length };
+}
+
+// --- Calendrier SLA des tickets (Lot 2/7 « valeur ajoutée » — opérationnel) ---
+// Vue front PURE : pour chaque ticket OUVERT, ses échéances SLA ENCORE EN ATTENTE (prise en compte tant
+// qu'il n'est pas pris en charge ; résolution tant qu'il n'est pas résolu), avec l'état live (rompu / en
+// cours) calculé par le MÊME moteur slaState que la fiche (horloge jours ouvrés ou h24, ADR-002). Aucune
+// I/O ni métrique persistée → pas de miroir back (comme le tableau de bord). Les horodatages sont fournis
+// EN MILLIS (le module convertit les Timestamp via tsMillis avant l'appel) → fonction trivialement testable.
+export interface SlaAgendaItem {
+  ticketId: string; contratId: string; client: string; titre: string; priorite: string;
+  slaType: "prise_en_compte" | "resolution"; dueMs: number; state: "rompu" | "en_cours"; remainingMs: number;
+}
+type TicketMs = {
+  id?: string; contratId?: string; client?: string; titre?: string; priorite?: string; statut?: string;
+  ouvertMs?: number | null; priseEnCompteMs?: number | null; resoluMs?: number | null;
+};
+type Eng = { type?: string; couverture?: string; seuilHeures?: number };
+type ContratEng = { id?: string; engagements?: Eng[] };
+
+/** Échéances SLA en attente des tickets ouverts, triées « rompu d'abord » puis par échéance la plus proche. PUR. */
+export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: number): SlaAgendaItem[] {
+  // 1ᵉʳ engagement de chaque type par contrat (la fiche impose au plus un par type utile ici).
+  const engByContrat = new Map<string, { prise_en_compte?: Eng; resolution?: Eng }>();
+  for (const c of contrats || []) {
+    if (!c.id) continue;
+    const slot: { prise_en_compte?: Eng; resolution?: Eng } = {};
+    for (const e of c.engagements || []) {
+      if (e.type === "prise_en_compte" && !slot.prise_en_compte) slot.prise_en_compte = e;
+      else if (e.type === "resolution" && !slot.resolution) slot.resolution = e;
+    }
+    engByContrat.set(c.id, slot);
+  }
+  const out: SlaAgendaItem[] = [];
+  for (const t of tickets || []) {
+    const st = t.statut || "ouvert";
+    if (st !== "ouvert" && st !== "en_cours") continue; // seuls les tickets OUVERTS
+    if (t.ouvertMs == null) continue;
+    const engs = engByContrat.get(t.contratId || "") || {};
+    const pending: { slaType: SlaAgendaItem["slaType"]; eng: any }[] = [];
+    if (t.priseEnCompteMs == null && engs.prise_en_compte) pending.push({ slaType: "prise_en_compte", eng: engs.prise_en_compte });
+    if (t.resoluMs == null && engs.resolution) pending.push({ slaType: "resolution", eng: engs.resolution });
+    for (const p of pending) {
+      const s = slaState(p.eng, t.ouvertMs, null, nowMs); // markMs=null → SLA encore en cours (état vivant)
+      out.push({
+        ticketId: t.id || "", contratId: t.contratId || "", client: t.client || "", titre: t.titre || "",
+        priorite: t.priorite || "moyenne", slaType: p.slaType, dueMs: s.dueMs,
+        state: s.state === "rompu" ? "rompu" : "en_cours", remainingMs: s.dueMs - nowMs,
+      });
+    }
+  }
+  // Rompus d'abord (les plus en retard en tête), puis les échéances les plus proches.
+  out.sort((a, b) => {
+    if (a.state !== b.state) return a.state === "rompu" ? -1 : 1;
+    return a.dueMs - b.dueMs;
+  });
+  return out;
 }

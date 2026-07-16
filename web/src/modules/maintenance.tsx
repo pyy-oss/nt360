@@ -5,7 +5,7 @@
 // money, date JJ/MM/AAAA via frDate). Aucune valeur en dur (tokens/tons via lib/mntContrat).
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { where } from "firebase/firestore";
+import { where, orderBy, limit } from "firebase/firestore";
 import { useCan } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
@@ -13,11 +13,12 @@ import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
-import { slaState, slaTone, SLA_STATE_LABEL, echeancier } from "../lib/mntSla";
-import type { Invoice } from "../types";
+import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
+import type { Invoice, Order, AuditLog } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
+  mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -25,12 +26,13 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard } from "../lib/mntDashboard";
-import { suggestMntContrats, mntCandidatePool, type MntSuggestion } from "../lib/mntSuggest";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
+import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+const MNT_COMPLIANCE_LABEL: Record<string, string> = { sans_sla: "Sans engagement SLA", sans_echeance: "Sans date de fin", echeance_depassee: "Échéance dépassée", montant_nul: "Montant nul" };
 const opt = (map: Record<string, string>, vals: readonly string[]) => vals.map((v) => ({ value: v, label: map[v] || v }));
 const digits = (s: string) => s.replace(/[^\d]/g, "");
 const decimals = (s: string) => s.replace(/[^\d.,]/g, "").replace(",", ".");
@@ -124,6 +126,9 @@ export const Maintenance: FC<Props> = () => {
   const { rows: cInvoices } = useCollectionData<Invoice>(openFp ? "invoices" : null, openFp ? [where("fp", "==", openFp)] : [], openFp || "");
   const factureTotal = useMemo(() => cInvoices.reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices]);
   const ech = useMemo(() => echeancier({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
+  // Échéancier DÉTAILLÉ (liste datée) : chaque échéance marquée facturée (couverte par le facturé cumulé) /
+  // dûe (passée non couverte) / à venir. Même assiette que l'agrégat `ech` (parité echeancierPlan/echeancier).
+  const plan = useMemo(() => echeancierPlan({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
 
   // --- Tickets ---
   const [tOpen, setTOpen] = useState(false);
@@ -132,6 +137,22 @@ export const Maintenance: FC<Props> = () => {
   const ticketsSorted = useMemo(() => [...tickets].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [tickets]);
   const contratById = useMemo(() => Object.fromEntries(contrats.map((c) => [c.id!, c])), [contrats]);
   const nowMs = Date.now();
+  // Calendrier SLA (Lot 2/7) : échéances SLA en attente des tickets ouverts, live. Horodatages convertis en
+  // millis (tsMillis) avant l'appel → la vue PURE slaAgenda reste testable ; même moteur slaState que la fiche.
+  const agenda = useMemo(() => slaAgenda(
+    tickets.map((t) => ({
+      id: t.id, contratId: t.contratId, client: t.client, titre: t.titre, priorite: t.priorite, statut: t.statut,
+      ouvertMs: t.ouvertLe ? tsMillis(t.ouvertLe) : null,
+      priseEnCompteMs: t.priseEnCompteLe ? tsMillis(t.priseEnCompteLe) : null,
+      resoluMs: t.resoluLe ? tsMillis(t.resoluLe) : null,
+    })),
+    contrats, nowMs), [tickets, contrats, nowMs]);
+  // Restant lisible : « 2 j 3 h » ou « En retard de … » (rompu). Zéro dépendance externe (arrondi h).
+  const fmtRemaining = (ms: number) => {
+    const h = Math.floor(Math.abs(ms) / 3_600_000), d = Math.floor(h / 24);
+    const txt = d > 0 ? `${d} j ${h % 24} h` : `${h} h`;
+    return ms < 0 ? `En retard de ${txt}` : txt;
+  };
   const openNewTicket = () => { setTForm({ statut: "ouvert", priorite: "moyenne" }); setTOpen(true); };
   const openEditTicket = (t: MntTicket) => { setTForm({ ...t }); setTOpen(true); };
   // Sélection d'un contrat : renseigne contratId + reporte fp/client (rattachement).
@@ -179,6 +200,15 @@ export const Maintenance: FC<Props> = () => {
     )),
   ];
 
+  const agendaCols = [
+    colText("État", (a: SlaAgendaItem) => <Badge tone={slaTone(a.state)}>{SLA_STATE_LABEL[a.state]}</Badge>, (a: SlaAgendaItem) => (a.state === "rompu" ? 0 : 1)),
+    colText("Restant", (a: SlaAgendaItem) => <span className={cx("text-[12px] whitespace-nowrap", a.remainingMs < 0 && "text-clay")}>{fmtRemaining(a.remainingMs)}</span>, (a: SlaAgendaItem) => a.remainingMs),
+    colText("Client", (a: SlaAgendaItem) => a.client || "—", (a: SlaAgendaItem) => a.client || ""),
+    colText("Ticket", (a: SlaAgendaItem) => <span className="truncate max-w-[220px] inline-block align-bottom" title={a.titre}>{a.titre || "—"}</span>),
+    colText("SLA", (a: SlaAgendaItem) => label(SLA_TYPE_LABEL, a.slaType)),
+    colText("Priorité", (a: SlaAgendaItem) => <Badge tone={prioriteTone(a.priorite)}>{label(PRIORITE_LABEL, a.priorite)}</Badge>),
+  ];
+
   // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
   const risqueItems = risque?.items || [];
   const atRisk = risqueItems.filter((r) => r.niveau !== "vert");
@@ -200,6 +230,87 @@ export const Maintenance: FC<Props> = () => {
   // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
   const asOfIso = new Date().toISOString().slice(0, 10);
   const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
+  // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
+  // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
+  const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
+  // Renouvellements à anticiper (Lot 5/7) : contrats actifs dont la fin approche (≤ 90 j), plus urgent d'abord.
+  const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
+  const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
+  const renouvCols = [
+    colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
+    colText("Client", (r: MntRenouvellement) => r.client || "—", (r: MntRenouvellement) => r.client || ""),
+    colText("N° FP", (r: MntRenouvellement) => <FpLink fp={r.fp || undefined} />),
+    colText("Fin", (r: MntRenouvellement) => frDate(r.dateFin)),
+    colNum("Jours restants", (r: MntRenouvellement) => String(r.jours), (r: MntRenouvellement) => r.jours),
+    colText("", (r: MntRenouvellement) => (canWrite ? <Busy variant="ghost" label="Demander le renouvellement" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} /> : null)),
+  ];
+  // Rentabilité par contrat (Lot 4/7) : callable gouverné (coût CJM serveur, masqué sans droit rentabilité).
+  // Chargé à l'ouverture du module ; « Recalculer » rafraîchit après édition.
+  const [pnl, setPnl] = useState<{ rows: MntContratPnlRow[]; hasCost: boolean } | null>(null);
+  useEffect(() => { if (!gate) return; mntContratPnl().then((r) => setPnl({ rows: r.rows, hasCost: r.hasCost })).catch(() => setPnl(null)); }, [gate]);
+  const pnlCols = pnl ? [
+    colText("Client", (r: MntContratPnlRow) => r.client || "—", (r: MntContratPnlRow) => r.client || ""),
+    colText("N° FP", (r: MntContratPnlRow) => <FpLink fp={r.fp || undefined} />),
+    colNum("Revenu engagé", (r: MntContratPnlRow) => money(r.revenue), (r: MntContratPnlRow) => r.revenue),
+    colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
+    ...(pnl.hasCost ? [
+      colNum("Coût", (r: MntContratPnlRow) => money(r.cout || 0), (r: MntContratPnlRow) => r.cout || 0),
+      colNum("Marge", (r: MntContratPnlRow) => <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>{money(r.marge || 0)}</span>, (r: MntContratPnlRow) => r.marge || 0),
+      colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : `${Math.round(r.margePct * 100)} %`), (r: MntContratPnlRow) => r.margePct || 0),
+    ] : []),
+  ] : [];
+  // Analyse de rétention IA (Lot 6/7) : contrats à risque (moteur existant) enrichis de stats tickets +
+  // proximité d'échéance → l'IA rend motifs de churn + reco. Parité : on part de ce que l'écran affiche.
+  const churnInput = useMemo<ChurnInput[]>(() => {
+    const openByFp = new Map<string, number>(), breachByFp = new Map<string, number>();
+    for (const t of tickets) {
+      const k = fpKey(t.fp || ""); if (!k) continue;
+      if (t.statut === "ouvert" || t.statut === "en_cours") openByFp.set(k, (openByFp.get(k) || 0) + 1);
+      const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
+      if (eng && t.ouvertLe && slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs).state === "rompu") breachByFp.set(k, (breachByFp.get(k) || 0) + 1);
+    }
+    const finJours = (fp?: string | null) => {
+      const c = contrats.find((x) => fpKey(x.fp) === fpKey(fp || ""));
+      if (!c?.dateFin) return null;
+      const finMs = Date.parse(`${c.dateFin}T00:00:00Z`), asMs = Date.parse(`${asOfIso}T00:00:00Z`);
+      return Number.isFinite(finMs) ? Math.round((finMs - asMs) / 86400000) : null;
+    };
+    return atRisk.map((r) => {
+      const k = fpKey(r.fp || "") || "";
+      return { fp: r.fp || "", client: r.client || "", niveau: r.niveau, signals: (r.signals || []).map((s) => signalText(s)), joursEcheance: finJours(r.fp), ticketsOuverts: openByFp.get(k) || 0, slaBreaches: breachByFp.get(k) || 0 };
+    });
+  }, [atRisk, tickets, contrats, contratById, nowMs, asOfIso]);
+  const [churn, setChurn] = useState<ChurnResult | null>(null);
+  const CHURN_LABEL: Record<string, string> = { eleve: "Élevé", moyen: "Moyen", faible: "Faible" };
+  const churnCols = [
+    colText("Risque churn", (a: ChurnAnalysis) => <Badge tone={a.churnRisk === "eleve" ? "clay" : a.churnRisk === "moyen" ? "gold" : "steel"}>{CHURN_LABEL[a.churnRisk]}</Badge>, (a: ChurnAnalysis) => (a.churnRisk === "eleve" ? 0 : a.churnRisk === "moyen" ? 1 : 2)),
+    colText("Client", (a: ChurnAnalysis) => a.client || "—", (a: ChurnAnalysis) => a.client || ""),
+    colText("N° FP", (a: ChurnAnalysis) => <FpLink fp={a.fp} />),
+    colText("Motifs", (a: ChurnAnalysis) => <div className="flex flex-wrap gap-1">{a.drivers.map((d, i) => <Badge key={i} tone="steel">{d}</Badge>)}</div>),
+    colText("Reco de rétention", (a: ChurnAnalysis) => <span className="text-[12px]">{a.recommendation || "—"}</span>),
+  ];
+
+  // Registre d'audit (Lot 7/7 — conformité) : la piste opposable auditLog filtrée sur le module. Lecture
+  // réservée au droit `habilitations` (rules). Index composite (module, ts desc) → 500 plus récentes.
+  // La Table expose son export CSV natif (colsKey) → dossier de conformité prêt.
+  const canAudit = useCan("habilitations") === "write";
+  const { rows: audit } = useCollectionData<AuditLog>(gate && canAudit ? "auditLog" : null, [where("module", "==", "maintenance"), orderBy("ts", "desc"), limit(500)], "mnt_audit");
+  const auditCols = [
+    colText("Date", (r: AuditLog) => (r.ts?.seconds ? new Date(r.ts.seconds * 1000).toLocaleString("fr-FR") : "—"), (r: AuditLog) => r.ts?.seconds || 0),
+    colText("Action", (r: AuditLog) => r.action || "—"),
+    colText("Entité", (r: AuditLog) => r.entity || "—"),
+    colText("Réf", (r: AuditLog) => r.entityId || "—"),
+    colText("Détail", (r: AuditLog) => { const s = r.detail ? JSON.stringify(r.detail) : ""; return <span className="text-[11px] text-muted truncate max-w-[280px] inline-block align-bottom" title={s}>{s || "—"}</span>; }),
+    colText("Par", (r: AuditLog) => <span className="text-[11px]" title={r.uid}>{(r.uid || "").slice(0, 8) || "—"}</span>),
+  ];
+
+  const openContrat = (id: string) => { const c = contratById[id]; if (!c) return; setCForm(toContratForm(c)); setCId(id); setCEdit(true); setCOpen(true); };
+  const complianceCols = [
+    colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
+    colText("N° FP", (r: MntComplianceItem) => <FpLink fp={r.fp || undefined} />),
+    colText("Manques", (r: MntComplianceItem) => <div className="flex flex-wrap gap-1">{r.issues.map((k) => <Badge key={k} tone={k === "echeance_depassee" ? "clay" : "gold"}>{MNT_COMPLIANCE_LABEL[k]}</Badge>)}</div>),
+    colText("", (r: MntComplianceItem) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openContrat(r.id)}>Corriger</button> : null)),
+  ];
   const atRiskCount = (counts.ambre || 0) + (counts.rouge || 0) + (counts.critique || 0);
 
   // Suggestions (Lot 7) — affaires du carnet ressemblant à de la maintenance et sans contrat. Le carnet
@@ -217,30 +328,89 @@ export const Maintenance: FC<Props> = () => {
     const have = new Set(contrats.map((c) => fpKey(c.fp)).filter(Boolean));
     return aiSug.suggestions.filter((s) => !have.has(fpKey(s.fp)));
   }, [aiSug, contrats]);
-  const prefill = (s: { fp: string; client: string; bu: string; am: string; echeance?: string | null }) => {
-    setCForm({ ...emptyContrat(), fp: s.fp, client: s.client, bu: BU_OPTS.includes(s.bu) ? s.bu : "AUTRE", am: s.am, ...(s.echeance && (ECHEANCES as readonly string[]).includes(s.echeance) ? { echeanceType: s.echeance } : {}) });
+  // Commande par FP CANONIQUE (première rencontrée — même ordre que les constructeurs de suggestions) :
+  // source de la date de commande + du CAS pour pré-remplir un contrat. Échéance IA par FP (si suggérée).
+  const orderByFp = useMemo(() => {
+    const m = new Map<string, Order>();
+    for (const o of commandes) { const k = fpKey(o.fp); if (k && !m.has(k)) m.set(k, o); }
+    return m;
+  }, [commandes]);
+  type SugLike = { fp?: string; client?: string; bu?: string; am?: string; cas?: number; echeance?: string | null };
+  const keyOf = (s: SugLike) => fpKey(s.fp || "") || "";
+  // Brouillon pré-rempli (dateFin = date commande + 12 mois, montant = CAS…). Repli sur la suggestion si la
+  // commande n'est plus en mémoire (le carnet vit) — les dates tombent alors sur le millésime / aujourd'hui.
+  const draftFor = (s: SugLike) => {
+    const o = orderByFp.get(keyOf(s));
+    return buildContratDraft(o || { fp: s.fp, client: s.client, bu: s.bu, am: s.am, cas: s.cas }, asOfIso, s.echeance ?? undefined);
+  };
+  const prefill = (s: SugLike) => {
+    const f = toContratForm(draftFor(s));
+    // Le Select BU du formulaire n'accepte que BU_OPTS ; une BU hors liste retombe sur « AUTRE » (le serveur
+    // cleanBu gère la valeur réelle à l'écriture). La création en masse, elle, écrit la BU brute nettoyée serveur.
+    setCForm({ ...f, bu: BU_OPTS.includes(f.bu) ? f.bu : "AUTRE" });
     setCId(""); setCEdit(false); setCOpen(true);
   };
-  const openSuggestion = (s: MntSuggestion) => prefill(s);
+
+  // Sélection multiple (par FP canonique) → création EN MASSE. On boucle l'écriture GOUVERNÉE existante
+  // (upsertMntContrat), tolérante par ligne — même patron que « appliquer en lot » du Centre de correction.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const toggleSel = (k: string) => setSel((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const visibleKeys = (aiSug ? aiRows : suggestions).map(keyOf).filter(Boolean);
+  const allSelected = visibleKeys.length > 0 && visibleKeys.every((k) => sel.has(k));
+  const toggleAll = () => setSel(allSelected ? new Set() : new Set(visibleKeys));
+  const bulkCreate = async () => {
+    let ok = 0; const fails: string[] = [];
+    for (const s of (aiSug ? aiRows : suggestions)) {
+      const k = keyOf(s); if (!sel.has(k)) continue;
+      try { await upsertMntContrat(draftFor(s)); ok++; } catch { fails.push(k); }
+    }
+    setSel(new Set());
+    return { ok, fails: fails.length };
+  };
+  const selCol = <T extends SugLike>() => colText("", (s: T) => {
+    const k = keyOf(s);
+    return <input type="checkbox" className="accent-gold" checked={sel.has(k)} onChange={() => toggleSel(k)} aria-label={`Sélectionner ${s.fp || ""}`} />;
+  });
+  // Échéance dérivée (date commande + 12 mois), visible pour que rien ne soit « inventé » en silence.
+  const echCol = <T extends SugLike>() => colText("Échéance", (s: T) => {
+    const d = draftFor(s);
+    return <span className="text-[12px] whitespace-nowrap" title={`Début ${frDate(d.dateDebut)}`}>{frDate(d.dateFin || undefined)}</span>;
+  }, (s: T) => draftFor(s).dateFin || "");
+  const createBtn = <T extends SugLike>() => colText("", (s: T) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => prefill(s)}>Créer</button> : null));
   const suggestCols = [
+    ...(canWrite ? [selCol<MntSuggestion>()] : []),
     colText("Client", (s: MntSuggestion) => s.client || "—", (s: MntSuggestion) => s.client || ""),
     colText("N° FP", (s: MntSuggestion) => <FpLink fp={s.fp} />),
     colText("Affaire", (s: MntSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
     colNum("Montant", (s: MntSuggestion) => money(s.cas), (s: MntSuggestion) => s.cas),
+    echCol<MntSuggestion>(),
     colText("Signaux", (s: MntSuggestion) => <div className="flex flex-wrap gap-1">{s.reasons.slice(0, 4).map((r, i) => <Badge key={i} tone="steel">{r}</Badge>)}</div>),
-    colText("", (s: MntSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openSuggestion(s)}>Créer</button> : null)),
+    createBtn<MntSuggestion>(),
   ];
   // Confiance IA → ton (visuel aligné sur l'échelle de risque : forte = vert, moyenne = or, faible = argile).
   const confTone = (c: number) => (c >= 0.75 ? "emerald" : c >= 0.5 ? "gold" : "clay");
   const aiCols = [
+    ...(canWrite ? [selCol<MntAiSuggestion>()] : []),
     colText("Client", (s: MntAiSuggestion) => s.client || "—", (s: MntAiSuggestion) => s.client || ""),
     colText("N° FP", (s: MntAiSuggestion) => <FpLink fp={s.fp} />),
     colText("Affaire", (s: MntAiSuggestion) => <span className="truncate max-w-[240px] inline-block align-bottom" title={s.affaire}>{s.affaire || "—"}</span>),
     colNum("Montant", (s: MntAiSuggestion) => money(s.cas), (s: MntAiSuggestion) => s.cas),
+    echCol<MntAiSuggestion>(),
     colNum("Confiance", (s: MntAiSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: MntAiSuggestion) => s.confidence),
     colText("Analyse", (s: MntAiSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>),
-    colText("", (s: MntAiSuggestion) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => prefill(s)}>Créer</button> : null)),
+    createBtn<MntAiSuggestion>(),
   ];
+  // Barre d'actions de sélection (montée quand ≥ 1 ligne cochée) — réutilisée par les deux tables.
+  const bulkBar = canWrite ? (
+    <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px]">
+      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" className="accent-gold" checked={allSelected} onChange={toggleAll} aria-label="Tout sélectionner" />
+        <span className="text-muted">{sel.size > 0 ? `${sel.size} sélectionné(s)` : "Tout sélectionner"}</span>
+      </label>
+      {sel.size > 0 && <Busy variant="gold" label={`Créer ${sel.size} contrat(s)`} okMsg={(r: { ok: number; fails: number }) => `${r.ok} contrat(s) créé(s)${r.fails ? ` — ${r.fails} échec(s)` : ""}`} errMsg="Création refusée" fn={bulkCreate} />}
+      {sel.size > 0 && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setSel(new Set())}>Effacer</button>}
+    </div>
+  ) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -301,6 +471,54 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
+      {gate && churnInput.length > 0 && (
+        <Card title={churn ? `Analyse de rétention IA · ${churn.analyses.length}` : "Analyse de rétention IA"}
+          actions={<Busy variant="gold" label={churn ? "Réanalyser" : "Analyser le churn (IA)"} okMsg="Analyse prête" errMsg="Analyse IA indisponible" fn={async () => setChurn(await aiAnalyzeChurn(churnInput))} />}>
+          {!churn ? (
+            <Tip>L'<b>IA</b> lit les <b>{churnInput.length}</b> contrat(s) à risque (moteur ci-dessus) + les stats tickets et rend, par contrat, les <b>motifs de non-renouvellement</b> et une <b>reco de rétention</b>. Elle ne re-score pas — elle explique et recommande.</Tip>
+          ) : churn.analyses.length === 0 ? (
+            <EmptyState label="L'IA n'a produit aucune analyse sur ce lot." />
+          ) : (
+            <Table columns={churnCols} rows={churn.analyses} colsKey="mnt_churn" />
+          )}
+        </Card>
+      )}
+
+      {gate && renouvellements.length > 0 && (
+        <Card title={`Renouvellements à anticiper · ${renouvellements.length}`}>
+          <Tip>Contrats <b>actifs</b> dont la fin approche (≤ 90 j) — <b>critique ≤ 30 j</b>. « Demander le renouvellement » soumet la décision au <b>circuit d'approbation</b> (comme depuis la fiche).</Tip>
+          <Table columns={renouvCols} rows={renouvellements} colsKey="mnt_renouv" />
+        </Card>
+      )}
+
+      {gate && agenda.length > 0 && (
+        <Card title={`Calendrier SLA · ${agenda.length}`}>
+          <Tip>Échéances SLA <b>en attente</b> des tickets ouverts (prise en compte / résolution), calculées <b>en direct</b> — <b>rompues d'abord</b>, puis les plus proches. Un ticket dont le contrat n'a pas l'engagement du type n'apparaît pas.</Tip>
+          <Table columns={agendaCols} rows={agenda} colsKey="mnt_sla_agenda" />
+        </Card>
+      )}
+
+      {gate && compliance.activeTotal > 0 && (
+        <Card title="Conformité des contrats">
+          <Tip>Contrôle des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> non dépassée et un <b>montant d'engagement</b>. « Corriger » ouvre la fiche.</Tip>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <Kpi label="Conformes" value={`${compliance.conformes}/${compliance.activeTotal}`} tone={compliance.items.length === 0 ? "emerald" : "gold"} />
+            <Kpi label="Sans SLA" value={String(compliance.byIssue.sans_sla)} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
+            <Kpi label="Échéance manquante/dépassée" value={String(compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee)} tone={compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee ? "clay" : "ink"} />
+            <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
+          </div>
+          {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}
+        </Card>
+      )}
+
+      {gate && pnl && pnl.rows.length > 0 && (
+        <Card title="Rentabilité des contrats"
+          actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
+          <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût des interventions</b> (jours CRA × coût journalier du consultant). {pnl.hasCost ? <>Pires marges d'abord.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
+          <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
+        </Card>
+      )}
+
       <Card title="Contrats de maintenance"
         actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
@@ -314,17 +532,17 @@ export const Maintenance: FC<Props> = () => {
           actions={candidatePool.length > 0 ? (
             <Busy variant="gold" label={aiSug ? "Réanalyser à l'IA" : "Doper à l'IA"}
               okMsg="Analyse IA prête" errMsg="Analyse IA indisponible"
-              fn={async () => { setAiSug(await aiSuggestMntContrats(candidatePool)); }} />
+              fn={async () => { const r = await aiSuggestMntContrats(candidatePool); setSel(new Set()); setAiSug(r); }} />
           ) : undefined}>
           {aiSug ? (
             <>
-              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. « Créer » ouvre une fiche <b>pré-remplie</b> — rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
-              {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" />}
+              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. Coche des lignes pour <b>créer en masse</b>, ou « Créer » pour ouvrir une fiche <b>pré-remplie</b> (échéance = date de commande + 12 mois). Rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
+              {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <>{bulkBar}<Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" /></>}
             </>
           ) : (
             <>
-              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. « Créer » ouvre une fiche <b>pré-remplie</b>.</Tip>
-              {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" />}
+              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. Coche des lignes pour <b>créer en masse</b> (échéance = date de commande + 12 mois), ou « Créer » pour une fiche <b>pré-remplie</b>.</Tip>
+              {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <>{bulkBar}<Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" /></>}
             </>
           )}
         </Card>
@@ -335,6 +553,13 @@ export const Maintenance: FC<Props> = () => {
         <Tip>Un ticket est une demande sous contrat. Le temps saisi sur une <b>intervention</b> alimente le CRA (une seule vérité du temps).</Tip>
         {ticketsSorted.length === 0 ? <EmptyState label="Aucun ticket." /> : <Table columns={ticketCols} rows={ticketsSorted} colsKey="mnt_tickets" />}
       </Card>
+
+      {gate && canAudit && audit.length > 0 && (
+        <Card title={`Registre d'audit · ${audit.length}${audit.length >= 500 ? "+" : ""}`}>
+          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
+          <Table columns={auditCols} rows={audit} colsKey="mnt_audit" />
+        </Card>
+      )}
 
       {/* --- Fiche contrat --- */}
       {cOpen && (
@@ -373,6 +598,35 @@ export const Maintenance: FC<Props> = () => {
               <div><div className="text-[11px] text-muted">Facturé (ERP)</div><div className="tabnum">{money(ech.facture)}</div></div>
               <div><div className="text-[11px] text-muted">Écart</div><div className={cx("tabnum", ech.ecart > 0 ? "text-clay" : "text-emerald")}>{money(ech.ecart)}{ech.ecart > 0 ? " (sous-facturé)" : ""}</div></div>
             </div>
+            {plan.periods.length > 0 && (
+              <div className="mt-3">
+                <div className="text-[11px] text-muted mb-1.5">Détail des échéances <span className="text-faint">— {plan.periods.length} échéance(s) · statut par couverture cumulée du facturé</span></div>
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-line/60">
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-panel2 text-muted">
+                      <tr className="text-left">
+                        <th className="px-2 py-1 font-medium">#</th>
+                        <th className="px-2 py-1 font-medium">Échéance</th>
+                        <th className="px-2 py-1 font-medium text-right">Montant</th>
+                        <th className="px-2 py-1 font-medium text-right">Cumul engagé</th>
+                        <th className="px-2 py-1 font-medium">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plan.periods.map((p) => (
+                        <tr key={p.index} className="border-t border-line/40">
+                          <td className="px-2 py-1 tabnum text-faint">{p.index}</td>
+                          <td className="px-2 py-1 whitespace-nowrap">{frDate(p.dateEcheance || undefined)}</td>
+                          <td className="px-2 py-1 tabnum text-right">{money(p.montant)}</td>
+                          <td className="px-2 py-1 tabnum text-right text-muted">{money(p.cumulEngage)}</td>
+                          <td className="px-2 py-1"><Badge tone={echeanceStatutTone(p.statut)}>{ECHEANCE_STATUT_LABEL[p.statut]}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
           {cEdit && cId && canWrite && (
             <div className="mt-4 pt-3 border-t border-line/60">

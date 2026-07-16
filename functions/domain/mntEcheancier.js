@@ -41,4 +41,49 @@ function echeancier(contrat, factureTotal, asOfIso) {
   return { periodsDue, engage, facture, ecart: engage - facture };
 }
 
-module.exports = { PERIOD_MONTHS, monthsBetween, echeancier };
+// Ajoute `n` mois à une date ISO (jour ramené au dernier du mois si dépassement). PUR. Sert à dater
+// chaque échéance de l'échéancier détaillé (dateDebut + i × périodicité).
+function addMonthsIso(iso, n) {
+  const p = parse(iso);
+  if (!p) return null;
+  let y = p.y, mo = (p.mo - 1) + n, d = p.d;
+  y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
+  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate(); // dernier jour du mois cible
+  if (d > last) d = last;
+  return `${y}-${String(mo + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+const MAX_PERIODS = 240; // borne d'affichage (20 ans en mensuel) — anti-liste démesurée
+
+/**
+ * Échéancier DÉTAILLÉ : la liste datée des échéances de facturation d'un contrat, chacune marquée
+ * `facture` (couverte par le facturé cumulé de l'affaire), `du` (échéance passée non couverte) ou
+ * `a_venir`. Modèle de couverture CUMULATIF (sans allocation facture↔période inventée) : la 1ʳᵉ échéance
+ * dont l'engagé cumulé dépasse le facturé total est la 1ʳᵉ non couverte. Agrégats identiques à `echeancier`.
+ * Sans date de fin : on ne liste QUE les échéances dues (aucune projection spéculative).
+ * @returns {{periods:{index,dateEcheance,montant,cumulEngage,statut}[], periodsDue, engage, facture, ecart}}
+ */
+function echeancierPlan(contrat, factureTotal, asOfIso) {
+  const c = contrat || {};
+  const per = PERIOD_MONTHS[c.echeanceType] || 1;
+  const montant = Math.max(0, Math.round(Number(c.montantEngage) || 0));
+  const agg = echeancier(c, factureTotal, asOfIso); // réutilise le décompte/agrégats (parité stricte)
+  let total = agg.periodsDue;
+  if (parse(c.dateDebut) && parse(c.dateFin)) {
+    total = Math.max(0, Math.floor(monthsBetween(c.dateDebut, c.dateFin) / per) + 1);
+  }
+  total = Math.min(Math.max(0, total), MAX_PERIODS);
+  const periods = [];
+  for (let i = 0; i < total; i++) {
+    const dateEcheance = addMonthsIso(c.dateDebut, i * per);
+    const cumulEngage = (i + 1) * montant;
+    let statut;
+    if (cumulEngage <= agg.facture) statut = "facture";        // couverte par le facturé cumulé
+    else if (dateEcheance && String(dateEcheance) <= String(asOfIso)) statut = "du"; // passée, non couverte
+    else statut = "a_venir";
+    periods.push({ index: i + 1, dateEcheance, montant, cumulEngage, statut });
+  }
+  return { periods, periodsDue: agg.periodsDue, engage: agg.engage, facture: agg.facture, ecart: agg.ecart };
+}
+
+module.exports = { PERIOD_MONTHS, monthsBetween, echeancier, addMonthsIso, echeancierPlan };

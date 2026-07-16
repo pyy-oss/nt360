@@ -9,7 +9,7 @@ const { isMntEnabled } = require("../domain/mntFeature");
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { monthOf, craDaysFromHours } = require("../domain/mntTicket");
 
-function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
+function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée mnt_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `maintenance`.
   async function assertMntEnabled() {
@@ -245,7 +245,67 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id: ref.id, approverUid };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  // ANALYSE DE RÉTENTION IA (Lot 6/7 « valeur ajoutée » — anticipation) — l'IA lit les contrats DÉJÀ repérés
+  // à risque (moteur interne) + stats tickets et rend, par contrat, les MOTIFS de churn + une reco de
+  // rétention. ADDITIF (ne re-score pas). « L'IA propose » : aucune écriture. Double garde + limite anti-coût.
+  const aiAnalyzeChurn = onCallG(
+    "aiAnalyzeChurn",
+    { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 },
+    async (req) => {
+      await requireRead(req, "maintenance");
+      await assertMntEnabled();
+      if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+      const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();
+      if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+      const raw = Array.isArray(req.data?.contrats) ? req.data.contrats : [];
+      if (!raw.length) throw new HttpsError("invalid-argument", "aucun contrat à analyser");
+      const CAP = 60;
+      const truncated = raw.length > CAP;
+      const contrats = raw.slice(0, CAP).map((c) => ({
+        fp: String((c && c.fp) || "").slice(0, 40), client: String((c && c.client) || "").slice(0, 120),
+        niveau: String((c && c.niveau) || "").slice(0, 20),
+        signals: Array.isArray(c && c.signals) ? c.signals.slice(0, 8).map((s) => String(s).slice(0, 60)) : [],
+        joursEcheance: (c && c.joursEcheance != null && Number.isFinite(Number(c.joursEcheance))) ? Number(c.joursEcheance) : null, ticketsOuverts: Number(c && c.ticketsOuverts) || 0, slaBreaches: Number(c && c.slaBreaches) || 0,
+      })).filter((c) => fpKey(c.fp));
+      if (!contrats.length) throw new HttpsError("invalid-argument", "aucun contrat exploitable (N° FP requis)");
+      const { aiAnalyzeChurn: runAi } = require("../lib/aiChurn");
+      let out;
+      try {
+        out = await runAi(apiKey, contrats);
+      } catch (e) {
+        if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+        throw new HttpsError("internal", "L'assistant IA n'a pas pu produire d'analyse (réessayez).");
+      }
+      if (logOps) await logOps({ kind: "ai", action: "analyzeChurn", status: "ok", uid: req.auth.uid, detail: { contrats: contrats.length, analyses: out.analyses.length, model: out.model, usage: out.usage } });
+      return { ok: true, analyses: out.analyses, model: out.model, truncated, analyzed: contrats.length, total: raw.length };
+    },
+  );
+
+  // RENTABILITÉ PAR CONTRAT (Lot 4/7 « valeur ajoutée ») — revenu engagé à ce jour vs coût des interventions
+  // (jours CRA × CJM). Le CJM est CONFIDENTIEL : coût/marge MASQUÉS sauf droit `rentabilite` (même règle que
+  // resourcePnl/activityKpis). Lecture gouvernée `maintenance` + drapeau. Calcul serveur (le CJM ne sort pas).
+  const mntContratPnl = onCallG("mntContratPnl", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+    await requireRead(req, "maintenance");
+    await assertMntEnabled();
+    const { canRead } = require("../domain/authz");
+    const role = req.auth.token?.nt360Role;
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    const hasCost = role === "direction" || canRead(matrix, role, "rentabilite");
+    const [cSnap, iSnap, conSnap] = await Promise.all([
+      db.collection("mnt_contrats").limit(MAX_SCAN + 1).get(),
+      db.collection("mnt_interventions").limit(MAX_SCAN + 1).get(),
+      db.collection("consultants").select("cjm").limit(MAX_SCAN + 1).get(),
+    ]);
+    const contrats = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const interventions = sliceCapped(iSnap.docs).docs.map((d) => d.data());
+    const cjmById = {};
+    for (const d of sliceCapped(conSnap.docs).docs) { const x = d.data() || {}; if (x.cjm != null) cjmById[d.id] = Number(x.cjm); }
+    const { computeContratPnl } = require("../domain/mntContratPnl");
+    const asOf = new Date().toISOString().slice(0, 10);
+    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
+  });
+
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };

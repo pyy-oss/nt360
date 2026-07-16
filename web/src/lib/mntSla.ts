@@ -74,3 +74,47 @@ export function echeancier(contrat: { echeanceType?: string; montantEngage?: num
   const facture = Math.max(0, Math.round(Number(factureTotal) || 0));
   return { periodsDue, engage, facture, ecart: engage - facture };
 }
+
+// Ajoute `n` mois à une date ISO (jour ramené au dernier du mois si dépassement). Miroir de mntEcheancier.js.
+export function addMonthsIso(iso: string | null | undefined, n: number): string | null {
+  const p = parse(iso || undefined);
+  if (!p) return null;
+  let y = p.y, mo = (p.mo - 1) + n, d = p.d;
+  y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
+  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  if (d > last) d = last;
+  return `${y}-${String(mo + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+const MAX_PERIODS = 240;
+export type EcheancePeriod = { index: number; dateEcheance: string | null; montant: number; cumulEngage: number; statut: "facture" | "du" | "a_venir" };
+export type EcheancierPlan = { periods: EcheancePeriod[]; periodsDue: number; engage: number; facture: number; ecart: number };
+
+// Miroir EXACT de mntEcheancier.echeancierPlan : liste datée des échéances (facturée/dûe/à venir).
+export function echeancierPlan(
+  contrat: { echeanceType?: string; montantEngage?: number; dateDebut?: string; dateFin?: string | null },
+  factureTotal: number,
+  asOfIso: string,
+): EcheancierPlan {
+  const per = PERIOD_MONTHS[contrat.echeanceType || "mensuel"] || 1;
+  const montant = Math.max(0, Math.round(Number(contrat.montantEngage) || 0));
+  const agg = echeancier(contrat, factureTotal, asOfIso);
+  let total = agg.periodsDue;
+  if (parse(contrat.dateDebut) && parse(contrat.dateFin || undefined)) {
+    total = Math.max(0, Math.floor(monthsBetween(contrat.dateDebut, contrat.dateFin || undefined) / per) + 1);
+  }
+  total = Math.min(Math.max(0, total), MAX_PERIODS);
+  const periods: EcheancePeriod[] = [];
+  for (let i = 0; i < total; i++) {
+    const dateEcheance = addMonthsIso(contrat.dateDebut, i * per);
+    const cumulEngage = (i + 1) * montant;
+    let statut: EcheancePeriod["statut"];
+    if (cumulEngage <= agg.facture) statut = "facture";
+    else if (dateEcheance && String(dateEcheance) <= String(asOfIso)) statut = "du";
+    else statut = "a_venir";
+    periods.push({ index: i + 1, dateEcheance, montant, cumulEngage, statut });
+  }
+  return { periods, periodsDue: agg.periodsDue, engage: agg.engage, facture: agg.facture, ecart: agg.ecart };
+}
+export const ECHEANCE_STATUT_LABEL: Record<string, string> = { facture: "Facturé", du: "Dû", a_venir: "À venir" };
+export const echeanceStatutTone = (s: string): "emerald" | "clay" | "steel" => (s === "facture" ? "emerald" : s === "du" ? "clay" : "steel");

@@ -29,6 +29,7 @@ curateNewsNow
 decideApproval
 activityKpis
 aiSuggestCorrections
+aiSuggestClientMerges
 capacityPlan
 dedupe
 dedupeClickupTasks
@@ -57,6 +58,8 @@ upsertConsultant
 upsertMntContrat
 importMntContrats
 aiSuggestMntContrats
+aiAnalyzeChurn
+mntContratPnl
 upsertMntIntervention
 upsertMntTicket
 upsertTimesheet

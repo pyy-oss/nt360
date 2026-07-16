@@ -1272,6 +1272,42 @@ exports.aiSuggestCorrections = onCallG(
   },
 );
 
+// ASSISTANT IA — NORMALISATION DES NOMS CLIENTS : l'IA juge quelles graphies désignent la MÊME entité et
+// propose des fusions `variant → canonique` (attrape ce que le fuzzy Levenshtein rate : abréviations, mots
+// manquants, formes juridiques). « L'IA propose, l'humain valide » : renvoie des propositions AJOUTABLES à la
+// table d'alias (config/clientAliases), AUCUNE écriture. L'application reste `setClientAliases` (direction).
+exports.aiSuggestClientMerges = onCallG(
+  "aiSuggestClientMerges",
+  { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 300 },
+  async (req) => {
+    await requireWrite(req, "import");
+    if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+    const apiKey = ANTHROPIC_API_KEY.value();
+    if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+    // Inventaire fourni par le front (graphies vues à l'écran → parité), borné + assaini. On ne reçoit que
+    // le nécessaire (graphie + fréquence) ; on re-borne côté serveur (garde-fou coût/exfiltration).
+    const rawNames = Array.isArray(req.data?.names) ? req.data.names : [];
+    if (!rawNames.length) throw new HttpsError("invalid-argument", "aucun nom à analyser");
+    const CAP = 400; // borne coût/latence (un lot Opus)
+    const truncated = rawNames.length > CAP;
+    const names = rawNames.slice(0, CAP)
+      .map((n) => ({ name: String((n && n.name) != null ? n.name : n || "").slice(0, 120), count: Number(n && n.count) || 0 }))
+      .filter((n) => n.name);
+    if (!names.length) throw new HttpsError("invalid-argument", "aucun nom exploitable");
+    const { aiSuggestClientMerges: runAi } = require("./lib/aiClientNorm");
+    let out;
+    try {
+      out = await runAi(apiKey, names);
+    } catch (e) {
+      if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+      logger.error("aiSuggestClientMerges a échoué", { message: e && e.message });
+      throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de suggestions (réessayez).");
+    }
+    await logOps({ kind: "ai", action: "suggestClientMerges", status: "ok", uid: req.auth.uid, detail: { names: names.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
+    return { ok: true, suggestions: out.suggestions, model: out.model, truncated, analyzed: names.length, total: rawNames.length };
+  },
+);
+
 // === CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes de l'ESN,
 // fondation du plan de charge (Lot 12) et des KPI d'activité (Lot 13). ACCÈS 100% PAR CALLABLE (Admin
 // SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps
@@ -1292,10 +1328,12 @@ exports.staffingPlan = _staffing.staffingPlan;
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
 // par défaut → aucune écriture). Extraction dans handlers/maintenance.js (patron d'injection).
 const { createMaintenance } = require("./handlers/maintenance");
-const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps });
+const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.importMntContrats = _maintenance.importMntContrats;
 exports.aiSuggestMntContrats = _maintenance.aiSuggestMntContrats;
+exports.aiAnalyzeChurn = _maintenance.aiAnalyzeChurn;
+exports.mntContratPnl = _maintenance.mntContratPnl;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;
 exports.deleteMntTicket = _maintenance.deleteMntTicket;

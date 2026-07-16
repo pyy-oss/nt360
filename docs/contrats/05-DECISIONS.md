@@ -3,6 +3,44 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-020 — Création en masse depuis les suggestions : brouillon pré-rempli, échéance = date de commande + 12 mois
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Les suggestions (heuristique + IA, ADR-019) n'offraient qu'un « Créer » unitaire ouvrant une fiche vide
+sauf l'en-tête (fp, client, bu, am). Pour industrialiser, il faut **cocher plusieurs affaires** et créer
+les contrats **en une fois**, avec des valeurs par défaut sensées tirées de la commande.
+
+### Décision
+- **Helper PUR** `buildContratDraft(order, today, echeance?)` (`web/src/lib/mntSuggest.ts`, testé) construit
+  un brouillon prêt à écrire :
+  - `dateDebut` = **date de la commande** (`order.dateCommande`, overlay ClickUp) ; repli `AAAA-01-01` sur le
+    **millésime PO plausible** (`yearPo` ∈ [2015, année+3]) ; dernier repli = aujourd'hui.
+  - `dateFin` = **dateDebut + 12 mois** (`addMonths`, jour ramené au dernier du mois si dépassement).
+  - `montantEngage` = **CAS de la commande** (entier FCFA, `Math.round`).
+  - `statut` = **brouillon** (JAMAIS actif d'office — l'humain active après revue).
+  - `echeanceType` = échéance suggérée par l'IA si dans l'énumération, sinon **annuel** (cohérent avec 12 mois).
+  - `deviseEngage` = XOF ; `engagements` = [] (le SLA se saisit ensuite).
+- **Sélection multiple** (case à cocher + « tout sélectionner ») sur les deux tables (heuristique + IA).
+- **Écriture en masse** = **boucle client séquentielle sur `upsertMntContrat`** (l'écriture gouvernée
+  existante : RBAC + drapeau + validation + audit + idempotence par `safeId(fp)`), **tolérante par ligne** —
+  MÊME patron que « appliquer en lot » du Centre de correction. **Aucun nouveau callable** (surface minimale).
+- **Rien inventé en silence** : la colonne **Échéance** (dateFin dérivée) est visible AVANT toute création ;
+  l'utilisateur voit la date qui sera posée.
+
+### Conséquences
+- Additif, zéro nouvelle surface serveur, zéro dépendance. Les contrats créés sont des **brouillons**
+  réversibles (suppression déjà offerte). Drapeau éteint ⇒ `upsertMntContrat` refuse ⇒ rien ne se crée.
+
+### Ce qu'on saura dans six mois
+Si le terme par défaut (12 mois) ou le repli de date ne correspond pas aux usages (contrats pluriannuels,
+dates de commande souvent absentes) → paramétrer le terme / enrichir la source de date, pas coder en dur ailleurs.
+
+---
+
 ## ADR-019 — Suggestions de contrats : jugement IA (Claude) en surcouche de l'heuristique, l'IA propose et l'humain valide
 
 - **Date :** 2026-07-16

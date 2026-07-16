@@ -6,12 +6,12 @@
 //  3) ALIAS (direction) : la table d'alias éditable, enregistrée via setClientAliases (recompute derrière).
 // Lecture gouvernée « import » ; l'édition d'alias reste réservée à la direction (setClientAliases).
 import { useState, useEffect, useCallback, useMemo, type FC } from "react";
-import { Card, Kpi, Tip, Table, colText, colNum, raw, Busy, cx } from "../design/components";
+import { Card, Kpi, Tip, Badge, Table, colText, colNum, raw, Busy, cx } from "../design/components";
 import { fmt } from "../design/tokens";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { grid4, type Props } from "./_shared";
-import { fuzzyDuplicateClients, setClientAliases, type FuzzyPair } from "../lib/writes";
+import { fuzzyDuplicateClients, setClientAliases, aiSuggestClientMerges, type FuzzyPair, type ClientMergeResult, type ClientMergeSuggestion } from "../lib/writes";
 import { clientNames, type ClientNamesResult, type ClientNameGroup } from "../lib/clientNormWrites";
 
 type ClientAliasConfig = { pairs?: { from: string; to: string }[] };
@@ -51,6 +51,30 @@ export const ClientNorm: FC<Props> = () => {
     addPair({ from, to });
   };
 
+  // --- Normalisation IA : Claude juge quelles graphies désignent la même entité (au-delà du fuzzy) ---
+  // Inventaire des graphies distinctes (avec fréquence) envoyé à l'IA, borné au plafond serveur.
+  const aiNames = useMemo(() => [...countByName.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 400), [countByName]);
+  // Borne d'envoi (400 graphies les plus fréquentes) : on le SIGNALE (pas de troncature silencieuse) si dépassée.
+  const aiCapped = countByName.size > aiNames.length;
+  const [aiSug, setAiSug] = useState<ClientMergeResult | null>(null);
+  const [aiSel, setAiSel] = useState<Set<string>>(new Set());
+  const runAi = async () => {
+    const r = await aiSuggestClientMerges(aiNames);
+    // Auto-sélection des fusions ≥ 90 % (« automatique à 90 % ») ; les autres restent en revue.
+    setAiSel(new Set(r.suggestions.filter((s) => s.confidence >= 0.9).map((s) => s.from)));
+    setAiSug(r);
+  };
+  const toggleAi = (from: string) => setAiSel((p) => { const n = new Set(p); n.has(from) ? n.delete(from) : n.add(from); return n; });
+  // Ajoute les fusions cochées à la table d'alias (brouillon) — l'humain enregistre ensuite (setClientAliases).
+  const applyAiSelected = () => {
+    const picked = (aiSug?.suggestions || []).filter((s) => aiSel.has(s.from));
+    if (!picked.length) return;
+    const base = aliases.filter((r) => !picked.some((p) => p.from === r.from));
+    setDraft([...base, ...picked.map((p) => ({ from: p.from, to: p.to }))]);
+    setAiSel(new Set());
+  };
+  const confTone = (c: number): "emerald" | "gold" | "clay" => (c >= 0.9 ? "emerald" : c >= 0.7 ? "gold" : "clay");
+
   return (
     <div className="flex flex-col gap-4">
       <Card title="Normalisation clients — atelier"
@@ -82,6 +106,37 @@ export const ClientNorm: FC<Props> = () => {
             ))] : []),
           ]} rows={fuzzy} />
           <Tip>Rapprochements <b>flous</b> (typos, mot en plus) que la normalisation exacte n'a pas fusionnés. « Fusionner » ajoute un <b>alias</b> ci-dessous (à enregistrer) — la graphie la plus fréquente devient la cible.</Tip>
+        </Card>
+      )}
+
+      {/* Normalisation IA — l'IA propose des fusions, l'humain les ajoute à la liste puis enregistre */}
+      {canEdit && aiNames.length > 0 && (
+        <Card title={aiSug ? `Normalisation IA · ${aiSug.suggestions.length} fusion(s) proposée(s)` : "Normalisation IA"}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              {aiSug && aiSel.size > 0 && <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={applyAiSelected}>Ajouter {aiSel.size} à la liste</button>}
+              <Busy variant="gold" label={aiSug ? "Réanalyser" : "Doper à l'IA"} okMsg="Analyse IA prête" errMsg="Analyse IA indisponible" fn={runAi} />
+            </div>}>
+          {!aiSug ? (
+            <Tip>L'<b>IA</b> juge quelles graphies désignent la <b>même entité</b> — abréviations (« SGCI »), mots manquants, formes juridiques, singulier/pluriel — <b>au-delà</b> des quasi-doublons flous, et évite les faux rapprochements (« ORANGE » ≠ « ORANGE BANK »). Les fusions <b>≥ 90 %</b> sont pré-cochées ; « Ajouter à la liste » les pose comme alias (à <b>enregistrer</b> ensuite). Rien n'est appliqué automatiquement.{aiCapped ? ` L'analyse porte sur les ${aiNames.length} graphies les plus fréquentes (sur ${fmt(countByName.size)}).` : ""}</Tip>
+          ) : aiSug.suggestions.length === 0 ? (
+            <Tip>L'IA n'a proposé aucune fusion sur cet inventaire.{aiSug.truncated ? ` (Analyse bornée aux ${aiSug.analyzed} graphies les plus fréquentes.)` : ""}</Tip>
+          ) : (
+            <>
+              <Table colsKey="clientnorm-ai" columns={[
+                raw(colText("", (s: ClientMergeSuggestion) => (
+                  <input type="checkbox" className="accent-gold" checked={aiSel.has(s.from)} onChange={() => toggleAi(s.from)} aria-label={`Sélectionner ${s.from}`} />
+                ))),
+                colText("Graphie", (s: ClientMergeSuggestion) => s.from, (s: ClientMergeSuggestion) => s.from),
+                colText("→ Cible canonique", (s: ClientMergeSuggestion) => (
+                  <span>{s.to} {!s.existingTarget && <span className="text-[10px] text-gold" title="Graphie corrigée par l'IA (absente de l'inventaire)">· corrigée</span>}</span>
+                ), (s: ClientMergeSuggestion) => s.to),
+                colNum("Confiance", (s: ClientMergeSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: ClientMergeSuggestion) => s.confidence),
+                colText("Analyse", (s: ClientMergeSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>),
+              ]} rows={aiSug.suggestions} />
+              <Tip>« <b>Ajouter à la liste</b> » pose les fusions cochées comme alias dans la table ci-dessous — cliquez ensuite <b>Enregistrer</b> pour lancer le recalcul. La mention <span className="text-gold">corrigée</span> = graphie proposée par l'IA absente de l'inventaire (à valider).{aiSug.truncated ? ` Analyse bornée aux ${aiSug.analyzed} graphies les plus fréquentes.` : ""}</Tip>
+            </>
+          )}
         </Card>
       )}
 

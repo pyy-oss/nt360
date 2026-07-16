@@ -820,6 +820,16 @@ export async function fuzzyDuplicateClients(threshold?: number) {
   return res.data as { ok: boolean; pairs: FuzzyPair[]; scanned: number; threshold: number };
 }
 
+// NORMALISATION IA — l'IA (Claude) juge quelles graphies désignent la MÊME entité et propose des fusions
+// `variant → canonique` (au-delà du fuzzy Levenshtein). « L'IA propose, l'humain valide » : aucune écriture,
+// les propositions s'ajoutent à la table d'alias que la direction enregistre (setClientAliases).
+export type ClientMergeSuggestion = { from: string; to: string; confidence: number; reason: string; existingTarget: boolean };
+export type ClientMergeResult = { ok: boolean; suggestions: ClientMergeSuggestion[]; model: string; truncated: boolean; analyzed: number; total: number };
+export async function aiSuggestClientMerges(names: { name: string; count: number }[]): Promise<ClientMergeResult> {
+  const res = await httpsCallable(functions, "aiSuggestClientMerges", { timeout: 300_000 })({ names });
+  return res.data as ClientMergeResult;
+}
+
 /** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
  *  entière ; recalcule tous les agrégats client. */
 export async function setClientAliases(pairs: { from: string; to: string }[]) {
@@ -1038,6 +1048,24 @@ export type MntAiSuggestResult = { ok: boolean; suggestions: MntAiSuggestion[]; 
 export async function aiSuggestMntContrats(candidates: MntCandidate[]): Promise<MntAiSuggestResult> {
   const res = await httpsCallable(functions, "aiSuggestMntContrats", { timeout: 300_000 })({ candidates });
   return res.data as MntAiSuggestResult;
+}
+
+// Rentabilité par contrat (Lot 4/7) — revenu engagé vs coût interventions (jours × CJM). Coût/marge MASQUÉS
+// (null) sans droit `rentabilite` (calcul serveur, le CJM ne sort jamais). Lecture gouvernée `maintenance`.
+export type MntContratPnlRow = { id: string; fp: string | null; client: string; statut: string; revenue: number; jours: number; cout: number | null; marge: number | null; margePct: number | null };
+export async function mntContratPnl(): Promise<{ ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean }> {
+  const res = await httpsCallable(functions, "mntContratPnl", { timeout: 120_000 })({});
+  return res.data as { ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean };
+}
+
+// Analyse de rétention IA (Lot 6/7) — l'IA lit les contrats à risque + stats tickets et rend, par contrat,
+// les motifs de churn + une reco de rétention. « L'IA propose », aucune écriture. Droit `maintenance` + secret.
+export type ChurnInput = { fp: string; client: string; niveau: string; signals: string[]; joursEcheance: number | null; ticketsOuverts: number; slaBreaches: number };
+export type ChurnAnalysis = { fp: string; client: string; churnRisk: "eleve" | "moyen" | "faible"; drivers: string[]; recommendation: string };
+export type ChurnResult = { ok: boolean; analyses: ChurnAnalysis[]; model: string; truncated: boolean; analyzed: number; total: number };
+export async function aiAnalyzeChurn(contrats: ChurnInput[]): Promise<ChurnResult> {
+  const res = await httpsCallable(functions, "aiAnalyzeChurn", { timeout: 300_000 })({ contrats });
+  return res.data as ChurnResult;
 }
 
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
