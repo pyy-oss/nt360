@@ -125,7 +125,10 @@ jobs:
           # MÊME TEMPS que l'env runtime qui l'active — sinon les mutations déposeraient des demandes de
           # recompute que personne ne traiterait (summaries périmés jusqu'au recompute nocturne). Fail = le
           # déploiement échoue et l'ANCIENNE version (recompute synchrone) reste en ligne → toujours correct.
-          if [ -n "$RECOMPUTE_REGION" ]; then FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest"; fi
+          # onMntApprovalDecided (application des décisions d'approbation de contrat, ADR-022) est le MÊME cas :
+          # env-gated sur RECOMPUTE_REGION (co-localisé à la base nommée), absent de deployed-functions.txt,
+          # ajouté ici quand la région est fournie pour être déployé avec son env runtime.
+          if [ -n "$RECOMPUTE_REGION" ]; then FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest,functions:onMntApprovalDecided"; fi
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
