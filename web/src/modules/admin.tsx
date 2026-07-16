@@ -275,14 +275,14 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
       <div className="mt-3 border-t border-line/60 pt-3 flex items-center gap-3 flex-wrap">
         <label className="flex items-center gap-2 min-w-[190px]">
           <span className="text-ink font-medium">Seuil « Gelé » (phases amont)</span>
-          <span className="text-[11px] text-faint">opp non déposée âgée au-delà</span>
+          <span className="text-[11px] text-faint">opp non transmise âgée au-delà</span>
         </label>
         <label className="flex items-center gap-2 text-[13px]">
           <span className="text-muted">Mois</span>
           <input className="field !py-1 w-24" inputMode="numeric" value={geleMonths} onChange={(e) => setGeleMonths(e.target.value)} placeholder="6" aria-label="Seuil Gelé en mois" />
         </label>
       </div>
-      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Les <b>opportunités dormantes</b> (clôture prévue d'un <b>millésime révolu</b>, jamais reclassée) sont retirées de la <b>prévision cumulée</b> (« Tout ») quand l'option est active — elles restent visibles dans la tuile <b>« Opportunité dormante »</b> du Pipeline (les onglets d'année les écartent déjà). Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
+      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Les <b>opportunités dormantes</b> (clôture prévue d'un <b>millésime révolu</b>, jamais reclassée) sont retirées de la <b>prévision cumulée</b> (« Tout ») quand l'option est active — elles restent visibles dans la tuile <b>« Opportunité dormante »</b> du Pipeline (les onglets d'année les écartent déjà). Le <b>seuil « Gelé »</b> classe en phase amont <b>Gelé</b> (Pipeline) toute opportunité active non encore <b>transmise</b> (étape &lt; 3) dont l'âge dépasse ce nombre de mois. Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
     </Card>
   );
 }

@@ -34,16 +34,16 @@ const isEligible = (o) => isActive(o) && p01(o.probability || 0) >= CONFIANCE_MI
 // Classification transverse des opportunités ACTIVES en « phases amont » (mutuellement exclusives) —
 // dérivée des SEULS champs existants (désignation, étape, âge), sans aucune nouvelle donnée source :
 //   BUDGET : désignation commençant par « budget » (offre budgétaire — prioritaire) ;
-//   sinon, si l'offre n'est PAS encore déposée (étape < 3 « Transmise ») :
+//   sinon, si l'offre n'est PAS encore transmise au client (étape < 3 « Transmise ») :
 //     GELE : âge > seuil (paramétrable, défaut 6 mois) — dossier enlisé ;
-//     DEV  : sinon — offre en cours d'élaboration, non encore déposée.
-//   étape ≥ 3 (déposée) et non budgétaire → aucune phase amont (dans le funnel normal).
+//     DEV  : sinon — offre en cours d'élaboration, non encore transmise.
+//   étape ≥ 3 (transmise) et non budgétaire → aucune phase amont (dans le funnel normal).
 // Tag TRANSVERSE : ne modifie ni l'étape, ni le pondéré ; sert au seul pilotage « Vue d'ensemble ».
 const DAYS_PER_MONTH = 30.44; // 365,25/12 — seuil GELE exprimé en MOIS → jours (comparé à ageDays « Âge Auto »)
 function classifyPhase0(o, geleDays) {
   if (!isActive(o)) return null; // uniquement les opps actives (étapes 1..5)
   if (String(o.designation || "").trim().toLowerCase().startsWith("budget")) return "budget";
-  if ((o.stage || 0) < 3) { // avant « 3-Transmise » = offre pas encore déposée
+  if ((o.stage || 0) < 3) { // avant l'étape 3 (Transmise) = offre pas encore transmise au client
     const age = Number(o.ageDays);
     return Number.isFinite(age) && age > geleDays ? "gele" : "dev"; // âge inconnu → dev (jamais gelé par défaut)
   }
