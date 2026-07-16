@@ -315,6 +315,14 @@ Dé-doublonnage saisie↔fichier par `extId`/`ID` si présent (Annexe §18.5) ; 
 - **Design Forest & Gold conservé** : tokens `bg #0E1613 · panel #151F1A · ink #EEF3EF · gold #C9A24B · emerald #46C08A · clay #D9694C · steel #6E9DC0 · plum #A98AC4` ; BU ICT=emerald, Cloud=steel, Formation=gold ; polices **Bricolage Grotesque** + **Inter** ; `fmt` (Md/M/k), `pct`, tabular-nums.
 - Composants conservés : `Kpi, Card, Eyebrow, HBars, Stage, Tip, ErrorBoundary` (un par vue) ; sélecteur de période ; sauvegarde/restauration JSON.
 
+### 12.1 Primitives de liste — `Table` / `ListView` (`web/src/design/`)
+Toute liste d'enregistrements passe par ces deux primitives partagées (jamais un `<table>` brut sauf matrice sur-mesure). Colonnes déclarées via `colText(header, render, sort?, filter?)` / `colNum(...)` ; `det(col)` replie une colonne au détail. Fonctions **opt-in par props**, cumulables, mémoïsées sur signaux stables :
+- **Tri** : colonne avec `sort` → en-tête cliquable. **Pagination** : automatique au-delà de `pageSize` (défaut Table 50 / ListView 25).
+- **Recherche** : `searchKeys={[(r)=>…]}` → champ plein-texte (insensible casse/accents).
+- **Filtre par colonne** : 4ᵉ arg `filter` de `colText`/`colNum` (accesseur d'une valeur discrète) → menu **« Filtres »** (cases des valeurs distinctes, cumulable ET entre colonnes / OU au sein d'une colonne).
+- **Sélection + actions en masse** : `rowKey={(r)=>id_stable}` + `bulk={BulkAction[]}`. `bulk={[]}` = sélection + « Exporter la sélection » (CSV) seuls. Une `BulkAction` (`{ label, run(rows), tone?, confirm?, okMsg?, icon? }`) reçoit les **lignes cochées visibles** ; `confirm` → garde `useConfirm` ; `run` tracé (`trackWrite`) + toast + désélection au succès. **Réutiliser les callables existants**, garder **le même droit RBAC** que l'action par ligne, et **enchaîner séquentiellement** les écritures qui partagent un doc d'overlay (ex. `setCancellation`) pour éviter la contention.
+- **Budget bundle** : la « chrome » de liste (BulkBar, SelectAllBox, ColumnsMenu, ColumnFilterMenu, ExportBtn) vit dans `design/bulk.tsx` chargé en **lazy** → hors chunk d'entrée (garde ≤ 120 KB).
+
 ---
 
 ## 13. Sécurité · coûts · sauvegarde · migration

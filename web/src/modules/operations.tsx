@@ -7,7 +7,7 @@ import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
@@ -183,7 +183,7 @@ export const Fournisseurs: FC<Props> = () => {
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
       <Card title="Par fournisseur">
-        <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" />
+        <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
         <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
       </Card>
     </div>
@@ -323,6 +323,13 @@ export const BC: FC<Props> = () => {
   useEffect(() => { if (intent?.segment === "late" || intent?.segment === "open") setFlt(intent.segment as "late" | "open"); }, [intent]);
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []); // stable sur la session (pas de bascule minuit mi-session)
   const isLate = (r: BcLine) => isBcLate(r, today); // colonne « Retard » par ligne (table paginée)
+  // Action en masse (même droit que le sélecteur de statut par ligne) : passer N lignes BC à un statut
+  // cible. Appels séquentiels (chaque écriture déclenche un recompute coalescé) ; réutilise setBcStatus.
+  const bcBulk: BulkAction[] = canWrite ? [
+    { label: "Passer au statut", pick: { options: BC_STAGES.map((s) => ({ value: s, label: bcLabel(s) })), placeholder: "Statut cible" },
+      okMsg: (rs) => { const k = rs.filter((r) => r.id).length; return `${k} ligne${k > 1 ? "s" : ""} BC mise${k > 1 ? "s" : ""} à jour`; }, errMsg: "Mise à jour refusée",
+      run: async (rs, status) => { for (const r of rs.filter((x) => x.id)) await setBcStatus(r.id!, status!); } },
+  ] : [];
   // byStatus + lateCount + filtered en UNE seule passe MÉMOÏSÉE (le retard n'est plus parcouru deux fois).
   const { byStatus, solde, lateCount, filtered } = useMemo(() => {
     const bs: Record<string, number> = {};
@@ -353,19 +360,19 @@ export const BC: FC<Props> = () => {
           initialSearch={intent?.search}
           searchKeys={[(r) => r.bcNumber, (r) => r.fp, (r) => r.supplier, (r) => r.expenseType]}
           rowKey={(r) => r.id || r.bcNumber || ""}
-          bulk={[]}
+          bulk={bcBulk}
           columns={[
             // Essentiels EN LIGNE (N° BC, Fournisseur, XOF, Retard, Statut) ; le secondaire (FP, Type,
             // ETA contrat/réel) est replié dans le détail via det() → tableau étroit, sans scroll.
             colText("N° BC", (r) => r.bcNumber || "—", (r) => r.bcNumber || ""),
             det(colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp || "")),
             colText("Fournisseur", (r) => r.supplier, (r) => r.supplier),
-            det(colText("Type", (r) => r.expenseType, (r) => r.expenseType)),
+            det(colText("Type", (r) => r.expenseType, (r) => r.expenseType, (r) => r.expenseType || "—")),
             colNum("XOF", (r) => <BcAmount row={r} />, (r) => r.amountXof || 0),
             det(colText("ETA contrat", (r) => r.etaContrat || "—", (r) => r.etaContrat || "")),
             det(colText("ETA réel", (r) => r.etaReel || "—", (r) => r.etaReel || "")),
             colText("Retard", (r) => (isLate(r) ? <Badge tone="clay">en retard</Badge> : "—"), (r) => (isLate(r) ? 1 : 0)),
-            colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || ""),
+            colText("Statut", (r) => (canWrite ? <StatusSelect id={r.id!} status={r.status || "a_emettre"} /> : <Badge>{bcLabel(r.status)}</Badge>), (r) => r.status || "", (r) => bcLabel(r.status)),
             // Actions groupées en UNE colonne (entête vide → toujours en ligne) : ClickUp, fiabiliser, assainir.
             ...((cuOn || canWrite) ? [colText("", (r: BcLine) => (
               <div className="flex items-center justify-end gap-1.5">

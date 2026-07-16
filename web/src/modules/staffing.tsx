@@ -596,9 +596,9 @@ export const Staffing: FC<Props> = () => {
           <>
             <Table columns={[
               colText("Nom", (c: Consultant) => c.name, (c: Consultant) => c.name),
-              colText("Grade", (c: Consultant) => gradeLabel(c.grade)),
-              colText("BU", (c: Consultant) => c.bu || "—"),
-              colText("Statut", (c: Consultant) => { const m = statusMeta(c.status); return <Badge tone={m.tone}>{m.label}</Badge>; }, (c: Consultant) => c.status || ""),
+              colText("Grade", (c: Consultant) => gradeLabel(c.grade), undefined, (c: Consultant) => gradeLabel(c.grade)),
+              colText("BU", (c: Consultant) => c.bu || "—", undefined, (c: Consultant) => c.bu || "—"),
+              colText("Statut", (c: Consultant) => { const m = statusMeta(c.status); return <Badge tone={m.tone}>{m.label}</Badge>; }, (c: Consultant) => c.status || "", (c: Consultant) => statusMeta(c.status).label),
               colNum("TJM cible", (c: Consultant) => (c.tjmTarget != null ? money(c.tjmTarget) : "—"), (c: Consultant) => c.tjmTarget ?? 0),
               ...(canCost ? [colNum("CJM", (c: Consultant) => (c.cjm != null ? money(c.cjm) : "—"), (c: Consultant) => c.cjm ?? 0),
                 colNum("Marge/j", (c: Consultant) => (c.tjmTarget != null && c.cjm != null ? money(c.tjmTarget - c.cjm) : "—"), (c: Consultant) => (c.tjmTarget != null && c.cjm != null ? c.tjmTarget - c.cjm : 0))] : []),

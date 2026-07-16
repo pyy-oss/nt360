@@ -1,9 +1,8 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, Fragment, lazy, Suspense, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Download, Activity, Loader2 } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Activity, Loader2 } from "lucide-react";
 import { fmt, pct } from "./tokens";
-import { buildCsv, downloadCsv } from "../lib/exportCsv";
 import { isStaleChunkError, reloadForStaleChunk } from "../lib/staleChunk";
 import { trackWrite, useWriteActivity, useActivityLog } from "../lib/activity";
 
@@ -133,7 +132,10 @@ export function Chain({ children }: { children: ReactNode[] }) {
 }
 
 // --- Table triable ---
-export type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean; raw?: boolean };
+export type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean; raw?: boolean;
+  // `filter` : accesseur d'une valeur DISCRÈTE (statut, BU, étape…) → active un filtre par colonne
+  // (menu « Filtres » : cases des valeurs distinctes, cumulable avec recherche / tri / pagination).
+  filter?: (row: any) => string };
 
 // Marque une colonne comme SECONDAIRE : elle quitte la ligne principale et s'affiche dans le détail
 // déroulant (grille clé/valeur). Sert à garder des tableaux étroits, sans scroll horizontal.
@@ -219,29 +221,15 @@ function useColVisibility(storageKey: string | undefined, columns: Col[]) {
   return { cols, hidden, toggle, hideable, enabled: !!storageKey };
 }
 
-// Sélecteur de colonnes : petit menu (cases à cocher) pour afficher/masquer les colonnes de la liste.
-// Export CSV des colonnes VISIBLES + lignes courantes (après filtre/tri). Exporte « ce qu'on voit ».
-function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: string }) {
-  if (!rows.length) return null;
-  const onClick = () => {
-    const visible = cols.filter((c) => (c.header || "").trim() !== "");
-    const d = new Date();
-    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    downloadCsv(`nt360-${name || "export"}-${stamp}.csv`, buildCsv(visible, rows));
-  };
-  return (
-    <button type="button" onClick={onClick} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5" title="Exporter les lignes affichées en CSV (Excel)">
-      <Download size={14} aria-hidden="true" />CSV
-    </button>
-  );
-}
-
 // --- Sélection multiple + actions en masse (partagées Table + ListView) ---
 // Une action en masse reçoit les LIGNES cochées. `confirm` (texte) → modale de garde avant exécution.
 // `run` est asynchrone (tracé + toast comme Busy) ; la sélection est vidée au succès.
 export type BulkAction = {
   label: string; icon?: ReactNode; tone?: "default" | "danger";
-  run: (rows: any[]) => Promise<any> | any;
+  // `pick` : petit sélecteur de valeur affiché AVANT le bouton (ex. statut cible) ; la valeur choisie
+  // est passée en 2ᵉ argument de `run`. Sans `pick`, `run` ne reçoit que les lignes.
+  pick?: { options: { value: string; label: string }[]; placeholder?: string };
+  run: (rows: any[], picked?: string) => Promise<any> | any;
   okMsg?: string | ((rows: any[]) => string); errMsg?: string; confirm?: ReactNode;
 };
 
@@ -262,6 +250,19 @@ function useSelection() {
 const BulkBar = lazy(() => import("./bulk").then((m) => ({ default: m.BulkBar })));
 const SelectAllBox = lazy(() => import("./bulk").then((m) => ({ default: m.SelectAllBox })));
 const ColumnsMenu = lazy(() => import("./bulk").then((m) => ({ default: m.ColumnsMenu })));
+const ColumnFilterMenu = lazy(() => import("./bulk").then((m) => ({ default: m.ColumnFilterMenu })));
+const ExportBtn = lazy(() => import("./bulk").then((m) => ({ default: m.ExportBtn })));
+
+// Applique les filtres par colonne (valeurs cochées) à une ligne. `cols` relu au calcul (accesseurs inline).
+function passColFilters(r: any, cols: Col[], colFilters: Record<string, string[]>): boolean {
+  for (const h in colFilters) {
+    const vals = colFilters[h];
+    if (!vals || !vals.length) continue;
+    const c = cols.find((x) => x.header === h && x.filter);
+    if (c && !vals.includes(c.filter!(r))) return false;
+  }
+  return true;
+}
 
 export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bulk, searchKeys, searchPlaceholder = "Rechercher…" }:
   { columns: Col[]; rows: any[]; empty?: string; colsKey?: string; pageSize?: number;
@@ -272,9 +273,12 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
   const [open, setOpen] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(0);
   const [q, setQ] = useState("");
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
   const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
   const { primary, detail } = splitCols(cols);
   const hasDetail = detail.length > 0;
+  const filterCols = columns.filter((c) => c.filter); // sur `columns` (toutes) : un filtre survit au masquage de sa colonne
+  const filtersActive = Object.values(colFilters).some((a) => a && a.length);
   const selectable = !!bulk && !!rowKey;
   const kOf = (r: any) => (rowKey ? rowKey(r) : "");
   // Recherche + tri mémoïsés sur des signaux STABLES : lignes, requête, état de tri, visibilité des
@@ -285,6 +289,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
     let base = rows.map((r, i) => ({ r, i }));
     const s = searchKeys && q.trim() ? q.trim().toLowerCase() : "";
     if (s) base = base.filter(({ r }) => searchKeys!.some((k) => String(k(r) ?? "").toLowerCase().includes(s)));
+    if (filtersActive) base = base.filter(({ r }) => passColFilters(r, columns, colFilters));
     const key = sort ? primary[sort.i]?.sort : null;
     if (!key || !sort) return base;
     const dir = sort.dir;
@@ -293,7 +298,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
       return va < vb ? -1 * dir : va > vb ? 1 * dir : 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sort, hidden, q]);
+  }, [rows, sort, hidden, q, colFilters]);
   // Sélection portée sur TOUTES les lignes filtrées/triées (toutes pages), pas la page courante.
   const allKeys = useMemo(() => (selectable ? sorted.map(({ r }) => kOf(r)) : []), [sorted, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectedRows = useMemo(() => (selectable ? sorted.filter(({ r }) => sel.has(kOf(r))).map(({ r }) => r) : []), [sorted, sel, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -307,7 +312,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
   // (onSnapshot), et tout changement du nombre de lignes (import delta, ajout optimiste, annulation)
   // téléporterait l'utilisateur en page 1 en pleine navigation. Le clamp `safePage` suffit à rester dans
   // les bornes quand la liste rétrécit (parité avec ListView).
-  useEffect(() => { setPage(0); }, [sort, pageSize, q]);
+  useEffect(() => { setPage(0); }, [sort, pageSize, q, colFilters]);
   const pageRows = paged ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted;
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
@@ -323,8 +328,9 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
           </div>
         ) : <span />}
         <div className="flex items-center gap-2 ml-auto">
-          {searchKeys && q.trim() && <span className="text-xs text-muted tabnum">{total.toLocaleString("fr-FR")} / {rows.length.toLocaleString("fr-FR")}</span>}
-          <ExportBtn cols={cols} rows={sorted.map(({ r }) => r)} name={colsKey} />
+          {((searchKeys && q.trim()) || filtersActive) && <span className="text-xs text-muted tabnum">{total.toLocaleString("fr-FR")} / {rows.length.toLocaleString("fr-FR")}</span>}
+          {filterCols.length > 0 && <Suspense fallback={null}><ColumnFilterMenu columns={filterCols} rows={rows} value={colFilters} onChange={setColFilters} /></Suspense>}
+          <Suspense fallback={null}><ExportBtn cols={cols} rows={sorted.map(({ r }) => r)} name={colsKey} /></Suspense>
           {enabled && <Suspense fallback={null}><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></Suspense>}
         </div>
       </div>
@@ -403,8 +409,9 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
     </div>
   );
 }
-export const colText = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any): Col => ({ header, align: "left", render, sort });
-export const colNum = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any): Col => ({ header, align: "right", render, sort });
+// 4ᵉ argument optionnel `filter` : accesseur d'une valeur discrète → active le filtre par colonne (menu « Filtres »).
+export const colText = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any, filter?: (r: any) => string): Col => ({ header, align: "left", render, sort, filter });
+export const colNum = (header: string, render: (r: any) => ReactNode, sort?: (r: any) => any, filter?: (r: any) => string): Col => ({ header, align: "right", render, sort, filter });
 export const money = (v: number | null | undefined) => <span className="tabnum">{fmt(v)}</span>;
 
 export function EmptyState({ label, icon, action }: { label?: string; icon?: ReactNode; action?: ReactNode }) {
@@ -465,34 +472,39 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
   const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
   const { cols, hidden, toggle: toggleCol, enabled: colsEnabled } = useColVisibility(colsKey, columns);
   // Colonnes essentielles en ligne + secondaires dans le détail déroulant (zéro scroll horizontal).
   // Un `expand` explicite du module reste prioritaire ; sinon on génère la grille de détail.
   const { primary, detail: detailCols } = splitCols(cols);
   const hasDetail = !!expand || detailCols.length > 0;
+  const filterCols = columns.filter((c) => c.filter); // sur `columns` (toutes) : un filtre survit au masquage de sa colonne
+  const filtersActive = Object.values(colFilters).some((a) => a && a.length);
   const selectable = !!bulk && !!rowKey;
   const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
   const toggleRow = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
   // corriger), on pré-remplit le filtre. Se met à jour si l'intention change (nouvelle anomalie).
   useEffect(() => { if (initialSearch) { setQ(initialSearch); setPage(0); } }, [initialSearch]);
+  useEffect(() => { setPage(0); }, [colFilters]);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     let r = !s ? rows : rows.filter((row) => searchKeys.some((k) => String(k(row) ?? "").toLowerCase().includes(s)));
+    if (filtersActive) r = r.filter((row) => passColFilters(row, columns, colFilters));
     if (sort && primary[sort.i]?.sort) {
       const key = primary[sort.i].sort!;
       r = [...r].sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? -sort.dir : va > vb ? sort.dir : 0; });
     }
     return r;
-    // Déps STABLES (rows/q/sort/hidden) — PAS `cols` : les colonnes sont construites en inline côté
-    // appelant (identité neuve à chaque rendu) → sans ça le filtre+tri re-tournait à chaque rendu non
-    // lié. `hidden` (bascule colonnes) capture le seul changement de colonnes qui doit re-trier ; `primary`
-    // est relu au calcul.
+    // Déps STABLES (rows/q/sort/hidden/colFilters) — PAS `cols` : les colonnes sont construites en inline
+    // côté appelant (identité neuve à chaque rendu) → sans ça le filtre+tri re-tournait à chaque rendu non
+    // lié. `hidden` (bascule colonnes) capture le seul changement de colonnes qui doit re-trier ; `primary`/
+    // `cols` relus au calcul.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, sort, hidden]);
+  }, [rows, q, sort, hidden, colFilters]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const cur = Math.min(page, pages - 1);
@@ -512,7 +524,8 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
-          <ExportBtn cols={cols} rows={filtered} name={colsKey} />
+          {filterCols.length > 0 && <Suspense fallback={null}><ColumnFilterMenu columns={filterCols} rows={rows} value={colFilters} onChange={setColFilters} /></Suspense>}
+          <Suspense fallback={null}><ExportBtn cols={cols} rows={filtered} name={colsKey} /></Suspense>
           {colsEnabled && <Suspense fallback={null}><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></Suspense>}
         </div>
       </div>

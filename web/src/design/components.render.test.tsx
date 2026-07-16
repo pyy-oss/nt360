@@ -121,6 +121,22 @@ describe("Table — recherche intégrée (searchKeys)", () => {
   });
 });
 
+// Filtre par colonne : une colonne déclarant `filter` (4ᵉ arg de colText) ouvre le menu « Filtres »
+// (chargé en lazy) ; cocher une valeur ne garde que les lignes correspondantes, cumulable avec recherche/tri.
+describe("Table / ListView — filtre par colonne", () => {
+  const fcols = [colText("Client", (r: any) => r.client, (r: any) => r.client), colText("Statut", (r: any) => r.status, (r: any) => r.status, (r: any) => r.status)];
+  const frows = [{ client: "ACME", status: "ouvert" }, { client: "BETA", status: "clos" }];
+  it("Table : cocher une valeur de colonne ne garde que ses lignes", async () => {
+    render(<Table columns={fcols} rows={frows} />);
+    expect(screen.getByText("ACME")).toBeTruthy();
+    expect(screen.getByText("BETA")).toBeTruthy();
+    // Le menu « Filtres » est lazy → findBy sur la case de la valeur (aria-label « Statut : ouvert »).
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Statut : ouvert" }));
+    expect(screen.getByText("ACME")).toBeTruthy();
+    expect(screen.queryByText("BETA")).toBeNull();
+  });
+});
+
 // Sélection multiple + actions en masse (Table et ListView) : cases par ligne + « tout sélectionner »
 // + barre d'actions (chargée en lazy) qui reçoit les LIGNES cochées.
 describe("Table / ListView — sélection multiple + actions en masse", () => {

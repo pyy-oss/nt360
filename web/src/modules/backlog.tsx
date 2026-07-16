@@ -1006,7 +1006,7 @@ function ReconcileWonOpps({ commandeFps, canPipelineWrite }: { commandeFps: Set<
               confirm={`Annuler l'opportunité gagnée ${o.fp} (${o.client || "—"}) ? Elle passe au statut « Annulé » et quitte cette liste. Un ré-import de la source la rétablira si elle y figure encore comme gagnée.`}
               fn={() => patchOpportunity({ id: o.id!, stage: 9 })} />
           : null), () => 0),
-      ]} rows={won} colsKey="won-opps" />
+      ]} rows={won} colsKey="won-opps" searchKeys={[(o: Opportunity) => o.fp || "", (o: Opportunity) => o.client || "", (o: Opportunity) => o.am || ""]} rowKey={(o: Opportunity) => o.id || o.fp || ""} bulk={[]} />
       <Tip>Ces affaires sont <b>gagnées</b> et portent un N° FP mais n'ont pas de ligne au P&L → elles ne comptent pas encore en commande. <b>« Inscrire au P&L »</b> crée la commande depuis l'opportunité (CAS = montant de l'opp). <b>« Annuler »</b> écarte l'opp (statut « Annulé ») si elle ne doit pas devenir une commande. Le <b>N° FP est corrigeable</b> (les versions saisies par les commerciaux sont parfois erronées) : la correction peut suffire à rapprocher l'affaire d'une ligne P&L existante. Au prochain import, une ligne P&L Excel du même FP reste prioritaire.</Tip>
     </Card>
   );
@@ -1166,10 +1166,10 @@ export const OrderList: FC<Props> = () => {
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
           colText("Affaire", (r) => r.affaire || "—", (r) => r.affaire || ""),
-          det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu)),
-          det(colText("Commercial", (r) => r.am, (r) => r.am)),
+          det(colText("BU", (r) => buBadge(r.bu), (r) => r.bu, (r) => r.bu || "—")),
+          det(colText("Commercial", (r) => r.am, (r) => r.am, (r) => r.am || "—")),
           // Affectation à un Project Manager (PMO) — éditable en place pour le droit « import ».
-          det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "")),
+          det(colText("PM", (r: Order) => (canImport && r.fp ? <OrderPmFixer row={r} /> : (r.pm ? <Badge tone="steel">{r.pm}</Badge> : <span className="text-faint">—</span>)), (r: Order) => r.pm || "", (r: Order) => r.pm || "—")),
           // CAS corrigeable EN PLACE (montant de la commande) pour les commandes P&L/manuelles, sans
           // ouvrir la modale : les montants saisis à la source sont parfois erronés. Les commandes de
           // source « fiche »/« opp gagnée » se corrigent à la source (fiche / opportunité).
