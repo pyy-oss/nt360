@@ -8,6 +8,8 @@ import { useState, useEffect, useCallback, type FC, type ReactNode } from "react
 import { useClaims } from "../lib/rbac";
 import { Card, Badge, Busy, Table, Modal, money, cx, useToast, EmptyState, colText, colNum } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { Combo } from "../design/combo";
+import { useAmOptions, useClientOptions } from "./_shared";
 import { fmt } from "../design/tokens";
 import { relTime } from "../lib/format";
 import {
@@ -175,6 +177,7 @@ function LinesEditor({ lignes, mode, onChange, showMontant }: { lignes: FicheLin
 
 // Modale de détail + circuit d'une fiche.
 function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: string | null; onClose: () => void; onChanged: () => void }) {
+  const amOpts = useAmOptions(), clientOpts = useClientOptions();
   const toast = useToast();
   const [fiche, setFiche] = useState<Fiche | null>(null);
   const [history, setHistory] = useState<FicheEvent[]>([]);
@@ -220,9 +223,9 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
 
         {/* Entête */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-          <Info k="Client" v={editVal(mode === "edit", <TxtField value={draft.client} onChange={(v) => setDraft({ ...draft, client: v })} aria="Client" w="w-full" />, fiche.client)} />
+          <Info k="Client" v={editVal(mode === "edit", <Combo value={draft.client} onChange={(v) => setDraft({ ...draft, client: v })} ariaLabel="Client" placeholder="Client" allowCreate className="w-full" options={clientOpts.map((c) => ({ value: c, label: c }))} />, fiche.client)} />
           <Info k="Affaire" v={editVal(mode === "edit", <TxtField value={draft.affaire} onChange={(v) => setDraft({ ...draft, affaire: v })} aria="Affaire" w="w-full" />, fiche.affaire)} />
-          <Info k="Commercial" v={editVal(mode === "edit", <TxtField value={draft.commercial} onChange={(v) => setDraft({ ...draft, commercial: v })} aria="Commercial" w="w-full" />, fiche.commercial)} />
+          <Info k="Commercial" v={editVal(mode === "edit", <Combo value={draft.commercial} onChange={(v) => setDraft({ ...draft, commercial: v })} ariaLabel="Commercial" placeholder="Commercial" allowCreate className="w-full" options={amOpts.map((a) => ({ value: a, label: a }))} />, fiche.commercial)} />
           <Info k="N° DC" v={etape === 2 && canAct ? <TxtField value={dc} onChange={setDc} aria="N° de DC" w="w-full" placeholder="N° de DC" /> : (fiche.numero_dc || <span className="text-faint">— (défini par le DRO)</span>)} />
           <Info k="Date fiche" v={editVal(mode === "edit", <DateField value={draft.date_fiche || ""} onChange={(v) => setDraft({ ...draft, date_fiche: v })} ariaLabel="Date fiche" />, fiche.date_fiche || "—")} />
           <Info k="Éditée par" v={editVal(mode === "edit", <TxtField value={draft.editeur_ac || ""} onChange={(v) => setDraft({ ...draft, editeur_ac: v })} aria="Éditée par" />, fiche.editeur_ac || "—")} />
@@ -289,6 +292,7 @@ const editVal = (on: boolean, node: ReactNode, ro: ReactNode) => (on ? node : <s
 
 // Modale de création (assistance commerciale / direction).
 function CreateFiche({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const amOpts = useAmOptions(), clientOpts = useClientOptions();
   const toast = useToast();
   const [f, setF] = useState<Partial<Fiche>>(EMPTY_FICHE());
   const set = (patch: Partial<Fiche>) => setF((p) => ({ ...p, ...patch }));
@@ -301,9 +305,9 @@ function CreateFiche({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <div className="flex flex-col gap-3 text-[13px]">
         <div className="flex flex-wrap items-end gap-3">
           <Lbl t="N° de FP (FP/AAAA/N)"><TxtField value={f.numero_fp || ""} onChange={(v) => set({ numero_fp: v })} aria="N° de FP" w="w-40" placeholder="FP/2026/1" /></Lbl>
-          <Lbl t="Client"><TxtField value={f.client || ""} onChange={(v) => set({ client: v })} aria="Client" /></Lbl>
+          <Lbl t="Client"><Combo value={f.client || ""} onChange={(v) => set({ client: v })} ariaLabel="Client" placeholder="Client" allowCreate className="w-44" options={clientOpts.map((c) => ({ value: c, label: c }))} /></Lbl>
           <Lbl t="Affaire"><TxtField value={f.affaire || ""} onChange={(v) => set({ affaire: v })} aria="Affaire" w="w-56" /></Lbl>
-          <Lbl t="Commercial"><TxtField value={f.commercial || ""} onChange={(v) => set({ commercial: v })} aria="Commercial" /></Lbl>
+          <Lbl t="Commercial"><Combo value={f.commercial || ""} onChange={(v) => set({ commercial: v })} ariaLabel="Commercial" placeholder="Commercial" allowCreate className="w-44" options={amOpts.map((a) => ({ value: a, label: a }))} /></Lbl>
           <Lbl t="Date fiche"><DateField value={f.date_fiche || ""} onChange={(v) => set({ date_fiche: v })} ariaLabel="Date fiche" /></Lbl>
           <Lbl t="Éditée par"><TxtField value={f.editeur_ac || ""} onChange={(v) => set({ editeur_ac: v })} aria="Éditée par" /></Lbl>
         </div>
