@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast, type BulkAction } from "../design/components";
 import { Bars, DonutBU, GroupedBars, MultiLine } from "../design/charts";
 import { DateField, Select } from "../design/inputs";
 import { Combo } from "../design/combo";
@@ -224,6 +224,8 @@ function CarryoverCard() {
         rows={shown}
         colsKey="backlog-projets"
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.affaire || ""]}
+        rowKey={(r) => r.fp || ""}
+        bulk={[]}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),
@@ -1125,6 +1127,15 @@ export const OrderList: FC<Props> = () => {
       </div>
     </div>
   ) : undefined;
+  // Action en masse (même droit que par ligne) : annulation en LOT, réutilisant l'overlay `setCancellation`
+  // (statut persistant, rétablissable via la carte « Commandes annulées », survit au ré-import).
+  // Appels SÉQUENTIELS (pas Promise.all) : `setCancellation` sérialise déjà l'overlay par transaction serveur ;
+  // enchaîner évite la contention de N transactions concurrentes sur le même doc d'annulations.
+  const orderBulk: BulkAction[] = canImport ? [
+    { label: "Annuler", tone: "danger", confirm: "Annuler les commandes sélectionnées ? Elles sortent du carnet, du CAS et du backlog (conservées, rétablissables). L'annulation survit à un ré-import.",
+      okMsg: (rs) => { const n = rs.filter((x) => x.fp).length; return `${n} commande${n > 1 ? "s" : ""} annulée${n > 1 ? "s" : ""}`; }, errMsg: "Annulation refusée",
+      run: async (rs) => { for (const r of rs.filter((x) => x.fp)) await setCancellation("orders", fpDocId(r.fp!), true, { label: r.fp!, client: r.client }); } },
+  ] : [];
   if (loading && !all.length) return <CardSkeleton />;
   if (!all.length) return (
     <div className="flex flex-col gap-2">
@@ -1149,6 +1160,8 @@ export const OrderList: FC<Props> = () => {
         initialSearch={intent?.search}
         expand={orderActions}
         searchKeys={[(r) => r.fp, (r) => r.client, (r) => r.am, (r) => r.pm || "", (r) => r.affaire || ""]}
+        rowKey={(r) => r.fp || ""}
+        bulk={orderBulk}
         columns={[
           colText("FP", (r) => <FpLink fp={r.fp} />, (r) => r.fp),
           colText("Client", (r) => r.client, (r) => r.client),

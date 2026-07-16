@@ -335,7 +335,7 @@ function Vivier({ canWrite }: { canWrite: boolean }) {
                 <DangerBtn label="Suppr." okMsg="Candidat supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteCandidate(c.id!); await load(); }} />
               </span>
             ))] : []),
-          ]} rows={r.rows} />
+          ]} rows={r.rows} searchKeys={[(c: Candidate) => c.name || "", (c: Candidate) => c.bu || ""]} rowKey={(c: Candidate) => c.id || ""} bulk={[]} />
         </>
       )}
       <Tip>Le vivier ferme la boucle : une BU en <b>sous-capacité</b> (Lot 14) se traite ici. La <b>capacité future attendue</b> = Σ candidats pondérés par leur avancement (offre 0,7 · entretien 0,3 · sourcé 0,1) → à rapprocher du gap en ETP.</Tip>
@@ -609,7 +609,7 @@ export const Staffing: FC<Props> = () => {
                   <DangerBtn label="Suppr." okMsg="Consultant supprimé" errMsg="Suppression refusée" confirm={`Supprimer « ${c.name} » ?`} fn={async () => { await deleteConsultant(c.id!); await load(); bump(); }} />
                 </span>
               ))] : []),
-            ]} rows={rows} colsKey="staffing-consultants" />
+            ]} rows={rows} colsKey="staffing-consultants" searchKeys={[(c: Consultant) => c.name, (c: Consultant) => c.bu || "", (c: Consultant) => gradeLabel(c.grade)]} rowKey={(c: Consultant) => c.id || ""} bulk={[]} />
             {canWrite && rows.map((c) => editing === c.id && (
               <div key={`edit-${c.id}`} className={cx("border-t border-hair pt-2 mt-2")}><ConsultantForm initial={c} canCost={canCost} onDone={() => { setEditing(null); load(); bump(); }} /></div>
             ))}

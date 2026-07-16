@@ -649,6 +649,8 @@ export const OppList: FC<Props> = () => {
           colsKey="opps"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.client, (r) => r.designation || "", (r) => r.am, (r) => r.fp, (r) => r.stageLabel]}
+          rowKey={(r) => r.id || r.fp || ""}
+          bulk={[]}
           columns={[
             // Essentiels EN LIGNE (Client, Désignation, AM, Montant, Étape, Pondéré) ; le secondaire
             // (FP, BU, Proba, MB prév., DR, Closing, P&L) est replié dans le détail via det().

@@ -4,7 +4,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
@@ -186,6 +186,19 @@ export const InvoiceList: FC<Props> = () => {
   const orphan = rows.filter((r) => r.linked !== true && !cancelled.has(r.id!));
   const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
   const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
+  // Actions en masse (réservées à qui peut importer, comme les actions par ligne) : annulation / rétablissement
+  // en LOT, réutilisant l'overlay `setCancellation` (statut persistant, rétablissable, survit au ré-import).
+  // NB : `setCancellation` sérialise déjà le read-modify-write de l'overlay (transaction serveur). On enchaîne
+  // les appels SÉQUENTIELLEMENT (pas Promise.all) pour ne pas mettre en contention le même doc d'annulations
+  // (N transactions concurrentes sur un doc unique → tempête de retries / timeouts sur grande sélection).
+  const invoiceBulk: BulkAction[] = canImport ? [
+    { label: "Annuler", tone: "danger", confirm: "Annuler les factures sélectionnées ? Elles sortent de la facturation, du cash et des créances (conservées, rétablissables). L'annulation survit à un ré-import.",
+      okMsg: (rs) => { const n = rs.filter((x) => x.id).length; return `${n} facture${n > 1 ? "s" : ""} annulée${n > 1 ? "s" : ""}`; }, errMsg: "Annulation refusée",
+      run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, true, { label: r.numero || r.id!, client: r.client }); } },
+    { label: "Rétablir", confirm: "Rétablir les factures sélectionnées ? Elles réintègrent la facturation et le cash.",
+      okMsg: (rs) => { const n = rs.filter((x) => x.id).length; return `${n} facture${n > 1 ? "s" : ""} rétablie${n > 1 ? "s" : ""}`; }, errMsg: "Rétablissement refusé",
+      run: async (rs) => { for (const r of rs.filter((x) => x.id)) await setCancellation("invoices", r.id!, false); } },
+  ] : [];
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / client" />
@@ -200,6 +213,8 @@ export const InvoiceList: FC<Props> = () => {
           colsKey="factures"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}
+          rowKey={(r) => r.id || r.numero || ""}
+          bulk={invoiceBulk}
           columns={[
             // Essentiels EN LIGNE (Numéro, Client, Échéance, Montant, Statut) ; le secondaire (FP, BU,
             // Rattachement, Date d'émission) est replié dans le détail via det() → tableau étroit, lisible.

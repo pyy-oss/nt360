@@ -1,7 +1,7 @@
 // Primitives UI "Forest & Gold" (Tailwind). BUILD_KIT §12.
 import { Component, createContext, Fragment, lazy, Suspense, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Columns3, Download, Activity, Loader2 } from "lucide-react";
+import { Inbox, TrendingUp, TrendingDown, Minus, AlertTriangle, ArrowRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search, CheckCircle2, XCircle, WifiOff, X, Download, Activity, Loader2 } from "lucide-react";
 import { fmt, pct } from "./tokens";
 import { buildCsv, downloadCsv } from "../lib/exportCsv";
 import { isStaleChunkError, reloadForStaleChunk } from "../lib/staleChunk";
@@ -133,7 +133,7 @@ export function Chain({ children }: { children: ReactNode[] }) {
 }
 
 // --- Table triable ---
-type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean; raw?: boolean };
+export type Col = { header: string; align?: "left" | "right"; render: (row: any) => ReactNode; sort?: (row: any) => number | string; key?: string; sec?: boolean; raw?: boolean };
 
 // Marque une colonne comme SECONDAIRE : elle quitte la ligne principale et s'affiche dans le détail
 // déroulant (grille clé/valeur). Sert à garder des tableaux étroits, sans scroll horizontal.
@@ -220,30 +220,6 @@ function useColVisibility(storageKey: string | undefined, columns: Col[]) {
 }
 
 // Sélecteur de colonnes : petit menu (cases à cocher) pour afficher/masquer les colonnes de la liste.
-function ColumnsMenu({ columns, hidden, onToggle }: { columns: Col[]; hidden: Set<string>; onToggle: (id: string) => void }) {
-  const items = columns.map((c, i) => ({ id: colId(c, i), header: c.header })).filter((x) => (x.header || "").trim() !== "");
-  const shown = items.filter((x) => !hidden.has(x.id)).length;
-  return (
-    <details className="relative shrink-0 [&_summary::-webkit-details-marker]:hidden">
-      <summary className="btn-ghost !px-2.5 !py-1 text-xs cursor-pointer list-none inline-flex items-center gap-1.5" title="Choisir les colonnes affichées">
-        <Columns3 size={14} aria-hidden="true" />Colonnes<span className="text-faint tabnum">{shown}/{items.length}</span>
-      </summary>
-      <div role="menu" className="absolute right-0 z-30 mt-1 w-56 max-h-72 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
-        {items.map((x) => {
-          const on = !hidden.has(x.id);
-          const last = on && shown <= 1; // ne pas masquer la dernière colonne visible
-          return (
-            <label key={x.id} className={cx("flex items-center gap-2 px-2 py-1.5 rounded text-[13px] cursor-pointer hover:bg-panel2", last && "opacity-60 cursor-not-allowed")}>
-              <input type="checkbox" checked={on} disabled={last} onChange={() => onToggle(x.id)} className="accent-gold" aria-label={`Colonne ${x.header}`} />
-              <span className="truncate">{x.header}</span>
-            </label>
-          );
-        })}
-      </div>
-    </details>
-  );
-}
-
 // Export CSV des colonnes VISIBLES + lignes courantes (après filtre/tri). Exporte « ce qu'on voit ».
 function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: string }) {
   if (!rows.length) return null;
@@ -260,20 +236,55 @@ function ExportBtn({ cols, rows, name }: { cols: Col[]; rows: any[]; name?: stri
   );
 }
 
-export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { columns: Col[]; rows: any[]; empty?: string; colsKey?: string; pageSize?: number }) {
+// --- Sélection multiple + actions en masse (partagées Table + ListView) ---
+// Une action en masse reçoit les LIGNES cochées. `confirm` (texte) → modale de garde avant exécution.
+// `run` est asynchrone (tracé + toast comme Busy) ; la sélection est vidée au succès.
+export type BulkAction = {
+  label: string; icon?: ReactNode; tone?: "default" | "danger";
+  run: (rows: any[]) => Promise<any> | any;
+  okMsg?: string | ((rows: any[]) => string); errMsg?: string; confirm?: ReactNode;
+};
+
+// État de sélection par clé stable (survit au tri / filtre / pagination — on coche des LIGNES, pas des
+// index de page). Le hook est TOUJOURS appelé (règles des hooks) ; inerte tant qu'aucune ligne n'est cochée.
+function useSelection() {
+  const [sel, setSel] = useState<Set<string>>(() => new Set());
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const clear = () => setSel((s) => (s.size ? new Set() : s));
+  // Bascule « tout » sur un ENSEMBLE de clés donné (les lignes filtrées/triées courantes, toutes pages).
+  const setAll = (keys: string[], on: boolean) => setSel(() => (on ? new Set(keys) : new Set()));
+  return { sel, toggle, clear, setAll };
+}
+
+// Barre d'actions en masse ET case « tout sélectionner » vivent dans un chunk séparé (design/bulk)
+// chargé en LAZY → hors du chunk d'entrée (garde-fou bundle ≤ 120 KB). Rendues seulement sur les
+// tables/listes qui activent la sélection.
+const BulkBar = lazy(() => import("./bulk").then((m) => ({ default: m.BulkBar })));
+const SelectAllBox = lazy(() => import("./bulk").then((m) => ({ default: m.SelectAllBox })));
+const ColumnsMenu = lazy(() => import("./bulk").then((m) => ({ default: m.ColumnsMenu })));
+
+export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bulk, searchKeys, searchPlaceholder = "Rechercher…" }:
+  { columns: Col[]; rows: any[]; empty?: string; colsKey?: string; pageSize?: number;
+    // `rowKey` (clé stable) est requis pour la sélection en masse — sinon `bulk` est inerte.
+    rowKey?: (r: any) => string; bulk?: BulkAction[]; searchKeys?: ((r: any) => any)[]; searchPlaceholder?: string }) {
   const { cols, hidden, toggle: toggleCol, enabled } = useColVisibility(colsKey, columns);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const [open, setOpen] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(0);
+  const [q, setQ] = useState("");
+  const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
   const { primary, detail } = splitCols(cols);
   const hasDetail = detail.length > 0;
-  // Tri mémoïsé sur des signaux STABLES : lignes, état de tri, visibilité des colonnes (`hidden`, dont
-  // l'identité ne change qu'à une bascule utilisateur). On NE dépend PAS de `primary`/`cols` : les
-  // appelants construisent leurs colonnes en INLINE (identité neuve à CHAQUE rendu), ce qui re-triait la
-  // liste entière à chaque rendu non lié (tick onSnapshot, frappe ailleurs) — le memo ne cachait jamais.
-  // `primary` est relu au calcul (contenu identique tant que `hidden`/le contenu des colonnes ne bouge pas).
+  const selectable = !!bulk && !!rowKey;
+  const kOf = (r: any) => (rowKey ? rowKey(r) : "");
+  // Recherche + tri mémoïsés sur des signaux STABLES : lignes, requête, état de tri, visibilité des
+  // colonnes (`hidden`). On NE dépend PAS de `primary`/`cols`/`searchKeys` : les appelants construisent
+  // leurs colonnes/clés en INLINE (identité neuve à CHAQUE rendu), ce qui re-triait la liste entière à
+  // chaque rendu non lié (tick onSnapshot, frappe ailleurs). Ils sont RELUS au calcul (contenu stable).
   const sorted = useMemo(() => {
-    const base = rows.map((r, i) => ({ r, i }));
+    let base = rows.map((r, i) => ({ r, i }));
+    const s = searchKeys && q.trim() ? q.trim().toLowerCase() : "";
+    if (s) base = base.filter(({ r }) => searchKeys!.some((k) => String(k(r) ?? "").toLowerCase().includes(s)));
     const key = sort ? primary[sort.i]?.sort : null;
     if (!key || !sort) return base;
     const dir = sort.dir;
@@ -282,32 +293,49 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
       return va < vb ? -1 * dir : va > vb ? 1 * dir : 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sort, hidden]);
+  }, [rows, sort, hidden, q]);
+  // Sélection portée sur TOUTES les lignes filtrées/triées (toutes pages), pas la page courante.
+  const allKeys = useMemo(() => (selectable ? sorted.map(({ r }) => kOf(r)) : []), [sorted, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectedRows = useMemo(() => (selectable ? sorted.filter(({ r }) => sel.has(kOf(r))).map(({ r }) => r) : []), [sorted, sel, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pagination des longues listes : au-delà de `pageSize` lignes on ne rend qu'une fenêtre + un pager.
   // Les listes courtes (< pageSize) restent inchangées (aucun pager). `pageSize={0}` désactive.
   const total = sorted.length;
   const paged = pageSize > 0 && total > pageSize;
   const pageCount = paged ? Math.ceil(total / pageSize) : 1;
   const safePage = Math.min(page, pageCount - 1);
-  // Le tri ramène à la première page. On NE dépend PAS de `total` : l'app est temps réel (onSnapshot),
-  // et tout changement du nombre de lignes (import delta, ajout optimiste, annulation) ré-exécuterait
-  // l'effet et téléporterait l'utilisateur en page 1 en pleine navigation. Le clamp `safePage` suffit à
-  // rester dans les bornes quand la liste rétrécit (parité avec ListView).
-  useEffect(() => { setPage(0); }, [sort, pageSize]);
+  // Le tri/la recherche ramènent à la première page. On NE dépend PAS de `total` : l'app est temps réel
+  // (onSnapshot), et tout changement du nombre de lignes (import delta, ajout optimiste, annulation)
+  // téléporterait l'utilisateur en page 1 en pleine navigation. Le clamp `safePage` suffit à rester dans
+  // les bornes quand la liste rétrécit (parité avec ListView).
+  useEffect(() => { setPage(0); }, [sort, pageSize, q]);
   const pageRows = paged ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted;
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   const toggleRow = (i: number) => setOpen((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const leadCols = (selectable ? 1 : 0) + (hasDetail ? 1 : 0);
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex justify-end gap-2">
-        <ExportBtn cols={cols} rows={rows} name={colsKey} />
-        {enabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        {searchKeys ? (
+          <div className="relative w-full sm:w-64">
+            <Search size={14} aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+            <input className="field pl-8 w-full" aria-label={searchPlaceholder} placeholder={searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+        ) : <span />}
+        <div className="flex items-center gap-2 ml-auto">
+          {searchKeys && q.trim() && <span className="text-xs text-muted tabnum">{total.toLocaleString("fr-FR")} / {rows.length.toLocaleString("fr-FR")}</span>}
+          <ExportBtn cols={cols} rows={sorted.map(({ r }) => r)} name={colsKey} />
+          {enabled && <Suspense fallback={null}><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></Suspense>}
+        </div>
       </div>
+      {selectable && selectedRows.length > 0 && (
+        <Suspense fallback={null}><BulkBar selected={selectedRows} actions={bulk} cols={cols} exportName={colsKey} onClear={clearSel} /></Suspense>
+      )}
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-sm rtable">
           <thead>
             <tr className="text-muted">
+              {selectable && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8"><Suspense fallback={<span />}><SelectAllBox allKeys={allKeys} sel={sel} setAll={setAll} /></Suspense></th>}
               {hasDetail && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
               {primary.map((c, i) => (
                 <th key={i} scope="col" aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
@@ -324,9 +352,15 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
           <tbody>
             {pageRows.map(({ r, i: ri }) => {
               const isOpen = open.has(ri);
+              const on = selectable && sel.has(kOf(r));
               return (
                 <Fragment key={ri}>
-                  <tr className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
+                  <tr className={cx("transition-colors", on ? "bg-gold/[.07]" : "odd:bg-ink/[.03] hover:bg-ink/[.06]")}>
+                    {selectable && (
+                      <td className="px-2 py-2 border-t border-line/60 align-middle">
+                        <input type="checkbox" checked={on} onChange={() => toggleSel(kOf(r))} className="accent-gold align-middle" aria-label="Sélectionner la ligne" />
+                      </td>
+                    )}
                     {hasDetail && (
                       <td className="px-2 py-2 border-t border-line/60 align-middle">
                         <button type="button" onClick={() => toggleRow(ri)} aria-expanded={isOpen}
@@ -340,7 +374,7 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50 }: { column
                   </tr>
                   {hasDetail && isOpen && (
                     <tr className="bg-panel2/40">
-                      <td colSpan={primary.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60"><DetailGrid cols={detail} row={r} /></td>
+                      <td colSpan={primary.length + leadCols} className="px-3 sm:px-5 py-3 border-t border-line/60"><DetailGrid cols={detail} row={r} /></td>
                     </tr>
                   )}
                 </Fragment>
@@ -421,20 +455,23 @@ export function Tip({ children }: { children: ReactNode }) {
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
-export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey }:
+export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey, bulk }:
   { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string;
     // Détail masquable sous la ligne : `expand(row)` rend le panneau déplié (null ⇒ ligne non extensible).
     // `rowKey` identifie la ligne de façon stable (l'ouverture survit au tri/pagination/recherche).
     // `colsKey` active la personnalisation des colonnes (afficher/masquer), persistée sous cette clé.
-    expand?: (row: any) => ReactNode; rowKey?: (row: any) => string; colsKey?: string }) {
+    // `bulk` (avec `rowKey`) active la sélection multiple + barre d'actions en masse.
+    expand?: (row: any) => ReactNode; rowKey?: (row: any) => string; colsKey?: string; bulk?: BulkAction[] }) {
   const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
   const { cols, hidden, toggle: toggleCol, enabled: colsEnabled } = useColVisibility(colsKey, columns);
   // Colonnes essentielles en ligne + secondaires dans le détail déroulant (zéro scroll horizontal).
   // Un `expand` explicite du module reste prioritaire ; sinon on génère la grille de détail.
   const { primary, detail: detailCols } = splitCols(cols);
   const hasDetail = !!expand || detailCols.length > 0;
+  const selectable = !!bulk && !!rowKey;
   const keyOf = (r: any, i: number) => (rowKey ? rowKey(r) : String(i));
   const toggleRow = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
@@ -461,6 +498,10 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   const cur = Math.min(page, pages - 1);
   const slice = filtered.slice(cur * pageSize, (cur + 1) * pageSize);
   const toggle = (i: number) => { setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 })); };
+  // Sélection portée sur TOUTES les lignes filtrées (toutes pages), comme Table.
+  const allKeys = useMemo(() => (selectable ? filtered.map((r, i) => keyOf(r, i)) : []), [filtered, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectedRows = useMemo(() => (selectable ? filtered.filter((r, i) => sel.has(keyOf(r, i))) : []), [filtered, sel, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
+  const leadCols = (selectable ? 1 : 0) + (hasDetail ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-3">
@@ -472,14 +513,18 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted tabnum">{filtered.length.toLocaleString("fr-FR")} résultat{filtered.length > 1 ? "s" : ""}{filtered.length !== rows.length ? ` / ${rows.length.toLocaleString("fr-FR")}` : ""}</span>
           <ExportBtn cols={cols} rows={filtered} name={colsKey} />
-          {colsEnabled && <ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} />}
+          {colsEnabled && <Suspense fallback={null}><ColumnsMenu columns={columns} hidden={hidden} onToggle={toggleCol} /></Suspense>}
         </div>
       </div>
+      {selectable && selectedRows.length > 0 && (
+        <Suspense fallback={null}><BulkBar selected={selectedRows} actions={bulk} cols={cols} exportName={colsKey} onClear={clearSel} /></Suspense>
+      )}
       {slice.length === 0 ? <EmptyState label="Aucun résultat." /> : (
         <div className="overflow-x-auto -mx-1">
           <table className="w-full text-sm rtable">
             <thead>
               <tr className="text-muted">
+                {selectable && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8"><Suspense fallback={<span />}><SelectAllBox allKeys={allKeys} sel={sel} setAll={setAll} /></Suspense></th>}
                 {hasDetail && <th scope="col" className="px-2 py-2 sticky top-0 bg-panel w-8" aria-label="Détail" />}
                 {primary.map((c, i) => (
                   <th key={i} scope="col" aria-sort={c.sort && sort?.i === i ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
@@ -502,9 +547,15 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                 const custom = expand ? expand(r) : null;
                 const detail = custom && auto ? <div className="flex flex-col gap-4">{custom}{auto}</div> : (custom || auto);
                 const isOpen = hasDetail ? open.has(k) : false;
+                const on = selectable && sel.has(k);
                 return (
                 <Fragment key={k}>
-                  <tr className="odd:bg-ink/[.03] hover:bg-ink/[.06] transition-colors">
+                  <tr className={cx("transition-colors", on ? "bg-gold/[.07]" : "odd:bg-ink/[.03] hover:bg-ink/[.06]")}>
+                    {selectable && (
+                      <td className="px-2 py-2 border-t border-line/60 align-middle">
+                        <input type="checkbox" checked={on} onChange={() => toggleSel(k)} className="accent-gold align-middle" aria-label="Sélectionner la ligne" />
+                      </td>
+                    )}
                     {hasDetail && (
                       <td className="px-2 py-2 border-t border-line/60 align-middle">
                         {detail ? (
@@ -520,7 +571,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
                   </tr>
                   {isOpen && detail && (
                     <tr className="bg-panel2/40">
-                      <td colSpan={primary.length + 1} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
+                      <td colSpan={primary.length + leadCols} className="px-3 sm:px-5 py-3 border-t border-line/60">{detail}</td>
                     </tr>
                   )}
                 </Fragment>
