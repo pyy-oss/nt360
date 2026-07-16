@@ -7,6 +7,7 @@ import { useNav } from "../lib/nav";
 import { Card, Tip, Badge, Table, Segmented, colText, colNum, raw, money, cx } from "../design/components";
 import { scoreOpportunities, type ScoredOpp } from "../lib/writes";
 import type { Props } from "./_shared";
+import { STAGE_SHORT } from "./_shared";
 
 const bandLabel: Record<string, string> = { hot: "chaud", warm: "tiède", cold: "froid" };
 
@@ -55,7 +56,7 @@ export const Scoring: FC<Props> = () => {
               ), (o: ScoredOpp) => o.client || ""),
               colText("Commercial", (o: ScoredOpp) => o.am || "—"),
               colNum("Montant", (o: ScoredOpp) => money(o.amount), (o: ScoredOpp) => o.amount),
-              colNum("Étape", (o: ScoredOpp) => `${o.stage}/6`, (o: ScoredOpp) => o.stage),
+              colText("Étape", (o: ScoredOpp) => `${o.stage}·${STAGE_SHORT[o.stage] || ""}`, (o: ScoredOpp) => o.stage),
               colText("Score", (o: ScoredOpp) => <span className="inline-flex items-center gap-2"><ScoreBadge score={o.score} band={o.band} /><span className="text-[11px] text-muted">{bandLabel[o.band]}</span></span>, (o: ScoredOpp) => o.score),
               // Top 3 facteurs EN LIGNE (chips) + « +N ». Contenu riche → `raw` (jamais coincé dans `.cell-txt`
               // qui écrêterait les 2e/3e chips et le « +N ») ; le survol donne la liste complète.

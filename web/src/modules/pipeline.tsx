@@ -38,7 +38,6 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
   const { data: funnelC } = useDocData<OppFunnelSummary>("summaries/oppFunnel"); // funnel de conversion réel (Lot C)
-  const { go, canGo } = useNav(); // renvoi vers AM 360° (source unique du classement par commercial)
   if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
   const funnel = buildStageFunnel(data.byStage);
@@ -110,20 +109,10 @@ export const Pipeline: FC<Props> = ({ period }) => {
           <Tip>Granularité <b>hebdomadaire</b> (semaine ISO de la <b>D Prev</b>) de l'écoulement du pondéré projeté — même population et même pondération que l'écoulement mensuel, en plus fin pour le pilotage à court terme. Fondé sur la seule <b>date de clôture prévue</b> (la source n'ayant pas de date de création, ce n'est pas un « entrant »).</Tip>
         </Card>
       )}
-      {/* Le CLASSEMENT par commercial (pondéré / taux de transfo. / R-O …) vit désormais UNIQUEMENT dans
-          AM 360° (source unique summaries/ams). Il était ici recalculé depuis un AUTRE agrégat
-          (pipeline_${period}.byAmConv) → un même AM pouvait afficher un pondéré/transfo. différent selon
-          l'écran. On renvoie vers la source unique ; la distribution « Pondéré par AM » (période) ci-dessus
-          reste, elle, une lecture de répartition et non un classement. */}
-      {canGo("am360") && (
-        <Card title="Performance par commercial (AM)">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-[12.5px] text-muted">Le <b>classement complet</b> par commercial (CAS, facturé, backlog, pondéré, taux de transformation, R/O) est dans <b>AM 360°</b> — source unique pour garantir la cohérence des chiffres.</p>
-            <button onClick={() => go("am360")} className="btn-ghost !px-3 !py-1.5 text-sm shrink-0">Ouvrir AM 360°</button>
-          </div>
-        </Card>
-      )}
-
+      {/* Le CLASSEMENT complet par commercial vit UNIQUEMENT dans AM 360° (source unique summaries/ams) —
+          la carte-renvoi qui vivait ici a été retirée (doublon d'accès : AM 360° est déjà dans la nav, et
+          la carte n'apportait aucune donnée). La distribution « Pondéré par AM » (période) ci-dessus reste
+          une lecture de répartition, pas un classement. */}
       {data.dormant && (data.dormant.count ?? 0) > 0 && (
         <Card title={`Opportunité dormante · ${data.dormant.count}`}>
           <div className={grid4}>
@@ -793,16 +782,13 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
       </div>
+      {/* Signal COMPACT (le cockpit ne duplique plus la carte dormante pleine : son détail — 4 KPI + Tip —
+          vit dans « Pipeline », et l'alerte est aussi dans le Centre d'alertes). Un clic ouvre le détail. */}
       {data.dormant && (data.dormant.count ?? 0) > 0 && (
-        <Card title={`Opportunité dormante · ${data.dormant.count}`}>
-          <div className={grid4}>
-            <Kpi label="Volume" value={`${data.dormant.count} opp.`} tone="clay" sub={data.excludeDormant ? "exclues de la prévision cumulée" : "signalées (non exclues)"} />
-            <Kpi label="Valeur" value={fmt(data.dormant.brut)} tone="clay" sub="brut (non pondéré)" />
-            <Kpi label="Âge moyen" value={`${data.dormant.ageAvg ?? 0} j`} sub={`min ${data.dormant.ageMin ?? 0} j · max ${data.dormant.ageMax ?? 0} j`} />
-            <Kpi label="D Prev révolue" value="millésime antérieur" tone="steel" sub="à requalifier ou clôturer" />
-          </div>
-          <Tip>Opportunités <b>ouvertes</b> dont la <b>date de clôture prévue</b> appartient à un <b>exercice révolu</b>. {data.excludeDormant ? <>Elles sont <b>retirées de la prévision « Tout »</b> (réglable en Habilitations)</> : <>Elles sont ici <b>signalées sans être exclues</b></>} — à <b>requalifier</b> (re-dater) ou passer en perdu.</Tip>
-        </Card>
+        <button onClick={() => jump("pipeline")} className="text-left w-full rounded-xl border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
+          <span className="text-[12.5px] text-muted"><b className="text-clay">{data.dormant.count} opportunité(s) dormante(s)</b> · {fmt(data.dormant.brut)} brut — millésime révolu, à requalifier{data.excludeDormant ? " · exclues de la prévision cumulée" : ""}.</span>
+          <span className="text-gold text-xs underline shrink-0">Détail dans Pipeline</span>
+        </button>
       )}
       <Card title="Prévision par certitude (IdC) — Commit / Best Case / Pipeline">
         <div className="flex flex-col gap-2.5">
