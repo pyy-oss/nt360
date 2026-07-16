@@ -429,7 +429,7 @@ async function recomputeCore(db, only) {
     if (want("atterrissage")) w.push({ path: `summaries/billingTrend_${currentFy}`, data: { ...trend, ...stamp } });
   }
   // AM 360° : pilotage par commercial (CAS/CAF/backlog/pipeline/conversion/R-O), sans marge.
-  if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers), ...stamp } });
+  if (want("pipeline") || want("ams")) w.push({ path: "summaries/ams", data: { ...am360(orders, invoices, opps, objectives, currentFy, tiers, excludeDormant), ...stamp } });
   // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory), construit
   // à partir de MAINTENANT (la source n'a pas d'historique). Lu uniquement sur want("pipeline").
   // Lecture BORNÉE de oppHistory (append-only, non purgé) : on ne relit que les N transitions les plus

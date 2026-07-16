@@ -71,4 +71,17 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     expect(d.pipelinePondere).toBe(0); // opp au carnet retirée du pondéré
     expect(d.activeCount).toBe(1);     // funnel actif BRUT inchangé
   });
+
+  it("exclut les opps DORMANTES du pondéré par AM (parité Cockpit « Tout »)", () => {
+    const op = [
+      { am: "DATCHA", stage: 3, probability: 0.95, amount: 1000, closingDate: "2026-06-01" }, // exercice
+      { am: "DATCHA", stage: 3, probability: 0.95, amount: 8000, closingDate: "2024-06-01" }, // DORMANTE
+    ];
+    // Défaut (exclusion active) : la dormante 2024 ne compte pas.
+    expect(am360([], [], op, [], 2026).rows.find((x) => x.am === "DATCHA").pipelinePondere).toBe(1000);
+    // Drapeau désactivé : les deux comptent (poids Certitudes = 1).
+    expect(am360([], [], op, [], 2026, undefined, false).rows.find((x) => x.am === "DATCHA").pipelinePondere).toBe(9000);
+    // activeCount (funnel brut) inchangé dans les deux cas.
+    expect(am360([], [], op, [], 2026).rows.find((x) => x.am === "DATCHA").activeCount).toBe(2);
+  });
 });
