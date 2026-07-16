@@ -22,6 +22,17 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     expect(c1.margePct).toBe(0.75);
   });
 
+  it("signale missingCjm : jours d'intervention sans CJM connu (marge non fiable, audit m6)", () => {
+    // K2 n'est pas dans cjmById → ses jours comptent en coût 0 mais sont drapeautés.
+    const iv = [{ contratId: "C1", consultantId: "K1", heures: 8 }, { contratId: "C1", consultantId: "K2", heures: 16 }];
+    const rows = computeContratPnl(contrats, iv, { K1: 100_000 }, asOf, true);
+    const c1 = rows.find((r) => r.id === "C1");
+    expect(c1.missingCjm).toBe(2);  // 16 h / 8 → 2 j sans CJM
+    expect(c1.cout).toBe(100_000);  // seul K1 (1 j × 100 000) est chiffré
+    // Sans droit coût : missingCjm masqué comme le reste.
+    expect(computeContratPnl(contrats, iv, { K1: 100_000 }, asOf, false).find((r) => r.id === "C1").missingCjm).toBeNull();
+  });
+
   it("masque coût/marge SANS droit rentabilité (revenu + jours restent)", () => {
     const rows = computeContratPnl(contrats, interventions, cjmById, asOf, false);
     const c1 = rows.find((r) => r.id === "C1");

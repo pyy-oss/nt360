@@ -2,7 +2,7 @@
 # Une fonction/ligne. Consommé par : (1) .github/workflows/firebase-deploy.yml (construit --only)
 # et (2) functions/scripts/check-deploy-targets.mjs (CI : échoue si un export de index.js n'est pas ici).
 # Exclusions VOLONTAIRES (triggers env-gated, exportés seulement si INGEST_REGION/RECOMPUTE_REGION) :
-# ingest, onRecomputeRequest — activés manuellement par ops, cf. commentaires index.js.
+# ingest, onRecomputeRequest, onMntApprovalDecided — activés manuellement par ops, cf. commentaires index.js.
 # Lignes # et vides ignorées. Régénérer la liste : grep -oP '^exports\.\K\w+' functions/index.js | sort -u
 accountView
 addBcLine

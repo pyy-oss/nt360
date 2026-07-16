@@ -758,3 +758,32 @@ resserrement d'assiette) ; aucune colonne/signature touchée.
 au contrat), m6 (`missingCjm` absent → marge surévaluée en silence), m7 (normalisation clients IA hors `mnt_`
 sans ADR), + infos (deviseEngage non validée XOF, dateFin===dateDebut, injection de prompt confinée, gate
 front sur RBAC seul). Documentés ici pour ne pas les perdre.
+
+---
+
+## 2026-07-16 — Audit (suite) : remédiation m3/m4/m6/m7
+
+**Fait** — Deuxième vague de remédiation de l'audit adverse, sur arbitrage utilisateur :
+
+- **m4 (mineur) — décision d'approbation inerte → application automatique.** Un renouvellement/résiliation
+  approuvé ne mutait pas le contrat. Ajout d'un trigger `onMntApprovalDecided` (Firestore, base nommée, gaté
+  `RECOMPUTE_REGION`, `retry:false`, idempotent sur la transition→approved) qui applique la fonction PURE
+  `applyMntDecision` : résiliation → `statut=resilie` ; renouvellement → `dateFin += terme initial` (échu/
+  résilié → renaît `actif`). **ADR-022**. Audité `mnt_decision_apply`. Exclusion volontaire de déploiement
+  (activé par ops, comme le recompute).
+- **m3 (mineur) — parité churn.** `churnInput.slaBreaches` recalculait les ruptures SLA côté front (seul
+  l'engagement `resolution`), divergeant de `r.slaRompus` (back, tous engagements + repli). Fix : réutiliser
+  `r.slaRompus`, source **unique** déjà matérialisée (« même métrique = même nombre »).
+- **m6 (mineur) — marge non fiable silencieuse.** Un consultant sans CJM renseigné contribuait 0 au coût
+  sans signal → marge surévaluée. Ajout d'un drapeau `missingCjm` (jours d'intervention sans CJM) par ligne
+  P&L (masqué sans droit coût), + marqueur « ⚠ » sur la colonne Marge, comme `resourcePnl.missingCjm`.
+- **m7 (gouvernance) — normalisation clients IA hors `mnt_`.** **ADR-023** : actée comme référentiel
+  transverse distinct, always-on, gouverné `import`/`habilitations`, hors kill-switch `mntFeature` (l'écran
+  pré-existe, l'IA ne fait que proposer, l'application reste direction).
+
+**Vérif** — functions 926/926 (+7 : applyMntDecision 6, missingCjm 1), web 124/124, build OK, lint OK,
+chunk 116,9 KB ≤ 120, gardes CI (deploy-targets/no-undef/indexes) OK. Additif ; `onMntApprovalDecided`
+listé en exclusion volontaire de `deployed-functions.txt` (comme `onRecomputeRequest`).
+
+**Reste ouvert (infos, non traité)** : deviseEngage non validée XOF, `dateFin===dateDebut` accepté,
+injection de prompt confinée (durcissement optionnel), gate front sur RBAC seul (défense en profondeur).

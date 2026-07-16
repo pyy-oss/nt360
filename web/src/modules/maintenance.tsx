@@ -255,19 +255,22 @@ export const Maintenance: FC<Props> = () => {
     colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
     ...(pnl.hasCost ? [
       colNum("Coût", (r: MntContratPnlRow) => money(r.cout || 0), (r: MntContratPnlRow) => r.cout || 0),
-      colNum("Marge", (r: MntContratPnlRow) => <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>{money(r.marge || 0)}</span>, (r: MntContratPnlRow) => r.marge || 0),
+      colNum("Marge", (r: MntContratPnlRow) => (
+        <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>
+          {money(r.marge || 0)}
+          {(r.missingCjm || 0) > 0 && <span className="text-gold" title={`${r.missingCjm} j d'intervention sans CJM connu — marge non fiable (coût sous-estimé)`}> ⚠</span>}
+        </span>
+      ), (r: MntContratPnlRow) => r.marge || 0),
       colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : `${Math.round(r.margePct * 100)} %`), (r: MntContratPnlRow) => r.margePct || 0),
     ] : []),
   ] : [];
   // Analyse de rétention IA (Lot 6/7) : contrats à risque (moteur existant) enrichis de stats tickets +
   // proximité d'échéance → l'IA rend motifs de churn + reco. Parité : on part de ce que l'écran affiche.
   const churnInput = useMemo<ChurnInput[]>(() => {
-    const openByFp = new Map<string, number>(), breachByFp = new Map<string, number>();
+    const openByFp = new Map<string, number>();
     for (const t of tickets) {
       const k = fpKey(t.fp || ""); if (!k) continue;
       if (t.statut === "ouvert" || t.statut === "en_cours") openByFp.set(k, (openByFp.get(k) || 0) + 1);
-      const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
-      if (eng && t.ouvertLe && slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs).state === "rompu") breachByFp.set(k, (breachByFp.get(k) || 0) + 1);
     }
     const finJours = (fp?: string | null) => {
       const c = contrats.find((x) => fpKey(x.fp) === fpKey(fp || ""));
@@ -277,9 +280,12 @@ export const Maintenance: FC<Props> = () => {
     };
     return atRisk.map((r) => {
       const k = fpKey(r.fp || "") || "";
-      return { fp: r.fp || "", client: r.client || "", niveau: r.niveau, signals: (r.signals || []).map((s) => signalText(s)), joursEcheance: finJours(r.fp), ticketsOuverts: openByFp.get(k) || 0, slaBreaches: breachByFp.get(k) || 0 };
+      // slaBreaches = r.slaRompus, la source UNIQUE déjà matérialisée par le moteur de risque back (parcourt
+      // TOUS les engagements, repli prise_en_compte→résolution). On ne le RECALCULE pas côté front (le front
+      // n'aurait vu que 'resolution' → divergence « même métrique = même nombre », audit m3).
+      return { fp: r.fp || "", client: r.client || "", niveau: r.niveau, signals: (r.signals || []).map((s) => signalText(s)), joursEcheance: finJours(r.fp), ticketsOuverts: openByFp.get(k) || 0, slaBreaches: r.slaRompus || 0 };
     });
-  }, [atRisk, tickets, contrats, contratById, nowMs, asOfIso]);
+  }, [atRisk, tickets, contrats, asOfIso]);
   const [churn, setChurn] = useState<ChurnResult | null>(null);
   const CHURN_LABEL: Record<string, string> = { eleve: "Élevé", moyen: "Moyen", faible: "Faible" };
   const churnCols = [

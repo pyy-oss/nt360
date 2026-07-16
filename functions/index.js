@@ -130,6 +130,42 @@ if (process.env.RECOMPUTE_REGION) {
   );
 }
 
+// Application de l'EFFET d'une décision d'approbation de contrat de maintenance (audit m4, ADR-022) : quand une
+// demande `approvals` de kind renouvellement/résiliation passe à `approved`, on MUTE le contrat (statut resilie,
+// ou dateFin repoussée d'un terme). Sans ce trigger, la validation humaine restait SANS effet sur les données.
+// Trigger co-localisé à la base NOMMÉE (database: FIRESTORE_DB) → gaté sur RECOMPUTE_REGION comme
+// onRecomputeRequest (la région d'une base nommée ne peut pas être devinée). retry:false = pas de boucle.
+if (process.env.RECOMPUTE_REGION) {
+  const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+  exports.onMntApprovalDecided = onDocumentWritten(
+    { document: "approvals/{id}", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 256, timeoutSeconds: 120, retry: false },
+    async (event) => {
+      const before = event.data && event.data.before && event.data.before.data();
+      const after = event.data && event.data.after && event.data.after.data();
+      if (!after) return; // suppression du doc → rien à faire
+      // On n'agit QU'À LA TRANSITION vers `approved` (idempotence : les ré-écritures ultérieures — note, etc.
+      // — ne re-mutent pas le contrat). Seules les décisions de contrat de maintenance sont concernées.
+      if (after.status !== "approved" || (before && before.status === "approved")) return;
+      if (after.entityType !== "mnt_contrat") return;
+      if (!["renouvellement_contrat", "resiliation_contrat"].includes(after.kind)) return;
+      const contratId = after.entityId;
+      if (!contratId) return;
+      try {
+        const { applyMntDecision } = require("./domain/mntDecision");
+        const ref = db.doc(`mnt_contrats/${contratId}`);
+        const snap = await ref.get();
+        if (!snap.exists) return; // contrat supprimé entre-temps
+        const res = applyMntDecision(after.kind, snap.data() || {});
+        if (!res.applied || !res.patch) return; // rien d'applicable (déjà résilié, renouvellement sans date de fin…)
+        await ref.set({ ...res.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        await db.collection("auditLog").add({ uid: after.decidedBy || null, action: "mnt_decision_apply", module: "maintenance", entity: "mnt_contrat", entityId: contratId, detail: { kind: after.kind, approvalId: event.params.id, patch: res.patch, reason: res.reason }, ts: FieldValue.serverTimestamp() });
+      } catch (e) {
+        logger.error("onMntApprovalDecided a échoué", { message: e && e.message, stack: e && e.stack });
+      }
+    }
+  );
+}
+
 /** Recalcule config/fiscal.currentFy = max(yearPo) des commandes (§7). */
 async function updateFiscalYearFromOrders() {
   const snap = await db.collection("orders").select("yearPo").get();
