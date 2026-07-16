@@ -18,6 +18,7 @@ import type { Invoice, Order } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
+  mntContratPnl, type MntContratPnlRow,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
 import {
@@ -232,6 +233,21 @@ export const Maintenance: FC<Props> = () => {
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
   // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
   const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
+  // Rentabilité par contrat (Lot 4/7) : callable gouverné (coût CJM serveur, masqué sans droit rentabilité).
+  // Chargé à l'ouverture du module ; « Recalculer » rafraîchit après édition.
+  const [pnl, setPnl] = useState<{ rows: MntContratPnlRow[]; hasCost: boolean } | null>(null);
+  useEffect(() => { if (!gate) return; mntContratPnl().then((r) => setPnl({ rows: r.rows, hasCost: r.hasCost })).catch(() => setPnl(null)); }, [gate]);
+  const pnlCols = pnl ? [
+    colText("Client", (r: MntContratPnlRow) => r.client || "—", (r: MntContratPnlRow) => r.client || ""),
+    colText("N° FP", (r: MntContratPnlRow) => <FpLink fp={r.fp || undefined} />),
+    colNum("Revenu engagé", (r: MntContratPnlRow) => money(r.revenue), (r: MntContratPnlRow) => r.revenue),
+    colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
+    ...(pnl.hasCost ? [
+      colNum("Coût", (r: MntContratPnlRow) => money(r.cout || 0), (r: MntContratPnlRow) => r.cout || 0),
+      colNum("Marge", (r: MntContratPnlRow) => <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>{money(r.marge || 0)}</span>, (r: MntContratPnlRow) => r.marge || 0),
+      colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : `${Math.round(r.margePct * 100)} %`), (r: MntContratPnlRow) => r.margePct || 0),
+    ] : []),
+  ] : [];
   const openContrat = (id: string) => { const c = contratById[id]; if (!c) return; setCForm(toContratForm(c)); setCId(id); setCEdit(true); setCOpen(true); };
   const complianceCols = [
     colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
@@ -416,6 +432,14 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
           </div>
           {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}
+        </Card>
+      )}
+
+      {gate && pnl && pnl.rows.length > 0 && (
+        <Card title="Rentabilité des contrats"
+          actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
+          <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût des interventions</b> (jours CRA × coût journalier du consultant). {pnl.hasCost ? <>Pires marges d'abord.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
+          <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
         </Card>
       )}
 

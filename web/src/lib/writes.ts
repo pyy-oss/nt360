@@ -1050,6 +1050,14 @@ export async function aiSuggestMntContrats(candidates: MntCandidate[]): Promise<
   return res.data as MntAiSuggestResult;
 }
 
+// Rentabilité par contrat (Lot 4/7) — revenu engagé vs coût interventions (jours × CJM). Coût/marge MASQUÉS
+// (null) sans droit `rentabilite` (calcul serveur, le CJM ne sort jamais). Lecture gouvernée `maintenance`.
+export type MntContratPnlRow = { id: string; fp: string | null; client: string; statut: string; revenue: number; jours: number; cout: number | null; marge: number | null; margePct: number | null };
+export async function mntContratPnl(): Promise<{ ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean }> {
+  const res = await httpsCallable(functions, "mntContratPnl", { timeout: 120_000 })({});
+  return res.data as { ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean };
+}
+
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
 import type { MntTicket, MntIntervention } from "../types";
 export async function upsertMntTicket(t: MntTicket) { const res = await httpsCallable(functions, "upsertMntTicket")(t); return res.data as { ok: boolean; id: string }; }

@@ -9,7 +9,7 @@ const { isMntEnabled } = require("../domain/mntFeature");
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { monthOf, craDaysFromHours } = require("../domain/mntTicket");
 
-function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
+function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée mnt_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `maintenance`.
   async function assertMntEnabled() {
@@ -245,7 +245,31 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id: ref.id, approverUid };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  // RENTABILITÉ PAR CONTRAT (Lot 4/7 « valeur ajoutée ») — revenu engagé à ce jour vs coût des interventions
+  // (jours CRA × CJM). Le CJM est CONFIDENTIEL : coût/marge MASQUÉS sauf droit `rentabilite` (même règle que
+  // resourcePnl/activityKpis). Lecture gouvernée `maintenance` + drapeau. Calcul serveur (le CJM ne sort pas).
+  const mntContratPnl = onCallG("mntContratPnl", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+    await requireRead(req, "maintenance");
+    await assertMntEnabled();
+    const { canRead } = require("../domain/authz");
+    const role = req.auth.token?.nt360Role;
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    const hasCost = role === "direction" || canRead(matrix, role, "rentabilite");
+    const [cSnap, iSnap, conSnap] = await Promise.all([
+      db.collection("mnt_contrats").limit(MAX_SCAN + 1).get(),
+      db.collection("mnt_interventions").limit(MAX_SCAN + 1).get(),
+      db.collection("consultants").select("cjm").limit(MAX_SCAN + 1).get(),
+    ]);
+    const contrats = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const interventions = sliceCapped(iSnap.docs).docs.map((d) => d.data());
+    const cjmById = {};
+    for (const d of sliceCapped(conSnap.docs).docs) { const x = d.data() || {}; if (x.cjm != null) cjmById[d.id] = Number(x.cjm); }
+    const { computeContratPnl } = require("../domain/mntContratPnl");
+    const asOf = new Date().toISOString().slice(0, 10);
+    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
+  });
+
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, mntContratPnl, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };

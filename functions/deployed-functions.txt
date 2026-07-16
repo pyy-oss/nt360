@@ -58,6 +58,7 @@ upsertConsultant
 upsertMntContrat
 importMntContrats
 aiSuggestMntContrats
+mntContratPnl
 upsertMntIntervention
 upsertMntTicket
 upsertTimesheet
