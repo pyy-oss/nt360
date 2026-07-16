@@ -7,10 +7,11 @@ import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, useToast, cx, colText, colNum, det, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
+import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
 import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
-import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits } from "./_shared";
+import { Props, grid4, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
@@ -427,6 +428,7 @@ export const OppList: FC<Props> = () => {
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
+  const amOpts = useAmOptions(), clientOpts = useClientOptions(); // autocomplete Client/AM (mêmes sources que les filtres)
   const prefill = (o: Opportunity, patch: boolean) => { setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
     amount: String(o.amount ?? ""), stage: String(o.stage ?? "1"), probability: String(o.probability ?? ""), closingDate: o.closingDate || "",
@@ -516,9 +518,9 @@ export const OppList: FC<Props> = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {/* En correction d'opp importée, le client vient de la source (non modifiable) ; on l'affiche en lecture. */}
             <label className="flex flex-col gap-1 text-[11px] text-muted">Client
-              <input data-autofocus className="field" aria-label="Client" placeholder="Client" value={f.client} disabled={f.patch} onChange={(e) => setF({ ...f, client: e.target.value })} /></label>
+              <Combo value={f.client} onChange={(v) => setF({ ...f, client: v })} ariaLabel="Client" placeholder="Client" disabled={f.patch} allowCreate options={clientOpts.map((c) => ({ value: c, label: c }))} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">Account Manager
-              <input className="field" aria-label="Account Manager" placeholder="AM" value={f.am} onChange={(e) => setF({ ...f, am: e.target.value })} /></label>
+              <Combo value={f.am} onChange={(v) => setF({ ...f, am: v })} ariaLabel="Account Manager" placeholder="AM" allowCreate options={amOpts.map((a) => ({ value: a, label: a }))} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">N° FP
               <input className="field" aria-label="N° FP" placeholder="N° FP (FP/2026/…)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></label>
             <label className="flex flex-col gap-1 text-[11px] text-muted">Business Unit

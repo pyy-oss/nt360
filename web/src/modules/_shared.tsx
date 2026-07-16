@@ -94,6 +94,18 @@ export function useRefList(kind: "businessUnits" | "projectManagers", fallback: 
 export const useBusinessUnits = () => useRefList("businessUnits", DEFAULT_BU);
 export const useProjectManagers = () => useRefList("projectManagers", []);
 
+// Référentiels DÉRIVÉS des agrégats (commerciaux distincts, clients canonicalisés) — alimentent
+// l'autocomplete des formulaires de saisie (Combo) : mêmes sources que les filtres transverses
+// (FilterBar), pour que « ce qu'on filtre » et « ce qu'on saisit » soient une seule liste.
+export function useAmOptions(): string[] {
+  const { data } = useDocData<AmsSummary>("summaries/ams");
+  return (data?.rows || []).map((r) => r.am).filter(Boolean);
+}
+export function useClientOptions(): string[] {
+  const { data } = useDocData<EntitySummary>("summaries/clients_all");
+  return (data?.rows || []).map((r) => r.key).filter(Boolean);
+}
+
 export function useCommandesRows(enabled = true) {
   const canMargin = useCanSeeMargin();
   // enabled=false → aucun abonnement (name null) : la Vue d'ensemble / FP 360° ne chargent la liste

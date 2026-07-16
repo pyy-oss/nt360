@@ -3,7 +3,7 @@
 // composants (jsdom) et on exerce les interactions clés (filtre, sélection, création, navigation mois).
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { Combo, MonthField } from "./inputs";
+import { Combo, MonthField } from "./combo";
 import { Field } from "./components";
 
 afterEach(() => cleanup());

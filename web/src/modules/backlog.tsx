@@ -6,7 +6,8 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast } from "../design/components";
 import { Bars, DonutBU, GroupedBars, MultiLine } from "../design/charts";
 import { DateField, Select } from "../design/inputs";
-import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, FpLink } from "./_shared";
+import { Combo } from "../design/combo";
+import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, useBusinessUnits, useAmOptions, useClientOptions, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
 import { useFilters } from "../lib/filters";
 import { fpKey, plausibleYear } from "../lib/ids";
@@ -614,6 +615,7 @@ function Field({ label, v, set, placeholder, mode }: { label: string; v: string;
 // Saisie d'une NOUVELLE commande (ligne P&L) directement dans l'app — sans passer par l'Excel.
 // N° FP + CAS obligatoires ; RAF vide = dérivé (CAS − facturé). createOrder refuse un FP déjà présent.
 function OrderForm({ onDone }: { onDone?: () => void }) {
+  const amOpts = useAmOptions(), clientOpts = useClientOptions(), BU = useBusinessUnits(); // autocomplete/référentiels
   const [fp, setFp] = useState("");
   const [cas, setCas] = useState("");
   const [client, setClient] = useState("");
@@ -640,10 +642,13 @@ function OrderForm({ onDone }: { onDone?: () => void }) {
         <Field label="N° FP (obligatoire)" v={fp} set={setFp} placeholder="FP/2026/13" />
         <Field label="CAS (obligatoire)" v={cas} set={setCas} placeholder="0" mode="decimal" />
         <Field label="RAF (vide = dérivé)" v={raf} set={setRaf} placeholder="auto" mode="decimal" />
-        <Field label="Client" v={client} set={setClient} />
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-muted">Client</span>
+          <Combo value={client} onChange={setClient} ariaLabel="Client" placeholder="Client" allowCreate className="!py-0.5" options={clientOpts.map((c) => ({ value: c, label: c }))} /></label>
         <Field label="Affaire" v={affaire} set={setAffaire} />
-        <Field label="BU" v={bu} set={setBu} />
-        <Field label="AM" v={am} set={setAm} />
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-muted">BU</span>
+          <Select value={bu} onChange={setBu} ariaLabel="BU" placeholder="BU" className="!py-1" options={BU.map((b) => ({ value: b, label: b }))} /></label>
+        <label className="flex flex-col gap-1 text-[13px]"><span className="text-muted">AM</span>
+          <Combo value={am} onChange={setAm} ariaLabel="AM" placeholder="AM" allowCreate className="!py-0.5" options={amOpts.map((a) => ({ value: a, label: a }))} /></label>
         <Field label="Millésime (année PO)" v={year} set={setYear} placeholder="2026" mode="numeric" />
       </div>
       <div className="mt-2.5 flex justify-end">
