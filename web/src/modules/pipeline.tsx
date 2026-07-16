@@ -445,6 +445,9 @@ export const OppList: FC<Props> = () => {
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
+  // Sous-filtre par ÉTAPE (phase) — ne s'applique qu'au segment « Actives » (étapes 1..5). 0 = toutes.
+  // C'est un filtre d'affichage (pas une métrique recalculée) → aucune divergence de chiffres possible.
+  const [stageF, setStageF] = useState(0);
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
   const amOpts = useAmOptions(), clientOpts = useClientOptions(); // autocomplete Client/AM (mêmes sources que les filtres)
   const prefill = (o: Opportunity, patch: boolean) => { setF({
@@ -496,7 +499,16 @@ export const OppList: FC<Props> = () => {
     for (const o of rows) c[segOf(o.stage || 0)]++;
     return c;
   }, [rows]);
-  const shownOpps = useMemo(() => seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg), [rows, seg]);
+  // Comptes par étape active (1..5) — alimentent les pastilles du sous-filtre par phase.
+  const activeStageCounts = useMemo(() => {
+    const c: Record<number, number> = {};
+    for (const o of rows) { const s = o.stage || 0; if (s >= 1 && s <= 5) c[s] = (c[s] || 0) + 1; }
+    return c;
+  }, [rows]);
+  const shownOpps = useMemo(() => {
+    const base = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
+    return seg === "active" && stageF ? base.filter((o) => (o.stage || 0) === stageF) : base;
+  }, [rows, seg, stageF]);
   const pnlFlag = (o: Opportunity): ReactNode =>
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
       : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
@@ -652,7 +664,7 @@ export const OppList: FC<Props> = () => {
       {canWrite && <OppBulkExcel />}
       <Card title={`Toutes les opportunités · ${shownOpps.length.toLocaleString("fr-FR")}`} actions={
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <Segmented value={seg} onChange={setSeg} ariaLabel="Filtrer par statut d'opportunité" options={[
+          <Segmented value={seg} onChange={(v) => { setSeg(v as typeof seg); if (v !== "active") setStageF(0); }} ariaLabel="Filtrer par statut d'opportunité" options={[
             { value: "all", label: "Toutes", count: rows.length },
             { value: "active", label: "Actives", count: segCounts.active },
             { value: "won", label: "Gagnées", count: segCounts.won },
@@ -660,6 +672,14 @@ export const OppList: FC<Props> = () => {
             { value: "susp", label: "Suspendues", count: segCounts.susp },
             { value: "cxl", label: "Annulées", count: segCounts.cxl },
           ]} />
+          {/* Sous-filtre par phase (étapes 1..5), visible seulement pour « Actives » — précise la vue
+              « opportunités ouvertes » sans introduire de métrique parallèle. */}
+          {seg === "active" && (
+            <Segmented value={String(stageF)} onChange={(v) => setStageF(Number(v))} ariaLabel="Filtrer par étape du pipeline" options={[
+              { value: "0", label: "Toutes phases", count: segCounts.active },
+              ...[1, 2, 3, 4, 5].map((s) => ({ value: String(s), label: `${s}·${STAGE_SHORT[s]}`, count: activeStageCounts[s] || 0 })),
+            ]} />
+          )}
           {canImport && <ImportButton label="Importer (LIVE / Sales)" />}
         </div>}>
         <ListView
