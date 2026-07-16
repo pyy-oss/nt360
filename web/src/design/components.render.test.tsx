@@ -28,12 +28,12 @@ describe("Table — rendu & personnalisation des colonnes", () => {
     expect(screen.getByText("BETA")).toBeTruthy();
   });
 
-  it("colsKey : masquer une colonne la retire du tableau et persiste le choix", () => {
+  it("colsKey : masquer une colonne la retire du tableau et persiste le choix", async () => {
     render(<Table columns={cols} rows={rows} colsKey="t-test" />);
     // La colonne « Client » est visible au départ.
     expect(screen.getByRole("columnheader", { name: "Client" })).toBeTruthy();
-    // Décocher « Client » dans le sélecteur de colonnes.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Colonne Client" }));
+    // Décocher « Client » dans le sélecteur de colonnes (chargé en lazy → findBy).
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Colonne Client" }));
     expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
     // Le choix est persisté sous la clé attendue.
     expect(localStorage.getItem("nt360-cols-t-test")).toContain("Client");
@@ -61,11 +61,11 @@ describe("Table — rendu & personnalisation des colonnes", () => {
     expect(cells).toEqual(["ZED", "ALP"]);
   });
 
-  it("tri actif puis masquage d'une colonne : le rendu reste cohérent (hidden re-déclenche le memo)", () => {
+  it("tri actif puis masquage d'une colonne : le rendu reste cohérent (hidden re-déclenche le memo)", async () => {
     render(<Table columns={cols} rows={rows} colsKey="sort-hide" />);
     fireEvent.click(screen.getByRole("button", { name: "CAS" })); // tri ascendant sur CAS
     // Masquer « Client » : la bascule `hidden` doit ré-évaluer le tri sans casser l'affichage.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Colonne Client" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Colonne Client" }));
     expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
     // Les lignes restent rendues, dans l'ordre CAS croissant (FP/2026/1=1000 avant FP/2026/2=2000).
     // On lit la colonne FP, toujours visible (« Client » est masquée).
@@ -94,18 +94,60 @@ describe("ListView — recherche, détail extensible, colonnes", () => {
     expect(screen.getByText("détail-ACME")).toBeTruthy();
   });
 
-  it("colsKey : masquer une colonne la retire de la liste", () => {
+  it("colsKey : masquer une colonne la retire de la liste", async () => {
     render(<ListView rows={rows} columns={cols} searchKeys={[(r: any) => r.fp]} colsKey="lv-test" />);
     expect(screen.getByRole("columnheader", { name: "CAS" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Colonne CAS" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Colonne CAS" }));
     expect(screen.queryByRole("columnheader", { name: "CAS" })).toBeNull();
   });
 
-  it("ne masque jamais la DERNIÈRE colonne visible (case désactivée)", () => {
+  it("ne masque jamais la DERNIÈRE colonne visible (case désactivée)", async () => {
     const one = [colText("Seule", (r: any) => r.fp)];
     render(<Table columns={one} rows={rows} colsKey="last-test" />);
-    const cb = screen.getByRole("checkbox", { name: "Colonne Seule" }) as HTMLInputElement;
+    const cb = await screen.findByRole("checkbox", { name: "Colonne Seule" }) as HTMLInputElement;
     expect(cb.disabled).toBe(true);
+  });
+});
+
+// Recherche intégrée au Table (parité avec ListView) : filtre en mémoire, insensible à la casse.
+describe("Table — recherche intégrée (searchKeys)", () => {
+  it("filtre les lignes selon la requête (insensible casse)", () => {
+    render(<Table columns={cols} rows={rows} searchKeys={[(r: any) => r.client]} />);
+    expect(screen.getByText("ACME")).toBeTruthy();
+    expect(screen.getByText("BETA")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "acm" } });
+    expect(screen.getByText("ACME")).toBeTruthy();
+    expect(screen.queryByText("BETA")).toBeNull();
+  });
+});
+
+// Sélection multiple + actions en masse (Table et ListView) : cases par ligne + « tout sélectionner »
+// + barre d'actions (chargée en lazy) qui reçoit les LIGNES cochées.
+describe("Table / ListView — sélection multiple + actions en masse", () => {
+  it("Table : cocher une ligne révèle la barre ; l'action reçoit les lignes sélectionnées", async () => {
+    let got: any[] = [];
+    const bulk = [{ label: "Traiter", run: (rs: any[]) => { got = rs; } }];
+    render(<Table columns={cols} rows={rows} rowKey={(r: any) => r.fp} bulk={bulk} />);
+    // Case de la 1re ligne (ACME). Les cases « ligne » portent l'aria-label générique.
+    const boxes = screen.getAllByRole("checkbox", { name: "Sélectionner la ligne" });
+    fireEvent.click(boxes[0]);
+    // La barre (lazy) affiche « 1 sélectionné » et le bouton d'action.
+    const act = await screen.findByText("Traiter");
+    fireEvent.click(act);
+    expect(got).toHaveLength(1);
+    expect(got[0].fp).toBe("FP/2026/1");
+  });
+  it("Table : « tout sélectionner » coche toutes les lignes filtrées", async () => {
+    render(<Table columns={cols} rows={rows} rowKey={(r: any) => r.fp} bulk={[{ label: "X", run: () => {} }]} />);
+    const all = await screen.findByRole("checkbox", { name: "Tout sélectionner" });
+    fireEvent.click(all);
+    expect(await screen.findByText("2 sélectionnés")).toBeTruthy();
+  });
+  it("ListView : sélection + barre d'actions", async () => {
+    render(<ListView rows={rows} columns={cols} searchKeys={[(r: any) => r.fp]} rowKey={(r: any) => r.fp} bulk={[{ label: "Traiter", run: () => {} }]} />);
+    const boxes = screen.getAllByRole("checkbox", { name: "Sélectionner la ligne" });
+    fireEvent.click(boxes[0]);
+    expect(await screen.findByText("1 sélectionné")).toBeTruthy();
   });
 });
 
