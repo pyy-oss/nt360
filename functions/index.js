@@ -2091,14 +2091,23 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   await requireRead(req, "pipeline");
   const { salesVelocity } = require("./domain/velocity");
   const { normalizeTiers } = require("./domain/projection");
+  const { fpKey } = require("./lib/ids");
   const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
-  // probability/ageDays/source nécessaires au pondéré TIÉRÉ et à l'exclusion des périmées (isAgedLost).
-  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "visibleTo").limit(MAX_SCAN + 1).get();
+  // probability/ageDays/source nécessaires au pondéré TIÉRÉ et à l'exclusion des périmées (isAgedLost) ;
+  // `fp` requis pour exclure les opps DÉJÀ au carnet (parité net-carnet du cockpit).
+  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "fp", "visibleTo").limit(MAX_SCAN + 1).get();
   let opps = sliceCapped(snap.docs).docs.map((d) => d.data()).filter((o) => o.stale !== true);
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
-  return { ok: true, ...salesVelocity(opps, tiers) };
+  // Carnet P&L matérialisé (commandesRows/*, MÊME source que le front/pipeline) → set de FP au carnet,
+  // pour retrancher les opps déjà réalisées du pondéré ouvert (anti-double-compte, invariant chiffres).
+  const bookedFps = new Set();
+  try {
+    const cmdSnap = await db.collection("commandesRows").get();
+    for (const d of cmdSnap.docs) for (const r of (d.data().rows || [])) { const k = fpKey(r.fp); if (k) bookedFps.add(k); }
+  } catch { /* carnet indisponible → repli sans exclusion (pas de blocage de la vélocité) */ }
+  return { ok: true, ...salesVelocity(opps, tiers, bookedFps) };
 });
 
 // === FUZZY MATCHING QUALITÉ (Lot 9) — repère les QUASI-DOUBLONS de noms clients (typos, mot en plus)

@@ -73,7 +73,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
         <Kpi label="Pondéré projeté" value={fmt(data.tot?.weighted)} tone="gold" sub={`${projLabel} — ${data.tot?.countConf ?? 0} opp.`} />
         <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
-        <Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)}`} />
+        <Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`en valeur · gagné ${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)} en nombre`} />
       </div>
       {tiers.length > 0 && (
         <Card title="Pondéré projeté — décomposition par niveau (on ne mélange pas)">
@@ -789,7 +789,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
       <div className={grid4}>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir la liste" /></button>
-        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)}`} /></button>
+        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`en valeur · gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)} en nombre`} /></button>
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
       </div>
@@ -922,8 +922,10 @@ function VelocityStrip({ refreshKey }: { refreshKey: number }) {
   return (
     <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-line bg-panel2/40 px-3 py-2">
       <Kpi label="Ouvertes" value={String(v.openCount)} />
-      <Kpi label="Pipeline pondéré" value={fmt(v.openWeighted)} />
-      <Kpi label="Taux de gain" value={`${Math.round(v.winRate * 100)}%`} />
+      {/* Périmètre VISIBLE et temps réel (net du carnet) — libellés distincts du cockpit (période) pour
+          éviter la collision « même libellé, deux nombres » signalée à l'audit. */}
+      <Kpi label="Pondéré ouvert (visible)" value={fmt(v.openWeighted)} />
+      <Kpi label="Taux de gain (instantané)" value={`${Math.round(v.winRate * 100)}%`} />
       <Kpi label="Deal moyen" value={fmt(v.avgDeal)} />
       <Kpi label="Indice de vélocité" value={fmt(v.velocityIndex)} />
     </div>

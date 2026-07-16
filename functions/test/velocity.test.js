@@ -41,4 +41,16 @@ describe("salesVelocity", () => {
   it("liste vide → zéros", () => {
     expect(salesVelocity([])).toEqual({ openCount: 0, openWeighted: 0, winRate: 0, avgDeal: 0, won: 0, lost: 0, velocityIndex: 0 });
   });
+  it("exclut du pondéré ouvert les opps DÉJÀ au carnet (bookedFps) — anti-double-compte, parité cockpit", () => {
+    const withFp = [
+      { stage: 3, amount: 800, probability: 0.95, fp: "FP/2026/1" }, // au carnet → exclue
+      { stage: 5, amount: 1200, probability: 0.7, fp: "FP/2026/2" }, // hors carnet → comptée (240)
+    ];
+    const booked = new Set(["FP/2026/1"]); // fpKey canonique
+    const v = salesVelocity(withFp, undefined, booked);
+    expect(v.openCount).toBe(1);
+    expect(v.openWeighted).toBe(240);
+    // Sans bookedFps : les deux comptent (rétro-compat, aucun 3e argument requis).
+    expect(salesVelocity(withFp).openCount).toBe(2);
+  });
 });

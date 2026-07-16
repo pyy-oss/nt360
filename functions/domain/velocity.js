@@ -7,8 +7,14 @@
 
 const { projectionWeight } = require("./projection");
 const { isAgedLost } = require("./oppLifecycle");
+const { fpKey } = require("../lib/ids");
 
-function salesVelocity(opps, tiers) {
+// `bookedFps` (Set de fpKey déjà au carnet P&L) : une opp active dont le FP porte DÉJÀ une commande est
+// réalisée (comptée dans le CAS) → l'inclure dans le pondéré OUVERT la double-compterait, en rupture avec
+// la parité `notBooked` du cockpit/atterrissage (invariant « même libellé = même nombre »). On l'exclut.
+function salesVelocity(opps, tiers, bookedFps) {
+  const booked = bookedFps instanceof Set ? bookedFps : new Set();
+  const notBooked = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !(k && booked.has(k)); };
   let won = 0, lost = 0, wonAmt = 0, openCount = 0, openWeighted = 0, openAmt = 0;
   for (const o of opps || []) {
     const st = Number(o.stage) || 0;
@@ -19,6 +25,7 @@ function salesVelocity(opps, tiers) {
       // Périmée par âge : exclue du pipeline actif, comme les agrégats (aggregate.js) → l'assiette
       // « ouvertes » du VelocityStrip colle aux en-têtes de colonnes du Board.
       if (isAgedLost(o)) continue;
+      if (!notBooked(o)) continue; // déjà au carnet → hors pipeline ouvert (parité cockpit, anti-double-compte)
       // Pondéré TIÉRÉ (projectionWeight) et NON le champ linéaire persisté `weighted` : source unique
       // avec le cockpit Pipeline/Overview, sinon le même libellé « pipeline pondéré » affiche 2 valeurs.
       openCount++; openWeighted += projectionWeight(o, tiers); openAmt += amt;
