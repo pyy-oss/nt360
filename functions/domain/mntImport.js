@@ -3,6 +3,7 @@
 // 1 contrat = 1 affaire, ADR-001) ou en ERREUR. Le callable (handlers/maintenance.importMntContrats)
 // garde l'I/O (lecture du classeur, écritures batch, audit). Testable sans Admin SDK.
 const { validateMntContrat } = require("./mntContrat");
+const { fpKey } = require("../lib/ids");
 const { safeId } = require("../lib/sheets");
 
 // Une cellule est « renseignée » si elle porte une valeur non vide. Sert à la MISE À JOUR NON EFFAÇANTE :
@@ -34,10 +35,20 @@ function updatePatch(value, raw) {
 function planMntContratsImport(rows, existingIds) {
   const existing = existingIds instanceof Set ? existingIds : new Set(existingIds || []);
   const errors = [];
-  // DÉDUP intra-fichier par id (même FP répété) : la DERNIÈRE occurrence gagne (comme une ré-saisie),
-  // pour ne pas écrire deux fois la même affaire ni gonfler les compteurs.
+  const list = Array.isArray(rows) ? rows : [];
+  // DÉDUP intra-fichier par FP AVANT validation (fpKey canonique — jamais le FP brut) : la DERNIÈRE
+  // occurrence d'une même affaire gagne, MÊME si elle est invalide. Sinon une re-saisie fautive (dernière
+  // ligne) partirait en erreur tandis qu'une version ANTÉRIEURE valide s'importerait en silence — l'inverse
+  // de la sémantique « ré-saisie » (audit m2). On repère l'index de la dernière occurrence de chaque FP et on
+  // ignore les précédentes ; l'ordre des lignes (erreurs comme plan) est préservé. Un FP illisible ne peut
+  // pas être regroupé : traité individuellement (il partira en erreur « N° FP invalide » à la validation).
+  const lastIdxByFp = new Map();
+  list.forEach((row, i) => { const k = fpKey(row && row.raw && row.raw.fp); if (k) lastIdxByFp.set(k, i); });
   const byId = new Map();
-  for (const row of rows || []) {
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    const k = fpKey(row && row.raw && row.raw.fp);
+    if (k && lastIdxByFp.get(k) !== i) continue; // occurrence antérieure supersédée par une plus récente
     const v = validateMntContrat(row.raw);
     if (!v.ok) { errors.push({ line: row.line, error: v.error, fp: (row.raw && row.raw.fp) || null }); continue; }
     byId.set(safeId(v.value.fp), { line: row.line, id: safeId(v.value.fp), value: v.value, raw: row.raw });

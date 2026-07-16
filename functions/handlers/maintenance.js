@@ -175,7 +175,18 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       if (v.value.statut === "en_cours" && !prev.priseEnCompteLe) doc.priseEnCompteLe = FieldValue.serverTimestamp();
       if ((v.value.statut === "resolu" || v.value.statut === "clos") && !prev.resoluLe) doc.resoluLe = FieldValue.serverTimestamp();
       await db.doc(`mnt_tickets/${id}`).set(doc, { merge: true });
-    } else { const ref = await db.collection("mnt_tickets").add({ ...doc, ouvertLe: FieldValue.serverTimestamp(), createdBy: req.auth.uid }); id = ref.id; }
+    } else {
+      // CRÉATION : poser les MÊMES horodatages de transition que l'édition, selon le statut INITIAL. Un
+      // ticket saisi rétroactivement déjà resolu/clos (historisation, courant en ESN) doit porter resoluLe,
+      // sinon le moteur de risque calcule markMs=null → SLA « rompu » à jamais sur un ticket clos dans les
+      // temps (audit m5). serverTimestamp partagé : ouverture et résolution au même instant → SLA respecté.
+      const seedTs = FieldValue.serverTimestamp();
+      const seed = { ...doc, ouvertLe: seedTs, createdBy: req.auth.uid };
+      if (v.value.statut === "en_cours") seed.priseEnCompteLe = seedTs;
+      if (v.value.statut === "resolu" || v.value.statut === "clos") seed.resoluLe = seedTs;
+      const ref = await db.collection("mnt_tickets").add(seed);
+      id = ref.id;
+    }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "upsert_mnt_ticket" : "create_mnt_ticket", module: "maintenance", entity: "mnt_ticket", entityId: id, detail: { contratId: v.value.contratId, statut: v.value.statut, priorite: v.value.priorite }, ts: FieldValue.serverTimestamp() });
     return { ok: true, id };
   });

@@ -3,6 +3,129 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-024 — Le contrat de maintenance est XOF-only : une devise ≠ XOF est rejetée (pas de conversion en v1)
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+`montantEngage` est traité comme un **entier XOF** partout dans le module (échéancier, rentabilité), sans
+conversion. Le champ `deviseEngage` était accepté tel quel (juste mis en majuscules) : un import « Montant
+1500 / Devise EUR » stockait `montantEngage=1500` **traité comme 1500 FCFA** — erreur d'unité silencieuse
+contraire au pivot XOF de l'ERP (audit info).
+
+### Décision
+`validateMntContrat` **rejette** toute `deviseEngage ≠ "XOF"` (après normalisation de casse ; absent/vide →
+`XOF` par défaut). Pas de conversion `fx.js` en v1 : le contrat est **XOF-only**. Fail-loud (erreur de
+validation visible à l'import/saisie) plutôt que coercition silencieuse — cohérent avec le rejet du montant
+négatif (audit m1).
+
+### Conséquences
+- Plus d'erreur d'unité silencieuse ; une ligne d'import en devise étrangère est signalée, pas avalée.
+- Un besoin multi-devises (contrats facturés en EUR) nécessiterait une conversion au `FIXED_PEG`/`fxRates`
+  et un nouvel ADR — non couvert en v1.
+
+### Ce qu'on saura dans six mois
+Si des contrats en devise étrangère se multiplient → ouvrir la conversion (fx.js) par un ADR dédié.
+
+---
+
+## ADR-023 — « Normalisation clients IA » est un référentiel séparé, always-on (hors kill-switch mntFeature)
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+La surcouche IA de suggestion de fusions clients (`aiSuggestClientMerges` + `lib/aiClientNorm.js` + le
+bouton IA de `modules/clientnorm.tsx`) a été co-livrée avec le lot « valeur ajoutée » du module
+maintenance (#398), **hors** préfixe `mnt_` et **hors** drapeau `config/mntFeature`. Un audit a relevé
+l'absence d'ADR actant ce périmètre. L'écran « Normalisation clients » **pré-existe** au module (il édite
+l'overlay `config/clientAliases`, ADR d'accélérateur) ; seul le **bouton IA** est nouveau, gardé par le
+droit RBAC `import`, et l'application effective des alias reste réservée à la direction (droit
+`habilitations`). L'IA **propose** un tableau de suggestions, elle **n'écrit rien**.
+
+### Décision
+« Normalisation clients IA » est un **référentiel transverse distinct** du module maintenance, **pas**
+un livrable `mnt_` : il reste **always-on** (hors kill-switch `mntFeature`), gouverné par le droit
+`import` (génération) + `habilitations` (application). On ne le place PAS derrière `mntFeature` : il ne
+touche aucune donnée `mnt_` et l'éteindre avec le module maintenance n'aurait pas de sens métier.
+
+### Conséquences
+- Le périmètre est tranché et écrit : couper le module maintenance n'affecte pas la normalisation clients.
+- Si un besoin de kill-switch propre émerge (ex. contrôler le coût Opus), il fera l'objet d'un drapeau
+  dédié (`config/clientNormAi`) par un nouvel ADR — pas d'accrochage à `mntFeature`.
+
+### Ce qu'on saura dans six mois
+Si l'usage IA de normalisation explose en coût sans garde → ouvrir un drapeau dédié.
+
+---
+
+## ADR-022 — Une décision d'approbation de contrat APPROUVÉE mute le contrat (application automatique par trigger)
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Les décisions de contrat (renouvellement / résiliation) sont soumises au moteur d'approbation générique
+(ADR-004). Un audit a relevé que `decideApproval` ne fait que passer le `status` à `approved` : **aucun
+effet** n'était appliqué au contrat. Une résiliation approuvée laissait le contrat `actif` (toujours au
+carnet de risque, générant échéances et revenu) ; un renouvellement approuvé ne repoussait pas `dateFin`.
+La boucle « l'humain valide » restait **ouverte** (validation sans effet sur les données).
+
+### Décision
+Un **trigger Firestore** `onMntApprovalDecided` (co-localisé à la base nommée, gaté `RECOMPUTE_REGION`
+comme `onRecomputeRequest`, `retry:false`) applique l'effet **à la transition** vers `approved`, via la
+fonction PURE `applyMntDecision(kind, contrat)` :
+- **résiliation** → `statut = "resilie"` (sort du risque ET de la rentabilité, assiette vivante ADR-021) ;
+- **renouvellement** → `dateFin` repoussée d'une **durée = terme initial** (`monthsBetween(dateDebut,
+  dateFin)` mois) ; un contrat échu/résilié **renaît** `actif`.
+Idempotent (n'agit qu'à la transition, pas sur les ré-écritures). Audité (`mnt_decision_apply`).
+
+### Conséquences
+- La validation humaine a enfin un **effet** ; plus de contrat « fantôme » au risque après résiliation.
+- Un renouvellement approuvé étend la couverture d'un terme (les nouvelles échéances apparaissent).
+- Le trigger est un **exclusion volontaire** du déploiement par défaut (activé par ops, comme le recompute).
+
+### Ce qu'on saura dans six mois
+Si le terme de reconduction souhaité diffère de la durée initiale (ex. renouvellement toujours annuel) →
+paramétrer la durée de reconduction sur le contrat, nouvel ADR.
+
+---
+
+## ADR-021 — La rentabilité par contrat n'agrège que les statuts VIVANTS (actif/suspendu), comme le risque
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Un audit adverse (workflow) a relevé que `computeContratPnl` (Lot 4/7) itérait **tous** les contrats,
+sans filtre de statut, alors que le moteur de risque (`mntRisque`, ADR-016) ne score que les statuts
+**vivants** `{actif, suspendu}` via `RISK_STATUTS`. Le revenu étant dérivé de l'échéancier (dates
+seules, aveugle au statut), un `brouillon` (montant spéculatif, non engagé) ou un contrat
+`echu`/`resilie` remontait un revenu > 0 et gonflait la marge du portefeuille — deux populations
+divergentes sur la **même** collection `mnt_contrats`, ce que l'« invariant fort » de CLAUDE.md
+(« même métrique = même nombre ») interdit.
+
+### Décision
+La rentabilité **filtre la même assiette que le risque** : `computeContratPnl` ignore tout contrat
+dont le statut n'est pas dans `RISK_STATUTS` (source **unique**, importée de `mntRisque` — pas de
+liste dupliquée). Un brouillon/échu/résilié ne pèse ni sur le revenu, ni sur le coût, ni sur la marge.
+
+### Conséquences
+- Rentabilité et risque parlent du même périmètre de contrats → chiffres réconciliables.
+- La rentabilité **historique** d'un contrat terminé (échu/résilié) n'est pas offerte en v1. Si ce
+  besoin émerge, il fera l'objet d'un ADR dédié (et devra alors traiter la résiliation anticipée dans
+  l'échéancier — aujourd'hui `dateFin` d'origine est conservée, cf. journal).
+
+### Ce qu'on saura dans six mois
+Si la direction réclame la marge des contrats clos (bilan de fin de contrat) → rouvrir l'assiette.
+
+---
+
 ## ADR-020 — Création en masse depuis les suggestions : brouillon pré-rempli, échéance = date de commande + 12 mois
 
 - **Date :** 2026-07-16

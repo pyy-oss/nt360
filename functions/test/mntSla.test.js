@@ -63,6 +63,35 @@ describe("mntEcheancier — engagé vs facturé", () => {
     expect(t.periodsDue).toBe(2); // 2 trimestres sur un contrat de 6 mois
     expect(t.engage).toBe(6000000);
   });
+  it("annuel 12 mois pile (dateFin = début + 12 mois) : 1 SEULE échéance, pas 2 — dateFin exclusive (bug doublage)", () => {
+    // Contrat annuel du 01/01/26 au 01/01/27 (dateFin = borne de renouvellement). L'échéance du 01/01/27 est
+    // la reconduction, NON due (les contrats ne se renouvellent pas d'office). asOf après la fin → 1 échéance.
+    const a = echeancier({ echeanceType: "annuel", montantEngage: 12000000, dateDebut: "2026-01-01", dateFin: "2027-01-01" }, 0, "2027-06-01");
+    expect(a.periodsDue).toBe(1);       // AVANT le fix : 2 (montant doublé)
+    expect(a.engage).toBe(12000000);
+  });
+  it("mensuel 12 mois pile : 12 échéances, pas 13 — la 13ᵉ tombe sur dateFin (renouvellement)", () => {
+    const m = echeancier({ echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-01", dateFin: "2027-01-01" }, 0, "2027-06-01");
+    expect(m.periodsDue).toBe(12);      // AVANT le fix : 13
+    expect(m.engage).toBe(12000000);
+  });
+  it("début en FIN DE MOIS (31/01) : les échéances rabattues (28/02…) sont comptées — pas de sous-décompte (audit M1)", () => {
+    // mensuel démarrant le 31/01 : échéances réelles 31/01, 28/02, 31/03… asOf 28/02 → 2 dues (pas 1).
+    const m = echeancier({ echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-31" }, 0, "2026-02-28");
+    expect(m.periodsDue).toBe(2);       // AVANT le fix : 1 (monthsBetween comparait le jour du mois)
+    expect(m.engage).toBe(2000000);
+    // trimestriel 31/01 : échéances 31/01, 30/04, 31/07… asOf 30/04 → 2 dues (6M), pas 1 (3M).
+    const t = echeancier({ echeanceType: "trimestriel", montantEngage: 3000000, dateDebut: "2026-01-31" }, 0, "2026-04-30");
+    expect(t.periodsDue).toBe(2);
+    expect(t.engage).toBe(6000000);
+  });
+  it("PARITÉ décompte ↔ liste datée sur un début fin de mois : echeancier.periodsDue === echeancierPlan lignes dues", () => {
+    const c = { echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-31", dateFin: "2026-12-31" };
+    const agg = echeancier(c, 0, "2026-02-28");
+    const plan = echeancierPlan(c, 0, "2026-02-28");
+    const duesListees = plan.periods.filter((p) => p.statut === "du").length;
+    expect(agg.periodsDue).toBe(duesListees); // « même métrique = même nombre » (les deux modèles alignés)
+  });
 });
 
 describe("mntEcheancier — addMonthsIso", () => {
@@ -97,5 +126,13 @@ describe("mntEcheancier — échéancier DÉTAILLÉ (echeancierPlan)", () => {
   it("contrat non démarré (asOf < début) : aucune échéance", () => {
     const p = echeancierPlan({ echeanceType: "mensuel", montantEngage: 500000, dateDebut: "2026-09-01" }, 0, "2026-07-15");
     expect(p.periods.length).toBe(0);
+  });
+  it("annuel 12 mois pile : une SEULE ligne datée (pas de ligne fantôme sur dateFin) — miroir du fix agrégat", () => {
+    // Le bug se manifestait comme une 2ᵉ ligne datée du 01/01/27 doublant le montant. dateFin exclusive → 1 ligne.
+    const c = { echeanceType: "annuel", montantEngage: 12000000, dateDebut: "2026-01-01", dateFin: "2027-01-01" };
+    const p = echeancierPlan(c, 0, "2027-06-01");
+    expect(p.periods.length).toBe(1);
+    expect(p.periods.map((x) => x.dateEcheance)).toEqual(["2026-01-01"]);
+    expect(p.engage).toBe(12000000);    // AVANT le fix : 24000000
   });
 });

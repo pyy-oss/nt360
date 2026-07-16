@@ -37,6 +37,16 @@ describe("mntSla (front, miroir) — échéancier", () => {
     expect(e.engage).toBe(0);
     expect(e.ecart).toBe(0);
   });
+  it("annuel 12 mois pile → 1 échéance, pas 2 (dateFin exclusive, bug doublage — miroir back)", () => {
+    const a = echeancier({ echeanceType: "annuel", montantEngage: 12000000, dateDebut: "2026-01-01", dateFin: "2027-01-01" }, 0, "2027-06-01");
+    expect(a.periodsDue).toBe(1);
+    expect(a.engage).toBe(12000000);
+  });
+  it("début fin de mois (31/01) : échéances rabattues comptées, pas de sous-décompte (miroir back, audit M1)", () => {
+    const m = echeancier({ echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-31" }, 0, "2026-02-28");
+    expect(m.periodsDue).toBe(2); // 31/01 + 28/02 (AVANT le fix : 1)
+    expect(m.engage).toBe(2000000);
+  });
 });
 
 describe("mntSla (front, miroir) — échéancier DÉTAILLÉ", () => {
@@ -57,5 +67,12 @@ describe("mntSla (front, miroir) — échéancier DÉTAILLÉ", () => {
     const p = echeancierPlan({ echeanceType: "mensuel", montantEngage: 500000, dateDebut: "2026-01-01" }, 0, "2026-03-15");
     expect(p.periods.length).toBe(3);
     expect(p.periods.every((x) => x.statut === "du")).toBe(true);
+  });
+  it("annuel 12 mois pile : 1 seule ligne datée (pas de ligne fantôme sur dateFin — miroir back)", () => {
+    const c = { echeanceType: "annuel", montantEngage: 12000000, dateDebut: "2026-01-01", dateFin: "2027-01-01" };
+    const p = echeancierPlan(c, 0, "2027-06-01");
+    expect(p.periods.length).toBe(1);
+    expect(p.periods.map((x) => x.dateEcheance)).toEqual(["2026-01-01"]);
+    expect(p.engage).toBe(12000000);
   });
 });

@@ -5,6 +5,7 @@
 // Montants ENTIERS XOF. Réutilise craDaysFromHours (ADR-013) et echeancier (source unique du « dû »).
 const { craDaysFromHours } = require("./mntTicket");
 const { echeancier } = require("./mntEcheancier");
+const { RISK_STATUTS } = require("./mntRisque");
 
 /**
  * @param {object[]} contrats      contrats (id, fp, client, statut, echeanceType, montantEngage, dateDebut, dateFin)
@@ -22,13 +23,22 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost) {
     const cid = iv && iv.contratId;
     if (!cid) continue;
     const jours = craDaysFromHours(Number(iv.heures) || 0);
-    const a = agg[cid] || (agg[cid] = { jours: 0, cout: 0 });
+    const a = agg[cid] || (agg[cid] = { jours: 0, cout: 0, joursSansCjm: 0 });
     a.jours += jours;
     a.cout += jours * (Number(cjm[iv.consultantId]) || 0);
+    // Consultant sans CJM renseigné (absent de l'annuaire des coûts) → contribue 0 au coût. On COMPTE ces
+    // jours pour signaler une marge NON FIABLE (sinon coût=0 → marge=revenu silencieusement), comme
+    // resourcePnl.missingCjm (audit m6). CJM à 0 explicite ≠ absent : seul l'absence (== null) est un manque.
+    if (cjm[iv.consultantId] == null) a.joursSansCjm += jours;
   }
   const rows = [];
   for (const c of contrats || []) {
-    const a = agg[c.id] || { jours: 0, cout: 0 };
+    // Même assiette que le moteur de risque (ADR-021) : seuls les contrats VIVANTS (actif/suspendu) ont un
+    // revenu engagé pilotable. Un brouillon (montant spéculatif, non engagé) ou un contrat échu/résilié
+    // gonflerait revenu et marge — divergence « populations divergentes » interdite (« même métrique = même
+    // nombre »). Filtre partagé RISK_STATUTS (source unique) plutôt qu'un doublon de la liste.
+    if (!c || !RISK_STATUTS.has(String(c.statut))) continue;
+    const a = agg[c.id] || { jours: 0, cout: 0, joursSansCjm: 0 };
     const revenue = echeancier(c, 0, asOfIso).engage; // engagé à ce jour (indépendant du facturé)
     if (!(revenue > 0) && a.jours <= 0) continue;      // ni revenu ni activité → hors P&L
     const cout = Math.round(a.cout);
@@ -39,6 +49,8 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost) {
       cout: hasCost ? cout : null,
       marge: hasCost ? marge : null,
       margePct: hasCost && revenue > 0 ? Math.round((marge / revenue) * 1000) / 1000 : null,
+      // Jours d'intervention sans CJM connu → marge non fiable (coût sous-estimé). Masqué sans droit coût.
+      missingCjm: hasCost ? Math.round(a.joursSansCjm * 100) / 100 : null,
     });
   }
   // Pires marges d'abord (là où il faut agir) quand le coût est visible ; sinon plus d'activité d'abord.

@@ -27,12 +27,16 @@ function echeancier(contrat, factureTotal, asOfIso) {
   // sans cette garde un contrat actif à date de début future compterait déjà 1 échéance (fausse sous-
   // facturation — audit Lot 5). Comparaison lexicographique sûre sur des ISO AAAA-MM-JJ.
   if (parse(c.dateDebut) && String(asOfIso) >= String(c.dateDebut)) {
-    // Échéance émise en début de chaque période, la 1ʳᵉ à dateDebut → +1.
-    periodsDue = Math.floor(monthsBetween(c.dateDebut, asOfIso) / per) + 1;
-    // Borne par la durée du contrat si une date de fin est posée.
+    // Échéances ÉMISES à ce jour : comptées par leurs DATES RÉELLES (addMonthsIso, ≤ asOf) et NON via
+    // monthsBetween/per — sinon un contrat démarrant le 29/30/31 sous-compte d'une période (monthsBetween
+    // compare le JOUR du mois tandis qu'addMonthsIso RABAT au dernier jour du mois : 31/01→28/02). Aligné
+    // sur echeancierPlan (audit M1 : « même métrique = même nombre »).
+    periodsDue = periodsDueAsOf(c.dateDebut, asOfIso, per);
+    // Borne par la durée du contrat. dateFin = borne de RENOUVELLEMENT (EXCLUSIVE) : les contrats ne se
+    // renouvellent pas d'office → l'échéance tombant PILE sur dateFin (début de la reconduction) ne compte
+    // pas. On compte les débuts de période dont la DATE est strictement avant dateFin.
     if (parse(c.dateFin)) {
-      const total = Math.floor(monthsBetween(c.dateDebut, c.dateFin) / per) + 1;
-      periodsDue = Math.min(periodsDue, Math.max(0, total));
+      periodsDue = Math.min(periodsDue, periodsInContract(c.dateDebut, c.dateFin, per));
     }
     periodsDue = Math.max(0, periodsDue);
   }
@@ -55,6 +59,36 @@ function addMonthsIso(iso, n) {
 
 const MAX_PERIODS = 240; // borne d'affichage (20 ans en mensuel) — anti-liste démesurée
 
+// Nombre de débuts de période (dateDebut, +pas, +2·pas, …) dont la DATE est STRICTEMENT avant dateFin
+// (borne de renouvellement exclusive). Compté par dates réelles (addMonthsIso) pour gérer correctement
+// les fins de mois ET les durées partielles : un mensuel 01/01→30/06 = 6 (juin est dans le contrat) ;
+// un annuel 01/01/26→01/01/27 = 1 (l'échéance du 01/01/27 est le renouvellement) ; un annuel de 18 mois = 2.
+function periodsInContract(dateDebut, dateFin, per) {
+  if (!parse(dateDebut) || !parse(dateFin)) return 0;
+  let n = 0;
+  while (n < MAX_PERIODS) {
+    const start = addMonthsIso(dateDebut, n * per);
+    if (!start || String(start) >= String(dateFin)) break;
+    n++;
+  }
+  return n;
+}
+
+// Nombre d'échéances ÉMISES à la date `asOf` INCLUSE : débuts de période (dateDebut, +pas, …) dont la DATE
+// RÉELLE (addMonthsIso, qui rabat les fins de mois) est ≤ asOf. Pendant de periodsInContract (borne asOf
+// INCLUSIVE — l'échéance émise pile à asOf est due — là où dateFin est exclusive). Compté par dates réelles
+// pour rester aligné sur echeancierPlan et ne pas sous-compter les contrats démarrant le 29/30/31 (audit M1).
+function periodsDueAsOf(dateDebut, asOfIso, per) {
+  if (!parse(dateDebut) || !parse(asOfIso)) return 0;
+  let n = 0;
+  while (n < MAX_PERIODS) {
+    const d = addMonthsIso(dateDebut, n * per);
+    if (!d || String(d) > String(asOfIso)) break;
+    n++;
+  }
+  return n;
+}
+
 /**
  * Échéancier DÉTAILLÉ : la liste datée des échéances de facturation d'un contrat, chacune marquée
  * `facture` (couverte par le facturé cumulé de l'affaire), `du` (échéance passée non couverte) ou
@@ -70,7 +104,8 @@ function echeancierPlan(contrat, factureTotal, asOfIso) {
   const agg = echeancier(c, factureTotal, asOfIso); // réutilise le décompte/agrégats (parité stricte)
   let total = agg.periodsDue;
   if (parse(c.dateDebut) && parse(c.dateFin)) {
-    total = Math.max(0, Math.floor(monthsBetween(c.dateDebut, c.dateFin) / per) + 1);
+    // dateFin exclusive (borne de renouvellement) — mêmes débuts de période < dateFin que echeancier.
+    total = periodsInContract(c.dateDebut, c.dateFin, per);
   }
   total = Math.min(Math.max(0, total), MAX_PERIODS);
   const periods = [];
