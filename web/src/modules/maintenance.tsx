@@ -5,7 +5,7 @@
 // money, date JJ/MM/AAAA via frDate). Aucune valeur en dur (tokens/tons via lib/mntContrat).
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { where } from "firebase/firestore";
+import { where, orderBy, limit } from "firebase/firestore";
 import { useCan } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
@@ -14,7 +14,7 @@ import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
-import type { Invoice, Order } from "../types";
+import type { Invoice, Order, AuditLog } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
@@ -290,6 +290,20 @@ export const Maintenance: FC<Props> = () => {
     colText("Reco de rétention", (a: ChurnAnalysis) => <span className="text-[12px]">{a.recommendation || "—"}</span>),
   ];
 
+  // Registre d'audit (Lot 7/7 — conformité) : la piste opposable auditLog filtrée sur le module. Lecture
+  // réservée au droit `habilitations` (rules). Index composite (module, ts desc) → 500 plus récentes.
+  // La Table expose son export CSV natif (colsKey) → dossier de conformité prêt.
+  const canAudit = useCan("habilitations") === "write";
+  const { rows: audit } = useCollectionData<AuditLog>(gate && canAudit ? "auditLog" : null, [where("module", "==", "maintenance"), orderBy("ts", "desc"), limit(500)], "mnt_audit");
+  const auditCols = [
+    colText("Date", (r: AuditLog) => (r.ts?.seconds ? new Date(r.ts.seconds * 1000).toLocaleString("fr-FR") : "—"), (r: AuditLog) => r.ts?.seconds || 0),
+    colText("Action", (r: AuditLog) => r.action || "—"),
+    colText("Entité", (r: AuditLog) => r.entity || "—"),
+    colText("Réf", (r: AuditLog) => r.entityId || "—"),
+    colText("Détail", (r: AuditLog) => { const s = r.detail ? JSON.stringify(r.detail) : ""; return <span className="text-[11px] text-muted truncate max-w-[280px] inline-block align-bottom" title={s}>{s || "—"}</span>; }),
+    colText("Par", (r: AuditLog) => <span className="text-[11px]" title={r.uid}>{(r.uid || "").slice(0, 8) || "—"}</span>),
+  ];
+
   const openContrat = (id: string) => { const c = contratById[id]; if (!c) return; setCForm(toContratForm(c)); setCId(id); setCEdit(true); setCOpen(true); };
   const complianceCols = [
     colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
@@ -539,6 +553,13 @@ export const Maintenance: FC<Props> = () => {
         <Tip>Un ticket est une demande sous contrat. Le temps saisi sur une <b>intervention</b> alimente le CRA (une seule vérité du temps).</Tip>
         {ticketsSorted.length === 0 ? <EmptyState label="Aucun ticket." /> : <Table columns={ticketCols} rows={ticketsSorted} colsKey="mnt_tickets" />}
       </Card>
+
+      {gate && canAudit && audit.length > 0 && (
+        <Card title={`Registre d'audit · ${audit.length}${audit.length >= 500 ? "+" : ""}`}>
+          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
+          <Table columns={auditCols} rows={audit} colsKey="mnt_audit" />
+        </Card>
+      )}
 
       {/* --- Fiche contrat --- */}
       {cOpen && (
