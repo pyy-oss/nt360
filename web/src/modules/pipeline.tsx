@@ -107,6 +107,18 @@ export const Pipeline: FC<Props> = ({ period }) => {
         </Card>
       )}
 
+      {data.dormant && (data.dormant.count ?? 0) > 0 && (
+        <Card title={`Opportunité dormante · ${data.dormant.count}`}>
+          <div className={grid4}>
+            <Kpi label="Volume" value={`${data.dormant.count} opp.`} tone="clay" sub={data.excludeDormant ? "exclues de la prévision cumulée" : "signalées (non exclues)"} />
+            <Kpi label="Valeur" value={fmt(data.dormant.brut)} tone="clay" sub="brut (non pondéré)" />
+            <Kpi label="Âge moyen" value={`${data.dormant.ageAvg ?? 0} j`} sub={`min ${data.dormant.ageMin ?? 0} j · max ${data.dormant.ageMax ?? 0} j`} />
+            <Kpi label="D Prev révolue" value="millésime antérieur" tone="steel" sub="à requalifier ou clôturer" />
+          </div>
+          <Tip>Les opportunités <b>dormantes</b> sont <b>ouvertes</b> mais leur <b>date de clôture prévue</b> appartient à un <b>exercice révolu</b> (année antérieure à l'exercice courant). Elles gonflent une prévision cumulée d'un espoir périmé → {data.excludeDormant ? <>elles sont <b>retirées de la prévision « Tout »</b> (réglable en Habilitations) et</> : <>elles sont ici <b>signalées sans être exclues</b> ;</>} à <b>requalifier</b> (re-dater) ou passer en perdu. L'<b>âge</b> = jours depuis la D Prev dépassée.</Tip>
+        </Card>
+      )}
+
       {data.closing && (
         <>
           <div className={grid4}>
@@ -716,6 +728,17 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
       </div>
+      {data.dormant && (data.dormant.count ?? 0) > 0 && (
+        <Card title={`Opportunité dormante · ${data.dormant.count}`}>
+          <div className={grid4}>
+            <Kpi label="Volume" value={`${data.dormant.count} opp.`} tone="clay" sub={data.excludeDormant ? "exclues de la prévision cumulée" : "signalées (non exclues)"} />
+            <Kpi label="Valeur" value={fmt(data.dormant.brut)} tone="clay" sub="brut (non pondéré)" />
+            <Kpi label="Âge moyen" value={`${data.dormant.ageAvg ?? 0} j`} sub={`min ${data.dormant.ageMin ?? 0} j · max ${data.dormant.ageMax ?? 0} j`} />
+            <Kpi label="D Prev révolue" value="millésime antérieur" tone="steel" sub="à requalifier ou clôturer" />
+          </div>
+          <Tip>Opportunités <b>ouvertes</b> dont la <b>date de clôture prévue</b> appartient à un <b>exercice révolu</b>. {data.excludeDormant ? <>Elles sont <b>retirées de la prévision « Tout »</b> (réglable en Habilitations)</> : <>Elles sont ici <b>signalées sans être exclues</b></>} — à <b>requalifier</b> (re-dater) ou passer en perdu.</Tip>
+        </Card>
+      )}
       <Card title="Prévision par certitude (IdC) — Commit / Best Case / Pipeline">
         <div className="flex flex-col gap-2.5">
           {ladder.map((l) => (

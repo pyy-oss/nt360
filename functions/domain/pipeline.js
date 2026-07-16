@@ -8,6 +8,7 @@ const { sum } = require("./chaine");
 const { fpKey } = require("../lib/ids");
 const { projectionWeight, tierBreakdown, normalizeTiers, p01 } = require("./projection");
 const { groupSum } = require("./backlog");
+const { isDormantClosing } = require("./oppLifecycle");
 
 const CONFIANCE_MIN = 0.9;
 const isActive = (o) => o.stage >= 1 && o.stage <= 5;
@@ -52,6 +53,27 @@ function closingAnalysis(active, asOf, pw) {
   }
   const avgOverdueDays = stale.length ? Math.round(overdueDaysSum / stale.length) : 0;
   return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop, overdueAge, avgOverdueDays };
+}
+
+// Opportunités DORMANTES (isDormantClosing) : ouvertes dont la D Prev est d'un millésime révolu.
+// Renvoie le VOLUME (count), la VALEUR brute (Σ montant) et l'ANCIENNETÉ en jours depuis la D Prev
+// passée (min / max / moyen). Base de la tuile « Opportunité dormante » ET du montant exclu de la
+// prévision cumulée. PURE. Calculée sur l'assiette active GLOBALE (indépendante de la période).
+function dormantSummary(opps, currentFy, asOf) {
+  const tp = Date.parse(String(asOf || ""));
+  let count = 0, brut = 0, ageSum = 0, aged = 0, ageMin = null, ageMax = null;
+  for (const o of opps || []) {
+    if (!isDormantClosing(o, currentFy)) continue;
+    count++; brut += o.amount || 0;
+    const dp = Date.parse(String(o.closingDate || "").slice(0, 10));
+    if (Number.isFinite(tp) && Number.isFinite(dp)) {
+      const days = Math.max(0, Math.floor((tp - dp) / 86400000));
+      ageSum += days; aged++;
+      ageMin = ageMin == null ? days : Math.min(ageMin, days);
+      ageMax = ageMax == null ? days : Math.max(ageMax, days);
+    }
+  }
+  return { count, brut, ageMin: ageMin || 0, ageMax: ageMax || 0, ageAvg: aged ? Math.round(ageSum / aged) : 0 };
 }
 
 function pipeline(opps, asOf, tiers, orders) {
@@ -122,4 +144,4 @@ function pipeline(opps, asOf, tiers, orders) {
   };
 }
 
-module.exports = { pipeline, closingAnalysis, isActive, isEligible, CONFIANCE_MIN };
+module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, CONFIANCE_MIN };

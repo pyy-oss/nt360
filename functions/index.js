@@ -382,6 +382,9 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, t
   const w = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
   const tier = (k, dw) => ({ active: d?.[k]?.active === undefined ? true : !!d[k].active, weight: w(d?.[k]?.weight, dw) });
   const cfg = { certitudes: tier("certitudes", 1), forecast: tier("forecast", 0.2), pipe: tier("pipe", 0.05) };
+  // Exclusion des opportunités DORMANTES (année de closing < exercice) de la prévision cumulée. Booléen ;
+  // non fourni ⇒ inchangé (merge). Défaut métier (absent du doc) = ACTIVÉ, cf. aggregate/forecastRollup.
+  if (d.excludeDormant !== undefined) cfg.excludeDormant = !!d.excludeDormant;
   // Solde d'OUVERTURE de trésorerie (SOA global) : base de la position cash projetée. Peut être
   // négatif (découvert). Non fourni → champ inchangé (merge). Fourni → borné à un ordre de grandeur
   // raisonnable pour éviter une saisie aberrante.
@@ -1879,16 +1882,21 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   await requireRead(req, "pipeline");
   const { rollupForecast } = require("./domain/forecast");
   const { plausibleYear, fpKey } = require("./lib/ids");
-  const { isAgedLost } = require("./domain/oppLifecycle");
-  const [oppSnap, fiscalDoc] = await Promise.all([
+  const { isAgedLost, isDormantClosing } = require("./domain/oppLifecycle");
+  const [oppSnap, fiscalDoc, projDoc] = await Promise.all([
     // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
     // fp + updatedAt : requis pour la dédup (intra/inter-source) et l'exclusion des opps DÉJÀ AU CARNET
     // (parité stricte avec l'assiette pipeline du reste de la famille — cf. audit cohérence).
     // Scan BORNÉ (MAX_SCAN+1 + sliceCapped, comme scoreOpportunities) — pression mémoire maîtrisée à N grand.
     db.collection("opportunities").select("client", "am", "stage", "amount", "forecastCategory", "closingDate", "stale", "source", "ageDays", "probability", "ownerUid", "visibleTo", "fp", "updatedAt").limit(MAX_SCAN + 1).get(),
     db.doc("config/fiscal").get(),
+    db.doc("config/projection").get(),
   ]);
   const { docs: oppDocs, capped } = sliceCapped(oppSnap.docs);
+  // Exclusion des DORMANTES (année de closing < exercice) de la prévision CUMULÉE (« Tout ») — même
+  // drapeau/prédicat que le recompute (aggregate.js) → Commit/Best Case/Pipeline cohérents avec le
+  // Cockpit. En mode année, le filtre de millésime (closingDate == periodYear) les écarte déjà.
+  const excludeDormant = (projDoc.data() || {}).excludeDormant !== false;
   // Population COHÉRENTE avec le reste de la famille pipeline (cf. audit chiffres, divergence D) : NON `stale`
   // ET NON périmée par âge. isAgedLost ne touche que les OUVERTES (1-5) → les catégories Closed/gagné sont
   // conservées ; une opp ouverte périmée n'apparaît plus en Best Case/Pipeline ici alors qu'elle est absente
@@ -1938,6 +1946,7 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
     if (Number(o.stage) === 6) return false;                 // gagné : porté par le carnet
     const k = fpKey(o.fp); if (k && bookedFps.has(k)) return false; // déjà au carnet → pas de double-compte
     if (periodYear && String(o.closingDate || "").slice(0, 4) !== String(periodYear)) return false;
+    if (excludeDormant && !periodYear && isDormantClosing(o, currentFy)) return false; // « Tout » : hors dormantes
     return true;
   });
   const rollup = rollupForecast(opps, closedAmount, closedCount);
