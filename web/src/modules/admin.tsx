@@ -23,7 +23,13 @@ const MODULE_LABEL: Record<string, string> = {
   overview: "Vue d'ensemble", pipeline: "Pipeline", backlog: "Backlog", import: "Imports",
   bc: "BC fournisseurs", fournisseurs: "Fournisseurs", rentabilite: "Rentabilité",
   objectifs: "Objectifs", habilitations: "Habilitations", qualite: "Qualité",
+  clients: "Clients", prevision: "Prévision", facturation: "Facturation", pnlprojet: "P&L projet",
+  domaines: "Domaines", maintenance: "Contrats de maintenance",
 };
+// Modules GOUVERNABLES connus (source de vérité de la matrice) — garantit une ligne pour CHAQUE module même
+// s'il n'a encore aucune entrée stockée dans config/permissions (sinon un module récent, ex. `maintenance`,
+// reste invisible et INACCORDABLE : seule la Direction peut écrire). Union avec les clés réellement stockées.
+const KNOWN_MODULES = Object.keys(MODULE_LABEL);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Titre de rubrique — segmente la page Habilitations (~20 cartes) en blocs lisibles. Réutilise la
@@ -44,8 +50,9 @@ export const Habilitations: FC<Props> = () => {
   const [draft, setDraft] = useState<Record<string, Record<string, string>> | null>(null);
   const matrix = draft || data?.matrix || {};
   const roles = Object.keys(matrix);
-  // Union des modules sur TOUS les rôles (pas seulement le premier) pour ne rien masquer.
-  const modules = [...new Set(roles.flatMap((r) => Object.keys(matrix[r] || {})))];
+  // Union des modules CONNUS + de ceux réellement stockés sur TOUS les rôles → chaque module gouvernable a
+  // une ligne, même sans entrée stockée (sinon `maintenance` & co. restent invisibles/inaccordables).
+  const modules = [...new Set([...KNOWN_MODULES, ...roles.flatMap((r) => Object.keys(matrix[r] || {}))])];
   const cyc: Record<string, string> = { none: "read", read: "write", write: "none" };
   const glyph: Record<string, string> = { write: "W", read: "R", none: "–" };
   const tone: Record<string, string> = { write: "bg-emerald text-bg", read: "bg-steel text-bg", none: "bg-panel2 text-muted" };
