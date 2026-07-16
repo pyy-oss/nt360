@@ -10,6 +10,7 @@ import { T } from "../design/tokens";
 import { Select } from "../design/inputs";
 import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, preBillingFromCra, taceHistory, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type PreBilling, type PreBillingLine, type TaceTrend } from "../lib/writes";
 import type { Props } from "./_shared";
+import { useBusinessUnits } from "./_shared";
 
 const monthLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"][Number(m) - 1]}. ${y.slice(2)}`; };
 const loadTone = (pct: number, active: boolean) => pct > 100 ? "bg-clay/25 text-clay" : pct >= 80 ? "bg-emerald/20 text-emerald" : pct > 0 ? "bg-panel2 text-ink" : active ? "bg-gold/15 text-gold" : "text-muted";
@@ -37,6 +38,7 @@ const gradeLabel = (g?: string) => GRADES.find((x) => x.value === g)?.label || g
 const EMPTY: Consultant = { name: "", email: "", grade: "confirme", bu: "", tjmTarget: null, cjm: null, skills: [], status: "active", startDate: null };
 
 function ConsultantForm({ initial, canCost, onDone }: { initial: Consultant; canCost: boolean; onDone: () => void }) {
+  const BU = useBusinessUnits();
   const [f, setF] = useState<Consultant>(initial);
   const set = (k: keyof Consultant, v: unknown) => setF((p) => ({ ...p, [k]: v }));
   const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
@@ -47,7 +49,8 @@ function ConsultantForm({ initial, canCost, onDone }: { initial: Consultant; can
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Grade</span>
         <Select ariaLabel="Grade" className="!py-1 w-32" value={f.grade || "confirme"} onChange={(v) => set("grade", v)} options={GRADES} /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">BU</span>
-        <input className="field !py-1 w-28" value={f.bu || ""} onChange={(e) => set("bu", e.target.value)} aria-label="Business unit" /></label>
+        <Select ariaLabel="Business unit" className="!py-1 w-28" value={f.bu || ""} onChange={(v) => set("bu", v)} placeholder="BU"
+          options={[...new Set([f.bu, ...BU].filter(Boolean))].map((b) => ({ value: b as string, label: b as string }))} /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Statut</span>
         <Select ariaLabel="Statut" className="!py-1 w-32" value={f.status || "active"} onChange={(v) => set("status", v)} options={STATUSES} /></label>
       <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TJM cible</span>
@@ -272,6 +275,7 @@ const CAND_STATUS: { value: CandidateStatus; label: string; tone: "steel" | "gol
 ];
 const candMeta = (s?: string) => CAND_STATUS.find((x) => x.value === s) || CAND_STATUS[0];
 function Vivier({ canWrite }: { canWrite: boolean }) {
+  const BU = useBusinessUnits();
   const [r, setR] = useState<Recruitment | null>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
@@ -293,7 +297,8 @@ function Vivier({ canWrite }: { canWrite: boolean }) {
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Grade visé</span>
             <Select ariaLabel="Grade visé" className="!py-1 w-32" value={f.gradeTarget || "confirme"} onChange={(v) => setk("gradeTarget", v)} options={GRADES} /></label>
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">BU</span>
-            <input className="field !py-1 w-24" value={f.bu || ""} onChange={(e) => setk("bu", e.target.value)} aria-label="BU visée" /></label>
+            <Select ariaLabel="BU visée" className="!py-1 w-24" value={f.bu || ""} onChange={(v) => setk("bu", v)} placeholder="BU"
+              options={[...new Set([f.bu, ...BU].filter(Boolean))].map((b) => ({ value: b as string, label: b as string }))} /></label>
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">Statut</span>
             <Select ariaLabel="Statut candidat" className="!py-1 w-32" value={f.status || "sourced"} onChange={(v) => setk("status", v)} options={CAND_STATUS} /></label>
           <label className="flex flex-col gap-0.5"><span className="text-[11px] text-muted">TJM visé</span>
