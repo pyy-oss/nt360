@@ -421,6 +421,12 @@ exports.setProjectionConfig = onCallG("setProjectionConfig", { memoryMiB: 512, t
   // Exclusion des opportunités DORMANTES (année de closing < exercice) de la prévision cumulée. Booléen ;
   // non fourni ⇒ inchangé (merge). Défaut métier (absent du doc) = ACTIVÉ, cf. aggregate/forecastRollup.
   if (d.excludeDormant !== undefined) cfg.excludeDormant = !!d.excludeDormant;
+  // Seuil « Gelé » des phases amont (en MOIS) : au-delà, une opp non déposée est considérée enlisée.
+  // Non fourni → inchangé (merge). Borné [1..36] mois ; défaut métier (absent) = 6 (cf. domain/pipeline).
+  if (d.geleMonths !== undefined) {
+    const gm = Number(d.geleMonths);
+    cfg.geleMonths = Number.isFinite(gm) ? Math.max(1, Math.min(36, Math.round(gm))) : 6;
+  }
   // Solde d'OUVERTURE de trésorerie (SOA global) : base de la position cash projetée. Peut être
   // négatif (découvert). Non fourni → champ inchangé (merge). Fourni → borné à un ordre de grandeur
   // raisonnable pour éviter une saisie aberrante.

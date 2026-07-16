@@ -811,7 +811,7 @@ export async function callSetAlertThresholds(cfg: AlertThresholds) {
 
 export type ProjectionTierInput = { active: boolean; weight: number };
 // cashOpening : solde d'ouverture de trésorerie (SOA global) — base de la position cash projetée.
-export type ProjectionConfigInput = { certitudes: ProjectionTierInput; forecast: ProjectionTierInput; pipe: ProjectionTierInput; cashOpening?: number; excludeDormant?: boolean };
+export type ProjectionConfigInput = { certitudes: ProjectionTierInput; forecast: ProjectionTierInput; pipe: ProjectionTierInput; cashOpening?: number; excludeDormant?: boolean; geleMonths?: number };
 /** Enregistre les niveaux de projection (admin) : recompute COMPLET (overview/pipeline/atterrissage/ams). */
 export async function callSetProjectionConfig(cfg: ProjectionConfigInput) {
   const res = await httpsCallable(functions, "setProjectionConfig")(cfg);

@@ -39,6 +39,11 @@ export const SalesForecast: FC<Props> = ({ period }) => {
               <div><div className="text-[11px] text-muted">Quota (objectif CAS)</div><div className="font-display tabnum text-lg">{r.quota ? money(r.quota) : "—"}</div></div>
               <div><div className="text-[11px] text-muted">Gagné / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.closed)}</div></div>
               <div><div className="text-[11px] text-muted">Commit / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.commit)}</div></div>
+              <div><div className="text-[11px] text-muted">Best Case / quota</div><div className="font-display tabnum text-lg">{pctAtt(r.attainment?.bestCase)}</div></div>
+              {/* Écart au quota = objectif CAS − RÉALISÉ (gagné), même grandeur que l'« écart »
+                  d'atterrissage au périmètre prévision. Distinct du « Reste à trouver » du CODIR
+                  (objectif − projeté PONDÉRÉ). « — » si pas de quota (objectif non défini). */}
+              <div><div className="text-[11px] text-muted">Écart au quota</div><div className="font-display tabnum text-lg">{r.quota ? money(Math.max(r.quota - r.closed, 0)) : "—"}</div></div>
             </div>
             <div className="flex flex-col gap-3">
               <Bar label="Closed (gagné)" value={r.closed} max={max} tone="bg-emerald" sub={`${r.counts.closed} cmd.`} />

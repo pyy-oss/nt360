@@ -48,6 +48,10 @@ export interface PipelineSummary {
   tierBreakdown?: TierBucket[];
   conv?: number; wonCount?: number; lostCount?: number;
   byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
+  byWeek?: Record<string, number>; // écoulement HEBDO du closing (clés ISO « AAAA-Www »), miroir de byMonth
+  // Phases amont (tag transverse dérivé) : Budget / Gelé / Dev sur opps actives — volume + brut.
+  phase0?: { budget?: { count?: number; brut?: number }; gele?: { count?: number; brut?: number }; dev?: { count?: number; brut?: number } };
+  geleMonths?: number; // seuil « Gelé » appliqué (mois)
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
   closing?: ClosingAnalysis | null;

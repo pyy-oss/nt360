@@ -218,6 +218,7 @@ function ProjectionConfigCard() {
     pipe: { ...DEFAULT_PROJ.pipe, ...(data?.pipe || {}) },
     cashOpening: data?.cashOpening ?? 0,
     excludeDormant: data?.excludeDormant !== false, // absent ⇒ activé
+    geleMonths: data?.geleMonths ?? 6, // seuil « Gelé » des phases amont (mois), défaut 6
   };
   return <ProjectionConfigForm key={JSON.stringify(data || {})} initial={init} />;
 }
@@ -226,6 +227,7 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
   const [st, setSt] = useState(() => Object.fromEntries(PROJ_TIERS.map((t) => [t.key, { active: initial[t.key].active, weight: p1(initial[t.key].weight) }])) as Record<string, { active: boolean; weight: string }>);
   const [cashOpening, setCashOpening] = useState(String(initial.cashOpening ?? 0));
   const [excludeDormant, setExcludeDormant] = useState(initial.excludeDormant !== false);
+  const [geleMonths, setGeleMonths] = useState(String(initial.geleMonths ?? 6));
   const num = (s: string) => Number(String(s).replace(",", "."));
   const set = (k: string, patch: Partial<{ active: boolean; weight: string }>) => setSt((s) => ({ ...s, [k]: { ...s[k], ...patch } }));
   const build = (): ProjectionConfigInput => ({
@@ -234,6 +236,7 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
     pipe: { active: st.pipe.active, weight: num(st.pipe.weight) / 100 },
     cashOpening: Number.isFinite(num(cashOpening)) ? num(cashOpening) : 0,
     excludeDormant,
+    geleMonths: Number.isFinite(num(geleMonths)) ? Math.max(1, Math.min(36, Math.round(num(geleMonths)))) : 6,
   });
   return (
     <Card title="Niveaux de projection du pipeline" actions={<Busy label="Enregistrer" okMsg="Réglages appliqués (recalcul complet lancé)" fn={() => callSetProjectionConfig(build())} />}>
@@ -269,7 +272,17 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
         </div>
         <span className="text-[11px] text-faint">année de clôture antérieure à l'exercice courant</span>
       </div>
-      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Les <b>opportunités dormantes</b> (clôture prévue d'un <b>millésime révolu</b>, jamais reclassée) sont retirées de la <b>prévision cumulée</b> (« Tout ») quand l'option est active — elles restent visibles dans la tuile <b>« Opportunité dormante »</b> du Pipeline (les onglets d'année les écartent déjà). Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
+      <div className="mt-3 border-t border-line/60 pt-3 flex items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 min-w-[190px]">
+          <span className="text-ink font-medium">Seuil « Gelé » (phases amont)</span>
+          <span className="text-[11px] text-faint">opp non transmise âgée au-delà</span>
+        </label>
+        <label className="flex items-center gap-2 text-[13px]">
+          <span className="text-muted">Mois</span>
+          <input className="field !py-1 w-24" inputMode="numeric" value={geleMonths} onChange={(e) => setGeleMonths(e.target.value)} placeholder="6" aria-label="Seuil Gelé en mois" />
+        </label>
+      </div>
+      <Tip>Les 3 niveaux sont des cohortes <b>disjointes</b> par certitude (IdC). Le <b>pondéré projeté</b> = somme des niveaux <b>cochés</b> uniquement. Le <b>solde d'ouverture trésorerie</b> ancre la <b>prévision cash</b> (Prévision) sur une position absolue plutôt qu'une simple variation (0 = variation depuis aujourd'hui ; peut être négatif). Les <b>opportunités dormantes</b> (clôture prévue d'un <b>millésime révolu</b>, jamais reclassée) sont retirées de la <b>prévision cumulée</b> (« Tout ») quand l'option est active — elles restent visibles dans la tuile <b>« Opportunité dormante »</b> du Pipeline (les onglets d'année les écartent déjà). Le <b>seuil « Gelé »</b> classe en phase amont <b>Gelé</b> (Pipeline) toute opportunité active non encore <b>transmise</b> (étape &lt; 3) dont l'âge dépasse ce nombre de mois. Ces réglages s'appliquent à <b>toutes les vues</b> ; l'enregistrement lance un <b>recalcul complet</b>.</Tip>
     </Card>
   );
 }

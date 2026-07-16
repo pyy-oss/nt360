@@ -90,10 +90,26 @@ export const Pipeline: FC<Props> = ({ period }) => {
       <Card title="Funnel pondéré par étape">
         <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={240} size={26} interval={0} />
       </Card>
+      {data.phase0 && ((data.phase0.budget?.count || 0) + (data.phase0.gele?.count || 0) + (data.phase0.dev?.count || 0)) > 0 && (
+        <Card title="Phases amont — répartition des opportunités actives">
+          <HBars rows={[
+            { name: "Budget", v: data.phase0.budget?.brut || 0, sub: `${data.phase0.budget?.count || 0} opp.` },
+            { name: "Gelé", v: data.phase0.gele?.brut || 0, sub: `${data.phase0.gele?.count || 0} opp.` },
+            { name: "Dev", v: data.phase0.dev?.brut || 0, sub: `${data.phase0.dev?.count || 0} opp.` },
+          ]} colorFn={(r) => (r.name === "Gelé" ? T.clay : r.name === "Budget" ? T.steel : T.gold)} />
+          <Tip>Classement <b>transverse</b> des opportunités <b>actives</b> (n'affecte ni l'étape, ni le pondéré) : <b>Budget</b> = désignation « budget… » ; <b>Dev</b> = offre pas encore transmise (avant l'étape 3·Transmise) ; <b>Gelé</b> = non transmise et âgée de plus de <b>{data.geleMonths ?? 6} mois</b> (réglable en Habilitations). Montants <b>bruts</b> (non pondérés).</Tip>
+        </Card>
+      )}
       <div className={cols2}>
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       </div>
+      {monthsAsc(data.byWeek).filter((x) => x.name !== "?").length > 0 && (
+        <Card title="Écoulement hebdomadaire du closing (pondéré)">
+          <AreaTrend data={monthsAsc(data.byWeek).filter((x) => x.name !== "?")} color={T.steel} name="Pondéré" h={200} />
+          <Tip>Granularité <b>hebdomadaire</b> (semaine ISO de la <b>D Prev</b>) de l'écoulement du pondéré projeté — même population et même pondération que l'écoulement mensuel, en plus fin pour le pilotage à court terme. Fondé sur la seule <b>date de clôture prévue</b> (la source n'ayant pas de date de création, ce n'est pas un « entrant »).</Tip>
+        </Card>
+      )}
       {/* Le CLASSEMENT par commercial (pondéré / taux de transfo. / R-O …) vit désormais UNIQUEMENT dans
           AM 360° (source unique summaries/ams). Il était ici recalculé depuis un AUTRE agrégat
           (pipeline_${period}.byAmConv) → un même AM pouvait afficher un pondéré/transfo. différent selon
@@ -190,6 +206,15 @@ export const Am360: FC<Props> = () => {
   const sel = rows.find((r) => r.am === am) || rows[0];
   // Rang par prise de commande (CAS) — classement de performance du leaderboard.
   const rankOf = new Map([...rows].sort((a, b) => b.cas - a.cas).map((r, i) => [r.am, i + 1] as const));
+  // Synthèse portefeuille (Total) : agrégats des colonnes du classement + R/O global (réalisé exercice /
+  // objectif) — DC lit la performance de l'équipe d'un coup d'œil, sans additionner mentalement les lignes.
+  const totCas = rows.reduce((s, r) => s + (r.cas || 0), 0);
+  const totFacture = rows.reduce((s, r) => s + (r.facture || 0), 0);
+  const totBacklog = rows.reduce((s, r) => s + (r.backlog || 0), 0);
+  const totPipe = rows.reduce((s, r) => s + (r.pipelinePondere || 0), 0);
+  const totTarget = rows.reduce((s, r) => s + (r.targetCas || 0), 0);
+  const totCasFy = rows.reduce((s, r) => s + (r.casFy || 0), 0);
+  const globalRo = totTarget > 0 ? totCasFy / totTarget : null;
   return (
     <div className="flex flex-col gap-4">
       <Card title="Commercial (Account Manager)">
@@ -221,6 +246,15 @@ export const Am360: FC<Props> = () => {
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
           colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
         ]} rows={rows} colsKey="pipeline-am360" />
+        <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line/60 pt-2 text-[12px] text-muted">
+          <span className="font-semibold text-ink">Total portefeuille</span>
+          <span>{rows.length.toLocaleString("fr-FR")} commercial(aux)</span>
+          <span>CAS <b className="tabnum text-ink">{money(totCas)}</b></span>
+          <span>Facturé <b className="tabnum text-ink">{money(totFacture)}</b></span>
+          <span>Backlog <b className="tabnum text-ink">{money(totBacklog)}</b></span>
+          <span>Pipeline pond. <b className="tabnum text-ink">{money(totPipe)}</b></span>
+          {globalRo != null && <span>R/O global <b className={cx("tabnum", globalRo >= 1 ? "text-emerald" : globalRo >= 0.7 ? "text-gold" : "text-clay")}>{pct(globalRo)}</b></span>}
+        </div>
       </Card>
       <Tip>Vue par commercial <b>sans marge</b> (la rentabilité par AM reste dans « Rentabilité »). Le <b>facturé</b> est rattaché au commercial via la clé N° FP de ses commandes. Le <b>R/O</b> compare le CAS de l'exercice à l'objectif CAS « commercial » de l'année.</Tip>
     </div>
@@ -427,6 +461,9 @@ export const OppList: FC<Props> = () => {
   // Filtre STATUT (étape du pipeline) local à la liste — complète le filtre transverse (BU/AM/client)
   // et la recherche. Actives = étapes 1..5 (en cours), puis Gagnées/Perdues/Suspendues/Annulées.
   const [seg, setSeg] = useState<"all" | "active" | "won" | "lost" | "susp" | "cxl">("all");
+  // Sous-filtre par ÉTAPE (phase) — ne s'applique qu'au segment « Actives » (étapes 1..5). 0 = toutes.
+  // C'est un filtre d'affichage (pas une métrique recalculée) → aucune divergence de chiffres possible.
+  const [stageF, setStageF] = useState(0);
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
   const amOpts = useAmOptions(), clientOpts = useClientOptions(); // autocomplete Client/AM (mêmes sources que les filtres)
   const prefill = (o: Opportunity, patch: boolean) => { setF({
@@ -478,7 +515,22 @@ export const OppList: FC<Props> = () => {
     for (const o of rows) c[segOf(o.stage || 0)]++;
     return c;
   }, [rows]);
-  const shownOpps = useMemo(() => seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg), [rows, seg]);
+  // Comptes par étape active (1..5) — alimentent les pastilles du sous-filtre par phase.
+  const activeStageCounts = useMemo(() => {
+    const c: Record<number, number> = {};
+    for (const o of rows) { const s = o.stage || 0; if (s >= 1 && s <= 5) c[s] = (c[s] || 0) + 1; }
+    return c;
+  }, [rows]);
+  // Actives HORS phases 1..5 (étape 0/absente ou aberrante) : segOf les classe « active » (repli), mais
+  // aucune pastille 1..5 ne les couvre → sans ce bucket « Sans phase » elles seraient inatteignables et
+  // la somme des pastilles ne retomberait pas sur le total « Actives » (piège populations divergentes).
+  const activeNoStage = segCounts.active - [1, 2, 3, 4, 5].reduce((s, k) => s + (activeStageCounts[k] || 0), 0);
+  const shownOpps = useMemo(() => {
+    const base = seg === "all" ? rows : rows.filter((o) => segOf(o.stage || 0) === seg);
+    if (seg !== "active" || !stageF) return base;
+    // stageF = -1 → « Sans phase » (actives hors 1..5) ; sinon étape exacte.
+    return stageF === -1 ? base.filter((o) => !((o.stage || 0) >= 1 && (o.stage || 0) <= 5)) : base.filter((o) => (o.stage || 0) === stageF);
+  }, [rows, seg, stageF]);
   const pnlFlag = (o: Opportunity): ReactNode =>
     isBooked(o) ? <Badge tone="emerald">au P&L</Badge>
       : o.stage === 6 && o.fp ? <Badge tone="clay">hors P&L</Badge> // gagnée mais pas encore inscrite
@@ -634,7 +686,7 @@ export const OppList: FC<Props> = () => {
       {canWrite && <OppBulkExcel />}
       <Card title={`Toutes les opportunités · ${shownOpps.length.toLocaleString("fr-FR")}`} actions={
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <Segmented value={seg} onChange={setSeg} ariaLabel="Filtrer par statut d'opportunité" options={[
+          <Segmented value={seg} onChange={(v) => { setSeg(v as typeof seg); if (v !== "active") setStageF(0); }} ariaLabel="Filtrer par statut d'opportunité" options={[
             { value: "all", label: "Toutes", count: rows.length },
             { value: "active", label: "Actives", count: segCounts.active },
             { value: "won", label: "Gagnées", count: segCounts.won },
@@ -642,6 +694,15 @@ export const OppList: FC<Props> = () => {
             { value: "susp", label: "Suspendues", count: segCounts.susp },
             { value: "cxl", label: "Annulées", count: segCounts.cxl },
           ]} />
+          {/* Sous-filtre par phase (étapes 1..5), visible seulement pour « Actives » — précise la vue
+              « opportunités ouvertes » sans introduire de métrique parallèle. */}
+          {seg === "active" && (
+            <Segmented value={stageF === -1 ? "none" : String(stageF)} onChange={(v) => setStageF(v === "none" ? -1 : Number(v))} ariaLabel="Filtrer par étape du pipeline" options={[
+              { value: "0", label: "Toutes phases", count: segCounts.active },
+              ...[1, 2, 3, 4, 5].map((s) => ({ value: String(s), label: `${s}·${STAGE_SHORT[s]}`, count: activeStageCounts[s] || 0 })),
+              ...(activeNoStage > 0 ? [{ value: "none", label: "Sans phase", count: activeNoStage }] : []),
+            ]} />
+          )}
           {canImport && <ImportButton label="Importer (LIVE / Sales)" />}
         </div>}>
         <ListView
