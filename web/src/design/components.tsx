@@ -13,6 +13,34 @@ export function Eyebrow({ children, color, as: As = "div" }: { children: ReactNo
   return <As className="text-xs uppercase tracking-wider text-dim mb-2 font-semibold" style={color ? { color } : undefined}>{children}</As>;
 }
 
+// Champ de formulaire STANDARD : étiquette au-dessus + contrôle + indice/erreur optionnels. Espacement
+// unique (label↔champ = gap-1), typographie de label canonique (text-[11px] text-muted) — reprend le
+// gabarit historique le plus soigné (module maintenance) pour supprimer les dizaines de réimplémentations
+// manuelles de `<label><span text-[11px]>…` disséminées dans les écrans. `error` prime sur `hint`.
+export function Field({ label, hint, error, required, htmlFor, className, children }:
+  { label: ReactNode; hint?: ReactNode; error?: ReactNode; required?: boolean; htmlFor?: string; className?: string; children: ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} className={cx("flex flex-col gap-1", className)}>
+      <span className="text-[11px] text-muted">{label}{required && <span className="text-clay"> *</span>}</span>
+      {children}
+      {error ? <span className="text-[11px] text-clay">{error}</span> : hint ? <span className="text-[11px] text-faint">{hint}</span> : null}
+    </label>
+  );
+}
+
+// Section de formulaire : titre discret + grille aérée. Sert à découper les longs formulaires (identité /
+// montants / dates / suivi) — gouttières `gap-x-4 gap-y-3`, plus d'air que les grilles historiques `gap-2.5`.
+export function FormSection({ title, cols = 2, className, children }:
+  { title?: ReactNode; cols?: 1 | 2 | 3; className?: string; children: ReactNode }) {
+  const grid = cols === 1 ? "grid-cols-1" : cols === 3 ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 sm:grid-cols-2";
+  return (
+    <div className={cx("space-y-3", className)}>
+      {title && <Eyebrow>{title}</Eyebrow>}
+      <div className={cx("grid gap-x-4 gap-y-3", grid)}>{children}</div>
+    </div>
+  );
+}
+
 export function Card({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={cx("card p-3 sm:p-4 animate-fade-in", className)}>
