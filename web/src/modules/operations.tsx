@@ -534,7 +534,7 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
       const k = (o.client || "").trim();
       if (!k) continue;
       const e = m.get(k) || { fps: new Set<string>(), orders: 0, pmCas: new Map<string, number>() };
-      if (o.fp) e.fps.add(fpDocId(o.fp)); // FP canonicalisé → une affaire = un N° FP (pas de double-compte casse/zéros)
+      if (o.fp) e.fps.add(fpDocId(o.fp)); // clé de doc FP → une affaire = un N° FP (carnet déjà fusionné par fpKey en amont)
       e.orders += 1;
       const pm = (o.pm || "").trim();
       if (pm) e.pmCas.set(pm, (e.pmCas.get(pm) || 0) + (o.cas || 0));
@@ -558,14 +558,14 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
   const tot = rows.reduce((s, r) => {
     s.cas += r.cas || 0; s.facture += r.facture || 0; s.backlog += r.backlog || 0;
     s.forecast += r.forecast || 0; s.projete += r.projete || 0;
-    s.reste += Math.max((r.cas || 0) - (r.facture || 0), 0);
     return s;
-  }, { cas: 0, facture: 0, backlog: 0, forecast: 0, projete: 0, reste: 0 });
+  }, { cas: 0, facture: 0, backlog: 0, forecast: 0, projete: 0 });
   const realRows = rows.filter((r) => !r.isOther); // entités réelles (hors ligne de traîne agrégée)
+  const activeCount = realRows.filter((r) => (r.cas || 0) > 0).length; // carnet acquis sur la période
+  const prospectCount = realRows.filter((r) => (r.cas || 0) === 0 && (r.forecast || 0) > 0).length; // pipeline seul
   const top5 = realRows.slice(0, 5).reduce((s, r) => s + (r.cas || 0), 0); // rows déjà triées CAS desc (byEntity)
   const concentration = tot.cas > 0 ? top5 / tot.cas : 0;
   const otherRow = rows.find((r) => r.isOther); // longue traîne agrégée éventuelle (> 100 clients)
-  const resteOf = (r: EntityRow) => Math.max((r.cas || 0) - (r.facture || 0), 0);
   const tauxFactOf = (r: EntityRow) => ((r.cas || 0) > 0 ? Math.min((r.facture || 0) / (r.cas || 0), 1) : 0);
   return (
     <div className="flex flex-col gap-4">
@@ -574,14 +574,14 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
       {isClients && (
         <>
           <div className={grid4}>
-            <Kpi label="CAS du portefeuille" value={fmt(tot.cas)} tone="steel" sub={`${realRows.length.toLocaleString("fr-FR")} client(s)${otherRow ? " + traîne" : ""}`} />
+            <Kpi label="CAS du portefeuille" value={fmt(tot.cas)} sub={`${realRows.length.toLocaleString("fr-FR")} client(s)${otherRow ? " + traîne" : ""}`} />
             <Kpi label="Pipeline pondéré" value={fmt(tot.forecast)} tone="gold" sub="opportunités ouvertes (pondérées)" />
             <Kpi label="Facturé (CAF)" value={fmt(tot.facture)} tone="emerald" />
-            <Kpi label="Backlog (RAF)" value={fmt(tot.backlog)} tone="clay" />
+            <Kpi label="Backlog (RAF)" value={fmt(tot.backlog)} tone="steel" sub="reste à facturer" />
           </div>
           <div className={grid4}>
             <Kpi label="Projeté" value={fmt(tot.projete)} tone="gold" sub="CAS + pipeline pondéré" />
-            <Kpi label="Reste à encaisser" value={fmt(tot.reste)} tone="clay" sub="CAS non encore facturé" />
+            <Kpi label="Clients actifs" value={activeCount.toLocaleString("fr-FR")} tone="emerald" sub={`${prospectCount.toLocaleString("fr-FR")} prospect(s) · pipeline seul`} />
             <Kpi label="Concentration top 5" value={pct(concentration)} tone={concentration >= 0.6 ? "clay" : "steel"} sub="part du CAS des 5 premiers" />
             <Kpi label="Taux de facturation" value={tot.cas > 0 ? pct(Math.min(tot.facture / tot.cas, 1)) : "—"} sub="facturé / CAS du portefeuille" />
           </div>
@@ -605,7 +605,6 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
             // DF — facturation & encaissement.
             colNum("Facturé", (r) => money(r.facture), (r) => r.facture || 0),
             colNum("Backlog", (r) => money(r.backlog), (r) => r.backlog || 0),
-            det(colNum("Reste à encaisser", (r) => money(resteOf(r)), (r) => resteOf(r))),
             det(colNum("Taux fact.", (r) => ((r.cas || 0) > 0 ? pct(tauxFactOf(r)) : "—"), (r) => tauxFactOf(r))),
             // Marges masquées pour les rôles sans accès « Rentabilité ».
             ...(canMargin ? [det(colNum("Marge", (r: EntityRow) => money(mbOf(r)), (r: EntityRow) => mbOf(r) || 0)), det(colNum("%MB", (r: EntityRow) => pct(pmbOf(r)), (r: EntityRow) => pmbOf(r) || 0))] : []),
