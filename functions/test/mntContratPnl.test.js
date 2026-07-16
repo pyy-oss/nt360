@@ -42,4 +42,16 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     const c3 = [{ id: "C3", statut: "brouillon", echeanceType: "annuel", montantEngage: 0, dateDebut: "2030-01-01" }];
     expect(computeContratPnl(c3, [], {}, asOf, true)).toEqual([]);
   });
+  it("EXCLUT les statuts non vivants (brouillon/échu/résilié) même avec un revenu > 0 — parité risque (audit M2)", () => {
+    // Même montant/dates que C1 (revenu engagé 1 000 000) mais statuts terminaux/spéculatifs : ne doivent PAS
+    // gonfler la rentabilité (assiette = celle du moteur de risque, actif/suspendu). ADR-021.
+    const pop = [
+      { id: "B", statut: "brouillon", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" },
+      { id: "R", statut: "resilie", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" },
+      { id: "E", statut: "echu", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" },
+      { id: "S", statut: "suspendu", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" },
+    ];
+    const rows = computeContratPnl(pop, [], {}, asOf, true);
+    expect(rows.map((r) => r.id)).toEqual(["S"]); // seul le suspendu (vivant) subsiste
+  });
 });

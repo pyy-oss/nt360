@@ -27,8 +27,11 @@ function echeancier(contrat, factureTotal, asOfIso) {
   // sans cette garde un contrat actif à date de début future compterait déjà 1 échéance (fausse sous-
   // facturation — audit Lot 5). Comparaison lexicographique sûre sur des ISO AAAA-MM-JJ.
   if (parse(c.dateDebut) && String(asOfIso) >= String(c.dateDebut)) {
-    // Échéance émise en début de chaque période, la 1ʳᵉ à dateDebut → +1 (échéances émises ≤ asOf).
-    periodsDue = Math.floor(monthsBetween(c.dateDebut, asOfIso) / per) + 1;
+    // Échéances ÉMISES à ce jour : comptées par leurs DATES RÉELLES (addMonthsIso, ≤ asOf) et NON via
+    // monthsBetween/per — sinon un contrat démarrant le 29/30/31 sous-compte d'une période (monthsBetween
+    // compare le JOUR du mois tandis qu'addMonthsIso RABAT au dernier jour du mois : 31/01→28/02). Aligné
+    // sur echeancierPlan (audit M1 : « même métrique = même nombre »).
+    periodsDue = periodsDueAsOf(c.dateDebut, asOfIso, per);
     // Borne par la durée du contrat. dateFin = borne de RENOUVELLEMENT (EXCLUSIVE) : les contrats ne se
     // renouvellent pas d'office → l'échéance tombant PILE sur dateFin (début de la reconduction) ne compte
     // pas. On compte les débuts de période dont la DATE est strictement avant dateFin.
@@ -66,6 +69,21 @@ function periodsInContract(dateDebut, dateFin, per) {
   while (n < MAX_PERIODS) {
     const start = addMonthsIso(dateDebut, n * per);
     if (!start || String(start) >= String(dateFin)) break;
+    n++;
+  }
+  return n;
+}
+
+// Nombre d'échéances ÉMISES à la date `asOf` INCLUSE : débuts de période (dateDebut, +pas, …) dont la DATE
+// RÉELLE (addMonthsIso, qui rabat les fins de mois) est ≤ asOf. Pendant de periodsInContract (borne asOf
+// INCLUSIVE — l'échéance émise pile à asOf est due — là où dateFin est exclusive). Compté par dates réelles
+// pour rester aligné sur echeancierPlan et ne pas sous-compter les contrats démarrant le 29/30/31 (audit M1).
+function periodsDueAsOf(dateDebut, asOfIso, per) {
+  if (!parse(dateDebut) || !parse(asOfIso)) return 0;
+  let n = 0;
+  while (n < MAX_PERIODS) {
+    const d = addMonthsIso(dateDebut, n * per);
+    if (!d || String(d) > String(asOfIso)) break;
     n++;
   }
   return n;

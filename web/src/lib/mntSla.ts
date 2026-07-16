@@ -63,7 +63,9 @@ export function echeancier(contrat: { echeanceType?: string; montantEngage?: num
   let periodsDue = 0;
   // Miroir back : contrat non démarré (asOf < dateDebut) → 0 échéance due (pas de fausse sous-facturation).
   if (parse(contrat.dateDebut) && String(asOfIso) >= String(contrat.dateDebut)) {
-    periodsDue = Math.floor(monthsBetween(contrat.dateDebut, asOfIso) / per) + 1;
+    // Échéances émises ≤ asOf comptées par DATES RÉELLES (addMonthsIso) — pas via monthsBetween/per — sinon
+    // sous-décompte des contrats démarrant le 29/30/31. Miroir EXACT de mntEcheancier.periodsDueAsOf (audit M1).
+    periodsDue = periodsDueAsOf(contrat.dateDebut, asOfIso, per);
     // dateFin = borne de RENOUVELLEMENT (EXCLUSIVE) : l'échéance tombant pile sur dateFin (reconduction)
     // n'est pas comptée. On compte les débuts de période dont la date est < dateFin. Miroir mntEcheancier.js.
     if (parse(contrat.dateFin || undefined)) {
@@ -99,6 +101,19 @@ function periodsInContract(dateDebut: string | null | undefined, dateFin: string
   while (n < MAX_PERIODS) {
     const start = addMonthsIso(dateDebut, n * per);
     if (!start || String(start) >= String(dateFin)) break;
+    n++;
+  }
+  return n;
+}
+
+// Échéances émises à `asOf` INCLUSE : débuts de période dont la date réelle (addMonthsIso) est ≤ asOf.
+// Miroir EXACT de mntEcheancier.periodsDueAsOf (borne asOf inclusive, vs dateFin exclusive) — audit M1.
+function periodsDueAsOf(dateDebut: string | null | undefined, asOfIso: string | null | undefined, per: number): number {
+  if (!parse(dateDebut || undefined) || !parse(asOfIso || undefined)) return 0;
+  let n = 0;
+  while (n < MAX_PERIODS) {
+    const d = addMonthsIso(dateDebut, n * per);
+    if (!d || String(d) > String(asOfIso)) break;
     n++;
   }
   return n;

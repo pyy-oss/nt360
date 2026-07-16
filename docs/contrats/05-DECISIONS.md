@@ -3,6 +3,37 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-021 — La rentabilité par contrat n'agrège que les statuts VIVANTS (actif/suspendu), comme le risque
+
+- **Date :** 2026-07-16
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Un audit adverse (workflow) a relevé que `computeContratPnl` (Lot 4/7) itérait **tous** les contrats,
+sans filtre de statut, alors que le moteur de risque (`mntRisque`, ADR-016) ne score que les statuts
+**vivants** `{actif, suspendu}` via `RISK_STATUTS`. Le revenu étant dérivé de l'échéancier (dates
+seules, aveugle au statut), un `brouillon` (montant spéculatif, non engagé) ou un contrat
+`echu`/`resilie` remontait un revenu > 0 et gonflait la marge du portefeuille — deux populations
+divergentes sur la **même** collection `mnt_contrats`, ce que l'« invariant fort » de CLAUDE.md
+(« même métrique = même nombre ») interdit.
+
+### Décision
+La rentabilité **filtre la même assiette que le risque** : `computeContratPnl` ignore tout contrat
+dont le statut n'est pas dans `RISK_STATUTS` (source **unique**, importée de `mntRisque` — pas de
+liste dupliquée). Un brouillon/échu/résilié ne pèse ni sur le revenu, ni sur le coût, ni sur la marge.
+
+### Conséquences
+- Rentabilité et risque parlent du même périmètre de contrats → chiffres réconciliables.
+- La rentabilité **historique** d'un contrat terminé (échu/résilié) n'est pas offerte en v1. Si ce
+  besoin émerge, il fera l'objet d'un ADR dédié (et devra alors traiter la résiliation anticipée dans
+  l'échéancier — aujourd'hui `dateFin` d'origine est conservée, cf. journal).
+
+### Ce qu'on saura dans six mois
+Si la direction réclame la marge des contrats clos (bilan de fin de contrat) → rouvrir l'assiette.
+
+---
+
 ## ADR-020 — Création en masse depuis les suggestions : brouillon pré-rempli, échéance = date de commande + 12 mois
 
 - **Date :** 2026-07-16

@@ -46,7 +46,11 @@ function validateMntContrat(d) {
   if (o.dateFin && !dateFin) return { ok: false, error: "date de fin invalide (AAAA-MM-JJ)" };
   if (dateFin && dateFin < dateDebut) return { ok: false, error: "la date de fin précède la date de début" };
   // Montant d'engagement PROPRE au contrat (ADR-005) — entier XOF (le FCFA n'a pas de subdivision).
-  const montantEngage = Math.max(0, Math.round(num(o.montantEngage)));
+  // Un montant NÉGATIF (format comptable « (500 000) », « 500000- », signe parasite) est une donnée
+  // aberrante : on la REJETTE explicitement plutôt que de la coercer à 0 en silence — sinon un import de
+  // mise à jour effacerait un montant stocké sans alerte (audit m1). Absent/vide → num()=0 → accepté.
+  const montantEngage = Math.round(num(o.montantEngage));
+  if (montantEngage < 0) return { ok: false, error: "montant engagé invalide (négatif)" };
   const deviseEngage = (String(o.deviseEngage || "XOF").toUpperCase().trim()) || "XOF";
   const rawEng = Array.isArray(o.engagements) ? o.engagements : [];
   const engagements = [];

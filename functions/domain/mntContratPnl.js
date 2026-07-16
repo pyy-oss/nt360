@@ -5,6 +5,7 @@
 // Montants ENTIERS XOF. Réutilise craDaysFromHours (ADR-013) et echeancier (source unique du « dû »).
 const { craDaysFromHours } = require("./mntTicket");
 const { echeancier } = require("./mntEcheancier");
+const { RISK_STATUTS } = require("./mntRisque");
 
 /**
  * @param {object[]} contrats      contrats (id, fp, client, statut, echeanceType, montantEngage, dateDebut, dateFin)
@@ -28,6 +29,11 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost) {
   }
   const rows = [];
   for (const c of contrats || []) {
+    // Même assiette que le moteur de risque (ADR-021) : seuls les contrats VIVANTS (actif/suspendu) ont un
+    // revenu engagé pilotable. Un brouillon (montant spéculatif, non engagé) ou un contrat échu/résilié
+    // gonflerait revenu et marge — divergence « populations divergentes » interdite (« même métrique = même
+    // nombre »). Filtre partagé RISK_STATUTS (source unique) plutôt qu'un doublon de la liste.
+    if (!c || !RISK_STATUTS.has(String(c.statut))) continue;
     const a = agg[c.id] || { jours: 0, cout: 0 };
     const revenue = echeancier(c, 0, asOfIso).engage; // engagé à ce jour (indépendant du facturé)
     if (!(revenue > 0) && a.jours <= 0) continue;      // ni revenu ni activité → hors P&L

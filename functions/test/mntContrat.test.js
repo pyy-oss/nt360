@@ -19,7 +19,12 @@ describe("mntContrat — validation d'un contrat", () => {
   });
   it("montant d'engagement arrondi à l'ENTIER XOF (pas de subdivision FCFA)", () => {
     expect(validateMntContrat({ ...base, montantEngage: 12000000.9 }).value.montantEngage).toBe(12000001);
-    expect(validateMntContrat({ ...base, montantEngage: -5 }).value.montantEngage).toBe(0);
+    expect(validateMntContrat({ ...base, montantEngage: "" }).value.montantEngage).toBe(0); // absent → 0
+  });
+  it("REJETTE un montant négatif (format comptable) au lieu de le coercer à 0 (audit m1)", () => {
+    expect(validateMntContrat({ ...base, montantEngage: -5 }).ok).toBe(false);
+    expect(validateMntContrat({ ...base, montantEngage: "(1 200 000)" }).ok).toBe(false); // comptable → négatif
+    expect(validateMntContrat({ ...base, montantEngage: "500000-" }).ok).toBe(false);
   });
   it("rejette un statut / une périodicité hors énumération", () => {
     expect(validateMntContrat({ ...base, statut: "en_cours" }).ok).toBe(false);

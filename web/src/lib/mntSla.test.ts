@@ -42,6 +42,11 @@ describe("mntSla (front, miroir) — échéancier", () => {
     expect(a.periodsDue).toBe(1);
     expect(a.engage).toBe(12000000);
   });
+  it("début fin de mois (31/01) : échéances rabattues comptées, pas de sous-décompte (miroir back, audit M1)", () => {
+    const m = echeancier({ echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-31" }, 0, "2026-02-28");
+    expect(m.periodsDue).toBe(2); // 31/01 + 28/02 (AVANT le fix : 1)
+    expect(m.engage).toBe(2000000);
+  });
 });
 
 describe("mntSla (front, miroir) — échéancier DÉTAILLÉ", () => {

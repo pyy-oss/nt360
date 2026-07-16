@@ -714,3 +714,47 @@ l'échéance de `dateDebut`, borne de gauche INCLUSIVE — sémantique opposée 
 functions 914/914, web 123/123, build OK, lint OK, chunk 116,9 KB ≤ 120, gardes CI (152 fonctions,
 no-undef, index) OK. Correctif purement additif (nouvelle fonction pure + resserrement d'un plafond) ;
 aucune colonne ni signature touchée ; comportement inchangé hors le cas piégé.
+
+---
+
+## 2026-07-16 — Audit adverse du module (workflow) + remédiation M1/M2 + 3 mineurs
+
+**Fait** — Audit adverse du module contrat conduit par un workflow multi-agents (8 axes : correctness
+échéancier/SLA, risque/PnL, contrat/import/suggest, parité back↔front, sécurité/RBAC, IA, gouvernance/
+additivité, conformité), chaque constat réfuté par un sceptique indépendant. 16 constats bruts → 11
+confirmés, 5 faux positifs écartés (dont : signal `sous_facturation` à contribution nulle jamais rendu
+pour les verts ; `aiAnalyzeChurn` requireRead **délibéré et documenté** ; `gap-1` vs `gap-0.5` aligné en
+fait sur pipeline/finance). Remédiation des correctifs validés par l'utilisateur :
+
+- **M1 (majeur) — échéancier fin de mois.** `echeancier.periodsDue` était dérivé de `monthsBetween/per`
+  (comparaison du JOUR du mois) alors que les dates réelles sont posées par `addMonthsIso` (rabat au
+  dernier jour). Un contrat démarrant le 29/30/31 sous-comptait d'une période (31/01→28/02 non compté),
+  contredisant `echeancierPlan` — violation « même métrique = même nombre », propagée au risque et à la
+  rentabilité. Fix : nouveau helper pur `periodsDueAsOf` (compte les débuts de période dont la DATE RÉELLE
+  est ≤ asOf), back + miroir front, aligné sur `periodsInContract`. Bug DISTINCT du off-by-one dateFin de
+  la même session (celui-là = sur-compte sur multiple exact ; M1 = sous-compte sur début fin de mois).
+- **M2 (majeur) — assiette rentabilité.** `computeContratPnl` agrégeait TOUS les statuts ; un brouillon/
+  échu/résilié gonflait revenu et marge, divergent de l'assiette `{actif,suspendu}` du risque. Fix :
+  filtre sur `RISK_STATUTS` (source **unique**, importée de `mntRisque`). **ADR-021** (assiette vivante,
+  rentabilité historique renvoyée à un ADR ultérieur si besoin).
+- **m1 — import non effaçant.** Un montant négatif comptable (« (500 000) », « 500000- ») était coercé à 0
+  par `Math.max(0,…)` → un import de MàJ pouvait effacer un montant stocké en silence. Fix : `validateMntContrat`
+  REJETTE désormais un montant < 0 (absent → 0 toujours accepté).
+- **m2 — dédup import.** « Dernière occurrence gagne » ne valait qu'entre lignes valides : une re-saisie
+  fautive (dernière) partait en erreur pendant qu'une version antérieure valide s'importait. Fix : dédup
+  par `fpKey` AVANT validation (dernière occurrence, même invalide, supersède les précédentes ; ordre des
+  lignes préservé).
+- **m5 — ticket créé déjà résolu.** La création ne posait que `ouvertLe` : un ticket saisi rétroactivement
+  `resolu`/`clos` n'avait pas de `resoluLe` → SLA « rompu » à jamais. Fix : la création pose les mêmes
+  horodatages de transition que l'édition, selon le statut initial.
+
+**Vérif** — functions 919/919 (+5 tests : M1 fin de mois back + parité décompte↔liste, M2 filtre statuts,
+m1 rejet négatif, m2 dédup invalide), web 124/124 (+1 : M1 miroir front). Build OK, lint OK, chunk 116,9 KB
+≤ 120, gardes CI (152 fonctions, no-undef, indexes) OK. Correctifs **additifs** (helpers purs + gardes +
+resserrement d'assiette) ; aucune colonne/signature touchée.
+
+**Reste ouvert (audit, non traité — sur décision ultérieure)** : m3 (parité `slaBreaches` churn front vs
+`slaRompus` back), m4 (décision d'approbation renouvellement/résiliation **inerte** — n'applique pas l'effet
+au contrat), m6 (`missingCjm` absent → marge surévaluée en silence), m7 (normalisation clients IA hors `mnt_`
+sans ADR), + infos (deviseEngage non validée XOF, dateFin===dateDebut, injection de prompt confinée, gate
+front sur RBAC seul). Documentés ici pour ne pas les perdre.

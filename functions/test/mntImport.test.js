@@ -54,6 +54,17 @@ describe("planMntContratsImport", () => {
     expect(toCreate).toHaveLength(1);
     expect(toCreate[0].value.client).toBe("NOUVEAU");
   });
+  it("dédup : une DERNIÈRE occurrence invalide BLOQUE l'import d'une version antérieure valide (audit m2)", () => {
+    // Ligne 2 valide (montant 1M) puis ligne 8 = correction voulue mais statut fautif → invalide.
+    // La correction doit partir en erreur ET la version antérieure NE doit PAS s'importer en silence.
+    const { toCreate, errors } = planMntContratsImport(
+      [{ ...mk("FP/2026/1", { montantEngage: 1000000 }), line: 2 },
+       { ...mk("FP/2026/1", { montantEngage: 2000000, statut: "n_importe_quoi" }), line: 8 }],
+      new Set(),
+    );
+    expect(toCreate).toHaveLength(0);            // aucune version antérieure importée
+    expect(errors.map((e) => e.line)).toEqual([8]); // seule la dernière occurrence (fautive) est signalée
+  });
   it("mise à jour NON EFFAÇANTE : patch sans engagements, cellules vides non écrasées", () => {
     // Contrat existant (FP_2026_1) réimporté avec les seuls champs REQUIS renseignés (le reste vide).
     const { toUpdate } = planMntContratsImport(
