@@ -1039,6 +1039,10 @@ export async function upsertMntContrat(c: MntContrat) {
 export async function deleteMntContrat(id: string) {
   await httpsCallable(functions, "deleteMntContrat")({ id });
 }
+// Changement de statut MINIMAL (ne touche que `statut`) — sert l'action en masse « Passer au statut ».
+export async function setMntContratStatut(id: string, statut: string) {
+  await httpsCallable(functions, "setMntContratStatut")({ id, statut });
+}
 export type MntImportResult = {
   ok: boolean; applied: boolean; created: number; updated: number; skipped: number; rowsParsed: number;
   samples?: { create: { fp: string; client: string; statut: string }[]; update: { fp: string; client: string; statut: string }[]; errors: { line: number; error: string; fp: string | null }[] };

@@ -165,6 +165,24 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true };
   });
 
+  // Changement de statut d'un contrat — MINIMAL (ne touche que `statut`, comme setBcStatus pour les BC).
+  // Sert l'action EN MASSE « Passer au statut » : plus sûr que de renvoyer tout le contrat via upsert (aucun
+  // autre champ n'est réécrit). Rafraîchit le score de risque (recompute scopé).
+  const setMntContratStatut = onCallG("setMntContratStatut", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const { STATUTS } = require("../domain/mntContrat");
+    const id = assertPlainId(req.data?.id, "id contrat");
+    const statut = String(req.data?.statut || "").trim();
+    if (!STATUTS.includes(statut)) throw new HttpsError("invalid-argument", "statut invalide");
+    const ref = db.doc(`mnt_contrats/${id}`);
+    if (!(await ref.get()).exists) throw new HttpsError("not-found", "contrat introuvable");
+    await ref.set({ statut, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_mnt_contrat_statut", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { statut }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["maintenance"]);
+    return { ok: true };
+  });
+
   const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
@@ -324,7 +342,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
