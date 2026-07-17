@@ -46,9 +46,9 @@ function stageConversion(history) {
     const e = ensure(from);
     e.out++;
     if (to === 7) e.lost++;
-    else if (to > from) { e.advanced++; if (to === 6) e.won++; }
-    else if (to < from) e.regressed++;
-    // to === from : sur place → ni progression ni recul
+    else if (to > from && to <= 6) { e.advanced++; if (to === 6) e.won++; } // progression funnel actif, Gagné (6) inclus ; 8·suspendu / 9·annulé ne sont PAS une avancée
+    else if (to < from) e.regressed++; // from déjà borné 1-5 par le continue ci-dessus
+    // to === from, ou sortie vers 8·suspendu / 9·annulé : ni progression ni recul
   }
   return [...byStage.values()]
     .map((e) => ({ ...e, advanceRate: e.out > 0 ? e.advanced / e.out : 0, lossRate: e.out > 0 ? e.lost / e.out : 0 }))

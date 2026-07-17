@@ -248,8 +248,8 @@ export const Am360: FC<Props> = () => {
       </div>
       {(sel.trend?.length ?? 0) > 1 && (
         <Card title={`Tendance de ${sel.am} — 12 derniers mois`}>
-          <GroupedBars data={(sel.trend || []).map((t) => ({ name: t.month, "CAS booké": t.cas, "Facturé": t.facture }))} series={[{ key: "CAS booké", color: T.steel, name: "CAS booké" }, { key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={20} interval={0} />
-          <Tip>Performance <b>dans le temps</b> du commercial : <b>CAS booké</b> (mois de la commande) et <b>facturé</b> (mois de la facture), sur les 12 derniers mois renseignés. Dérivé rétroactivement des commandes et factures — voir en un coup d'œil un vendeur qui décroche ou qui monte.</Tip>
+          <GroupedBars data={(sel.trend || []).map((t) => ({ name: t.month, "CAS": t.cas, "CAF": t.facture }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "CAF", color: T.emerald, name: "CAF" }]} h={220} size={20} interval={0} />
+          <Tip>Performance <b>dans le temps</b> du commercial : <b>prise de commande (CAS)</b> (mois de la commande) et <b>facturé (CAF)</b> (mois de la facture), sur les 12 derniers mois renseignés. Dérivé rétroactivement des commandes et factures — voir en un coup d'œil un vendeur qui décroche ou qui monte.</Tip>
         </Card>
       )}
       <Card title="Classement des commerciaux">
@@ -265,7 +265,7 @@ export const Am360: FC<Props> = () => {
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
           colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
           // Couverture du reste-à-faire par commercial (pipeline pondéré / (objectif − réalisé)) : ≥1× = couvert.
-          colNum("Couverture", (r) => (r.couverture != null ? <span className={cx(r.couverture >= 1 ? "text-emerald" : r.couverture >= 0.7 ? "text-gold" : "text-clay")}>{`${r.couverture.toFixed(1)}×`}</span> : "—"), (r) => r.couverture ?? -1),
+          colNum("Couverture", (r) => (r.couverture != null ? <span className={cx(r.couverture >= 1 ? "text-emerald" : r.couverture >= 0.7 ? "text-gold" : "text-clay")}>{`${r.couverture.toFixed(2)}×`}</span> : "—"), (r) => r.couverture ?? -1),
         ]} rows={rows} colsKey="pipeline-am360" />
         <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line/60 pt-2 text-[12px] text-muted">
           <span className="font-semibold text-ink">Total portefeuille</span>

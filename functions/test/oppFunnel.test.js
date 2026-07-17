@@ -65,4 +65,17 @@ describe("stageConversion — progression par étape (où meurent les deals)", (
     expect(stageConversion(hist).map((s) => s.stage)).toEqual([2, 4]);
     expect(stageConversion([])).toEqual([]);
   });
+
+  it("ne compte PAS une suspension (8) / annulation (9) comme une avancée", () => {
+    const s3 = stageConversion([
+      { from: 3, to: 8 }, // suspendu → sortie, mais pas une progression
+      { from: 3, to: 9 }, // annulé → idem
+      { from: 3, to: 4 }, // vraie avancée
+    ]).find((s) => s.stage === 3);
+    expect(s3.out).toBe(3);       // les 3 quittent bien l'étape 3
+    expect(s3.advanced).toBe(1);  // seule 3→4 progresse
+    expect(s3.lost).toBe(0);      // 8/9 ne sont pas des « Perdu » (=7)
+    expect(s3.regressed).toBe(0);
+    expect(s3.advanceRate).toBeCloseTo(1 / 3, 6);
+  });
 });

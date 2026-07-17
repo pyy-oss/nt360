@@ -40,6 +40,19 @@ describe("slippageFromHistory — glissement des deals (net par opp)", () => {
     expect(r.byCategory).toEqual({ commit: 0, best_case: 20, pipeline: 10 });
   });
 
+  it("une opp close (Perdue 7 / Gagnée 6) ne glisse plus → exclue, slipAmount = Σ byCategory", () => {
+    const events = [
+      { oppId: "L", fromDate: "2026-01-01", toDate: "2026-03-01", amount: 999, am: "KOUAME", stage: 7, atMs: 1 }, // Perdue → omise
+      { oppId: "A", fromDate: "2026-01-01", toDate: "2026-03-01", amount: 100, am: "DIALLO", stage: 5, forecastCategory: "commit", atMs: 1 }, // active
+    ];
+    const r = slippageFromHistory(events);
+    expect(r.slipCount).toBe(1);      // seule l'opp active glisse
+    expect(r.slipAmount).toBe(100);   // 999 (Perdue) exclu
+    const catSum = r.byCategory.commit + r.byCategory.best_case + r.byCategory.pipeline;
+    expect(catSum).toBe(r.slipAmount); // invariant de cohérence : ligne de tête = Σ des catégories
+    expect(r.byAm).toEqual([{ am: "DIALLO", amount: 100, count: 1 }]);
+  });
+
   it("dates invalides ou liste vide → agrégats nuls", () => {
     expect(slippageFromHistory([{ oppId: "X", fromDate: "n/a", toDate: "2026-01-01" }]).slipCount).toBe(0);
     expect(slippageFromHistory([]).slipAmount).toBe(0);
