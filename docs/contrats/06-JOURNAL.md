@@ -874,3 +874,28 @@ emplacement retenu = module Contrats de maintenance.
 **Appris** — L'« auto IA » la plus sûre est surtout NON-IA : les règles déterministes tranchent l'essentiel
 (échu) avec une exactitude testable, et l'IA ne touche qu'aux quelques cas de jugement — presque toujours
 en simple proposition. L'hybride donne le meilleur des deux : exact où c'est mécanique, prudent où ça juge.
+
+---
+
+## 2026-07-17 — INCIDENT statut auto : tout le parc en échu → auto-application supprimée (ADR-028)
+
+**Échoué** — L'auto-application du statut (Lot 6, ADR-027) a basculé TOUT le parc en `échu` : la règle
+« date de fin dépassée → échu » (confiance 1.0, auto) a frappé tous les contrats à `dateFin` passée — or
+beaucoup restent actifs (renouvelés sans MAJ de la date). Hypothèse fausse rendue auto = dégât de masse
+silencieux. La leçon d'origine du module (« la règle de l'ERP gagne », « rien d'autre n'a bougé ») a été
+violée par excès de confiance dans une règle « mécanique » qui ne l'était pas.
+
+**Fait — correctif** :
+- `aiMntContratStatut` ne fait plus que PROPOSER (n'écrit plus aucun statut). Application = geste humain
+  (setMntContratStatut), à l'unité ou « Appliquer les recommandés » (explicite).
+- Nouveau callable `revertMntAutoStatut` : rétablit chaque contrat à son statut ANTÉRIEUR depuis la piste
+  d'audit `auto_mnt_contrat_statut` (from/to), seulement s'il porte encore le statut auto-appliqué.
+  Idempotent. Bouton « Rétablir (annuler l'auto) ». ADR-028.
+- UI : avertissement explicite que « échu dérivé d'une date passée » est à vérifier avant d'appliquer.
+
+**Vérif** — functions 979, web 144, lint/build OK, chunk 120,0 KB ≤ 120, gardes (revertMntAutoStatut listé).
+
+**Appris** — Aucune écriture de masse ne doit être « automatique » sur des données que d'autres utilisent.
+Une règle déterministe « correcte au sens strict » (dateFin < today) peut être opérationnellement fausse ;
+la seule position sûre par défaut est PROPOSER, l'humain applique. La piste d'audit from/to a permis un
+rétablissement exact — d'où l'importance de tout tracer avant d'écrire.

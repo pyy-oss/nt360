@@ -46,6 +46,7 @@ deleteMntIntervention
 deleteMntTicket
 setMntContratStatut
 aiMntContratStatut
+revertMntAutoStatut
 setMntWatch
 deleteTimesheet
 listCandidates

@@ -4,9 +4,11 @@
 export type MntStatutSource = "regle" | "ia";
 export interface MntStatutProposal {
   id: string; fp: string | null; client: string;
-  current: string; proposed: string; confidence: number; motif: string; source: MntStatutSource; applied?: boolean;
+  current: string; proposed: string; confidence: number; motif: string; source: MntStatutSource; recommended?: boolean;
 }
-export interface MntStatutRun { ok: boolean; proposals: MntStatutProposal[]; appliedCount: number; analyzed: number; threshold: number; model?: string | null }
+// PROPOSE UNIQUEMENT (incident 2026-07-17) : l'analyse n'écrit AUCUN statut ; `recommended` = confiance ≥ seuil
+// (repère), l'application est un geste humain (setMntContratStatut).
+export interface MntStatutRun { ok: boolean; proposals: MntStatutProposal[]; analyzed: number; threshold: number; model?: string | null }
 
 export const STATUT_SOURCE_LABEL: Record<string, string> = { regle: "Règle", ia: "IA" };
 // Confiance → ton, aligné sur le seuil d'auto-application serveur (0.85) et la palette de risque.

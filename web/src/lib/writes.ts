@@ -1042,8 +1042,11 @@ export const deleteMntContrat = (id: string) => mntWrite("deleteMntContrat", { i
 export const setMntContratStatut = (id: string, statut: string) => mntWrite("setMntContratStatut", { id, statut });
 // Abonnements de surveillance de l'utilisateur (ADR-026) — écrit mnt_watches/{uid} (normalisé serveur).
 export const setMntWatch = (watch: MntWatch) => mntWrite("setMntWatch", watch);
-// Statut automatique (ADR-027) — règles + IA. `apply` auto-applique au-dessus du seuil ; sinon propose.
-export const aiMntContratStatut = (opts?: { ids?: string[]; apply?: boolean; threshold?: number }) => mntCall<MntStatutRun>("aiMntContratStatut", opts || {});
+// Statut automatique (ADR-027, révisé ADR-028) — PROPOSE uniquement (n'écrit aucun statut). L'application
+// reste un geste humain (setMntContratStatut). `revertMntAutoStatut` rétablit les statuts auto-appliqués
+// par l'ancienne version (rétablissement d'incident, idempotent).
+export const aiMntContratStatut = (opts?: { ids?: string[]; threshold?: number }) => mntCall<MntStatutRun>("aiMntContratStatut", opts || {});
+export const revertMntAutoStatut = () => mntCall<{ ok: boolean; restored: number; considered: number }>("revertMntAutoStatut", {});
 export type MntImportResult = {
   ok: boolean; applied: boolean; created: number; updated: number; skipped: number; rowsParsed: number;
   samples?: { create: { fp: string; client: string; statut: string }[]; update: { fp: string; client: string; statut: string }[]; errors: { line: number; error: string; fp: string | null }[] };

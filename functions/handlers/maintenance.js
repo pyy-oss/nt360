@@ -208,7 +208,8 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     await assertMntEnabled();
     if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
     const { proposeStatutRule, decideStatut, STATUT_AUTO_THRESHOLD } = require("../domain/mntStatutAuto");
-    const apply = req.data?.apply === true;
+    // `apply` n'est plus honoré : la détermination NE PEUT PLUS écrire (voir plus bas). Seul le seuil sert à
+    // marquer les propositions « recommandées » (repère visuel), l'application restant un geste humain.
     const threshold = Math.max(0.5, Math.min(1, Number(req.data?.threshold) || STATUT_AUTO_THRESHOLD));
     const asOf = new Date().toISOString().slice(0, 10);
     const today = Date.parse(`${asOf}T00:00:00Z`);
@@ -283,21 +284,38 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       }
     }
 
-    // Décision + auto-application au-dessus du seuil (si apply).
+    // PROPOSE UNIQUEMENT — n'écrit AUCUN statut (incident 2026-07-17 : l'auto-application de « échéance
+    // dépassée → échu » a basculé tout le parc en échu, car beaucoup de contrats gardent une date de fin
+    // passée tout en restant actifs). L'application est désormais un GESTE HUMAIN explicite (setMntContratStatut,
+    // à l'unité ou via « Appliquer les recommandés »). `recommended` = confiance ≥ seuil (repère visuel, pas une
+    // action). Aucun changement de statut ne peut plus se produire en silence.
     const decided = ruleProps.map((p) => decideStatut(p, threshold));
-    let appliedCount = 0;
-    if (apply) {
-      const toApply = decided.filter((d) => d.apply);
-      for (const d of toApply) {
-        await db.doc(`mnt_contrats/${d.id}`).set({ statut: d.proposed, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-        await db.collection("auditLog").add({ uid: req.auth.uid, action: "auto_mnt_contrat_statut", module: "maintenance", entity: "mnt_contrat", entityId: d.id, detail: { from: d.current, to: d.proposed, source: d.source, confidence: d.confidence }, ts: FieldValue.serverTimestamp() });
-        appliedCount += 1;
-      }
-      if (appliedCount) await requestRecompute(["maintenance"]);
+    const proposals = decided.filter((d) => d.changed).map((d) => ({ id: d.id, fp: d.fp, client: d.client, current: d.current, proposed: d.proposed, confidence: d.confidence, motif: d.motif, source: d.source, recommended: d.apply }));
+    return { ok: true, proposals, analyzed: contrats.length, threshold, model };
+  });
+
+  // RÉTABLISSEMENT des statuts auto-appliqués (incident 2026-07-17). Lit les changements AUTO tracés
+  // (auditLog action `auto_mnt_contrat_statut`, via l'index (module, ts) existant), dédoublonne au DERNIER
+  // par contrat, et restaure le statut ANTÉRIEUR (`detail.from`) — SEULEMENT si le contrat porte TOUJOURS le
+  // statut auto-appliqué (`detail.to`). Idempotent : ne touche pas ce qui a bougé depuis, rejouable sans risque.
+  const revertMntAutoStatut = onCallG("revertMntAutoStatut", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const snap = await db.collection("auditLog").where("module", "==", "maintenance").orderBy("ts", "desc").limit(3000).get();
+    const latest = new Map(); // entityId → detail du DERNIER auto-changement
+    for (const d of snap.docs) { const x = d.data() || {}; if (x.action !== "auto_mnt_contrat_statut") continue; const id = x.entityId; if (id && !latest.has(id)) latest.set(id, x.detail || {}); }
+    let restored = 0;
+    for (const [id, det] of latest) {
+      if (!det.from || !det.to) continue;
+      const ref = db.doc(`mnt_contrats/${id}`);
+      const cur = (await ref.get()).data();
+      if (!cur || cur.statut !== det.to) continue; // a déjà changé depuis → on n'y touche pas
+      await ref.set({ statut: det.from, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await db.collection("auditLog").add({ uid: req.auth.uid, action: "revert_mnt_auto_statut", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { from: det.to, to: det.from }, ts: FieldValue.serverTimestamp() });
+      restored += 1;
     }
-    // On ne renvoie que les contrats à transition (proposed ≠ current) — le reste est « déjà juste ».
-    const proposals = decided.filter((d) => d.changed).map((d) => ({ id: d.id, fp: d.fp, client: d.client, current: d.current, proposed: d.proposed, confidence: d.confidence, motif: d.motif, source: d.source, applied: apply && d.apply }));
-    return { ok: true, proposals, appliedCount, analyzed: contrats.length, threshold, model };
+    if (restored) await requestRecompute(["maintenance"]);
+    return { ok: true, restored, considered: latest.size };
   });
 
   const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
@@ -459,7 +477,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, aiMntContratStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };

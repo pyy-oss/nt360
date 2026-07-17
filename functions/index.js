@@ -1380,6 +1380,7 @@ exports.mntContratPnl = _maintenance.mntContratPnl;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
 exports.setMntContratStatut = _maintenance.setMntContratStatut;
 exports.aiMntContratStatut = _maintenance.aiMntContratStatut;
+exports.revertMntAutoStatut = _maintenance.revertMntAutoStatut;
 exports.setMntWatch = _maintenance.setMntWatch;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;
 exports.deleteMntTicket = _maintenance.deleteMntTicket;
