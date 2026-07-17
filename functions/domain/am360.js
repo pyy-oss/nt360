@@ -43,6 +43,18 @@ function am360(orders, invoices, opps, objectives, fy, tiers, excludeDormant = t
   (orders || []).forEach((o) => ams.add(normAm(o.am)));
   (opps || []).forEach((o) => ams.add(normAm(o.am)));
 
+  // TENDANCE mensuelle par commercial (« performance dans le temps ») — DÉRIVÉE rétroactivement : CAS booké
+  // par mois de commande (dateCommande), facturé par mois de facture (date), rattaché à l'AM via FP→AM.
+  // Valeur immédiate (pas de snapshot à accumuler). Mois = AAAA-MM.
+  const monthOf = (d) => { const m = /^(\d{4})-(\d{2})/.exec(String(d || "")); return m ? `${m[1]}-${m[2]}` : ""; };
+  const monthByAm = new Map();
+  const bumpM = (am, month, key, val) => { if (!am || am === "—" || !month || !val) return; let mm = monthByAm.get(am); if (!mm) { mm = new Map(); monthByAm.set(am, mm); } const e = mm.get(month) || { cas: 0, facture: 0 }; e[key] += val; mm.set(month, e); };
+  for (const o of orders || []) bumpM(normAm(o.am), monthOf(o.dateCommande), "cas", Number(o.cas) || 0);
+  for (const i of invoices || []) bumpM(normAm(amOfFp[fpKey(i.fp)]), monthOf(i.date), "facture", Number(i.amountHt) || 0);
+  const trendOf = (am) => [...(monthByAm.get(am) || new Map()).entries()]
+    .map(([month, v]) => ({ month, cas: Math.round(v.cas), facture: Math.round(v.facture) }))
+    .sort((a, b) => a.month.localeCompare(b.month)).slice(-12); // 12 derniers mois renseignés
+
   const rows = [...ams]
     .filter((am) => am && am !== "—")
     .map((am) => {
@@ -77,6 +89,7 @@ function am360(orders, invoices, opps, objectives, fy, tiers, excludeDormant = t
         // pipeline pondéré / (objectif CAS − réalisé exercice). < 1× = objectif non couvert par le pipe.
         // null si pas d'objectif ou objectif déjà atteint (rien à couvrir).
         couverture: targetCas > casFy ? pipelinePondere / (targetCas - casFy) : null,
+        trend: trendOf(am), // 12 derniers mois : CAS booké + facturé (tendance individuelle)
         orderCount: os.length,
       };
     })

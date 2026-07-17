@@ -99,6 +99,7 @@ export type AmRow = {
   am: string; cas: number; casFy: number; backlog: number; facture: number;
   pipelinePondere: number; activeCount: number; won: number; lost: number;
   conv: number; targetCas: number; roCas: number | null; couverture: number | null; orderCount: number;
+  trend?: { month: string; cas: number; facture: number }[]; // 12 derniers mois : CAS booké + facturé
 };
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
 // Glissement des deals (« slippage ») : dérivé du journal des changements de D Prev (oppDateHistory).
