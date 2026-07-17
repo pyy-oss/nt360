@@ -6,10 +6,14 @@ const c = (o) => ({ statut: "actif", dateDebut: "2026-01-01", dateFin: "2026-12-
 const sigActif = { ticketsOuverts: 2, dernierTicketJours: 10, joursDepuisDebut: 200 };
 
 describe("mntStatutAuto — règles déterministes (ADR-027)", () => {
-  it("échéance dépassée → échu (transition mécanique, confiance 1)", () => {
+  it("échéance dépassée → échu (proposé mais requiresReview : jamais recommandé en masse — incident 2026-07-17)", () => {
     const r = proposeStatutRule(c({ statut: "actif", dateFin: "2026-06-30" }), sigActif, asOf);
-    expect(r).toMatchObject({ proposed: "echu", source: "regle", confidence: 1 });
+    expect(r).toMatchObject({ proposed: "echu", source: "regle", confidence: 1, requiresReview: true });
     expect(r.motif).toContain("2026-06-30");
+    // brouillon jamais activé dont l'échéance est passée : idem, requiresReview
+    expect(proposeStatutRule(c({ statut: "brouillon", dateDebut: "2025-01-01", dateFin: "2026-06-30" }), sigActif, asOf)).toMatchObject({ proposed: "echu", requiresReview: true });
+    // décision finale : changed mais PAS apply (hors « recommandés »)
+    expect(decideStatut(r)).toMatchObject({ changed: true, apply: false });
   });
   it("résilié = terminal : jamais rétrogradé (aucun changement)", () => {
     const r = proposeStatutRule(c({ statut: "resilie", dateFin: "2026-06-30" }), sigActif, asOf);
@@ -55,10 +59,12 @@ describe("mntStatutAuto — re-validation de la sortie IA + décision", () => {
     expect(normalizeStatutProposals([{ fp: "FP/2026/7", proposed: "resilie", confidence: 1 }], cases)).toEqual([]);
     expect(normalizeStatutProposals([{ fp: "FP/9999/9", proposed: "suspendu" }], cases)).toEqual([]);
   });
-  it("decideStatut : apply seulement si transition réelle ET confiance ≥ seuil", () => {
-    expect(decideStatut({ current: "actif", proposed: "echu", confidence: 1 })).toMatchObject({ changed: true, apply: true });
+  it("decideStatut : apply seulement si transition réelle ET confiance ≥ seuil ET pas requiresReview", () => {
+    expect(decideStatut({ current: "actif", proposed: "suspendu", confidence: 1 })).toMatchObject({ changed: true, apply: true });
     expect(decideStatut({ current: "actif", proposed: "suspendu", confidence: 0.6 })).toMatchObject({ changed: true, apply: false });
     expect(decideStatut({ current: "actif", proposed: "actif", confidence: 1 })).toMatchObject({ changed: false, apply: false });
+    // requiresReview (échéance dépassée → échu) : proposé mais jamais recommandé, même à confiance 1
+    expect(decideStatut({ current: "actif", proposed: "echu", confidence: 1, requiresReview: true })).toMatchObject({ changed: true, apply: false });
   });
   it("buildStatutPrompt : énumère les statuts et interdit resilie + injection", () => {
     const { system, user } = buildStatutPrompt(cases);

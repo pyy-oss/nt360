@@ -13,12 +13,15 @@ function applyMntDecision(kind, contrat) {
   }
   if (kind === "renouvellement_contrat") {
     if (!c.dateDebut || !c.dateFin) return { applied: false, patch: null, reason: "renouvellement impossible sans date de fin" };
-    const terme = monthsBetween(c.dateDebut, c.dateFin); // durée initiale en mois entiers = période de reconduction
+    // Période de reconduction = terme INITIAL invariant. `monthsBetween(dateDebut, dateFin)` ne vaut le terme
+    // initial qu'AVANT tout renouvellement (ensuite dateFin est déjà prolongée → le terme se composerait, cf.
+    // audit 2026-07). On fige donc `termeMois` au 1er renouvellement et on le réutilise pour les suivants.
+    const terme = Number(c.termeMois) > 0 ? Math.round(Number(c.termeMois)) : monthsBetween(c.dateDebut, c.dateFin);
     if (!(terme > 0)) return { applied: false, patch: null, reason: "durée de contrat nulle" };
     const nouvelleFin = addMonthsIso(c.dateFin, terme); // dateFin (borne de renouvellement) repoussée d'un terme
     if (!nouvelleFin) return { applied: false, patch: null, reason: "date de fin illisible" };
     // Un contrat échu/résilié RENAÎT actif au renouvellement ; un actif/suspendu garde son statut courant.
-    const patch = { dateFin: nouvelleFin };
+    const patch = { dateFin: nouvelleFin, termeMois: terme }; // termeMois persisté → pas de composition au 2ᵉ renouvellement
     if (c.statut === "resilie" || c.statut === "echu") patch.statut = "actif";
     return { applied: true, patch, reason: `renouvelé jusqu'au ${nouvelleFin}` };
   }
