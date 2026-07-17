@@ -17,7 +17,7 @@ import { useClientKey } from "../lib/clientName";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { isDormantClosing } from "../lib/ids"; // miroir client de l'exclusion dormante (parité recompute)
-import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary } from "../types";
+import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary, OppSlippageSummary } from "../types";
 
 // Libellés courts d'étape pour le funnel de transitions (from→to).
 const stageArrow = (from: number, to: number) => `${from || "•"} → ${to}`;
@@ -838,6 +838,10 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
   const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
   const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
+  // Signaux DC remontés au cockpit : glissement (risque prévision) + point de fuite du funnel. Globaux
+  // (dérivés du journal des transitions/dates), donc mêmes docs que les vues détaillées — chiffres identiques.
+  const { data: slip } = useDocData<OppSlippageSummary>("summaries/oppSlippage");
+  const { data: fun } = useDocData<OppFunnelSummary>("summaries/oppFunnel");
   const { go, canGo } = useNav();
   if (!data) return <EmptyState label="Cockpit indisponible — importer le pipeline puis recalculer (Vue d'ensemble)." />;
   const tiers = data.tierBreakdown || [];
@@ -854,6 +858,10 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   // pendant « brut » du Pondéré projeté (montants réels, sans pondération par l'IdC). = Σ des barres
   // « Brut » du funnel.
   const brutPhases = [1, 2, 3, 4, 5].reduce((s, st) => s + (data.byStage?.[st]?.amount || 0), 0);
+  // Point de fuite : étape ACTIVE (1-5) au plus faible taux de progression observé. Seuil out≥5 pour écarter
+  // le bruit des petits échantillons. Dérivé des transitions (summaries/oppFunnel), pas du snapshot pipeline.
+  const leak = [...(fun?.byStage || [])].filter((s) => s.stage >= 1 && s.stage <= 5 && s.out >= 5)
+    .sort((a, b) => a.advanceRate - b.advanceRate)[0];
   const jump = (id: string) => { if (canGo(id)) go(id); };
   const ladder = [
     { label: "Commit", band: "Certitudes ≥ 90 %", v: commit, color: T.emerald },
@@ -877,6 +885,14 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <button onClick={() => jump("pipeline")} className="text-left w-full rounded-lg border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
           <span className="text-[12.5px] text-muted"><b className="text-clay">{data.dormant.count} opportunité(s) dormante(s)</b> · {fmt(data.dormant.brut)} brut — millésime révolu, à requalifier{data.excludeDormant ? " · exclues de la prévision cumulée" : ""}.</span>
           <span className="text-gold text-xs underline shrink-0">Détail dans Pipeline</span>
+        </button>
+      )}
+      {/* Signal de RISQUE PRÉVISION : deals dont le closing a reculé (glissement net). Miroir du bandeau
+          dormantes ; le détail (par catégorie/commercial) vit dans « Prévision commerciale ». */}
+      {slip && (slip.slipAmount ?? 0) > 0 && (
+        <button onClick={() => jump("salesforecast")} className="text-left w-full rounded-lg border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
+          <span className="text-[12.5px] text-muted"><b className="text-clay">{fmt(slip.slipAmount)} de deals ont glissé</b> · {slip.slipCount} opp. · {slip.avgSlipDays} j en moyenne{(slip.pullAmount ?? 0) > 0 ? ` · ${fmt(slip.pullAmount)} avancés` : ""} — closing repoussé, risque sur l'atterrissage.</span>
+          <span className="text-gold text-xs underline shrink-0">Détail dans Prévision</span>
         </button>
       )}
       <Card title="Prévision par certitude (IdC) — Commit / Best Case / Pipeline">
@@ -910,9 +926,12 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         </Card>
         <Card title="Funnel pondéré par étape" actions={canGo("pipeline") ? <button onClick={() => jump("pipeline")} className="text-gold text-xs underline">Analyse</button> : undefined}>
           <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={200} size={22} interval={0} />
+          {leak && (
+            <div className="mt-2 text-[11.5px] text-muted">Point de fuite : <b className="text-clay">{leak.stage}·{STAGE_SHORT[leak.stage]}</b> — {pct(leak.advanceRate)} de progression, {pct(leak.lossRate)} de perte sur {leak.out} sortie(s) observée(s). C'est là que les deals calent le plus.</div>
+          )}
         </Card>
       </div>
-      <Tip>Cockpit de pilotage commercial — pondéré, prévision, conversion, couverture, top AM. Chaque tuile ouvre la vue détaillée. Rafraîchi à chaque recalcul.</Tip>
+      <Tip>Cockpit de pilotage commercial — pondéré, prévision, conversion, couverture, top AM, <b>glissement</b> (risque prévision) et <b>point de fuite</b> du funnel. Chaque tuile ouvre la vue détaillée. Rafraîchi à chaque recalcul.</Tip>
     </div>
   );
 };
