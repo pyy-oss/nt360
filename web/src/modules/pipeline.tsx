@@ -892,7 +892,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
       {slip && (slip.slipAmount ?? 0) > 0 && (
         <button onClick={() => jump("salesforecast")} className="text-left w-full rounded-lg border border-clay/40 bg-clay/5 px-3 py-2 flex items-center justify-between gap-3 flex-wrap hover:border-clay/60 transition-colors">
           <span className="text-[12.5px] text-muted"><b className="text-clay">{fmt(slip.slipAmount)} de deals ont glissé</b> · {slip.slipCount} opp. · {slip.avgSlipDays} j en moyenne{(slip.pullAmount ?? 0) > 0 ? ` · ${fmt(slip.pullAmount)} avancés` : ""} — closing repoussé, risque sur l'atterrissage.</span>
-          <span className="text-gold text-xs underline shrink-0">Détail dans Prévision</span>
+          <span className="text-gold text-xs underline shrink-0">Détail dans Prévision commerciale</span>
         </button>
       )}
       <Card title="Prévision par certitude (IdC) — Commit / Best Case / Pipeline">
@@ -927,7 +927,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
         <Card title="Funnel pondéré par étape" actions={canGo("pipeline") ? <button onClick={() => jump("pipeline")} className="text-gold text-xs underline">Analyse</button> : undefined}>
           <GroupedBars data={funnel} series={[{ key: "Brut", color: T.steel, name: "Brut" }, { key: "Pondéré", color: T.gold, name: "Pondéré" }]} h={200} size={22} interval={0} />
           {leak && (
-            <div className="mt-2 text-[11.5px] text-muted">Point de fuite : <b className="text-clay">{leak.stage}·{STAGE_SHORT[leak.stage]}</b> — {pct(leak.advanceRate)} de progression, {pct(leak.lossRate)} de perte sur {leak.out} sortie(s) observée(s). C'est là que les deals calent le plus.</div>
+            <div className="mt-2 text-[11.5px] text-muted">Point de fuite : <b className="text-clay">{leak.stage}·{STAGE_SHORT[leak.stage]}</b> — {pct(leak.advanceRate)} de progression, {pct(leak.lossRate)} de perte sur {leak.out} sortie(s) observée(s) — mesuré sur les transitions, pas sur les barres ci-dessus. C'est là que les deals calent le plus.</div>
           )}
         </Card>
       </div>
