@@ -934,3 +934,19 @@ depuis le carnet `useCommandesRows` pour les suggestions) — hoisté en tête d
 **Appris** — La demande « afficher l'objet partout » ne nécessitait aucun champ nouveau : la donnée
 existait déjà côté carnet ; il suffisait de la joindre par `fpKey` (invariant ERP) et de mutualiser la
 cellule pour un rendu identique dans toutes les vues.
+
+---
+
+## 2026-07-17 — Lignées de renouvellement câblées en prod (ADR-030)
+
+**Fait** — Le domaine PUR (détection successeur + confirmation IA) développé plus tôt et **parké** (tag
+`parked/lignee`) est enfin **branché** : callables `aiMntLignees` (détection + confirmation IA, aucune
+écriture) et `applyMntLignee` (persiste le champ additif `ligneeId`, geste humain, recompute scopé) ;
+carte front « Lignées de renouvellement (IA) » + colonne « Lignée » sur la table Contrats. Numéro généré
+`AAAAMM` + lettres client. Objet des contrats joint depuis la commande (`orderByFp`, fpKey). Export
+`deployed-functions.txt`, wrappers `writes.ts`, type `ligneeId?` sur `MntContrat`.
+
+**Appris** — Un domaine parké se rebranche sans risque quand il est PUR et testé : il a suffi de restaurer
+les 3 fichiers (domaine + IA + test, 8 tests verts) et de câbler l'I/O (callables) + l'UI. La contrainte de
+budget de chunk d'entrée (120 KB) a été tenue en **mutualisant** les appels IA longs de `writes.ts` dans un
+helper `mntCallLong` (dé-duplication qui a plus que compensé l'ajout).

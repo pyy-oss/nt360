@@ -1036,6 +1036,8 @@ export async function upsertOpsBulletin(b: { fy: number; week: number; sections:
 // donnée du callable ; `mntWrite` ignore le retour (suppressions/changements ciblés).
 const mntCall = <T>(name: string, data: unknown): Promise<T> => httpsCallable(functions, name)(data).then((r) => r.data as T);
 const mntWrite = (name: string, data: unknown): Promise<void> => httpsCallable(functions, name)(data).then(() => {});
+// Appel LONG (assistants IA / imports) : timeout élevé pour tenir la réflexion adaptative dans le callable.
+const mntCallLong = <T>(name: string, data: unknown): Promise<T> => httpsCallable(functions, name, { timeout: 300_000 })(data).then((r) => r.data as T);
 export const upsertMntContrat = (c: MntContrat) => mntCall<{ ok: boolean; id: string }>("upsertMntContrat", c);
 export const deleteMntContrat = (id: string) => mntWrite("deleteMntContrat", { id });
 // Changement de statut MINIMAL (ne touche que `statut`) — sert l'action en masse « Passer au statut ».
@@ -1047,6 +1049,13 @@ export const setMntWatch = (watch: MntWatch) => mntWrite("setMntWatch", watch);
 // par l'ancienne version (rétablissement d'incident, idempotent).
 export const aiMntContratStatut = (opts?: { ids?: string[]; threshold?: number }) => mntCall<MntStatutRun>("aiMntContratStatut", opts || {});
 export const revertMntAutoStatut = () => mntCall<{ ok: boolean; restored: number; considered: number }>("revertMntAutoStatut", {});
+// Lignées de renouvellement (ADR-030) — détection IA de contrats distincts = même engagement reconduit,
+// numéro généré AAAAMM+client. `aiMntLignees` PROPOSE (aucune écriture) ; `applyMntLignee` persiste `ligneeId`.
+export type MntLigneeContrat = { id: string; fp?: string; dateDebut?: string; dateFin?: string | null; montantEngage?: number; affaire?: string };
+export type MntLignee = { numero: string; client: string; contrats: MntLigneeContrat[]; montantMoyen: number; debut?: string; fin?: string | null; count: number; confidence?: number; reason?: string };
+export type MntLigneeResult = { ok: boolean; lignees: MntLignee[]; model?: string; candidates?: number };
+export const aiMntLignees = () => mntCallLong<MntLigneeResult>("aiMntLignees", {});
+export const applyMntLignee = (numero: string, contratIds: string[]) => mntCall<{ ok: boolean; numero: string; count: number }>("applyMntLignee", { numero, contratIds });
 export type MntImportResult = {
   ok: boolean; applied: boolean; created: number; updated: number; skipped: number; rowsParsed: number;
   samples?: { create: { fp: string; client: string; statut: string }[]; update: { fp: string; client: string; statut: string }[]; errors: { line: number; error: string; fp: string | null }[] };
@@ -1065,28 +1074,19 @@ export async function importMntContrats(file: File, apply: boolean): Promise<Mnt
 import type { MntCandidate } from "./mntSuggest";
 export type MntAiSuggestion = { fp: string; client: string; bu: string; am: string; affaire: string; cas: number; confidence: number; reason: string; echeance: string | null };
 export type MntAiSuggestResult = { ok: boolean; suggestions: MntAiSuggestion[]; model: string; truncated: boolean; analyzed: number; total: number };
-export async function aiSuggestMntContrats(candidates: MntCandidate[]): Promise<MntAiSuggestResult> {
-  const res = await httpsCallable(functions, "aiSuggestMntContrats", { timeout: 300_000 })({ candidates });
-  return res.data as MntAiSuggestResult;
-}
+export const aiSuggestMntContrats = (candidates: MntCandidate[]) => mntCallLong<MntAiSuggestResult>("aiSuggestMntContrats", { candidates });
 
 // Rentabilité par contrat (Lot 4/7) — revenu engagé vs coût interventions (jours × CJM). Coût/marge MASQUÉS
 // (null) sans droit `rentabilite` (calcul serveur, le CJM ne sort jamais). Lecture gouvernée `maintenance`.
 export type MntContratPnlRow = { id: string; fp: string | null; client: string; statut: string; revenue: number; jours: number; cout: number | null; marge: number | null; margePct: number | null; missingCjm: number | null };
-export async function mntContratPnl(): Promise<{ ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean }> {
-  const res = await httpsCallable(functions, "mntContratPnl", { timeout: 120_000 })({});
-  return res.data as { ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean };
-}
+export const mntContratPnl = () => mntCallLong<{ ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean }>("mntContratPnl", {});
 
 // Analyse de rétention IA (Lot 6/7) — l'IA lit les contrats à risque + stats tickets et rend, par contrat,
 // les motifs de churn + une reco de rétention. « L'IA propose », aucune écriture. Droit `maintenance` + secret.
 export type ChurnInput = { fp: string; client: string; niveau: string; signals: string[]; joursEcheance: number | null; ticketsOuverts: number; slaBreaches: number };
 export type ChurnAnalysis = { fp: string; client: string; churnRisk: "eleve" | "moyen" | "faible"; drivers: string[]; recommendation: string };
 export type ChurnResult = { ok: boolean; analyses: ChurnAnalysis[]; model: string; truncated: boolean; analyzed: number; total: number };
-export async function aiAnalyzeChurn(contrats: ChurnInput[]): Promise<ChurnResult> {
-  const res = await httpsCallable(functions, "aiAnalyzeChurn", { timeout: 300_000 })({ contrats });
-  return res.data as ChurnResult;
-}
+export const aiAnalyzeChurn = (contrats: ChurnInput[]) => mntCallLong<ChurnResult>("aiAnalyzeChurn", { contrats });
 
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
 import type { MntTicket, MntIntervention, MntWatch } from "../types";
