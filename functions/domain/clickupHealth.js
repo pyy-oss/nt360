@@ -74,6 +74,17 @@ function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
     if (!fp || !cmdFpSet.has(fp)) { orphanTasks++; if (orphanSample.length < 12) orphanSample.push({ id: t.id, name: (t.name || "").slice(0, 80), fp: raw || null }); }
   }
 
+  // LIENS FANTÔMES (dérive) : un lien app→tâche (config/clickupLinks) dont la tâche N'EST PLUS dans le scan
+  // = tâche supprimée/déplacée côté ClickUp. Le pull inverse GARDE alors silencieusement le dernier état
+  // (état fantôme). On les rend VISIBLES pour rattachement/purge. NB : sur un scan tronqué (> 5000 tâches)
+  // ce compte peut sur-estimer — l'appelant signale la troncature.
+  const taskIds = new Set((tasks || []).map((t) => t && t.id != null ? String(t.id) : "").filter(Boolean));
+  let phantomLinks = 0; const phantomSample = [];
+  for (const ref of Object.keys(L)) {
+    const taskId = L[ref];
+    if (taskId && !taskIds.has(String(taskId))) { phantomLinks++; if (phantomSample.length < 12) phantomSample.push({ ref, taskId: String(taskId) }); }
+  }
+
   const unlinkedMatchable = unlinked.filter((u) => u.matchable).length;
   return {
     commandesTotal,
@@ -88,10 +99,12 @@ function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
     duplicateFps,               // nb de N° FP portés par ≥ 2 tâches
     cafGapCount,                // commandes liées dont le CAF diffère de la tâche
     cafGapTotal,
+    phantomLinks,               // liens vers une tâche ClickUp introuvable (supprimée/déplacée) — dérive
     coverage: commandesTotal ? Math.round((linked / commandesTotal) * 100) : 0,
     unlinkedSample: unlinked.slice(0, 12),
     orphanSample,
     duplicateSample,            // échantillon [{ fp, count }] pour la carte de monitoring
+    phantomSample,              // échantillon [{ ref, taskId }] des liens fantômes
   };
 }
 

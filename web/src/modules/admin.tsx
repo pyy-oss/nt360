@@ -678,6 +678,15 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
         <Metric label="Tâches ClickUp" value={health.tasksTotal || 0} sub={`${health.tasksWithFp || 0} avec N° FP`} />
         <Metric label="Tâches orphelines" value={health.orphanTasks || 0} tone={(health.orphanTasks || 0) > 0 ? "text-gold" : "text-emerald"} sub="sans N° FP ou hors commandes actives" />
         <Metric label="Écarts CAF" value={health.cafGapCount || 0} tone={(health.cafGapCount || 0) > 0 ? "text-clay" : "text-emerald"} sub={`${money(health.cafGapTotal)} d'écart`} />
+        {/* Dérive : lien app→tâche dont la tâche n'existe plus côté ClickUp (supprimée/déplacée). Non fiable si scan tronqué. */}
+        <Metric label="Liens fantômes" value={health.phantomLinks || 0} tone={(health.phantomLinks || 0) > 0 ? "text-clay" : "text-emerald"} sub={health.truncated ? "scan tronqué (indicatif)" : "tâche liée introuvable"} />
+        {(() => {
+          const wh = health.webhook; const active = wh?.active === true && wh?.present === true;
+          const val = wh?.error ? "?" : wh?.registered ? (active ? "actif" : "inactif") : "non configuré";
+          const tone = wh?.error ? "text-gold" : !wh?.registered ? "text-faint" : active ? "text-emerald" : "text-clay";
+          const sub = wh?.error ? "vérif échouée" : !wh?.registered ? "aucun webhook" : wh?.present ? (wh?.status ? `état : ${wh.status}` : "présent") : "absent côté ClickUp";
+          return <Metric label="Webhook temps réel" value={val} tone={tone} sub={sub} />;
+        })()}
       </div>
       {/* Deux sens OPPOSÉS, donc distincts : « non liées » = commandes app sans tâche (à pousser) ;
           « orphelines » = tâches ClickUp sans commande active correspondante. Un total nul de rattachables

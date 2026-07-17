@@ -129,6 +129,9 @@ export interface ClickupHealthSummary {
   unlinkedSample?: { fp?: string; client?: string; matchable?: boolean }[];
   orphanSample?: { id?: string; name?: string; fp?: string | null }[];
   duplicateSample?: { fp?: string; count?: number }[];
+  phantomLinks?: number; phantomSample?: { ref?: string; taskId?: string }[]; // liens vers tâche introuvable (dérive)
+  truncated?: boolean; // scan liste tronqué (> 5000 tâches) → phantomLinks non fiable
+  webhook?: { registered?: boolean; present?: boolean; status?: string | null; active?: boolean; error?: string }; // santé du webhook temps réel
   listId?: string; at?: any;
   lastError?: string; lastErrorAt?: any; // raison persistée du dernier échec de vérification ClickUp (API-side)
 }

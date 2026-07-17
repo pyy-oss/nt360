@@ -3243,39 +3243,78 @@ exports.dedupeClickupTasks = onCallG("dedupeClickupTasks", { secrets: [CLICKUP_T
   return { ok: true, dryRun: !apply, groups: plan.groups.length, duplicates: plan.duplicates, deletable: plan.deletable, deleted, failed, windowHours, samples };
 });
 
-// clickupHealth : diagnostic de QUALITÉ de l'intégration (couverture, tâches orphelines, écarts CAF,
-// synchro). Scanne la liste une fois, croise avec les commandes + overlays, écrit summaries/clickupHealth
-// (lu par la carte de monitoring). Direction.
-exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  const cfg = (await db.doc("config/clickup").get()).data() || {};
-  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+// Diagnostic ClickUp RÉUTILISABLE (callable ET planifié) : scanne la liste une fois, croise commandes +
+// overlays, RE-VÉRIFIE la santé du webhook (ClickUp le désactive après échecs répétés — jamais recontrôlé
+// jusqu'ici → dérive silencieuse), écrit summaries/clickupHealth (horodaté `at`). Throw en cas d'échec
+// (l'appelant persiste `lastError`). loadCommandeRows/onSchedule hoistés → déclaration avant usage OK.
+async function runClickupHealth(listId) {
   const token = CLICKUP_TOKEN.value();
-  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  if (!token) throw new Error("token ClickUp absent (secret CLICKUP_TOKEN)");
   const clickup = require("./lib/clickup");
   const { clickupHealth } = require("./domain/clickupHealth");
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
-  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
-  // TOUT le diagnostic est enveloppé : n'importe quelle erreur (API ClickUp 429/404/réseau, lecture
-  // loadCommandeRows, ÉCRITURE Firestore d'une valeur illégale…) est rendue LISIBLE — on persiste le
-  // motif réel (`lastError`) ET on propage un HttpsError PORTEUR DU MESSAGE. Sans ça, une erreur
-  // générique (non-HttpsError) repart en « internal » NU côté client, indiagnosticable (incident
-  // « Diagnostic refusé — internal »). `lastError: null` (et non FieldValue.delete) au succès : delete()
-  // est INTERDIT dans un set() sans {merge:true} et lèverait justement une erreur générique.
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
+  const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
+  const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
+  const orders = await loadCommandeRows();
+  const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
+  health.truncated = !!tasks.truncated; // liens fantômes non fiables si le scan est tronqué (> 5000 tâches)
+  // Santé du webhook : le webhook enregistré existe-t-il TOUJOURS côté ClickUp et n'est-il pas « failing » ?
+  // Best-effort — un échec ici n'invalide pas le diagnostic. Reflète l'état RÉEL dans config/clickup.webhookActive.
+  let webhook = { registered: false };
   try {
-    const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
-    const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
-    const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
-    const orders = await loadCommandeRows();
-    const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
-    await db.doc("summaries/clickupHealth").set({ ...health, listId, lastError: null, lastErrorAt: null, at: FieldValue.serverTimestamp() });
+    const wh = (await db.doc("config/clickupWebhook").get()).data() || {};
+    if (wh.id) {
+      const list = await clickup.listWebhooks(token, cfg.teamId || CLICKUP_TEAM);
+      const mine = (list || []).find((w) => String(w.id) === String(wh.id));
+      const status = mine && mine.health ? (mine.health.status || null) : null;
+      const active = !!mine && status !== "failing";
+      webhook = { registered: true, present: !!mine, status, active };
+      await db.doc("config/clickup").set({ webhookActive: active }, { merge: true });
+    }
+  } catch (e) { webhook = { registered: true, error: String((e && e.message) || e).slice(0, 120) }; }
+  await db.doc("summaries/clickupHealth").set({ ...health, webhook, listId, lastError: null, lastErrorAt: null, at: FieldValue.serverTimestamp() });
+  return health;
+}
+
+// clickupHealth : diagnostic de QUALITÉ de l'intégration (couverture, tâches orphelines, écarts CAF, liens
+// fantômes, santé webhook). Écrit summaries/clickupHealth (lu par la carte de monitoring). Direction.
+exports.clickupHealth = onCallG("clickupHealth", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  if (!CLICKUP_TOKEN.value()) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
+  // Tout est enveloppé : n'importe quelle erreur (API ClickUp 429/404/réseau, lecture loadCommandeRows,
+  // ÉCRITURE Firestore illégale…) est rendue LISIBLE — on persiste le motif réel (`lastError`) ET on
+  // propage un HttpsError PORTEUR DU MESSAGE (sinon « internal » nu, indiagnosticable côté client).
+  try {
+    const health = await runClickupHealth(listId);
     return { ok: true, ...health };
   } catch (e) {
     const status = e && e.status;
     const reason = String((e && e.message) || (e && e.code) || e || "erreur inconnue").slice(0, 300);
     await db.doc("summaries/clickupHealth").set({ lastError: reason, lastErrorAt: FieldValue.serverTimestamp(), listId }, { merge: true }).catch(() => {});
     throw new HttpsError(status === 401 || status === 403 ? "permission-denied" : "internal", `Diagnostic ClickUp : ${reason}`);
+  }
+});
+
+// scheduledClickupHealth : diagnostic PLANIFIÉ. Jusqu'ici on-demand uniquement → couverture/orphelins/
+// écart CAF/liens fantômes affichés au cockpit pouvaient être périmés jusqu'au clic d'un admin. Best-effort :
+// persiste lastError sans planter le scheduler. Co-localisé avec le pull (05:00) et le recompute.
+exports.scheduledClickupHealth = onSchedule({ schedule: "every day 05:15", secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async () => {
+  const t0 = Date.now();
+  try {
+    const cfg = (await db.doc("config/clickup").get()).data() || {};
+    if (cfg.enabled === false) return;
+    const h = await runClickupHealth(String(cfg.defaultListId || CLICKUP_LIST_CI));
+    await logOps({ kind: "scheduled", action: "clickupHealth", status: "ok", ms: Date.now() - t0, detail: { coverage: h.coverage, phantomLinks: h.phantomLinks, orphanTasks: h.orphanTasks } });
+  } catch (e) {
+    const reason = String((e && e.message) || e).slice(0, 300);
+    await db.doc("summaries/clickupHealth").set({ lastError: reason, lastErrorAt: FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    await logOps({ kind: "scheduled", action: "clickupHealth", status: "error", ms: Date.now() - t0, detail: { reason } }).catch(() => {});
   }
 });
 
@@ -3702,14 +3741,27 @@ async function runBcPull() {
   const prev = ((await db.doc("config/clickupBcSync").get()).data() || {}).map || {};
   const map = {};
   for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
+  // Un SEUL listTasks paginé (indexé par id), et non N getTask séquentiels — SYMÉTRIQUE au pull commande
+  // (runClickupPull). À l'échelle réelle, le N+1 (un getTask par BC lié) menaçait le timeout 300 s.
+  // readBcSync ne lit que le statut + le champ perso ETA, TOUS DEUX présents dans la réponse LISTE →
+  // aucune perte de champ. Tâche absente du scan (supprimée/déplacée/tronquée/illisible) → on GARDE l'état
+  // précédent (déjà recopié dans `map`), exactement comme l'ancien repli sur échec getTask.
+  const listId = String(cfg.bcListId || CLICKUP_LIST_BC);
+  const taskById = {};
+  let truncated = 0, listErrors = 0;
+  try {
+    const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
+    if (tasks.truncated) truncated++;
+    for (const t of tasks) taskById[String(t.id)] = t;
+  } catch (e) { logger.warn("BC pull: liste illisible", { listId, msg: e && e.message }); listErrors++; }
   let pulled = 0, failed = 0;
   for (const key of keys) {
-    try {
-      const task = await clickup.getTask(token, links[key]);
-      map[key] = { ...bc.readBcSync(task), taskId: links[key] };
-      pulled++;
-    } catch (e) { logger.warn("BC pull: échec", { key, msg: e && e.message }); failed++; }
+    const task = taskById[String(links[key])];
+    if (!task) { failed++; continue; }
+    map[key] = { ...bc.readBcSync(task), taskId: links[key] };
+    pulled++;
   }
+  if (truncated || listErrors) logger.warn("BC pull: couverture partielle", { truncated, listErrors, pulled, total: keys.length });
   await db.doc("config/clickupBcSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // « dataQuality » (clé canonique, l'ancienne « qualite » était inerte) + « news » (bulletin BC en retard).
   try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
