@@ -48,6 +48,26 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   const prePo = (invoices || []).filter((i) => i.prePo);
   if (prePo.length) out.push({ type: "facture_pre_po", severity: "medium", count: prePo.length, message: `${prePo.length} facture(s) antérieure(s) à l'année du PO` });
 
+  // AVAL — Facture datée AVANT la date de commande (chronologie au JOUR près, plus fine que facture_pre_po
+  // qui est annuel). `preCmd` posé par enrichLinks (inv.date < order.dateCommande). Anomalie : on ne peut
+  // pas facturer une commande avant qu'elle existe (erreur de rattachement ou de saisie de date).
+  const preCmd = (invoices || []).filter((i) => i.preCmd);
+  if (preCmd.length) out.push({ type: "facture_avant_commande", severity: "medium", count: preCmd.length, message: `${preCmd.length} facture(s) datée(s) avant la date de commande`, refs: preCmd.slice(0, 10).map((i) => i.numero || i.fp) });
+
+  // AVAL — Commande SIGNÉE (CAS>0) sans AUCUNE facture rattachée depuis plus de N jours (date de commande).
+  // Trou de facturation : cash non encaissé, backlog figé sur une prestation peut-être déjà livrée. Comme les
+  // autres alertes temporelles (opp_dormante, bc_en_retard) on EXIGE asOf ; sans dateCommande on ne peut pas
+  // mesurer l'ancienneté → la commande est ignorée (pas de faux positif). Les annulées sont déjà écartées du carnet.
+  if (asOf) {
+    const asOfMs = Date.parse(`${String(asOf).slice(0, 10)}T00:00:00Z`);
+    const unbilled = orders.filter((o) => {
+      if (!((o.cas || 0) > 0) || (o.facture || 0) > 0 || !o.dateCommande) return false;
+      const d = Date.parse(`${String(o.dateCommande).slice(0, 10)}T00:00:00Z`);
+      return Number.isFinite(d) && Math.floor((asOfMs - d) / 86400000) > T.nonFactureJours;
+    });
+    if (unbilled.length) out.push({ type: "commande_non_facturee", severity: "medium", count: unbilled.length, message: `${unbilled.length} commande(s) signée(s) non facturée(s) depuis plus de ${T.nonFactureJours} j`, refs: unbilled.slice(0, 10).map((o) => o.fp) });
+  }
+
   const surfac = orders.filter((o) => o.cas > 0 && (invByFp[fpKey(o.fp)] || 0) > o.cas * (1 + T.surfacturationPct));
   if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });
 

@@ -455,6 +455,7 @@ async function recomputeCore(db, only) {
     // appliqué à la marge (alertsMargin). Le type d'alerte → module (défaut overview).
     const ALERT_MOD = {
       factures_non_rattachees: "facturation", facture_pre_po: "facturation", surfacturation: "facturation",
+      facture_avant_commande: "facturation", commande_non_facturee: "facturation",
       raf_incoherent: "backlog", backlog_dormant: "backlog",
       ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
       bc_en_attente: "bc", bc_en_retard: "bc",

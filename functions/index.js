@@ -380,12 +380,14 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
   const d = req.data || {};
   const pct = (v, def) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 1 ? n : def; };
   const years = (v, def) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 10 ? n : def; };
+  const days = (v, def) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 365 ? n : def; };
   const cfg = {
     concentration: pct(d.concentration, 0.30),
     surfacturationPct: pct(d.surfacturationPct, 0.005),
     rafEcartPct: pct(d.rafEcartPct, 0.10),
     dormantYears: years(d.dormantYears, 2),
     valorisationEcartPct: pct(d.valorisationEcartPct, 0.30),
+    nonFactureJours: days(d.nonFactureJours, 90),
   };
   await db.doc("config/alerts").set(cfg, { merge: true });
   await db.collection("auditLog").add({

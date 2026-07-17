@@ -132,13 +132,14 @@ export function useCommandesRows(enabled = true) {
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable), avec le
 // SEGMENT interne à pré-sélectionner sur la vue cible quand elle en propose un (ex. « en retard »
 // sur Exécution BC) — le drill-through arrive ainsi filtré, pas sur la liste complète.
-// Valeur = module cible (chaîne) OU { module, segment } quand la vue cible propose un segment à
-// pré-sélectionner. La forme compacte « chaîne seule » évite d'alourdir le chunk d'entrée.
-const ALERT_TARGET: Record<string, string | { module: string; segment?: string }> = {
+// Valeur = "module" ou "module:segment" (segment interne à pré-sélectionner sur la vue cible). Forme
+// chaîne compacte (une seule string par type) pour ne pas alourdir le chunk d'entrée (budget 120 KB).
+const ALERT_TARGET: Record<string, string> = {
   marge_negative: "orderlist", achat_sup_vente: "orderlist", raf_incoherent: "orderlist",
-  factures_non_rattachees: { module: "invoicelist", segment: "orphan" }, facture_pre_po: "invoicelist", surfacturation: "invoicelist",
+  factures_non_rattachees: "invoicelist:orphan", facture_pre_po: "invoicelist", surfacturation: "invoicelist",
+  facture_avant_commande: "invoicelist", commande_non_facturee: "orderlist",
   backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
-  concentration_client: "clients", bc_en_attente: { module: "bc", segment: "open" }, bc_en_retard: { module: "bc", segment: "late" },
+  concentration_client: "clients", bc_en_attente: "bc:open", bc_en_retard: "bc:late",
   opp_dormante: "opplist", opp_active_carnet: "opplist",
   ecart_valorisation: "orderlist",
 };
@@ -560,16 +561,15 @@ export function AlertsBanner() {
     <Card title={`Centre d'alertes · ${items.length}`}>
       <div className="flex flex-col gap-2">
         {items.map((a, i) => {
-          const raw = ALERT_TARGET[a.type];
-          const target = typeof raw === "string" ? { module: raw } : raw;
-          const actionable = !!target && canGo(target.module);
+          const [tMod, tSeg] = (ALERT_TARGET[a.type] || "").split(":");
+          const actionable = !!tMod && canGo(tMod);
           const refs = (a.refs || []).filter(Boolean);
           return (
             <div key={i} className="flex items-start gap-2 text-[13px]">
               <AlertTriangle size={14} aria-hidden="true" className={cx("mt-0.5 shrink-0", a.severity === "high" ? "text-clay" : a.severity === "medium" ? "text-gold" : "text-steel")} />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 {actionable
-                  ? <button onClick={() => go(target.module, target.segment ? { segment: target.segment } : undefined)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir le module concerné">{a.message}</button>
+                  ? <button onClick={() => go(tMod, tSeg ? { segment: tSeg } : undefined)} className="text-ink hover:text-gold underline decoration-dotted underline-offset-2 text-left" title="Ouvrir le module concerné">{a.message}</button>
                   : <span>{a.message}</span>}
                 <Badge tone={(tone[a.severity] || "neutral") as any}>{a.count}</Badge>
                 {refs.slice(0, 6).map((r, j) => (

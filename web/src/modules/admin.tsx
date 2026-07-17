@@ -289,7 +289,7 @@ function ProjectionConfigForm({ initial }: { initial: ProjectionConfigInput }) {
 
 // Seuils d'alerte configurables (config/alerts) : pilotent le Centre d'alertes & la Qualité des
 // données. Enregistrer recalcule immédiatement côté serveur.
-const DEFAULT_THR: AlertThresholds = { concentration: 0.30, surfacturationPct: 0.005, rafEcartPct: 0.10, dormantYears: 2, valorisationEcartPct: 0.30 };
+const DEFAULT_THR: AlertThresholds = { concentration: 0.30, surfacturationPct: 0.005, rafEcartPct: 0.10, dormantYears: 2, valorisationEcartPct: 0.30, nonFactureJours: 90 };
 function AlertThresholdsCard() {
   const { data, loading } = useDocData<AlertThresholds>("config/alerts");
   if (loading && !data) return null;
@@ -311,10 +311,11 @@ function AlertThresholdsForm({ initial }: { initial: AlertThresholds }) {
   const [raf, setRaf] = useState(p1(initial.rafEcartPct));
   const [yrs, setYrs] = useState(String(initial.dormantYears));
   const [valo, setValo] = useState(p1(initial.valorisationEcartPct));
+  const [nfj, setNfj] = useState(String(initial.nonFactureJours));
   const num = (s: string) => Number(String(s).replace(",", "."));
   return (
     <Card title="Seuils d'alerte" actions={<Busy label="Enregistrer" okMsg="Seuils appliqués (recalcul lancé)" fn={() => callSetAlertThresholds({
-      concentration: num(conc) / 100, surfacturationPct: num(surf) / 100, rafEcartPct: num(raf) / 100, dormantYears: Math.trunc(num(yrs)), valorisationEcartPct: num(valo) / 100,
+      concentration: num(conc) / 100, surfacturationPct: num(surf) / 100, rafEcartPct: num(raf) / 100, dormantYears: Math.trunc(num(yrs)), valorisationEcartPct: num(valo) / 100, nonFactureJours: Math.trunc(num(nfj)),
     })} />}>
       <div className="grid gap-3 sm:grid-cols-2">
         <ThrField label="Concentration client (%)" hint="Alerte si un client dépasse cette part du CAS" value={conc} onChange={setConc} />
@@ -322,6 +323,7 @@ function AlertThresholdsForm({ initial }: { initial: AlertThresholds }) {
         <ThrField label="Écart RAF (%)" hint="RAF s'écarte de (CAS − Facturé) de plus de ce %" value={raf} onChange={setRaf} />
         <ThrField label="Backlog dormant (ans)" hint="Commande ouverte d'un millésime ≤ exercice − N" value={yrs} onChange={setYrs} />
         <ThrField label="Écart valorisation opp↔commande (%)" hint="CAS retenu (opp gagnée/fiche) s'écarte de la valeur P&L d'origine de plus de ce %" value={valo} onChange={setValo} />
+        <ThrField label="Commande non facturée (jours)" hint="Commande signée sans aucune facture depuis plus de N jours" value={nfj} onChange={setNfj} />
       </div>
       <Tip>Pilotent le Centre d'alertes et la Qualité des données. L'enregistrement recalcule immédiatement.</Tip>
     </Card>
