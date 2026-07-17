@@ -219,7 +219,10 @@ function CarryoverCard() {
       <div className="mt-3 mb-2">
         <Segmented value={seg} onChange={setSeg} options={SEGS} ariaLabel="Filtrer les projets" />
       </div>
-      {editing && <MilestoneEditor fp={editing.fp!} raf={editing.projetable} initial={msBy.get((editing.fp || "").toUpperCase()) || []} fy={fy} onClose={() => setEditFp(null)} />}
+      {/* Jalons existants du projet en cours d'édition : rapprochés par fpKey (comme msBy plus haut). Avant,
+          `toUpperCase()` divergeait de la clé fpKey de msBy → l'éditeur s'ouvrait VIDE malgré des jalons
+          définis (FP à zéros de tête / espaces), contraire à l'invariant fpKey (CLAUDE.md). */}
+      {editing && <MilestoneEditor fp={editing.fp!} raf={editing.projetable} initial={msBy.get(fpKey(editing.fp) || "") || []} fy={fy} onClose={() => setEditFp(null)} />}
       <ListView
         rows={shown}
         colsKey="backlog-projets"
@@ -1124,6 +1127,15 @@ export const OrderList: FC<Props> = () => {
       { value: "done" as const, label: "Soldées", count: done },
     ];
   }, [rows]);
+  // CONTRÔLE DE COHÉRENCE du carnet (registre unifié, ADR Exécution) : réconcilie les TOTAUX du module
+  // sur la vue courante — identité CAS = Facturé + RAF au niveau agrégat (le prédicat raf_incoherent la
+  // vérifie PAR LIGNE ; ici on l'agrège, ce qui n'existait nulle part). Calculé depuis `rows` (déjà en
+  // mémoire) → aucune lecture ni recompute. Montants = CA (jamais la marge) → visible au droit `overview`.
+  const coh = useMemo(() => {
+    let cas = 0, fact = 0, raf = 0, todo = 0, done = 0;
+    for (const r of rows) { cas += r.cas || 0; fact += r.facture || 0; raf += r.raf || 0; const b = factBucket(r); if (b === "todo") todo++; else if (b === "done") done++; }
+    return { cas, fact, raf, ecart: cas - fact - raf, todo, done };
+  }, [rows]);
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation LIT les opportunités (droit pipeline)
@@ -1173,6 +1185,17 @@ export const OrderList: FC<Props> = () => {
     {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} canPipelineWrite={canPipelineWrite} />}
     {canImport && <CancelledOrders />}
     <PmWorkload />
+    {/* Registre de cohérence du carnet (contrôle unifié amont/aval) : réconciliation agrégée CAS/Facturé/RAF
+        + couverture de facturation, sur la vue filtrée. Le détail par ligne vit au Centre d'alertes / Qualité. */}
+    <Card title="Cohérence du carnet">
+      <div className={grid4}>
+        <Kpi label="Σ CAS" value={fmt(coh.cas)} sub={`${rows.length.toLocaleString("fr-FR")} commandes`} />
+        <Kpi label="Σ Facturé" value={fmt(coh.fact)} sub={pct(coh.cas ? coh.fact / coh.cas : 0)} />
+        <Kpi label="Σ RAF" value={fmt(coh.raf)} tone="steel" />
+        <Kpi label="Écart CAS − (Fact + RAF)" value={fmt(coh.ecart)} tone={Math.abs(coh.ecart) > coh.cas * 0.02 ? "clay" : "emerald"} />
+      </div>
+      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé — voir le <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées.</Tip>
+    </Card>
     <Card title={`Commandes · ${shown.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
       <div className="mb-2"><Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" /></div>
