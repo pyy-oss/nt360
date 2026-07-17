@@ -73,15 +73,17 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
   };
 }
 
-// --- Renouvellements à anticiper (Lot 5/7 « valeur ajoutée » — anticipation) ---
-// Vue front PURE : contrats ACTIFS dont la date de fin approche, dans un horizon (défaut 90 j), classés par
-// urgence — critique (≤ 30 j), proche (≤ 60 j), à venir (≤ 90 j). Sert à déclencher un renouvellement AVANT
-// l'échéance (l'action passe par le moteur d'approbation existant). Les contrats DÉJÀ échus relèvent du
-// contrôle de conformité (échéance dépassée), pas d'ici. Aucune I/O, aucune métrique persistée.
-export type MntRenouvellementBucket = "critique" | "proche" | "a_venir";
+// --- Renouvellements & échéances à revoir (Lot 5/7 « valeur ajoutée » — anticipation) ---
+// Vue front PURE : contrats ACTIFS dont la date de fin approche OU est DÉJÀ dépassée, classés par urgence —
+// dépassé (jours < 0, statut à revoir : le contrat court encore alors qu'il aurait dû être renouvelé/échu),
+// critique (≤ 30 j), proche (≤ 60 j), à venir (≤ 90 j). Sert à déclencher un renouvellement (l'action passe
+// par le moteur d'approbation existant). Les contrats échus vivent ICI — pas dans la conformité, qui ne juge
+// que la COMPLÉTUDE structurelle du contrat (une échéance dépassée n'est pas un défaut de saisie mais un
+// signal de cycle de vie, déjà couvert par le statut auto). Aucune I/O, aucune métrique persistée.
+export type MntRenouvellementBucket = "depasse" | "critique" | "proche" | "a_venir";
 export interface MntRenouvellement { id: string; fp: string | null; client: string; dateFin: string; jours: number; bucket: MntRenouvellementBucket }
 
-/** Contrats actifs dont la fin tombe dans [0 .. horizon] jours, plus urgent d'abord. PUR. */
+/** Contrats actifs dont la fin est dépassée (jours < 0) ou tombe dans [0 .. horizon] jours, plus urgent d'abord. PUR. */
 export function mntRenouvellements(contrats: ContratLike[], asOfIso: string, horizonJours = 90): MntRenouvellement[] {
   const asOf = parseIso(asOfIso);
   if (asOf == null) return [];
@@ -91,21 +93,23 @@ export function mntRenouvellements(contrats: ContratLike[], asOfIso: string, hor
     const fin = parseIso(c.dateFin);
     if (fin == null) continue;
     const jours = Math.round((fin - asOf) / DAY);
-    if (jours < 0 || jours > horizonJours) continue;
-    const bucket: MntRenouvellementBucket = jours <= 30 ? "critique" : jours <= 60 ? "proche" : "a_venir";
+    if (jours > horizonJours) continue; // au-delà de l'horizon d'anticipation — rien à faire encore
+    const bucket: MntRenouvellementBucket = jours < 0 ? "depasse" : jours <= 30 ? "critique" : jours <= 60 ? "proche" : "a_venir";
     out.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", dateFin: c.dateFin as string, jours, bucket });
   }
-  out.sort((a, b) => a.jours - b.jours);
+  out.sort((a, b) => a.jours - b.jours); // dépassés (jours négatifs) en tête, puis les échéances les plus proches
   return out;
 }
 
 // --- Contrôle de complétude / conformité des contrats (Lot 3/7 « valeur ajoutée » — conformité) ---
-// Vue front PURE : parmi les contrats ACTIFS (ceux en vigueur), repère les MANQUES de conformité qui
-// rendent un contrat inexploitable ou hors-cadre — aucun engagement SLA, pas de date de fin, échéance déjà
-// dépassée (contrat encore « actif » alors qu'il aurait dû être renouvelé/échu), montant d'engagement nul.
-// Aucune I/O ni métrique persistée → pas de miroir back. On ne juge QUE les contrats actifs (les brouillons
-// sont en cours de saisie, les échus/résiliés sont sortis). « conforme » = actif sans aucun manque.
-export type MntComplianceIssue = "sans_sla" | "sans_echeance" | "echeance_depassee" | "montant_nul";
+// Vue front PURE : parmi les contrats ACTIFS (ceux en vigueur), repère les MANQUES de conformité STRUCTURELLE
+// qui rendent un contrat inexploitable ou hors-cadre — aucun engagement SLA, pas de date de fin, montant
+// d'engagement nul. La conformité ne juge QUE des défauts de SAISIE : une échéance DÉPASSÉE n'en est pas un
+// (le contrat est complet, c'est son cycle de vie qui appelle une décision) — elle relève des renouvellements
+// (mntRenouvellements, bucket « dépassé ») et du statut auto, pas d'ici. Aucune I/O ni métrique persistée →
+// pas de miroir back. On ne juge QUE les contrats actifs (brouillons en saisie, échus/résiliés sortis).
+// « conforme » = actif sans aucun manque.
+export type MntComplianceIssue = "sans_sla" | "sans_echeance" | "montant_nul";
 export interface MntComplianceItem { id: string; fp: string | null; client: string; issues: MntComplianceIssue[] }
 export interface MntComplianceResult {
   items: MntComplianceItem[];                       // contrats actifs avec ≥ 1 manque, plus de manques d'abord
@@ -114,20 +118,17 @@ export interface MntComplianceResult {
   conformes: number;
 }
 
-/** Contrôle de conformité des contrats ACTIFS à la date asOfIso (AAAA-MM-JJ). PUR. */
-export function mntCompliance(contrats: ContratLike[], asOfIso: string): MntComplianceResult {
-  const asOf = parseIso(asOfIso);
+/** Contrôle de conformité STRUCTURELLE des contrats ACTIFS (indépendant de la date). PUR. */
+export function mntCompliance(contrats: ContratLike[]): MntComplianceResult {
   const items: MntComplianceItem[] = [];
-  const byIssue: Record<MntComplianceIssue, number> = { sans_sla: 0, sans_echeance: 0, echeance_depassee: 0, montant_nul: 0 };
+  const byIssue: Record<MntComplianceIssue, number> = { sans_sla: 0, sans_echeance: 0, montant_nul: 0 };
   let activeTotal = 0;
   for (const c of contrats || []) {
     if ((c.statut || "brouillon") !== "actif") continue;
     activeTotal++;
     const issues: MntComplianceIssue[] = [];
     if (!(c.engagements && c.engagements.length)) issues.push("sans_sla");
-    const fin = parseIso(c.dateFin);
     if (!c.dateFin) issues.push("sans_echeance");
-    else if (fin != null && asOf != null && fin < asOf) issues.push("echeance_depassee");
     if (!(Number(c.montantEngage) > 0)) issues.push("montant_nul");
     if (issues.length) {
       for (const k of issues) byIssue[k]++;

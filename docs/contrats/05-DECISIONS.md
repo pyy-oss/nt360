@@ -3,6 +3,36 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-031 — Conformité = complétude structurelle seule ; « échéance dépassée » bascule vers les renouvellements
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté (prolonge ADR-029)
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Le contrôle de conformité (Lot 3/7, `mntCompliance`) comptait « échéance dépassée » (contrat actif dont la
+`dateFin` est passée) parmi les **manques** de conformité, aux côtés de « sans SLA », « sans date de fin »,
+« montant nul ». Or ADR-029 a déjà tranché que « `dateFin` passée ⇒ échu » est **opérationnellement faux** :
+un contrat reconduit sans mise à jour de sa `dateFin` reste actif — c'est un signal de **cycle de vie**, pas
+un **défaut de saisie**. Classé en conformité, il gonflait le compteur de non-conformités avec un cas qui
+n'appelle pas une correction de fiche mais une **décision** (renouveler / revoir le statut), déjà couverte par
+le statut auto (ADR-027/029) et les lignées (ADR-030). La même métrique portait ainsi deux sens.
+
+### Décision
+- **`mntCompliance` ne juge QUE la complétude STRUCTURELLE** : `sans_sla`, `sans_echeance` (aucune date de
+  fin saisie), `montant_nul`. Le manque `echeance_depassee` est **retiré** ; la fonction devient indépendante
+  de la date (plus d'`asOfIso`).
+- **Les contrats actifs échus rejoignent `mntRenouvellements`** en nouveau palier `depasse` (jours < 0),
+  affiché **en tête** (plus urgent), sous « Renouvellements & échéances à revoir ». L'action reste
+  « Demander le renouvellement » (circuit d'approbation existant).
+
+### Conséquences
+- Vue front PURE, aucune I/O ni miroir back — aucun schéma ni callable touché. À drapeau éteint, l'ERP est
+  strictement celui d'avant.
+- Un contrat complet mais échu est désormais **conforme** (il l'est structurellement) et **listé en
+  renouvellement** — une seule métrique par sens, plus de double-compte. Tests `mntDashboard.test.ts` mis à
+  jour en conséquence.
+
 ## ADR-030 — Lignées de renouvellement : regrouper les reconductions sous un numéro généré, les contrats gardent leur FP
 
 - **Date :** 2026-07-17
