@@ -47,7 +47,11 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
   // commande (P&L) est déjà comptée dans le CAS réalisé → on l'EXCLUT du pipeline projeté, sinon
   // elle serait comptée deux fois dans projete (CAS + pipeline) et dans cafProjete. Le N° FP est
   // l'identifiant du deal : même FP = même affaire (pipeline LIVE non repassé « gagné »).
-  const orderFps = new Set((orders || []).map((o) => fpKey(o.fp)).filter(Boolean));
+  // Aligné sur le COCKPIT (chaine/pipeline/overviewCalc) : seules les commandes de l'EXERCICE {fy} excluent
+  // une opp ouverte du pipeline projeté. Une opp de l'exercice dont le FP n'est booké que sur une AUTRE année
+  // n'est PAS réalisée cette année → elle reste projetée (parité stricte avec « Pondéré projeté » du cockpit,
+  // qui borne l'exclusion « déjà au carnet » aux commandes de la période).
+  const orderFps = new Set((orders || []).filter((o) => orderYear(o) === fy).map((o) => fpKey(o.fp)).filter(Boolean));
   const alreadyBooked = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !!k && orderFps.has(k); };
   // Pipeline de projection : opps actives de l'exercice, pondérées 100 %/20 % par certitude, hors
   // affaires déjà en commande (M1).

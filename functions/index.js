@@ -2013,6 +2013,10 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // `bookedFps` = TOUS les FP portés par le carnet (toutes années). Une opp OUVERTE dont le FP est déjà
   // au carnet serait comptée DEUX FOIS (dans Closed=CAS carnet ET dans le palier ouvert) → on l'exclut,
   // exactement comme le reste de la famille pipeline (chaine/pipeline/atterrissage excluent les FP bookés).
+  // CLOISON (OWD private) : le carnet n'est PAS record-scopé → sous périmètre restreint, une ligne carnet
+  // ne compte dans le « Closed » que si son FP correspond à une opp VISIBLE de l'appelant (attribution via
+  // l'opp). `bookedFps` reste GLOBAL : l'exclusion anti-double-compte du pipeline ne dépend pas du périmètre.
+  const visibleFps = scoped ? new Set(opps.map((o) => fpKey(o.fp)).filter(Boolean)) : null;
   const cmdSnap = await db.collection("commandesRows").get();
   let closedAmount = 0, closedCount = 0, maxYearPo = 0; const bookedFps = new Set();
   for (const chunk of cmdSnap.docs) {
@@ -2020,6 +2024,7 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
       const k = fpKey(o.fp); if (k) bookedFps.add(k);
       maxYearPo = Math.max(maxYearPo, plausibleYear(o.yearPo) || 0); // repli exercice = max PO borné (parité aggregate)
       if (periodYear && plausibleYear(o.yearPo) !== periodYear) continue; // filtre millésime carnet
+      if (visibleFps && !(k && visibleFps.has(k))) continue; // cloison : réalisé hors périmètre visible exclu
       closedAmount += Number(o.cas) || 0;
       closedCount++;
     }
@@ -2043,9 +2048,14 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
     return true;
   });
   const rollup = rollupForecast(opps, closedAmount, closedCount);
-  // Quota = objectif CAS annuel (périmètre global) de l'EXERCICE affiché — référence d'atteinte cohérente.
-  const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
-  const quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
+  // Quota = objectif CAS annuel GLOBAL de l'exercice. Sous OWD private (scoped), un objectif d'ENTREPRISE
+  // n'est PAS attribuable à un sous-périmètre → quota (et donc atteinte) masqués : pas de référence trompeuse
+  // (attainment devient null). Le « réalisé » cloisonné ci-dessus reste, lui, exposé pour le périmètre.
+  let quota = 0;
+  if (!scoped) {
+    const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
+    quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
+  }
   return {
     ok: true, fiscalYear: targetFy, allPeriods: !periodYear, scoped, quota, capped,
     ...rollup,

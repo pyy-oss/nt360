@@ -273,6 +273,7 @@ function createOpportunities({
       const o = { id: d.id, ...d.data() };
       byId.set(d.id, o);
       if (o.oppId) byId.set(o.oppId, o);
+      if (o.srcOppId) byId.set(o.srcOppId, o); // Opp ID SOURCE (import précédent) → ré-import idempotent
       const fk = fpKey(o.fp);
       if (fk && !byFp.has(fk)) byFp.set(fk, o);
     }
@@ -315,7 +316,7 @@ function createOpportunities({
     const creatorVisible = await visibleToFor(req.auth.uid);
     for (const c of toCreate) {
       const id = mkId();
-      const doc = buildCreateDoc(c.values, c.fp, id);
+      const doc = buildCreateDoc(c.values, c.fp, id, c.oppId);
       doc.ownerUid = req.auth.uid;
       doc.visibleTo = creatorVisible;
       doc.updatedAt = FieldValue.serverTimestamp();

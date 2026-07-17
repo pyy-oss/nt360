@@ -57,7 +57,9 @@ function planOpportunityImport(byId, byFp, rows) {
     } else {
       const client = row.values.client;
       if (!client) { skipped.push({ line, reason: "ni Opp ID ni N° FP connu, et client vide → ignorée" }); continue; }
-      toCreate.push({ line, fp: row.fp || null, values: row.values, client });
+      // `oppId` = Opp ID SOURCE de la ligne (id externe d'un CRM tiers, distinct de l'id `saisie_` généré).
+      // Persisté sur le doc créé (srcOppId) pour que le PROCHAIN import le retrouve → pas de doublon.
+      toCreate.push({ line, fp: row.fp || null, oppId: row.oppId || null, values: row.values, client });
     }
   }
   return { toUpdate, toCreate, skipped };
@@ -81,13 +83,16 @@ function finalizeUpdatePatch(cur, patch) {
  * Étape par défaut 1 ; proba = valeur fournie (0..1) sinon défaut de l'étape (jamais un pondéré à 0 par
  * oubli). L'identité (`oppId`) et le `fp` sont fournis par l'appelant (clés de match, non dans values). PUR.
  */
-function buildCreateDoc(values, fp, id) {
+function buildCreateDoc(values, fp, id, srcOppId) {
   const stage = "stage" in values ? clampStage(values.stage) : 1;
   const pr = values.probability;
   const probability = (typeof pr === "number" && pr > 0 && pr <= 100) ? pr : (DEFAULT_PROBA[stage] ?? 0);
   const amount = Number(values.amount) || 0;
   return {
     oppId: id, source: "saisie",
+    // Opp ID SOURCE (CRM tiers) conservé comme CLÉ DE MATCH additive → un ré-import de la même ligne
+    // (sans N° FP) retrouve ce doc au lieu d'en recréer un (idempotence). Null si la ligne n'en portait pas.
+    srcOppId: srcOppId || null,
     client: values.client, am: values.am || "", bu: values.bu || "AUTRE",
     fp: fp || null,
     amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),

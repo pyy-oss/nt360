@@ -11,6 +11,7 @@ function indexes(opps) {
   const { fpKey } = require("../lib/ids");
   for (const o of opps) {
     byId.set(o.id, o); if (o.oppId) byId.set(o.oppId, o);
+    if (o.srcOppId) byId.set(o.srcOppId, o); // Opp ID SOURCE (import précédent) — miroir du caller
     const fk = fpKey(o.fp); if (fk && !byFp.has(fk)) byFp.set(fk, o);
   }
   return { byId, byFp };
@@ -80,6 +81,31 @@ describe("oppImport — rapprochement & création", () => {
     const plan = planOpportunityImport(byId, byFp, rowsOf([{ oppId: "saisie_a", values: { amount: 200000 } }]));
     expect(plan.toUpdate[0].changed).toEqual(["amount"]);
     expect(plan.toUpdate[0].patch).not.toHaveProperty("lostReason");
+  });
+});
+
+describe("oppImport — idempotence d'un Opp ID EXTERNE sans N° FP (audit commercial)", () => {
+  const rowsOf = (rows) => rows.map((r) => ({ oppId: "", fp: "", values: {}, line: 2, ...r }));
+  it("1er import : ligne à Opp ID externe sans FP → CRÉATION portant srcOppId", () => {
+    const { byId, byFp } = indexes(OPPS);
+    const row = { oppId: "CRM-999", fp: "", values: { client: "NOUVEAU CRM", amount: 5000, stage: 2 } };
+    const plan = planOpportunityImport(byId, byFp, rowsOf([row]));
+    expect(plan.toCreate).toHaveLength(1);
+    expect(plan.toCreate[0].oppId).toBe("CRM-999"); // Opp ID source porté jusqu'à la création
+    const doc = buildCreateDoc(plan.toCreate[0].values, plan.toCreate[0].fp, "saisie_new", plan.toCreate[0].oppId);
+    expect(doc.srcOppId).toBe("CRM-999");
+  });
+  it("2e import de la MÊME ligne → MISE À JOUR (match par srcOppId), PAS un doublon", () => {
+    // Après le 1er import, l'opp créée est indexée avec son srcOppId (comme le fait le caller au ré-import).
+    const created = { id: "saisie_new", oppId: "saisie_new", srcOppId: "CRM-999", source: "saisie", client: "NOUVEAU CRM", amount: 5000, stage: 2, fp: null };
+    const { byId, byFp } = indexes([...OPPS, created]);
+    const row = { oppId: "CRM-999", fp: "", values: { client: "NOUVEAU CRM", amount: 9000, stage: 3 } };
+    const plan = planOpportunityImport(byId, byFp, rowsOf([row]));
+    expect(plan.toCreate).toHaveLength(0);        // ← plus de doublon
+    expect(plan.toUpdate).toHaveLength(1);
+    expect(plan.toUpdate[0].id).toBe("saisie_new");
+    expect(plan.toUpdate[0].matchBy).toBe("id");
+    expect(plan.toUpdate[0].changed.sort()).toEqual(["amount", "stage"]);
   });
 });
 
