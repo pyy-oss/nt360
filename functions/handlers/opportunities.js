@@ -24,6 +24,19 @@ function createOpportunities({
     } catch (e) { logger.warn("oppHistory: écriture impossible", { message: e && e.message }); }
   }
 
+  // Journalise un CHANGEMENT DE D PREV (closingDate) d'une opp → dérive le GLISSEMENT des deals (slippage,
+  // summaries/oppSlippage). Best-effort (n'échoue jamais l'action). Admin SDK (oppDateHistory write:false client).
+  async function recordOppDateChange({ oppId, from, to, amount, am, stage, forecastCategory, client, uid }) {
+    try {
+      await db.collection("oppDateHistory").add({
+        oppId: oppId || null, fromDate: from || null, toDate: to || null,
+        amount: Number(amount) || 0, am: am || null, stage: Number(stage) || 0,
+        forecastCategory: forecastCategory || null, client: client || null, uid: uid || null,
+        at: FieldValue.serverTimestamp(),
+      });
+    } catch (e) { logger.warn("oppDateHistory: écriture impossible", { message: e && e.message }); }
+  }
+
   const upsertOpportunity = onCallG("upsertOpportunity", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
     await requireWrite(req, "pipeline");
     const { fpKey } = require("../lib/ids");
@@ -38,10 +51,10 @@ function createOpportunities({
     // persistait un `weighted` négatif qui polluait tous les agrégats commerciaux (invariant de cohérence).
     if (amount < 0) throw new HttpsError("invalid-argument", "montant négatif interdit");
     // Étape précédente (édition d'une saisie existante) → journal de transition si elle change.
-    let prevStage = null;
+    let prevStage = null, prevClosingDate = null;
     if (typeof d.id === "string" && d.id.startsWith("saisie_")) {
       const ps = await db.doc(`opportunities/${d.id}`).get();
-      if (ps.exists) { await assertRecordVisible(req, "opportunities", ps.data() || {}); prevStage = Number(ps.data().stage) || 0; } // OWD privé : édition dans le périmètre
+      if (ps.exists) { const pd = ps.data() || {}; await assertRecordVisible(req, "opportunities", pd); prevStage = Number(pd.stage) || 0; prevClosingDate = pd.closingDate || null; } // OWD privé : édition dans le périmètre
     }
     // IdC (%) : valeur fournie (0..100) sinon défaut de l'étape — évite un pondéré à 0 par oubli.
     // Une valeur historique en 0-1 reste acceptée (p01 la normalise au calcul).
@@ -99,6 +112,10 @@ function createOpportunities({
     // montant saisi) au journal funnel et au webhook — sinon amount=0 quand seules des lignes sont posées.
     if (prevStage != null && prevStage !== stage) {
       await recordOppTransition({ oppId: id, from: prevStage, to: stage, amount: doc.amount, client, am: doc.am, bu: doc.bu, uid: req.auth.uid });
+    }
+    // Glissement de D Prev sur une saisie ÉDITÉE : journalise le changement de closingDate → slippage.
+    if (prevStage != null && String(doc.closingDate || "").slice(0, 10) !== String(prevClosingDate || "").slice(0, 10)) {
+      await recordOppDateChange({ oppId: id, from: prevClosingDate || null, to: doc.closingDate || null, amount: doc.amount, am: doc.am, stage, forecastCategory: doc.forecastCategory, client, uid: req.auth.uid });
     }
     // Webhook sortant (Lot 7b) : opportunité GAGNÉE (transition vers l'étape 6), best-effort.
     if (stage === 6 && prevStage !== 6) await fireOutbound("opp_won", { oppId: id, client, amount: doc.amount, fp: doc.fp, am: doc.am, bu: doc.bu });
@@ -202,6 +219,10 @@ function createOpportunities({
     // Transition d'étape (inclut le board Kanban qui passe par ici) → journal du funnel (Lot C).
     if (patch.stage !== undefined && patch.stage !== (Number(cur.stage) || 0)) {
       await recordOppTransition({ oppId: id, from: Number(cur.stage) || 0, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
+    }
+    // Glissement de D Prev : tout changement de closingDate → journal du slippage (summaries/oppSlippage).
+    if (patch.closingDate !== undefined && String(patch.closingDate || "").slice(0, 10) !== String(cur.closingDate || "").slice(0, 10)) {
+      await recordOppDateChange({ oppId: id, from: cur.closingDate || null, to: patch.closingDate || null, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), am: patch.am !== undefined ? patch.am : cur.am, stage: patch.stage !== undefined ? patch.stage : (Number(cur.stage) || 0), forecastCategory: patch.forecastCategory !== undefined ? patch.forecastCategory : (cur.forecastCategory || null), client: cur.client || null, uid: req.auth.uid });
     }
     // Webhook sortant (Lot 7b) : transition vers Gagné (étape 6), best-effort.
     if (patch.stage === 6 && (Number(cur.stage) || 0) !== 6) await fireOutbound("opp_won", { oppId: id, client: cur.client, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), fp: patch.fp !== undefined ? patch.fp : cur.fp, am: patch.am !== undefined ? patch.am : cur.am });
