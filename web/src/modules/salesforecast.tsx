@@ -81,7 +81,7 @@ export const SalesForecast: FC<Props> = ({ period }) => {
       {r && r.byAm && r.byAm.length > 0 && (
         <Card title={`Prévision par commercial · ${r.byAm.length}`}>
           <Tip>Le <b>forecast review</b> : Commit / Best Case / Pipeline (montants <b>BRUTS cumulatifs</b>, Pipeline ⊇ Best Case ⊇ Commit ⊇ Gagné) de <b>chaque commercial</b>, sur l'exercice sélectionné. Même assiette que la prévision globale ci-dessus — trié par pipeline décroissant.</Tip>
-          <Table columns={amCols} rows={r.byAm} colsKey="forecast_by_am" />
+          <Table columns={amCols} rows={r.byAm} colsKey="forecast-by-am" />
         </Card>
       )}
 
@@ -95,7 +95,7 @@ export const SalesForecast: FC<Props> = ({ period }) => {
             <div><div className="text-[11px] text-muted">Avancés (pull-in)</div><div className="font-display tabnum text-lg text-emerald">{money(slip.pullAmount ?? 0)} · {slip.pullCount ?? 0}</div></div>
             <div><div className="text-[11px] text-muted">dont Commit</div><div className="font-display tabnum text-lg text-clay">{money(slip.byCategory?.commit ?? 0)}</div></div>
           </div>
-          {(slip.items?.length ?? 0) > 0 && <Table columns={slipCols} rows={slip.items || []} colsKey="forecast_slippage" />}
+          {(slip.items?.length ?? 0) > 0 && <Table columns={slipCols} rows={slip.items || []} colsKey="forecast-slippage" />}
         </Card>
       )}
     </div>

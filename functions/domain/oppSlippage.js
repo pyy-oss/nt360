@@ -39,12 +39,15 @@ function slippageFromHistory(events) {
     const first = evs[0], last = evs[evs.length - 1];
     const fromD = iso10(first.fromDate), toD = iso10(last.toDate);
     if (!ISO.test(fromD) || !ISO.test(toD) || toD === fromD) continue; // mouvement net nul ou dates invalides
+    // Le glissement ne concerne que les opps ACTIVES (cf. doc) : une opp Gagnée/Perdue/omise ne « glisse » plus.
+    // Filtrer ici garde slipAmount = Σ byCategory (invariant de cohérence) et pullAmount sur la même assiette.
+    const cat = effectiveCategory({ stage: last.stage, forecastCategory: last.forecastCategory });
+    if (cat !== "commit" && cat !== "best_case" && cat !== "pipeline") continue;
     const amount = Number(last.amount) || 0;
     if (toD > fromD) { // clôture repoussée → glissement
       const days = daysBetween(fromD, toD);
       slipCount++; slipAmount += amount; slipDaysTotal += days;
-      const cat = effectiveCategory({ stage: last.stage, forecastCategory: last.forecastCategory });
-      if (cat === "commit" || cat === "best_case" || cat === "pipeline") byCategory[cat] += amount;
+      byCategory[cat] += amount;
       const am = normAm(last.am);
       const e = byAmMap.get(am) || { am, amount: 0, count: 0 }; e.amount += amount; e.count++; byAmMap.set(am, e);
       items.push({ oppId: String(last.oppId || ""), client: last.client || "", am, amount, fromDate: fromD, toDate: toD, days });
