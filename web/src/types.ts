@@ -199,6 +199,7 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
   casSource?: string | null; // 'override' = CAS surchargé depuis l'opportunité liée (syncOrderAmount)
   // Synchro inverse ClickUp (overlay config/clickupSync) : statut projet + dates (ISO yyyy-mm-dd).
   clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null;
+  dateCreation?: string | null; // date de création côté source (Odoo create_date), ISO yyyy-mm-dd
   // Enrichissements ClickUp → app (Lot 4) : priorité, blocage, avancement checklists (%), temps passé (h).
   clickupPriority?: string | null; clickupBlocked?: boolean; clickupProgress?: number | null; clickupTimeSpentH?: number | null;
   // Dernière note ops remontée de ClickUp (webhook taskCommentPosted).
@@ -208,7 +209,7 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }
 export interface CommandeChunk { i?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number };
-export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; stale?: boolean; ageDays?: number | null };
+export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; stale?: boolean; ageDays?: number | null; dateCreation?: string | null };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; fxRate?: number | null; fxSource?: string; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
 export type Objective = {

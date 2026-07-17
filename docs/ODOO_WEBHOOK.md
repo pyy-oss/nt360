@@ -50,12 +50,14 @@ Rapprochement : par **N° FP** (canonicalisé), sinon par **odooId**, sinon cré
 | `odooId` | string | id Odoo (`crm.lead:42`) — tracé, clé de repli. |
 | `fp` | string | N° FP `FP/AAAA/N` (canonicalisé par `fpKey`). |
 | `client` | string | Nom client (normalisé). |
+| `designation` | string | **Nom / objet de l'affaire** (alias acceptés : `name`, `affaire`). |
 | `am` | string | Commercial. |
 | `bu` | string | Business Unit (normalisée ; défaut `AUTRE`). |
 | `amount` | number | Montant HT (entier XOF). |
 | `stage` | number | Étape 1–6 (bornée). |
 | `probability` | number | IdC en **%** (0–100) ; défaut selon l'étape. |
 | `closingDate` | string | `AAAA-MM-JJ` (dates sentinelles rejetées). |
+| `dateCreation` | string | Date de création Odoo (`create_date`), `AAAA-MM-JJ` (alias `createdDate`). |
 
 ### object = "order"  →  collection `orders`
 Rapprochement : id **déterministe** `safeId(fp)` (converge avec l'import P&L). **`fp` requis.**
@@ -67,10 +69,12 @@ Rapprochement : id **déterministe** `safeId(fp)` (converge avec l'import P&L). 
 | `client` | string | |
 | `designation` | string | Objet de l'affaire. |
 | `bu` | string | |
-| `yearPo` | number | Millésime (fenêtré par `plausibleYear`). |
+| `dateCommande` | string | **Date de commande** Odoo (`date_order`), `AAAA-MM-JJ` (alias `datePo`, `dateOrder`). |
+| `yearPo` | number | Millésime (fenêtré par `plausibleYear`) ; **dérivé de `dateCommande`** si absent. |
 | `cas` | number | Chiffre d'affaires signé (entier XOF). |
 | `raf` | number | RAF figé (optionnel ; **absent → `null`** = repli dérivé conservé). |
 | `suppliers` | array | `[{ name, amount }]` (noms vides/montants ≤ 0 ignorés). |
+| `dateCreation` | string | Date de création Odoo (`create_date`), `AAAA-MM-JJ` (alias `createdDate`). |
 
 ### object = "invoice"  →  collection `invoices`
 Rapprochement : id **déterministe** `safeId(numero)`. **`numero` requis** ; `fp` sert au rapprochement d'affaire.
@@ -86,6 +90,7 @@ Rapprochement : id **déterministe** `safeId(numero)`. **`numero` requis** ; `fp
 | `date` | string | `AAAA-MM-JJ` (sentinelles rejetées). |
 | `dueDate` | string | Échéance. |
 | `paid` | bool/string | `true` ou libellé (`payé`, `réglé`, `encaissé`…). |
+| `dateCreation` | string | Date de création Odoo (`create_date`), `AAAA-MM-JJ` (alias `createdDate`). |
 
 ## Réponse
 
@@ -104,6 +109,10 @@ lot (`errors[]`) ; une erreur interne renvoie `500`.
 Tout doc reçu porte `source: "odoo"`, `odooId`, `updatedAt` (et `createdAt` à la création). Les
 normalisations (FP, client, BU, dates, montants) sont **identiques** à celles des imports Excel → Odoo et
 Excel convergent sur les mêmes documents (pas de seconde vérité).
+
+> `createdAt` (posé par nt360, `serverTimestamp`) = **quand nt360 a vu le doc pour la première fois**. Il ne
+> faut pas le confondre avec `dateCreation`, la **date de création côté Odoo** (`create_date`) transmise dans
+> le contrat : c'est cette dernière qui reflète l'antériorité métier de l'affaire/commande/facture.
 
 ---
 
@@ -191,11 +200,13 @@ def map_lead(l):
     return {
         "odooId": "crm.lead:%s" % l.id,
         "fp": _fp(l), "client": l.partner_id.name or l.contact_name or "",
+        "designation": l.name or "",                       # nom / objet de l'affaire
         "am": l.user_id.name or "", "bu": _bu(l),
         "amount": l.expected_revenue or 0,
         "stage": STAGE_MAP.get(l.stage_id.name, 1),
         "probability": l.probability or 0,                # IdC en % (0-100)
         "closingDate": _iso(l.date_deadline),
+        "dateCreation": _iso(l.create_date),              # date de création Odoo
     }
 
 # sale.order → order  (cas = HT signé ; suppliers optionnel)
@@ -204,10 +215,12 @@ def map_order(o):
         "odooId": "sale.order:%s" % o.id,
         "fp": _fp(o), "client": o.partner_id.name or "",
         "designation": o.name or "", "bu": _bu(o),
+        "dateCommande": _iso(o.date_order),               # date de commande (complète) — yearPo en est dérivé
         "yearPo": o.date_order.year if o.date_order else 0,
         "cas": o.amount_untaxed or 0,
         # "raf": ...,                                      # omettre → nt360 garde son RAF dérivé
         # "suppliers": [{"name": .., "amount": ..}],       # optionnel
+        "dateCreation": _iso(o.create_date),              # date de création Odoo
     }
 
 # account.move (facture client) → invoice
@@ -219,6 +232,7 @@ def map_invoice(m):
         "amountHt": m.amount_untaxed or 0, "bu": _bu(m),
         "date": _iso(m.invoice_date), "dueDate": _iso(m.invoice_date_due),
         "paid": m.payment_state == "paid",
+        "dateCreation": _iso(m.create_date),              # date de création Odoo
     }
 ```
 

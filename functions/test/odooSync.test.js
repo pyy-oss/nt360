@@ -15,6 +15,15 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m.doc.source).toBe("odoo");
     expect(m.doc.odooId).toBe("crm.lead:42");
   });
+  it("opportunité : mappe la désignation (nom de l'affaire) et la date de création Odoo", () => {
+    const m = mapOpportunity({ odooId: "crm.lead:8", client: "ACME", designation: "  Refonte SI  ", dateCreation: "2026-01-05" });
+    expect(m.doc.designation).toBe("Refonte SI");
+    expect(m.doc.dateCreation).toBe("2026-01-05");
+    // alias : `name` et `createdDate` acceptés si l'émetteur Odoo les nomme ainsi
+    const m2 = mapOpportunity({ odooId: "crm.lead:9", client: "X", name: "TMA", createdDate: "2026-02-01" });
+    expect(m2.doc.designation).toBe("TMA");
+    expect(m2.doc.dateCreation).toBe("2026-02-01");
+  });
   it("opportunité sans fp NI odooId → rejet (clé de rapprochement manquante)", () => {
     expect(mapOpportunity({ client: "ACME", amount: 500 }).ok).toBe(false);
   });
@@ -37,6 +46,16 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
   it("commande sans fp → rejet ; raf absent → null (repli dérivé conservé)", () => {
     expect(mapOrder({ client: "X", cas: 1000 }).ok).toBe(false);
     expect(mapOrder({ fp: "FP/2026/1", cas: 1000 }).doc.raf).toBeNull();
+  });
+  it("commande : mappe dateCommande + dateCreation ; dérive yearPo de la date si absent", () => {
+    const m = mapOrder({ fp: "FP/2026/1", cas: 1000, dateCommande: "2026-03-15", dateCreation: "2026-03-01" });
+    expect(m.doc.dateCommande).toBe("2026-03-15");
+    expect(m.doc.dateCreation).toBe("2026-03-01");
+    expect(m.doc.yearPo).toBe(2026); // dérivé de dateCommande faute de yearPo explicite
+    // yearPo explicite prime sur la date
+    expect(mapOrder({ fp: "FP/2026/2", yearPo: "2025", dateCommande: "2026-03-15" }).doc.yearPo).toBe(2025);
+    // date sentinelle rejetée
+    expect(mapOrder({ fp: "FP/2026/3", dateCommande: "1899-12-31" }).doc.dateCommande).toBeNull();
   });
 
   it("facture : id déterministe safeId(numero), fp rapproché par fpKey, paid détecté", () => {
