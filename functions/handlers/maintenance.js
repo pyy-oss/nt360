@@ -9,7 +9,7 @@ const { isMntEnabled } = require("../domain/mntFeature");
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { monthOf, craDaysFromHours } = require("../domain/mntTicket");
 
-function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps }) {
+function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps, requestRecompute }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée mnt_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `maintenance`.
   async function assertMntEnabled() {
@@ -45,6 +45,10 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_mnt_contrat" : "create_mnt_contrat", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { fp: v.value.fp, statut: v.value.statut, montantEngage: v.value.montantEngage }, ts: FieldValue.serverTimestamp() });
+    // Rafraîchit summaries/mnt_risque (KPI risque/rétention) après l'édition — recompute DIFFÉRÉ et SCOPÉ
+    // « maintenance » (le seul bloc à recalculer ; les lectures invoices/asOf sont inconditionnelles).
+    // Sinon le score ne bougeait qu'au recompute planifié de 05:00.
+    await requestRecompute(["maintenance"]);
     return { ok: true, id };
   });
 
@@ -92,6 +96,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       await batch.commit();
     }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_mnt_contrats", module: "maintenance", entity: "mnt_contrat", entityId: "(masse)", detail: { created, updated, skipped, rowsParsed: report.rowsParsed }, ts: FieldValue.serverTimestamp() });
+    if (created || updated) await requestRecompute(["maintenance"]); // rafraîchit le risque après un import qui a écrit
     return { ok: true, applied: true, created, updated, skipped, rowsParsed: report.rowsParsed, samples };
   });
 
@@ -156,6 +161,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const id = assertPlainId(req.data?.id, "id contrat");
     await db.doc(`mnt_contrats/${id}`).delete();
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_mnt_contrat", module: "maintenance", entity: "mnt_contrat", entityId: id, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["maintenance"]);
     return { ok: true };
   });
 
@@ -188,6 +194,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       id = ref.id;
     }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "upsert_mnt_ticket" : "create_mnt_ticket", module: "maintenance", entity: "mnt_ticket", entityId: id, detail: { contratId: v.value.contratId, statut: v.value.statut, priorite: v.value.priorite }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["maintenance"]); // le ticket alimente les SLA rompus / quota du score de risque
     return { ok: true, id };
   });
 
@@ -197,6 +204,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const id = assertPlainId(req.data?.id, "id ticket");
     await db.doc(`mnt_tickets/${id}`).delete();
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_mnt_ticket", module: "maintenance", entity: "mnt_ticket", entityId: id, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["maintenance"]);
     return { ok: true };
   });
 

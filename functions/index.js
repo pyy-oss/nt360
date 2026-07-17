@@ -159,6 +159,7 @@ if (process.env.RECOMPUTE_REGION) {
         if (!res.applied || !res.patch) return; // rien d'applicable (déjà résilié, renouvellement sans date de fin…)
         await ref.set({ ...res.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         await db.collection("auditLog").add({ uid: after.decidedBy || null, action: "mnt_decision_apply", module: "maintenance", entity: "mnt_contrat", entityId: contratId, detail: { kind: after.kind, approvalId: event.params.id, patch: res.patch, reason: res.reason }, ts: FieldValue.serverTimestamp() });
+        await requestRecompute(["maintenance"]); // le changement de statut (résilié/renouvelé) modifie le score de risque
       } catch (e) {
         logger.error("onMntApprovalDecided a échoué", { message: e && e.message, stack: e && e.stack });
       }
@@ -1370,7 +1371,7 @@ exports.staffingPlan = _staffing.staffingPlan;
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
 // par défaut → aucune écriture). Extraction dans handlers/maintenance.js (patron d'injection).
 const { createMaintenance } = require("./handlers/maintenance");
-const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps });
+const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps, requestRecompute });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.importMntContrats = _maintenance.importMntContrats;
 exports.aiSuggestMntContrats = _maintenance.aiSuggestMntContrats;
