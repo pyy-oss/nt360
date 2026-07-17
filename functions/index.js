@@ -1460,12 +1460,14 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   const { projectionWeight, normalizeTiers } = require("./domain/projection");
   const { isAgedLost } = require("./domain/oppLifecycle");
   const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
-  // Population IDENTIQUE à pipeline/board/vélocité (cf. audit cohérence chiffres, divergence C) : ouvertes
-  // (1-5), NON `stale` (fantômes retirés de LIVE), NON périmées par âge (`isAgedLost`). Sans ces exclusions,
-  // des opps invisibles ailleurs gonflaient la demande → gap de recrutement surévalué. `source`/`ageDays`
-  // requis par isAgedLost (sinon jamais périmée).
-  const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage", "stale", "source", "ageDays"]);
-  const opps = allOpps.filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5 && o.stale !== true && !isAgedLost(o); })
+  // Population alignée pipeline/vélocité : ouvertes (1-5), NON `stale`, NON périmées par âge (`isAgedLost`),
+  // DÉDUPLIQUÉE par FP (parité aggregate.js — une 'saisie' ré-importée en salesData doublait sinon la demande
+  // → gap de recrutement surévalué). `fp`/`updatedAt` requis par la dédup ; dormantes CONSERVÉES à dessein
+  // (une affaire ouverte qui a glissé reste à STAFFER — plan de capacité = liste d'action, pas prévision de CA).
+  const { dedupOppsByFp } = require("./domain/oppPipeline");
+  const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage", "stale", "source", "ageDays", "fp", "updatedAt"]);
+  const opps = dedupOppsByFp(allOpps.filter((o) => o.stale !== true && !isAgedLost(o)))
+    .filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; })
     .map((o) => ({ ...o, pw: projectionWeight(o, tiers) }));
   const plan = capacityVsPipeline({ consultants, loadByConsultant: byConsultant, months, opps });
   return { ok: true, months, openOppCount: opps.length, ...plan };
@@ -1977,6 +1979,7 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   const { rollupForecast } = require("./domain/forecast");
   const { plausibleYear, fpKey } = require("./lib/ids");
   const { isAgedLost, isDormantClosing } = require("./domain/oppLifecycle");
+  const { dedupOppsByFp } = require("./domain/oppPipeline");
   const [oppSnap, fiscalDoc, projDoc] = await Promise.all([
     // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
     // fp + updatedAt : requis pour la dédup (intra/inter-source) et l'exclusion des opps DÉJÀ AU CARNET
@@ -2026,18 +2029,9 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // quand config/fiscal.currentFy n'est pas encore écrit). Année civile en dernier recours seulement.
   const currentFy = fiscalFy || maxYearPo || new Date().getUTCFullYear();
   const targetFy = periodYear || currentFy;
-  // DÉDUP (parité aggregate.js) : sinon des doublons de FP salesData (ids hérités) ou une opp 'saisie'
-  // ré-importée en LIVE gonflent le pipeline prévisionnel. Intra-source salesData : garder le PLUS RÉCENT
-  // (updatedAt) par FP ; inter-source : une 'saisie' dont le FP est couvert par une 'salesData' est écartée.
-  const _ts = (o) => { const u = o.updatedAt; return u && typeof u.toMillis === "function" ? u.toMillis() : (Number(u) || 0); };
-  const bestSalesByFp = new Map();
-  for (const o of opps) { if (o.source === "salesData") { const k = fpKey(o.fp); if (k && (!bestSalesByFp.has(k) || _ts(o) >= _ts(bestSalesByFp.get(k)))) bestSalesByFp.set(k, o); } }
-  const salesFps = new Set([...bestSalesByFp.keys()]);
-  opps = opps.filter((o) => {
-    if (o.source === "salesData") { const k = fpKey(o.fp); if (k && bestSalesByFp.get(k) !== o) return false; }
-    else if (o.source === "saisie") { const k = fpKey(o.fp); if (k && salesFps.has(k)) return false; }
-    return true;
-  });
+  // DÉDUP (source unique domain/oppPipeline, parité aggregate.js/scoring/vélocité/capacité) : sinon des
+  // doublons de FP salesData (ids hérités) ou une opp 'saisie' ré-importée en LIVE gonflent le prévisionnel.
+  opps = dedupOppsByFp(opps);
   // Les OUVERTES (1-5) alimentent commit/best_case/pipeline : filtrées par leur date de clôture PRÉVUE
   // (closingDate) ET privées de celles DÉJÀ AU CARNET (bookedFps). Les gagnées (stage 6) sont ignorées par
   // rollupForecast (le carnet les porte) → aucun double-compte, assiette alignée sur le pondéré du Cockpit.
@@ -2067,11 +2061,12 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   const { scoreOpportunity, isOpen } = require("./domain/scoring");
   const { isAgedLost } = require("./domain/oppLifecycle");
   const { calibrate } = require("./domain/scoreCalib");
+  const { dedupOppsByFp } = require("./domain/oppPipeline");
   // `source`/`ageDays` chargés pour EXCLURE la MÊME population que pipeline/board/vélocité (parité) :
-  // fantômes `stale` (retirés de LIVE) et affaires périmées par âge (`isAgedLost`). Sans quoi le module
-  // « opportunités OUVERTES » listerait des affaires introuvables ailleurs (incohérence de population).
+  // fantômes `stale` (retirés de LIVE) et affaires périmées par âge (`isAgedLost`). `fp`/`updatedAt` : dédup
+  // par FP (une 'saisie' ré-importée en salesData ne doit pas produire 2 lignes de score).
   const snap = await db.collection("opportunities")
-    .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "source", "ageDays", "visibleTo")
+    .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "source", "ageDays", "fp", "updatedAt", "visibleTo")
     .limit(MAX_SCAN + 1).get(); // scan borné (R1)
   const all = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   // Calibration EMPIRIQUE (R6) : on dérive base + poids de catégorie du taux de gain HISTORIQUE réel
@@ -2079,10 +2074,15 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   const closed = all.filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7)
     .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: o.forecastCategory }));
   const calib = calibrate(closed);
-  // Population IDENTIQUE à pipeline/board/vélocité : ouvertes (1-5), NON `stale`, NON périmées par âge.
-  let opps = all.filter((o) => isOpen(o) && o.stale !== true && !isAgedLost(o));
+  // Population alignée sur pipeline/vélocité : NON `stale`, NON périmée par âge, DÉDUPLIQUÉE par FP (parité
+  // aggregate.js). On DÉDUPLIQUE sur l'ensemble stale/aged-filtré (toutes étapes) AVANT de restreindre aux
+  // OUVERTES — même ordre que forecastRollup. NB : les DORMANTES (closing d'un exercice révolu) restent
+  // listées à dessein — une affaire ouverte qui a glissé est encore À TRAVAILLER (liste d'action, pas
+  // prévision de CA). Seul le pondéré prévisionnel (cockpit/vélocité) les écarte.
   const scoped = (await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req));
-  if (scoped) opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  let base = all.filter((o) => o.stale !== true && !isAgedLost(o));
+  if (scoped) base = base.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+  const opps = dedupOppsByFp(base).filter((o) => isOpen(o));
   const today = nowISO10();
   const rows = opps.map((o) => {
     const s = scoreOpportunity(o, today, calib);
@@ -2103,22 +2103,33 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   await requireRead(req, "pipeline");
   const { salesVelocity } = require("./domain/velocity");
   const { normalizeTiers } = require("./domain/projection");
-  const { fpKey } = require("./lib/ids");
-  const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
-  // probability/ageDays/source nécessaires au pondéré TIÉRÉ et à l'exclusion des périmées (isAgedLost) ;
-  // `fp` requis pour exclure les opps DÉJÀ au carnet (parité net-carnet du cockpit).
-  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "fp", "visibleTo").limit(MAX_SCAN + 1).get();
+  const { fpKey, plausibleYear } = require("./lib/ids");
+  const { dedupOppsByFp } = require("./domain/oppPipeline");
+  const { isDormantClosing } = require("./domain/oppLifecycle");
+  const [projDoc, fiscalDoc] = await Promise.all([db.doc("config/projection").get(), db.doc("config/fiscal").get()]);
+  const tiers = normalizeTiers(projDoc.data() || undefined);
+  const excludeDormant = (projDoc.data() || {}).excludeDormant !== false;
+  // probability/ageDays/source : pondéré TIÉRÉ + exclusion des périmées (isAgedLost) ; `fp`/`updatedAt` : dédup
+  // + exclusion des opps DÉJÀ au carnet ; `closingDate` : exclusion des DORMANTES (closing d'un exercice
+  // révolu) — MÊME assiette que le « Pondéré projeté » du cockpit (invariant fort « même métrique = même nombre »).
+  const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "fp", "updatedAt", "closingDate", "visibleTo").limit(MAX_SCAN + 1).get();
   let opps = sliceCapped(snap.docs).docs.map((d) => d.data()).filter((o) => o.stale !== true);
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
-  // Carnet P&L matérialisé (commandesRows/*, MÊME source que le front/pipeline) → set de FP au carnet,
-  // pour retrancher les opps déjà réalisées du pondéré ouvert (anti-double-compte, invariant chiffres).
-  const bookedFps = new Set();
+  // Dédup FP (source unique domain/oppPipeline, parité aggregate.js) AVANT l'agrégation : une 'saisie'
+  // ré-importée en salesData ou un doublon salesData doublerait sinon le pondéré ET le taux de gain.
+  opps = dedupOppsByFp(opps);
+  // Carnet P&L matérialisé (commandesRows/*) → FP au carnet (anti-double-compte) + max(yearPo) pour l'exercice.
+  const bookedFps = new Set(); let maxYearPo = 0;
   try {
     const cmdSnap = await db.collection("commandesRows").get();
-    for (const d of cmdSnap.docs) for (const r of (d.data().rows || [])) { const k = fpKey(r.fp); if (k) bookedFps.add(k); }
+    for (const d of cmdSnap.docs) for (const r of (d.data().rows || [])) { const k = fpKey(r.fp); if (k) bookedFps.add(k); maxYearPo = Math.max(maxYearPo, plausibleYear(r.yearPo) || 0); }
   } catch { /* carnet indisponible → repli sans exclusion (pas de blocage de la vélocité) */ }
+  // Exercice courant : config/fiscal prioritaire, PUIS repli max(yearPo borné) — MÊME règle qu'aggregate.js.
+  const currentFy = ((fiscalDoc.data() || {}).currentFy || 0) || maxYearPo || new Date().getUTCFullYear();
+  // DORMANTES écartées du pondéré ouvert (parité cockpit) — n'affecte que les OUVERTES (isDormantClosing borne 1-5).
+  if (excludeDormant) opps = opps.filter((o) => !isDormantClosing(o, currentFy));
   return { ok: true, ...salesVelocity(opps, tiers, bookedFps) };
 });
 
@@ -2384,7 +2395,7 @@ exports.runAutomations = _automations.runAutomations;
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
 // pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
 const { createSanitize } = require("./handlers/sanitize");
-const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
+const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
 exports.deleteRecords = _sanitize.deleteRecords;
 exports.setCancellation = _sanitize.setCancellation;
 

@@ -34,6 +34,9 @@ function createOpportunities({
     if (!client) throw new HttpsError("invalid-argument", "client requis");
     const stage = clampStage(d.stage);
     const amount = Number(d.amount) || 0;
+    // Montant NÉGATIF interdit (parité patchOpportunity/syncSalesData) : un négatif fini passait `|| 0` et
+    // persistait un `weighted` négatif qui polluait tous les agrégats commerciaux (invariant de cohérence).
+    if (amount < 0) throw new HttpsError("invalid-argument", "montant négatif interdit");
     // Étape précédente (édition d'une saisie existante) → journal de transition si elle change.
     let prevStage = null;
     if (typeof d.id === "string" && d.id.startsWith("saisie_")) {
@@ -216,6 +219,9 @@ function createOpportunities({
   // (seul un rédacteur a besoin du modèle pour le ré-importer). En-têtes EXACTS du parseur (parité). ---
   const exportOpportunities = onCallG("exportOpportunities", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
     await requireWrite(req, "pipeline");
+    // Export = scan borné (MAX_SCAN) + génération XLSX : rate-limité comme l'import (parité), sinon des
+    // appels répétés déclenchent des exports coûteux (CPU/mémoire) sans garde-fou.
+    if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'exports en peu de temps — patientez un instant.");
     const { buildTemplateAoa } = require("../parsers/oppImport");
     // Scan borné (R1) : lecture à MAX_SCAN+1 → troncature SIGNALÉE si dépassement (jamais silencieuse).
     const snap = await db.collection("opportunities").limit(MAX_SCAN + 1).get();
