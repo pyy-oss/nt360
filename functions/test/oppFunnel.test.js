@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { oppFunnel } = require("../domain/oppFunnel");
+const { oppFunnel, stageConversion } = require("../domain/oppFunnel");
 
 describe("oppFunnel — funnel de conversion depuis l'historique des transitions", () => {
   it("agrège les transitions (from→to) avec count + montant", () => {
@@ -36,5 +36,33 @@ describe("oppFunnel — funnel de conversion depuis l'historique des transitions
     expect(oppFunnel([]).total).toBe(0);
     expect(oppFunnel([{ from: 1 }, { to: 0 }, null]).total).toBe(0);
     expect(oppFunnel(undefined).transitions).toEqual([]);
+  });
+});
+
+describe("stageConversion — progression par étape (où meurent les deals)", () => {
+  it("mesure sorties/avancés/perdus/reculs par étape active de départ", () => {
+    const hist = [
+      { from: 4, to: 5 },  // avancé
+      { from: 4, to: 6 },  // avancé (gagné)
+      { from: 4, to: 7 },  // perdu
+      { from: 4, to: 3 },  // recul
+      { from: 2, to: 3 },  // avancé
+      { from: 6, to: 7 },  // départ NON actif (6) → ignoré
+      { from: 0, to: 2 },  // départ 0 → ignoré (création, pas une sortie d'étape)
+    ];
+    const s4 = stageConversion(hist).find((s) => s.stage === 4);
+    expect(s4.out).toBe(4);
+    expect(s4.advanced).toBe(2);
+    expect(s4.won).toBe(1);
+    expect(s4.lost).toBe(1);
+    expect(s4.regressed).toBe(1);
+    expect(s4.advanceRate).toBeCloseTo(0.5, 6);
+    expect(s4.lossRate).toBeCloseTo(0.25, 6);
+    const s2 = stageConversion(hist).find((s) => s.stage === 2);
+    expect(s2.out).toBe(1);
+    expect(s2.advanceRate).toBe(1);
+    // Seules les étapes actives 1-5 rencontrées apparaissent, triées.
+    expect(stageConversion(hist).map((s) => s.stage)).toEqual([2, 4]);
+    expect(stageConversion([])).toEqual([]);
   });
 });

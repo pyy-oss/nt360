@@ -182,9 +182,21 @@ export const Pipeline: FC<Props> = ({ period }) => {
               colNum("Occurrences", (t) => t.count, (t) => t.count),
               colNum("Montant", (t) => money(t.amount), (t) => t.amount),
             ]} rows={funnelC?.transitions || []} />
+            {(funnelC?.byStage?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <div className="text-[12px] font-semibold text-muted mb-1">Progression par étape — où avancent (ou meurent) les deals</div>
+                <Table columns={[
+                  colText("Étape de départ", (s) => `${s.stage} · ${STAGE_SHORT[s.stage] || s.stage}`, (s) => s.stage),
+                  colNum("Sorties", (s) => s.out, (s) => s.out),
+                  colNum("% avancés", (s) => <span className={cx(s.advanceRate >= 0.5 ? "text-emerald" : s.advanceRate >= 0.3 ? "text-gold" : "text-clay")}>{pct(s.advanceRate)}</span>, (s) => s.advanceRate),
+                  colNum("% perdus", (s) => <span className={cx(s.lossRate >= 0.5 ? "text-clay" : s.lossRate >= 0.3 ? "text-gold" : "text-ink")}>{pct(s.lossRate)}</span>, (s) => s.lossRate),
+                  colNum("Reculs", (s) => s.regressed, (s) => s.regressed),
+                ]} rows={funnelC?.byStage || []} colsKey="pipeline-stage-conv" />
+              </div>
+            )}
           </>
         ) : <EmptyState label="Le funnel de conversion se construit à partir des changements d'étape (board / édition d'opportunité)." />}
-        <Tip>Funnel <b>réel</b> mesuré sur les transitions d'étape journalisées (board Kanban / édition) — la source Excel n'ayant ni date de création ni historique, il se construit <b>à partir de maintenant</b> et gagne en fiabilité avec le temps. <b>Taux de gain</b> = passages en Gagné / (Gagné + Perdu).{funnelC?.truncated ? ` Au-delà de ${(funnelC?.windowSize ?? 0).toLocaleString("fr-FR")} transitions, la mesure porte sur cette FENÊTRE GLISSANTE des plus récentes (les plus anciennes en sortent).` : ""}</Tip>
+        <Tip>Funnel <b>réel</b> mesuré sur les transitions d'étape journalisées (board Kanban / édition) — la source Excel n'ayant ni date de création ni historique, il se construit <b>à partir de maintenant</b> et gagne en fiabilité avec le temps. <b>Taux de gain</b> = passages en Gagné / (Gagné + Perdu). La <b>progression par étape</b> mesure, parmi les <b>sorties</b> de chaque étape, la part qui <b>avance</b> vs <b>perdue</b> vs recule — un taux <b>observé</b> sur les mouvements (pas une conversion de cohorte, faute de date de création).{funnelC?.truncated ? ` Au-delà de ${(funnelC?.windowSize ?? 0).toLocaleString("fr-FR")} transitions, la mesure porte sur cette FENÊTRE GLISSANTE des plus récentes (les plus anciennes en sortent).` : ""}</Tip>
       </Card>
     </div>
   );

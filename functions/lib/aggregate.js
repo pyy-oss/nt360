@@ -17,7 +17,7 @@ const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
 const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
-const { oppFunnel } = require("../domain/oppFunnel");
+const { oppFunnel, stageConversion } = require("../domain/oppFunnel");
 const { dataQuality } = require("../domain/dataQuality");
 const { isAgedLost, isDormantClosing } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
@@ -441,7 +441,8 @@ async function recomputeCore(db, only) {
     const OPP_HISTORY_WINDOW = 5000;
     const histSnap = await db.collection("oppHistory").orderBy("at", "desc").limit(OPP_HISTORY_WINDOW).get();
     const truncated = histSnap.size >= OPP_HISTORY_WINDOW; // borne atteinte → funnel = fenêtre glissante
-    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(histSnap.docs.map((d) => d.data())), truncated, windowSize: histSnap.size, ...stamp } });
+    const hist = histSnap.docs.map((d) => d.data());
+    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(hist), byStage: stageConversion(hist), truncated, windowSize: histSnap.size, ...stamp } });
   }
   // Gate ALIGNÉ sur l'écriture de summaries/dataQuality (`want("alerts") || want("dataQuality")`) :
   // les alertes et le cockpit Qualité partagent des métriques identiques (surfacturation, factures non
