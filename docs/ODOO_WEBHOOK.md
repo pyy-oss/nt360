@@ -103,3 +103,179 @@ lot (`errors[]`) ; une erreur interne renvoie `500`.
 Tout doc reçu porte `source: "odoo"`, `odooId`, `updatedAt` (et `createdAt` à la création). Les
 normalisations (FP, client, BU, dates, montants) sont **identiques** à celles des imports Excel → Odoo et
 Excel convergent sur les mêmes documents (pas de seconde vérité).
+
+---
+
+# Guide d'implémentation — côté Odoo
+
+Cette partie s'adresse au **développeur Odoo**. nt360 est déjà prêt à recevoir ; il reste à **émettre**
+depuis Odoo (opportunités, commandes, factures) vers l'endpoint `odooWebhook`, signé HMAC.
+
+## 0. Prérequis (à récupérer auprès de nt360 / Direction)
+
+| Élément | Où | Remarque |
+|---|---|---|
+| **URL** `odooWebhook` | console Firebase → Functions | `https://<région>-propulse-business-87f7a.cloudfunctions.net/odooWebhook` |
+| **Secret partagé** | posé côté nt360 via `setOdooWebhook({ secret })` | ≥ 16 caractères ; **la même valeur** doit être stockée côté Odoo. Générer p. ex. `openssl rand -hex 32`. |
+
+Le secret est **write-only** côté nt360 (jamais relu). Convenez-le une fois, stockez-le des deux côtés.
+
+## 1. Stocker le secret dans Odoo (jamais en clair dans le code)
+
+Paramètre système (`Paramètres techniques → Paramètres système`), clé **`nt360.webhook_secret`**, valeur = le
+secret partagé. Idem pour l'URL, clé **`nt360.webhook_url`**. Lecture dans le code :
+
+```python
+ICP    = env["ir.config_parameter"].sudo()
+SECRET = ICP.get_param("nt360.webhook_secret")
+URL    = ICP.get_param("nt360.webhook_url")
+```
+
+## 2. Server Action générique (signe + envoie)
+
+Une **Server Action** (`ir.actions.server`, type *code Python*) réutilisable, appelée par les Automated
+Actions de chaque modèle. Elle construit le corps, **signe les octets exacts** transmis, poste, et loggue.
+
+```python
+import hmac, hashlib, json
+import urllib.request, urllib.error
+
+def _nt360_send(env, obj, records):
+    """obj: 'opportunity'|'order'|'invoice' ; records: list[dict] déjà mappés au contrat nt360."""
+    ICP    = env["ir.config_parameter"].sudo()
+    secret = ICP.get_param("nt360.webhook_secret")
+    url    = ICP.get_param("nt360.webhook_url")
+    if not secret or not url:
+        raise UserError("nt360 : secret ou URL manquant (ir.config_parameter)")
+
+    # Corps BRUT : ce sont CES octets qui sont signés ET envoyés (ne re-sérialisez pas ailleurs).
+    body = json.dumps({"object": obj, "records": records},
+                      separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sig  = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json",
+        "X-Signature":  sig,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read() or b"{}")
+            env["ir.logging"].sudo().create({
+                "name": "nt360.webhook", "type": "server", "level": "INFO",
+                "dbname": env.cr.dbname, "func": obj, "line": "0", "path": "nt360",
+                "message": "nt360 OK: %s" % json.dumps(payload),
+            })
+    except urllib.error.HTTPError as e:
+        # 401 signature, 503 non configuré, 400 contrat, 500 interne — voir « Réponse » plus haut.
+        raise UserError("nt360 %s: %s" % (e.code, e.read().decode("utf-8", "ignore")))
+```
+
+> **Le piège n°1** : signer une chaîne différente de celle envoyée → `401`. Ici `body` est signé **et**
+> passé tel quel à `data=` : garanti identique. N'utilisez pas une lib qui re-sérialise le JSON à l'envoi.
+
+## 3. Mapper chaque modèle Odoo vers le contrat nt360
+
+Renseignez **au minimum les champs requis** (`fp` **ou** `odooId` pour l'opportunité ; `fp` pour la
+commande ; `numero` pour la facture). Adaptez les accès aux **champs personnalisés** de votre base (le N° FP
+et la BU sont souvent des champs `x_studio_…` — remplacez les `TODO` par vos noms réels).
+
+```python
+def _fp(rec):        return rec.x_studio_fp or ""        # TODO: votre champ N° FP (FP/AAAA/N)
+def _bu(rec):        return rec.x_studio_bu or ""         # TODO: votre champ Business Unit
+def _iso(d):         return d and str(d)[:10] or ""       # date/datetime Odoo → 'AAAA-MM-JJ'
+STAGE_MAP = {"New": 1, "Qualified": 2, "Proposition": 3, "Négociation": 4, "Won": 6, "Lost": 5}  # TODO: vos étapes → 1..6
+
+# crm.lead → opportunity
+def map_lead(l):
+    return {
+        "odooId": "crm.lead:%s" % l.id,
+        "fp": _fp(l), "client": l.partner_id.name or l.contact_name or "",
+        "am": l.user_id.name or "", "bu": _bu(l),
+        "amount": l.expected_revenue or 0,
+        "stage": STAGE_MAP.get(l.stage_id.name, 1),
+        "probability": l.probability or 0,                # IdC en % (0-100)
+        "closingDate": _iso(l.date_deadline),
+    }
+
+# sale.order → order  (cas = HT signé ; suppliers optionnel)
+def map_order(o):
+    return {
+        "odooId": "sale.order:%s" % o.id,
+        "fp": _fp(o), "client": o.partner_id.name or "",
+        "designation": o.name or "", "bu": _bu(o),
+        "yearPo": o.date_order.year if o.date_order else 0,
+        "cas": o.amount_untaxed or 0,
+        # "raf": ...,                                      # omettre → nt360 garde son RAF dérivé
+        # "suppliers": [{"name": .., "amount": ..}],       # optionnel
+    }
+
+# account.move (facture client) → invoice
+def map_invoice(m):
+    return {
+        "odooId": "account.move:%s" % m.id,
+        "numero": m.name or "", "fp": _fp(m),
+        "client": m.partner_id.name or "",
+        "amountHt": m.amount_untaxed or 0, "bu": _bu(m),
+        "date": _iso(m.invoice_date), "dueDate": _iso(m.invoice_date_due),
+        "paid": m.payment_state == "paid",
+    }
+```
+
+Exemple d'appel dans une Server Action déclenchée sur `sale.order` :
+
+```python
+_nt360_send(env, "order", [map_order(r) for r in records])   # `records` = recordset déclencheur
+```
+
+## 4. Déclencher l'envoi (Automated Actions)
+
+Une *Automated Action* (`base.automation`) par modèle, **sur création et mise à jour** :
+
+| Modèle | Déclencheur | Action |
+|---|---|---|
+| `crm.lead` | À la création & mise à jour | Server Action → `_nt360_send(env, "opportunity", [map_lead(r) for r in records])` |
+| `sale.order` | À la création & mise à jour | `_nt360_send(env, "order", [map_order(r) for r in records])` |
+| `account.move` | À la validation (`state == 'posted'`) & mise à jour | `_nt360_send(env, "invoice", [map_invoice(r) for r in records])` |
+
+- **Idempotence** : renvoyer le même enregistrement est sans danger — nt360 fait un **upsert** sur un id
+  déterministe (`fp`/`numero`) ou par rapprochement `fp`→`odooId`. Aucun doublon.
+- **Lots** : ≤ **500** `records` par requête (au-delà : `truncated: true`). Pour un backfill massif,
+  paginez côté Odoo.
+- **Fiabilité** : `odooWebhook` est synchrone. En cas d'erreur réseau/`5xx`, prévoyez un **rejeu** (file /
+  `queue_job`), le renvoi étant idempotent. Un `4xx` (401/400) est une erreur de configuration/contrat à
+  corriger, pas à rejouer en boucle.
+
+## 5. Tester l'endpoint AVANT de brancher Odoo (curl signé)
+
+```bash
+SECRET='le-secret-partagé'
+URL='https://<région>-propulse-business-87f7a.cloudfunctions.net/odooWebhook'
+BODY='{"object":"order","records":[{"fp":"FP/2026/12","client":"ACME","cas":12000000,"bu":"ICT"}]}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.*= //')
+curl -sS -X POST "$URL" -H 'Content-Type: application/json' -H "X-Signature: $SIG" --data "$BODY"
+# Attendu : {"ok":true,"object":"order","written":1,...}
+```
+
+`printf '%s'` (sans saut de ligne final) garantit que les octets signés = les octets envoyés.
+
+## Diagnostic des réponses
+
+| Code | Signification | À faire |
+|---|---|---|
+| `200 {ok:true, written, failed, errors[]}` | Traité (voir `errors[]` pour les lignes rejetées) | Vérifier `failed`/`errors` : champ requis manquant, objet inconnu… |
+| `200 {ignored:"integration disabled"}` | Kill-switch `enabled:false` côté nt360 | Demander l'activation (`setOdooWebhook({ enabled:true })`) |
+| `401 signature invalide` | HMAC faux | Même secret ? Octets signés = octets envoyés ? En-tête `X-Signature` en **hex** ? |
+| `503 webhook non configuré` | Aucun secret posé côté nt360 | Direction : `setOdooWebhook({ secret })` |
+| `400 aucun enregistrement` | `records[]` vide | Envoyer `records: [ {…} ]` (ou `record: {…}`) |
+| `405` | Méthode ≠ POST | Utiliser `POST` |
+
+## Checklist de mise en service
+
+- [ ] Secret partagé généré, posé côté nt360 (`setOdooWebhook`) **et** dans `ir.config_parameter` Odoo.
+- [ ] `nt360.webhook_url` renseignée (URL déployée de `odooWebhook`).
+- [ ] Test `curl` signé → `200 {ok:true}`.
+- [ ] Champs `x_studio_fp` / `x_studio_bu` (ou équivalents) mappés dans `_fp`/`_bu`.
+- [ ] Table `STAGE_MAP` alignée sur vos étapes CRM → **1..6** (6 = gagné).
+- [ ] 3 Automated Actions (lead / order / invoice) sur création **et** mise à jour.
+- [ ] Rejeu prévu sur erreur réseau/`5xx` (renvoi idempotent).
+- [ ] Backfill initial paginé par lots ≤ 500.
