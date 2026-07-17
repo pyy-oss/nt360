@@ -72,7 +72,7 @@ export const Backlog: FC<Props> = () => {
             colText("Affaire", (t) => t.affaire || "—"),
             det(colText("BU", (t) => t.bu)),
             det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—")),
-            det(colNum("Année", (t) => t.yearPo || "—")),
+            det(colNum("Année", (t) => plausibleYear(t.yearPo) || "—")), // borné (jamais un millésime aberrant brut)
             colNum("CAS", (t) => money(t.cas)),
             colNum("Facturé", (t) => money(t.facture)),
             colNum("RAF dérivé", (t) => money(t.raf)),
@@ -1182,7 +1182,7 @@ export const OrderList: FC<Props> = () => {
             det(colNum("%MB", (r: Order) => pct(r.cas ? (r.mb || 0) / r.cas : 0), (r: Order) => (r.cas ? (r.mb || 0) / r.cas : 0))),
             det(colText("P&L", (r: Order) => pnlBadge(r.pnlSource), (r: Order) => r.pnlSource || "")),
           ] : []),
-          det(colNum("Année", (r) => r.yearPo || "—", (r) => r.yearPo || 0)),
+          det(colNum("Année", (r) => plausibleYear(r.yearPo) || "—", (r) => plausibleYear(r.yearPo) || 0)),
           det(colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || "")),
           // Synchro inverse ClickUp : statut en ligne principale, dates dans le détail.
           colText("Statut CU", (r) => (r.clickupStatus ? <Badge tone="steel">{r.clickupStatus}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupStatus || ""),
