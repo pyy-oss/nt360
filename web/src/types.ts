@@ -47,7 +47,7 @@ export interface PipelineSummary {
   susp?: { brut?: number; count?: number };
   tierBreakdown?: TierBucket[];
   conv?: number; wonCount?: number; lostCount?: number;
-  byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byBU?: Record<string, number>; byMonth?: Record<string, number>;
+  byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byBU?: Record<string, number>; bySource?: Record<string, number>; byMonth?: Record<string, number>;
   byWeek?: Record<string, number>; // écoulement HEBDO du closing (clés ISO « AAAA-Www »), miroir de byMonth
   // Phases amont (tag transverse dérivé) : Budget / Gelé / Dev sur opps actives — volume + brut.
   phase0?: { budget?: { count?: number; brut?: number }; gele?: { count?: number; brut?: number }; dev?: { count?: number; brut?: number } };
@@ -224,7 +224,7 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }
 export interface CommandeChunk { i?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number };
-export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; stale?: boolean; ageDays?: number | null; dateCreation?: string | null };
+export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; leadSource?: string | null; competitor?: string | null; stale?: boolean; ageDays?: number | null; dateCreation?: string | null };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; fxRate?: number | null; fxSource?: string; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
 export type Objective = {

@@ -93,6 +93,9 @@ function createOpportunities({
       nextStep: String(d.nextStep || "").trim().slice(0, 500) || null,
       nextStepDate: d.nextStepDate ? (toISO(d.nextStepDate) || null) : null,
       lostReason: String(d.lostReason || "").trim().slice(0, 200) || null,
+      // Origine du lead (canal) + concurrent identifié sur une perte — analytique commerciale (DC Lot 6).
+      leadSource: String(d.leadSource || "").trim().slice(0, 60) || null,
+      competitor: String(d.competitor || "").trim().slice(0, 120) || null,
       updatedAt: FieldValue.serverTimestamp(),
     };
     if (ownerUid !== undefined) { doc.ownerUid = ownerUid; doc.visibleTo = await visibleToFor(ownerUid); }
@@ -182,6 +185,8 @@ function createOpportunities({
     if (d.nextStep !== undefined) patch.nextStep = String(d.nextStep || "").trim().slice(0, 500) || null;
     if (d.nextStepDate !== undefined) { const { toISO } = require("../lib/sheets"); patch.nextStepDate = d.nextStepDate ? (toISO(d.nextStepDate) || null) : null; }
     if (d.lostReason !== undefined) patch.lostReason = String(d.lostReason || "").trim().slice(0, 200) || null;
+    if (d.leadSource !== undefined) patch.leadSource = String(d.leadSource || "").trim().slice(0, 60) || null; // origine du lead (canal)
+    if (d.competitor !== undefined) patch.competitor = String(d.competitor || "").trim().slice(0, 120) || null; // concurrent (analytique perte)
     if (d.stage !== undefined) {
       const stage = clampStage(d.stage);
       patch.stage = stage;

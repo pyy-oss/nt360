@@ -32,6 +32,7 @@ export type OppInput = {
   probability: number; closingDate?: string; fp?: string; mbPrev?: number; dr?: boolean;
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
   forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[];
+  leadSource?: string; competitor?: string;
 };
 // LIGNES PRODUIT / CPQ-lite (Lot 8) — quand des lignes existent, le montant de l'opp est DÉRIVÉ.
 export type OppLine = { product: string; qty: number; unitPrice: number; discountPct: number; lineTotal?: number };
@@ -53,7 +54,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[] }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string }) {
   await httpsCallable(functions, "patchOpportunity")(data);
 }
 

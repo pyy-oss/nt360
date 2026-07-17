@@ -104,6 +104,14 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
         <Card title="Pondéré par BU"><HBars rows={objToArr(data.byBU).slice(0, 10)} colorFn={() => T.steel} /></Card>
       </div>
+      {Object.keys(data.bySource || {}).length > 0 && (
+        <div className={cols2}>
+          <Card title="Pondéré par source (canal)">
+            <HBars rows={objToArr(data.bySource).slice(0, 10)} colorFn={() => T.emerald} />
+            <Tip>Pipeline <b>pondéré</b> ventilé par <b>origine du lead</b> (canal d'acquisition) : quel canal alimente réellement le carnet projeté. Renseigné à la saisie de l'opportunité ; « — » = source non précisée.</Tip>
+          </Card>
+        </div>
+      )}
       <div className={cols2}>
         <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       {monthsAsc(data.byWeek).filter((x) => x.name !== "?").length > 0 && (
@@ -277,7 +285,9 @@ export const Am360: FC<Props> = () => {
 // Module OPPORTUNITÉS : top pondéré + liste détaillée + saisie.
 // IdC par défaut d'une étape, en POURCENTAGE (0-100) — échelle canonique de l'app (miroir salesData).
 const DEFAULT_PROBA: Record<number, number> = { 1: 10, 2: 25, 3: 40, 4: 60, 5: 80, 8: 5 };
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
+// Origines de lead (canaux) — liste fixe, alignée sur le vocabulaire commercial ESN.
+const LEAD_SOURCES = ["Entrant", "Sortant", "Référence", "Partenaire", "Appel d'offres", "Salon", "Autre"];
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", leadSource: "", competitor: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
 // Total dérivé des lignes produit (CPQ-lite, Lot 8) — miroir client de domain/quote.computeLines.
 const lineTot = (l: OppLine) => Math.round((Number(l.qty) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100));
 const linesTotal = (ls: OppLine[]) => ls.reduce((s, l) => s + lineTot(l), 0);
@@ -498,7 +508,7 @@ export const OppList: FC<Props> = () => {
     forecastCategory: (o as { forecastCategory?: string }).forecastCategory || "",
     custom: ((o as { custom?: Record<string, unknown> }).custom) || {},
     lines: ((o as { lines?: OppLine[] }).lines) || [],
-    nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", patch,
+    nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", leadSource: o.leadSource || "", competitor: o.competitor || "", patch,
   }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
   const fixOpp = (o: Opportunity) => prefill(o, true);   // opp IMPORTÉE → correction (patch, source conservée)
@@ -537,6 +547,16 @@ export const OppList: FC<Props> = () => {
       e.count++; e.amount += (o.amount || 0); m.set(k, e);
     });
     return [...m.entries()].map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
+  }, [rows]);
+  // Concurrents sur les opps PERDUES (étape 7) — analytique win/loss « contre qui perd-on ».
+  const lostByCompetitor = useMemo(() => {
+    const m = new Map<string, { count: number; amount: number }>();
+    rows.filter((o) => o.stage === 7 && (o.competitor || "").trim()).forEach((o) => {
+      const k = (o.competitor || "").trim();
+      const e = m.get(k) || { count: 0, amount: 0 };
+      e.count++; e.amount += (o.amount || 0); m.set(k, e);
+    });
+    return [...m.entries()].map(([competitor, v]) => ({ competitor, ...v })).sort((a, b) => b.amount - a.amount);
   }, [rows]);
   // Comptages par statut en UNE seule passe (au lieu de 5 `rows.filter` complets rejoués à chaque render).
   const segCounts = useMemo(() => {
@@ -595,9 +615,9 @@ export const OppList: FC<Props> = () => {
               <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
                 fn={async () => {
                   if (f.patch) {
-                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   } else {
-                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   }
                   setOpen(false); setF({ ...EMPTY_OPP });
                 }} />
@@ -666,10 +686,17 @@ export const OppList: FC<Props> = () => {
               <input className="field" aria-label="Prochaine action commerciale" placeholder="Ex. relancer DAF, envoyer proposition…" value={f.nextStep} onChange={(e) => setF({ ...f, nextStep: e.target.value })} /></Field>
             <Field label="Échéance action">
               <DateField ariaLabel="Échéance de la prochaine action" value={f.nextStepDate} onChange={(v) => setF({ ...f, nextStepDate: v })} placeholder="jj/mm/aaaa" /></Field>
-            {/* Motif de perte : pertinent uniquement pour une opp Perdue (étape 7) → analytique win/loss. */}
+            {/* Origine du lead (canal) : analytique d'acquisition — quel canal alimente le pipe. */}
+            <Field label="Source du lead">
+              <Select ariaLabel="Origine du lead" value={f.leadSource} onChange={(v) => setF({ ...f, leadSource: v })} options={[{ value: "", label: "—" }, ...LEAD_SOURCES.map((s) => ({ value: s, label: s }))]} /></Field>
+            {/* Motif de perte + concurrent : pertinents pour une opp Perdue (étape 7) → analytique win/loss. */}
             {Number(f.stage) === 7 && (
-              <Field label="Motif de perte">
-                <input className="field" aria-label="Motif de perte" placeholder="Ex. prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></Field>
+              <>
+                <Field label="Motif de perte">
+                  <input className="field" aria-label="Motif de perte" placeholder="Ex. prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></Field>
+                <Field label="Concurrent">
+                  <input className="field" aria-label="Concurrent (perte)" placeholder="Ex. nom du concurrent" value={f.competitor} onChange={(e) => setF({ ...f, competitor: e.target.value })} /></Field>
+              </>
             )}
           </FormSection>
           {Number(f.stage) === 6 && !f.fp.trim() && <div className="text-[11px] text-clay mt-2">Une opportunité gagnée sans N° FP ne pourra pas devenir commande (CAS/backlog).</div>}
@@ -697,6 +724,16 @@ export const OppList: FC<Props> = () => {
             colNum("Montant perdu", (r) => money(r.amount), (r) => r.amount),
           ]} rows={lostByReason} />
           <Tip>Analyse win/loss : volumes et montants perdus par motif (saisi au passage en « Perdu »). Éclaire les corrections de prix / délai / positionnement concurrentiel.</Tip>
+        </Card>
+      )}
+      {lostByCompetitor.length > 0 && (
+        <Card title={`Perdu face à la concurrence · ${lostByCompetitor.reduce((s, r) => s + r.count, 0)} opp.`}>
+          <Table columns={[
+            colText("Concurrent", (r) => r.competitor, (r) => r.competitor),
+            colNum("Opp.", (r) => r.count, (r) => r.count),
+            colNum("Montant perdu", (r) => money(r.amount), (r) => r.amount),
+          ]} rows={lostByCompetitor} />
+          <Tip>Analyse win/loss <b>concurrentielle</b> : contre qui perd-on, et pour quels montants (concurrent saisi au passage en « Perdu »). Oriente le positionnement et le battlecard commercial.</Tip>
         </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>

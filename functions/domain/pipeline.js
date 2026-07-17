@@ -175,6 +175,7 @@ function pipeline(opps, asOf, tiers, orders, geleMonths = 6) {
     byStage,
     byAM: groupSum(proj, (o) => o.am, pw),
     byBU: groupSum(proj, (o) => o.bu, pw),
+    bySource: groupSum(proj, (o) => o.leadSource || "—", pw), // pipeline pondéré par ORIGINE de lead (canal)
     byMonth: groupSum(proj, month, pw),
     // Écoulement HEBDO du closing (D Prev) — même population/pondération que byMonth, granularité semaine.
     byWeek: groupSum(proj, (o) => (o.closingDate ? isoWeek(o.closingDate) : "?"), pw),
