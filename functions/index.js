@@ -385,6 +385,7 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
     surfacturationPct: pct(d.surfacturationPct, 0.005),
     rafEcartPct: pct(d.rafEcartPct, 0.10),
     dormantYears: years(d.dormantYears, 2),
+    valorisationEcartPct: pct(d.valorisationEcartPct, 0.30),
   };
   await db.doc("config/alerts").set(cfg, { merge: true });
   await db.collection("auditLog").add({

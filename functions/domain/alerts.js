@@ -51,6 +51,18 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   const surfac = orders.filter((o) => o.cas > 0 && (invByFp[fpKey(o.fp)] || 0) > o.cas * (1 + T.surfacturationPct));
   if (surfac.length) out.push({ type: "surfacturation", severity: "high", count: surfac.length, message: `${surfac.length} commande(s) surfacturées (Σfactures > CAS)`, refs: surfac.slice(0, 10).map((o) => o.fp) });
 
+  // --- Cohérence AMONT (opportunité ↔ commande) ---
+  // Écart de valorisation : le CAS RETENU (écrasé par une opp gagnée / fiche) s'écarte fortement de la valeur
+  // P&L d'origine (casPnl, conservé par mergeCommandes). Miroir EXACT du prédicat dataQuality.ecart_valorisation
+  // (même population → mêmes comptes, verrouillé par consistencyAlertsDq.test.js).
+  const ecartVal = orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && (o.casPnl || 0) > 0 && (o.cas || 0) > 0 && Math.abs((o.cas || 0) - (o.casPnl || 0)) / Math.max(o.cas || 0, o.casPnl || 0) > T.valorisationEcartPct);
+  if (ecartVal.length) out.push({ type: "ecart_valorisation", severity: "medium", count: ecartVal.length, message: `${ecartVal.length} commande(s) dont le CAS retenu s'écarte de >${(T.valorisationEcartPct * 100).toFixed(0)} % de la valeur P&L d'origine`, refs: ecartVal.slice(0, 10).map((o) => o.fp) });
+
+  // Opportunité encore ACTIVE (stage 1-5) sur un FP DÉJÀ au carnet : commande existante → l'opp fait double
+  // emploi (exclue du pipeline projeté, jamais signalée). Miroir de dataQuality.opp_active_carnet.
+  const activeBooked = opps.filter((o) => { const k = fpKey(o.fp); return o.stage >= 1 && o.stage <= 5 && k && orderFps.has(k); });
+  if (activeBooked.length) out.push({ type: "opp_active_carnet", severity: "low", count: activeBooked.length, message: `${activeBooked.length} opportunité(s) active(s) sur un FP déjà au carnet — à requalifier/clôturer`, refs: activeBooked.slice(0, 10).map((o) => o.fp || o.client) });
+
   const rafIncoh = orders.filter((o) => {
     if (!(o.cas > 0)) return false;
     const attendu = Math.max(o.cas - (invByFp[fpKey(o.fp)] || 0), 0);

@@ -162,6 +162,10 @@ const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "
   opps_gagnees_sans_pnl: { kind: "reconcile-pnl", cap: "import" },
   opps_fantomes: { kind: "nav", module: "opplist" },
   opps_agees: { kind: "nav", module: "opplist" },
+  // Cohérence AMONT (opportunité ↔ commande) — non corrigeable en une valeur : drill vers l'écran concerné
+  // (revoir le CAS retenu sur Commandes / requalifier l'opp sur Pipeline).
+  ecart_valorisation: { kind: "nav", module: "orderlist" },
+  opp_active_carnet: { kind: "nav", module: "opplist" },
   bc_sans_fp: { kind: "fp-bc", cap: "bc" },
   bc_sans_fournisseur: { kind: "text-bc-supplier", cap: "bc" },
   bc_montant_zero: { kind: "amount-bc", cap: "bc" },

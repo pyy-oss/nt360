@@ -802,7 +802,7 @@ export async function callSetUserActive(uid: string, active: boolean) {
   await httpsCallable(functions, "setUserActive")({ uid, active });
 }
 
-export type AlertThresholds = { concentration: number; surfacturationPct: number; rafEcartPct: number; dormantYears: number };
+export type AlertThresholds = { concentration: number; surfacturationPct: number; rafEcartPct: number; dormantYears: number; valorisationEcartPct: number };
 /** Enregistre les seuils d'alerte (admin) : recompute alertes + qualité côté serveur. */
 export async function callSetAlertThresholds(cfg: AlertThresholds) {
   const res = await httpsCallable(functions, "setAlertThresholds")(cfg);
