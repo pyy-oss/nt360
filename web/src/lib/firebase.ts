@@ -11,14 +11,17 @@ import {
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
+// Surcharge par variables VITE_* (injectées au build depuis les variables GitHub à la migration projet).
+// `||` (et non `??`) : une variable posée mais VIDE (var GitHub absente → chaîne vide en CI) retombe sur le
+// défaut — le repli reste l'ancien projet tant que la bascule n'est pas faite (cf. docs/MIGRATION_PROJET.md).
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "AIzaSyBHxv2ThBh66hRc1Lp_boTlzeB8LA37FF8",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "propulse-business-87f7a.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "propulse-business-87f7a",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBHxv2ThBh66hRc1Lp_boTlzeB8LA37FF8",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "propulse-business-87f7a.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "propulse-business-87f7a",
   storageBucket:
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "propulse-business-87f7a.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "952738555565",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "1:952738555565:web:f20523a77118a53267c824",
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "propulse-business-87f7a.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "952738555565",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:952738555565:web:f20523a77118a53267c824",
 };
 
 export const app = initializeApp(firebaseConfig);

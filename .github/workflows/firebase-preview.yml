@@ -48,6 +48,13 @@ jobs:
           # Le canal de preview appelle les MÊMES Cloud Functions que la prod : une fois l'enforcement
           # App Check actif, la preview a aussi besoin de la clé reCAPTCHA pour émettre un jeton valide.
           VITE_APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY }}
+          # Config Firebase client (variables de dépôt) — vides = repli ancien projet (src/lib/firebase.ts).
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
 
       # Firebase Hosting plafonne le nombre de canaux de preview par site. Chaque PR en crée un
       # (rétention plusieurs jours) ; sans purge on finit par saturer le quota (429 RESOURCE_EXHAUSTED)
@@ -62,7 +69,7 @@ jobs:
           set +e
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
-          npx -y firebase-tools hosting:channel:list --site nt360 --project propulse-business-87f7a --json > channels.json 2>/dev/null
+          npx -y firebase-tools hosting:channel:list --site "${{ vars.FIREBASE_HOSTING_SITE || 'nt360' }}" --project "${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}" --json > channels.json 2>/dev/null
           KEEP=3
           ids=$(node -e '
             try {
@@ -75,7 +82,7 @@ jobs:
           ')
           for id in $ids; do
             echo "Purge canal preview obsolète : $id"
-            npx -y firebase-tools hosting:channel:delete "$id" --site nt360 --project propulse-business-87f7a --force 2>/dev/null
+            npx -y firebase-tools hosting:channel:delete "$id" --site "${{ vars.FIREBASE_HOSTING_SITE || 'nt360' }}" --project "${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}" --force 2>/dev/null
           done
           exit 0
 
@@ -88,5 +95,5 @@ jobs:
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: propulse-business-87f7a
+          projectId: ${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}
           expires: 2d

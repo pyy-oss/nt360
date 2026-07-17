@@ -24,10 +24,20 @@ jobs:
 
       # App Check : la clé reCAPTCHA v3 (secret APPCHECK_SITE_KEY) est injectée au build ; si le secret
       # est absent, l'app démarre sans App Check (non bloquant). Voir docs/app-check.md.
+      # Config Firebase du client injectée au build depuis les VARIABLES de dépôt (Settings → Variables).
+      # ABSENTES = chaîne vide → src/lib/firebase.ts retombe sur l'ANCIEN projet (repli `||`). Renseigner ces
+      # variables (valeurs de l'app web neurones-360) est l'un des gestes de BASCULE (cf. docs/MIGRATION_PROJET.md) ;
+      # tant qu'elles sont vides, le front reste sur propulse-business-87f7a.
       - name: Build web
         run: pnpm --filter web build
         env:
           VITE_APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY }}
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
 
       # Env runtime des Cloud Functions : l'enforcement App Check est piloté par la VARIABLE de dépôt
       # APPCHECK_ENFORCE (Settings → Variables). Ne PAS mettre à true tant que la clé reCAPTCHA n'est
@@ -55,7 +65,7 @@ jobs:
         env:
           RECOMPUTE_REGION: ${{ secrets.RECOMPUTE_REGION }}
         run: |
-          printf 'IMPORTS_BUCKET=nt360\nAPPCHECK_ENFORCE=%s\nBACKUP_BUCKET=%s\n' "${{ vars.APPCHECK_ENFORCE }}" "${{ vars.BACKUP_BUCKET }}" > functions/.env
+          printf 'IMPORTS_BUCKET=%s\nAPPCHECK_ENFORCE=%s\nBACKUP_BUCKET=%s\n' "${{ vars.IMPORTS_BUCKET || 'nt360' }}" "${{ vars.APPCHECK_ENFORCE }}" "${{ vars.BACKUP_BUCKET }}" > functions/.env
           # RECOMPUTE DIFFÉRÉ (perf des boutons d'action) : si le secret RECOMPUTE_REGION est fourni, on
           # l'écrit dans l'env runtime → les mutations répondent en ~ms (elles déposent une demande dans
           # config/recomputeRequest) au lieu d'attendre le recompute, ET index.js exporte alors le trigger
@@ -87,7 +97,7 @@ jobs:
       - name: Assurer l'existence de GRAPH_CLIENT_SECRET (déploiement non bloquant)
         run: |
           gcloud auth activate-service-account --key-file="$HOME/sa.json"
-          PROJECT=propulse-business-87f7a
+          PROJECT="${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}"
           if ! gcloud secrets describe GRAPH_CLIENT_SECRET --project="$PROJECT" >/dev/null 2>&1; then
             echo "GRAPH_CLIENT_SECRET absent → création d'une version placeholder inerte (e-mails désactivés)."
             printf 'UNSET' | gcloud secrets create GRAPH_CLIENT_SECRET --data-file=- --replication-policy=automatic --project="$PROJECT"
@@ -133,7 +143,7 @@ jobs:
           while true; do
             if npx firebase deploy \
               --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
-              --project propulse-business-87f7a --non-interactive; then
+              --project "${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}" --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi
             if [ "$attempt" -ge "$max" ]; then echo "::error::firebase deploy a échoué après $max tentatives"; exit 1; fi
