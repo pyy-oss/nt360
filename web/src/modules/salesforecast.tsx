@@ -3,8 +3,8 @@
 // l'utilisateur (sécurité par enregistrement, Lot 2), avec atteinte de l'objectif CAS (quota). Comble
 // l'écart #5 de l'audit (prévision non gouvernable : la probabilité d'étape décidait seule).
 import { useState, useEffect, useCallback, type FC } from "react";
-import { Card, Tip, Badge, money, cx } from "../design/components";
-import { forecastRollup, type ForecastRollup } from "../lib/writes";
+import { Card, Tip, Badge, Table, colText, colNum, money, cx } from "../design/components";
+import { forecastRollup, type ForecastRollup, type ForecastAmRow } from "../lib/writes";
 import type { Props } from "./_shared";
 
 function Bar({ label, value, max, tone, sub }: { label: string; value: number; max: number; tone: string; sub?: string }) {
@@ -29,6 +29,14 @@ export const SalesForecast: FC<Props> = ({ period }) => {
   // Échelle des barres = max(pipeline, quota) → le quota reste lisible même si le pipe le dépasse.
   const max = r ? Math.max(r.pipeline, r.quota, 1) : 1;
   const pctAtt = (v?: number) => (v != null ? `${Math.round(v * 100)}%` : "—");
+  // Colonnes de la ventilation par commercial (cumulatif : Pipeline ⊇ Best Case ⊇ Commit ⊇ Gagné).
+  const amCols = [
+    colText("Commercial", (a: ForecastAmRow) => a.am, (a: ForecastAmRow) => a.am),
+    colNum("Gagné", (a: ForecastAmRow) => money(a.closed), (a: ForecastAmRow) => a.closed),
+    colNum("Commit", (a: ForecastAmRow) => money(a.commit), (a: ForecastAmRow) => a.commit),
+    colNum("Best Case", (a: ForecastAmRow) => money(a.bestCase), (a: ForecastAmRow) => a.bestCase),
+    colNum("Pipeline", (a: ForecastAmRow) => money(a.pipeline), (a: ForecastAmRow) => a.pipeline),
+  ];
   return (
     <div className="flex flex-col gap-4">
       <Card title="Prévision commerciale — engagement BRUT (gouverné)" actions={r ? <Badge tone={r.scoped ? "steel" : "gold"}>{r.scoped ? "mon périmètre" : "global"}</Badge> : undefined}>
@@ -55,6 +63,13 @@ export const SalesForecast: FC<Props> = ({ period }) => {
           </div>
         )}
       </Card>
+
+      {r && r.byAm && r.byAm.length > 0 && (
+        <Card title={`Prévision par commercial · ${r.byAm.length}`}>
+          <Tip>Le <b>forecast review</b> : Commit / Best Case / Pipeline (montants <b>BRUTS cumulatifs</b>, Pipeline ⊇ Best Case ⊇ Commit ⊇ Gagné) de <b>chaque commercial</b>, sur l'exercice sélectionné. Même assiette que la prévision globale ci-dessus — trié par pipeline décroissant.</Tip>
+          <Table columns={amCols} rows={r.byAm} colsKey="forecast_by_am" />
+        </Card>
+      )}
     </div>
   );
 };

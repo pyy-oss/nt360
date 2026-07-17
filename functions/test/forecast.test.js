@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { defaultCategory, effectiveCategory, rollupForecast, FORECAST_CATEGORIES } = require("../domain/forecast");
+const { defaultCategory, effectiveCategory, rollupForecast, rollupForecastByAm, FORECAST_CATEGORIES } = require("../domain/forecast");
 
 describe("defaultCategory / effectiveCategory", () => {
   it("défaut dérivé de l'étape : 5→commit, 4→best_case, 1-3→pipeline ; reste hors prévision", () => {
@@ -56,5 +56,36 @@ describe("rollupForecast — cumul Salesforce, GAGNÉ fourni par le carnet (year
   });
   it("expose 4 catégories", () => {
     expect(FORECAST_CATEGORIES).toEqual(["omitted", "pipeline", "best_case", "commit"]);
+  });
+});
+
+describe("rollupForecastByAm — ventilation forecast par commercial", () => {
+  it("cumule par AM (Pipeline ⊇ Best Case ⊇ Commit ⊇ Gagné), gagnées ignorées, trie par pipeline", () => {
+    const opps = [
+      { am: "KOUAME", stage: 5, amount: 100, forecastCategory: null },   // commit (défaut étape 5)
+      { am: "KOUAME", stage: 4, amount: 50, forecastCategory: null },    // best_case
+      { am: "kouame", stage: 2, amount: 30, forecastCategory: null },    // pipeline (même AM, casse)
+      { am: "DIALLO", stage: 2, amount: 200, forecastCategory: null },   // pipeline
+      { am: "DIALLO", stage: 6, amount: 999, forecastCategory: null },   // gagné → ignoré (carnet)
+      { am: "", stage: 7, amount: 40, forecastCategory: null },          // omitted (perdu)
+    ];
+    const closedByAm = new Map([["KOUAME", { amount: 500, count: 2 }], ["Diallo", { amount: 300, count: 1 }]]);
+    const out = rollupForecastByAm(opps, closedByAm);
+    const k = out.find((r) => r.am === "KOUAME");
+    expect(k.closed).toBe(500);
+    expect(k.commit).toBe(600);      // 500 + 100
+    expect(k.bestCase).toBe(650);    // + 50
+    expect(k.pipeline).toBe(680);    // + 30 (casse fusionnée)
+    expect(k.counts).toEqual({ closed: 2, commit: 1, bestCase: 1, pipeline: 1 });
+    const d = out.find((r) => r.am === "DIALLO");
+    expect(d.closed).toBe(300);
+    expect(d.pipeline).toBe(500);    // 300 + 200 (gagné 999 ignoré)
+    // Trié par pipeline décroissant : KOUAME (680) avant DIALLO (500).
+    expect(out.map((r) => r.am)).toEqual(["KOUAME", "DIALLO"]);
+  });
+  it("un commercial SANS opp mais avec du réalisé apparaît (Gagné seul)", () => {
+    const out = rollupForecastByAm([], new Map([["SOLO", { amount: 100, count: 1 }]]));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ am: "SOLO", closed: 100, commit: 100, bestCase: 100, pipeline: 100 });
   });
 });

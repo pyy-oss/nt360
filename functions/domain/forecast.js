@@ -65,4 +65,43 @@ function rollupForecast(opps, closedAmount = 0, closedCount = 0) {
   return r;
 }
 
-module.exports = { FORECAST_CATEGORIES, WON_STAGE, LOST_STAGE, OPEN_MIN, OPEN_MAX, defaultCategory, effectiveCategory, rollupForecast };
+// Normalisation du commercial IDENTIQUE à AM 360° (domain/am360) — regroupe « Kouame »/« KOUAME » et
+// rattache les sans-AM à « — » (sinon un même vendeur se scinderait entre le forecast et AM 360°).
+const normAm = (a) => (a && String(a).trim().toUpperCase()) || "—";
+
+/**
+ * Ventilation du roll-up par COMMERCIAL (AM) — mêmes règles CUMULATIVES que rollupForecast, par AM.
+ * Débloque le « forecast review » 1:1 : voir Commit/Best Case/Pipeline de CHAQUE commercial.
+ * @param {object[]} opps       opportunités (gagnées stage 6 ignorées — portées par le carnet)
+ * @param {Map<string,{amount:number,count:number}>} closedByAm réalisé CAS du carnet de l'exercice, par AM
+ * @returns {{am:string,closed:number,commit:number,bestCase:number,pipeline:number,counts:object}[]} trié par pipeline décroissant
+ * PUR (aucun I/O).
+ */
+function rollupForecastByAm(opps, closedByAm) {
+  const byAm = new Map();
+  const ensure = (am) => {
+    let e = byAm.get(am);
+    if (!e) { e = { am, closed: 0, commit: 0, bestCase: 0, pipeline: 0, counts: { closed: 0, commit: 0, bestCase: 0, pipeline: 0 } }; byAm.set(am, e); }
+    return e;
+  };
+  // Réalisé (carnet de l'exercice) par commercial.
+  const cba = closedByAm instanceof Map ? closedByAm : new Map();
+  for (const [am, v] of cba) { const e = ensure(normAm(am)); e.closed += Number(v && v.amount) || 0; e.counts.closed += Number(v && v.count) || 0; }
+  // Ouvertes catégorisées par commercial (gagnées ignorées ; omitted = perdu/suspendu/annulé/hors [1..5]).
+  for (const o of opps || []) {
+    if ((Number(o.stage) || 0) === WON_STAGE) continue;
+    const cat = effectiveCategory(o);
+    if (cat === "omitted") continue;
+    const e = ensure(normAm(o.am));
+    const amount = Number(o.amount) || 0;
+    if (cat === "commit") { e.commit += amount; e.counts.commit++; }
+    else if (cat === "best_case") { e.bestCase += amount; e.counts.bestCase++; }
+    else { e.pipeline += amount; e.counts.pipeline++; }
+  }
+  // Cumul façon Salesforce (Pipeline ⊇ Best Case ⊇ Commit ⊇ Closed), par commercial.
+  const out = [...byAm.values()].map((e) => { e.commit += e.closed; e.bestCase += e.commit; e.pipeline += e.bestCase; return e; });
+  out.sort((a, b) => b.pipeline - a.pipeline || String(a.am).localeCompare(String(b.am)));
+  return out;
+}
+
+module.exports = { FORECAST_CATEGORIES, WON_STAGE, LOST_STAGE, OPEN_MIN, OPEN_MAX, defaultCategory, effectiveCategory, rollupForecast, rollupForecastByAm };

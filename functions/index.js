@@ -1976,7 +1976,7 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
 // et respecte la visibilité. Gouverné « pipeline ».
 exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
-  const { rollupForecast } = require("./domain/forecast");
+  const { rollupForecast, rollupForecastByAm } = require("./domain/forecast");
   const { plausibleYear, fpKey } = require("./lib/ids");
   const { isAgedLost, isDormantClosing } = require("./domain/oppLifecycle");
   const { dedupOppsByFp } = require("./domain/oppPipeline");
@@ -2019,14 +2019,16 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   const visibleFps = scoped ? new Set(opps.map((o) => fpKey(o.fp)).filter(Boolean)) : null;
   const cmdSnap = await db.collection("commandesRows").get();
   let closedAmount = 0, closedCount = 0, maxYearPo = 0; const bookedFps = new Set();
+  const closedByAm = new Map(); // réalisé CAS par commercial (ventilation forecast par AM)
   for (const chunk of cmdSnap.docs) {
     for (const o of (chunk.data() || {}).rows || []) {
       const k = fpKey(o.fp); if (k) bookedFps.add(k);
       maxYearPo = Math.max(maxYearPo, plausibleYear(o.yearPo) || 0); // repli exercice = max PO borné (parité aggregate)
       if (periodYear && plausibleYear(o.yearPo) !== periodYear) continue; // filtre millésime carnet
       if (visibleFps && !(k && visibleFps.has(k))) continue; // cloison : réalisé hors périmètre visible exclu
-      closedAmount += Number(o.cas) || 0;
-      closedCount++;
+      const cas = Number(o.cas) || 0;
+      closedAmount += cas; closedCount++;
+      const am = o.am || "—"; const e = closedByAm.get(am) || { amount: 0, count: 0 }; e.amount += cas; e.count++; closedByAm.set(am, e);
     }
   }
   // Exercice courant : config/fiscal en priorité, PUIS repli sur max(yearPo borné) — MÊME règle
@@ -2059,6 +2061,9 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   return {
     ok: true, fiscalYear: targetFy, allPeriods: !periodYear, scoped, quota, capped,
     ...rollup,
+    // Ventilation par COMMERCIAL (forecast review 1:1) — même assiette cloisonnée (opps visibles + réalisé
+    // du périmètre). Le carnet gagné est attribué par `am` de la ligne commande.
+    byAm: rollupForecastByAm(opps, closedByAm),
     attainment: quota > 0 ? { closed: rollup.closed / quota, commit: rollup.commit / quota, bestCase: rollup.bestCase / quota } : null,
   };
 });
