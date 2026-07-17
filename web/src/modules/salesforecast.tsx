@@ -5,6 +5,9 @@
 import { useState, useEffect, useCallback, type FC } from "react";
 import { Card, Tip, Badge, Table, colText, colNum, money, cx } from "../design/components";
 import { forecastRollup, type ForecastRollup, type ForecastAmRow } from "../lib/writes";
+import { useDocData } from "../lib/hooks";
+import { frDate } from "../lib/format";
+import type { OppSlippageSummary } from "../types";
 import type { Props } from "./_shared";
 
 function Bar({ label, value, max, tone, sub }: { label: string; value: number; max: number; tone: string; sub?: string }) {
@@ -20,6 +23,8 @@ function Bar({ label, value, max, tone, sub }: { label: string; value: number; m
 export const SalesForecast: FC<Props> = ({ period }) => {
   const [r, setR] = useState<ForecastRollup | null>(null);
   const [loading, setLoading] = useState(true);
+  // Glissement des deals (temps réel) : summaries/oppSlippage, dérivé du journal des changements de D Prev.
+  const { data: slip } = useDocData<OppSlippageSummary>("summaries/oppSlippage");
   // Filtre la prévision sur l'EXERCICE sélectionné (sinon la carte affichait le cumul toutes années).
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,6 +41,15 @@ export const SalesForecast: FC<Props> = ({ period }) => {
     colNum("Commit", (a: ForecastAmRow) => money(a.commit), (a: ForecastAmRow) => a.commit),
     colNum("Best Case", (a: ForecastAmRow) => money(a.bestCase), (a: ForecastAmRow) => a.bestCase),
     colNum("Pipeline", (a: ForecastAmRow) => money(a.pipeline), (a: ForecastAmRow) => a.pipeline),
+  ];
+  type SlipItem = NonNullable<OppSlippageSummary["items"]>[number];
+  const slipCols = [
+    colText("Client", (s: SlipItem) => s.client || "—", (s: SlipItem) => s.client || ""),
+    colText("Commercial", (s: SlipItem) => s.am || "—", (s: SlipItem) => s.am || ""),
+    colNum("Montant", (s: SlipItem) => money(s.amount), (s: SlipItem) => s.amount),
+    colText("De", (s: SlipItem) => frDate(s.fromDate), (s: SlipItem) => s.fromDate),
+    colText("À", (s: SlipItem) => frDate(s.toDate), (s: SlipItem) => s.toDate),
+    colNum("Glissement", (s: SlipItem) => <span className="text-clay">{`+${s.days} j`}</span>, (s: SlipItem) => s.days),
   ];
   return (
     <div className="flex flex-col gap-4">
@@ -68,6 +82,20 @@ export const SalesForecast: FC<Props> = ({ period }) => {
         <Card title={`Prévision par commercial · ${r.byAm.length}`}>
           <Tip>Le <b>forecast review</b> : Commit / Best Case / Pipeline (montants <b>BRUTS cumulatifs</b>, Pipeline ⊇ Best Case ⊇ Commit ⊇ Gagné) de <b>chaque commercial</b>, sur l'exercice sélectionné. Même assiette que la prévision globale ci-dessus — trié par pipeline décroissant.</Tip>
           <Table columns={amCols} rows={r.byAm} colsKey="forecast_by_am" />
+        </Card>
+      )}
+
+      {slip && (slip.slipCount ?? 0) + (slip.pullCount ?? 0) > 0 && (
+        <Card title="Glissement des deals (D Prev)">
+          <Tip>Combien de pipeline a vu sa <b>date de clôture repoussée</b> (glissement) — le vrai signal de fiabilité d'un forecast. Mesuré sur le <b>mouvement NET</b> de chaque opp (première → dernière D Prev journalisée) ; se construit à partir de maintenant, comme le funnel.{slip.truncated ? ` Fenêtre glissante des ${(slip.windowSize ?? 0).toLocaleString("fr-FR")} derniers changements.` : ""}</Tip>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 mb-3">
+            <div><div className="text-[11px] text-muted">Glissé (montant)</div><div className="font-display tabnum text-lg text-clay">{money(slip.slipAmount ?? 0)}</div></div>
+            <div><div className="text-[11px] text-muted">Deals glissés</div><div className="font-display tabnum text-lg">{slip.slipCount ?? 0}</div></div>
+            <div><div className="text-[11px] text-muted">Glissement moyen</div><div className="font-display tabnum text-lg">{slip.avgSlipDays ?? 0} j</div></div>
+            <div><div className="text-[11px] text-muted">Avancés (pull-in)</div><div className="font-display tabnum text-lg text-emerald">{money(slip.pullAmount ?? 0)} · {slip.pullCount ?? 0}</div></div>
+            <div><div className="text-[11px] text-muted">dont Commit</div><div className="font-display tabnum text-lg text-clay">{money(slip.byCategory?.commit ?? 0)}</div></div>
+          </div>
+          {(slip.items?.length ?? 0) > 0 && <Table columns={slipCols} rows={slip.items || []} colsKey="forecast_slippage" />}
         </Card>
       )}
     </div>

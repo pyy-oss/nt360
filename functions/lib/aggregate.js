@@ -18,6 +18,7 @@ const { cashflow, decaissements } = require("../domain/cashflow");
 const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
 const { oppFunnel, stageConversion } = require("../domain/oppFunnel");
+const { slippageFromHistory } = require("../domain/oppSlippage");
 const { dataQuality } = require("../domain/dataQuality");
 const { isAgedLost, isDormantClosing } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
@@ -443,6 +444,10 @@ async function recomputeCore(db, only) {
     const truncated = histSnap.size >= OPP_HISTORY_WINDOW; // borne atteinte → funnel = fenêtre glissante
     const hist = histSnap.docs.map((d) => d.data());
     w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(hist), byStage: stageConversion(hist), truncated, windowSize: histSnap.size, ...stamp } });
+    // Glissement des deals : journal des changements de D Prev (oppDateHistory), même fenêtre glissante.
+    const slipSnap = await db.collection("oppDateHistory").orderBy("at", "desc").limit(OPP_HISTORY_WINDOW).get();
+    const slipEvents = slipSnap.docs.map((d) => { const x = d.data() || {}; return { ...x, atMs: x.at && typeof x.at.toMillis === "function" ? x.at.toMillis() : 0 }; });
+    w.push({ path: "summaries/oppSlippage", data: { ...slippageFromHistory(slipEvents), truncated: slipSnap.size >= OPP_HISTORY_WINDOW, windowSize: slipSnap.size, ...stamp } });
   }
   // Gate ALIGNÉ sur l'écriture de summaries/dataQuality (`want("alerts") || want("dataQuality")`) :
   // les alertes et le cockpit Qualité partagent des métriques identiques (surfacturation, factures non

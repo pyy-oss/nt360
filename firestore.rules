@@ -148,6 +148,9 @@ service cloud.firestore {
     // laissé fuir client/AM/montant des transitions d'opps hors périmètre (audit RBAC). Aucun écran ne
     // lit oppHistory directement (le funnel vient du summary), donc pas de régression.
     match /oppHistory/{id} { allow read: if false; allow write: if false; }
+    // Journal des changements de D Prev (slippage) : écrit par l'Admin SDK, dérivé dans summaries/oppSlippage.
+    // Callable-only comme oppHistory (aucun écran ne le lit — la vue vient du summary) → read/write client refusés.
+    match /oppDateHistory/{id} { allow read: if false; allow write: if false; }
 
     // Objet COMPTE (Account 360) + CONTACTS rattachés : entité relationnelle stable clé sur le nom
     // client canonique. Lecture par qui voit le carnet (overview) ; écriture via callables (upsert/

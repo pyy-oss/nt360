@@ -101,6 +101,15 @@ export type AmRow = {
   conv: number; targetCas: number; roCas: number | null; couverture: number | null; orderCount: number;
 };
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
+// Glissement des deals (« slippage ») : dérivé du journal des changements de D Prev (oppDateHistory).
+export interface OppSlippageSummary {
+  slipCount?: number; slipAmount?: number; pullCount?: number; pullAmount?: number; avgSlipDays?: number;
+  byCategory?: { commit: number; best_case: number; pipeline: number };
+  byAm?: { am: string; amount: number; count: number }[];
+  items?: { oppId: string; client: string; am: string; amount: number; fromDate: string; toDate: string; days: number }[];
+  truncated?: boolean; windowSize?: number;
+}
+
 // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory).
 export interface OppFunnelSummary {
   transitions?: { from: number; to: number; count: number; amount: number }[];
