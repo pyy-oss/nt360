@@ -920,3 +920,17 @@ UX). Rapport priorisé : `docs/AUDIT-2026-07.md` ; runbook de migration projet d
 **Appris** — Un correctif d'incident (propose-only, ADR-028) peut laisser un vecteur résiduel dans l'UI
 (bouton d'application de masse). Fermer l'incident, c'est aussi retirer l'action dangereuse du chemin
 « un clic », pas seulement l'auto-application serveur.
+
+---
+
+## 2026-07-17 — Objet/désignation dans toutes les tables du module
+
+**Fait** — Colonne **« Objet »** ajoutée aux quatre tables du module (Contrats, Conformité, Risque,
+Renouvellements). Le contrat ne stocke PAS l'affaire (ADR-001 « 1 contrat = 1 affaire ») : l'objet est
+la **désignation de la commande adossée**, rapprochée par `fpKey`. Réutilise `orderByFp` (déjà construit
+depuis le carnet `useCommandesRows` pour les suggestions) — hoisté en tête du composant + helpers
+`objetOf`/`objetCell` partagés. Additif, aucune lecture ni écriture nouvelle, aucun schéma modifié.
+
+**Appris** — La demande « afficher l'objet partout » ne nécessitait aucun champ nouveau : la donnée
+existait déjà côté carnet ; il suffisait de la joindre par `fpKey` (invariant ERP) et de mutualiser la
+cellule pour un rendu identique dans toutes les vues.
