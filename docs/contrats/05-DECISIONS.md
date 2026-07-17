@@ -3,6 +3,33 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-032 — Détection de lignées : le signal « affaire » vient des commandes brutes, pas du carnet fusionné
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (audit adverse du module)
+
+### Contexte
+L'audit a relevé une divergence de source pour la désignation d'affaire : la **détection** de lignées
+(back, `aiMntLignees`) lit la collection **brute** `orders` (`.select("fp","designation")`) pour alimenter
+le signal « affaire » de l'appariement successeur, tandis que la colonne « Affaire » **affichée** (front)
+provient du **carnet fusionné** (`useCommandesRows`, autorité fiche > opp gagnée > P&L). Pour un FP dont la
+désignation du carnet est surchargée par une fiche/opp, la chaîne vue par la détection peut différer du
+libellé affiché.
+
+### Décision
+- **On garde les commandes brutes comme source de détection.** La désignation n'est qu'**un signal parmi
+  plusieurs** (client normalisé + adjacence des dates + proximité des montants) et la lignée détectée est de
+  toute façon **confirmée par l'IA puis validée par un humain** avant toute écriture. Reconstituer le carnet
+  fusionné côté serveur (coûteux : lecture de plusieurs collections, `mergeCommandes`) pour un signal
+  d'appariement heuristique n'est pas justifié.
+- La colonne **affichée** reste sur le carnet fusionné (autorité ERP pour ce qui est montré à l'humain).
+
+### Conséquences
+- Écart de source assumé et tracé ici — à ne pas re-débattre. Si la détection devait un jour rater des
+  reconductions à cause d'une désignation surchargée, l'humain le voit (il valide) et peut regrouper à la
+  main ; ce n'est pas un défaut silencieux.
+
 ## ADR-031 — Conformité = complétude structurelle seule ; « échéance dépassée » bascule vers les renouvellements
 
 - **Date :** 2026-07-17
