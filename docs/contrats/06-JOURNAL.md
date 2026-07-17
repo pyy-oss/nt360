@@ -846,3 +846,31 @@ build OK, chunk d'entrée 120,0 KB ≤ 120, gardes CI (deploy-targets/no-undef/i
 **Appris** — La surveillance n'avait pas besoin d'un nouveau moteur : le moteur de risque calculait déjà
 tous les signaux. La bonne architecture était une PROJECTION (une vue), pas un second calcul — ça évite
 la divergence « même métrique = même nombre » et concentre l'évolution sur une seule source.
+
+---
+
+## 2026-07-17 — Contrats Lot 6 : statut automatique (hybride règles + IA, ADR-027)
+
+**Fait** — Détermination automatique du statut d'un contrat, à l'unité et en masse :
+- `domain/mntStatutAuto.js` (PUR) : règles DÉTERMINISTES pour les transitions mécaniques (échéance
+  dépassée → échu à 1.0 ; début atteint → actif à 0.7 ; résilié terminal…) ; isole les cas de JUGEMENT
+  (dormant, réactivation, échéance prolongée) pour l'IA. Re-validation stricte de la sortie IA
+  (`normalizeStatutProposals` : énumération, jamais resilie, confiance bornée).
+- `lib/mntStatutAi.js` : pont Claude Opus 4.8 (adaptative, refus géré) sur les seuls cas ambigus.
+- Callable `aiMntContratStatut({ ids?, apply?, threshold? })` : règles + IA, AUTO-APPLIQUE au-dessus du
+  seuil (0.85, journalisé `auto_mnt_contrat_statut`, recompute scopé), PROPOSE en deçà. rate-limit `ai`.
+- Front : bouton « Statut IA » par contrat (unitaire), action de sélection « Déterminer le statut (IA) »,
+  carte « Statut automatique (IA) » (« Analyser le parc ») listant les propositions à valider (Appliquer
+  d'un clic via setMntContratStatut). Emplacement : module Contrats (confirmé en session).
+- Refactor connexe : wrappers mnt_ de `writes.ts` factorisés (`mntCall`/`mntWrite`) — budget bundle tenu.
+
+**Vérif** — functions 979 → +12 (mntStatutAuto), web 144, lint OK, build OK, chunk d'entrée 119,9 KB ≤ 120,
+gardes CI (deploy-targets `aiMntContratStatut` listé / no-undef / indexes) OK. Additif ; drapeau éteint ⇒ rien.
+
+**Note** — Consigne mi-parcours « afficher uniquement dans Référentiel > Normalisation clients » levée par
+question : un module de STATUT DE CONTRAT dans un écran clients aurait trompé l'œil (indiscernabilité) →
+emplacement retenu = module Contrats de maintenance.
+
+**Appris** — L'« auto IA » la plus sûre est surtout NON-IA : les règles déterministes tranchent l'essentiel
+(échu) avec une exactitude testable, et l'IA ne touche qu'aux quelques cas de jugement — presque toujours
+en simple proposition. L'hybride donne le meilleur des deux : exact où c'est mécanique, prudent où ça juge.

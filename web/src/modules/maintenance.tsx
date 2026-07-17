@@ -3,7 +3,7 @@
 // le drapeau config/mntFeature (App masque l'onglet si éteint) et gouverné par le droit `maintenance`.
 // Réutilise les primitives design, les écritures callable et les formats de l'ERP (FCFA entier via
 // money, date JJ/MM/AAAA via frDate). Aucune valeur en dur (tokens/tons via lib/mntContrat).
-import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
 import { useCan, useClaims } from "../lib/rbac";
@@ -17,12 +17,13 @@ import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
-  upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
+  upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, aiMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention, MntWatch } from "../types";
 import { EVENT_TYPE_LABEL, SEVERITY_LABEL, severityTone, watchMatchesEvent, hasAnyWatch, type MntSurveillanceEvent, type MntSurveillanceSummary } from "../lib/mntSurveillance";
+import { STATUT_SOURCE_LABEL, confidenceTone, type MntStatutProposal, type MntStatutRun } from "../lib/mntStatutAuto";
 import {
   STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, STATUT_LABEL, ECHEANCE_LABEL, SLA_TYPE_LABEL, COUVERTURE_LABEL,
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
@@ -170,11 +171,38 @@ export const Maintenance: FC<Props> = () => {
   const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
   // Action EN MASSE « Passer au statut » — même patron que les BC (operations.tsx). Appels séquentiels
   // (chaque écriture déclenche un recompute coalescé) ; réutilise setMntContratStatut (ne touche que le statut).
+  // Statut automatique (Lot 6, ADR-027) : le callable détermine le statut juste (règles + IA), auto-applique
+  // au-dessus du seuil de confiance et renvoie les propositions à valider (transitions sous le seuil).
+  const [statutRun, setStatutRun] = useState<MntStatutRun | null>(null);
+  const lastRunRef = useRef<MntStatutRun | null>(null); // pour le message okMsg de l'action en masse (qui ne voit que les lignes)
+  const runStatutAuto = async (ids?: string[]) => { const r = await aiMntContratStatut(ids ? { ids, apply: true } : { apply: true }); lastRunRef.current = r; setStatutRun(r); return r; };
+  const dropProposal = (id: string) => setStatutRun((r) => (r ? { ...r, proposals: r.proposals.filter((p) => p.id !== id) } : r));
   const contratBulk: BulkAction[] = canWrite ? [
     { label: "Passer au statut", pick: { options: STATUTS.map((s) => ({ value: s, label: STATUT_LABEL[s] })), placeholder: "Statut cible" },
       okMsg: (rs) => { const k = rs.filter((r) => r.id).length; return `${k} contrat${k > 1 ? "s" : ""} mis à jour`; }, errMsg: "Mise à jour refusée",
       run: async (rs, statut) => { for (const r of rs.filter((x) => x.id)) await setMntContratStatut(r.id!, statut!); } },
+    // Statut auto IA sur la sélection (en masse) : applique les cas fiables, remonte les propositions à valider.
+    { label: "Déterminer le statut (IA)",
+      okMsg: () => { const r = lastRunRef.current; return r ? `${r.appliedCount} appliqué(s) · ${r.proposals.filter((p) => !p.applied).length} à valider` : "Analyse lancée"; }, errMsg: "Analyse refusée",
+      run: async (rs) => runStatutAuto(rs.map((r) => r.id).filter(Boolean)) },
   ] : [];
+  const statutCols = [
+    colText("Client", (p: MntStatutProposal) => p.client || "—", (p: MntStatutProposal) => p.client || ""),
+    colText("N° FP", (p: MntStatutProposal) => <FpLink fp={p.fp || undefined} />),
+    colText("Transition", (p: MntStatutProposal) => (
+      <span className="inline-flex items-center gap-1.5">
+        <Badge tone={statutTone(p.current)}>{label(STATUT_LABEL, p.current)}</Badge>
+        <span className="text-faint">→</span>
+        <Badge tone={statutTone(p.proposed)}>{label(STATUT_LABEL, p.proposed)}</Badge>
+      </span>
+    )),
+    colText("Origine", (p: MntStatutProposal) => <Badge tone={p.source === "regle" ? "steel" : "gold"}>{STATUT_SOURCE_LABEL[p.source] || p.source}</Badge>),
+    colNum("Confiance", (p: MntStatutProposal) => <Badge tone={confidenceTone(p.confidence)}>{Math.round(p.confidence * 100)} %</Badge>, (p: MntStatutProposal) => p.confidence),
+    colText("Motif", (p: MntStatutProposal) => <span className="text-[12px] text-muted">{p.motif || "—"}</span>),
+    colText("", (p: MntStatutProposal) => (p.applied
+      ? <Badge tone="emerald">Appliqué ✓</Badge>
+      : (canWrite ? <Busy variant="ghost" label="Appliquer" okMsg="Statut appliqué" errMsg="Application refusée" fn={async () => { await setMntContratStatut(p.id, p.proposed); dropProposal(p.id); }} /> : null))),
+  ];
   const cValid = cForm.fp.trim() && cForm.client.trim() && cForm.dateDebut;
   const addEng = () => setC("engagements", [...cForm.engagements, { type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: "", quota: "" }]);
   const setEng = (i: number, k: string, v: string) => setC("engagements", cForm.engagements.map((e, j) => (j === i ? { ...e, [k]: v } : e)));
@@ -238,6 +266,8 @@ export const Maintenance: FC<Props> = () => {
             risque). `cForm` est aussi renseigné → l'échéancier partage la même assiette que l'édition. */}
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setViewC(c); }}>Consulter</button>
         {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCId(c.id || ""); setCEdit(true); setCOpen(true); }}>Éditer</button>}
+        {/* Statut IA (unitaire, ADR-027) : détermine le statut juste ; appliqué si fiable, sinon proposé dans la carte. */}
+        {canWrite && <Busy variant="ghost" label="Statut IA" okMsg={(r: MntStatutRun) => { const p = r.proposals[0]; return !p ? "Statut déjà cohérent" : p.applied ? `Statut → ${label(STATUT_LABEL, p.proposed)}` : `Proposition : ${label(STATUT_LABEL, p.proposed)} (à valider)`; }} errMsg="Analyse refusée" fn={() => runStatutAuto([c.id!])} />}
         {canWrite && <DangerBtn label="Suppr." confirm={`Supprimer le contrat ${c.fp} ?`} fn={() => deleteMntContrat(c.id!)} okMsg="Contrat supprimé" errMsg="Suppression refusée" />}
       </div>
     )),
@@ -659,6 +689,19 @@ export const Maintenance: FC<Props> = () => {
           actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
           <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût des interventions</b> (jours CRA × coût journalier du consultant). {pnl.hasCost ? <>Pires marges d'abord.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
           <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
+        </Card>
+      )}
+
+      {/* Statut automatique (ADR-027) — règles mécaniques + IA sur les cas de jugement ; auto-appliqué au-dessus
+          du seuil de confiance (journalisé), proposé en deçà. « Analyser le parc » (en masse) ou bouton « Statut
+          IA » par contrat (unitaire) ou l'action de sélection « Déterminer le statut (IA) ». */}
+      {canWrite && (contrats.length > 0 || !!statutRun) && (
+        <Card title={statutRun ? `Statut automatique (IA) · ${statutRun.proposals.length} à traiter` : "Statut automatique (IA)"}
+          actions={<Busy variant="gold" label="Analyser le parc" okMsg={(r: MntStatutRun) => `${r.appliedCount} appliqué(s) · ${r.proposals.filter((p) => !p.applied).length} à valider`} errMsg="Analyse refusée" fn={() => runStatutAuto()} />}>
+          <Tip>Détermine le statut juste de chaque contrat : les transitions <b>mécaniques</b> (échéance dépassée → <b>échu</b>, date de début atteinte → <b>actif</b>…) par règles, les cas de <b>jugement</b> (contrat dormant, réactivation) par l'<b>IA</b>. Au-dessus du seuil de confiance : <b>appliqué</b> (journalisé) ; sinon <b>proposé à valider</b>. Rien de fiable n'est appliqué en silence sans trace.</Tip>
+          {statutRun && (statutRun.proposals.length === 0
+            ? <EmptyState label="Aucun changement de statut — le parc est cohérent." />
+            : <Table columns={statutCols} rows={statutRun.proposals} colsKey="mnt_statut_ia" rowKey={(p) => p.id} />)}
         </Card>
       )}
 

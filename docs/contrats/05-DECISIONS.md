@@ -3,6 +3,52 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-027 — Statut automatique : HYBRIDE règles déterministes + IA, auto-application au-dessus d'un seuil
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (choix confirmés en session : « hybride règles + IA », « auto au-dessus d'un seuil, proposer sinon », interface **dans le module Contrats**)
+
+### Contexte
+Besoin : déterminer AUTOMATIQUEMENT le statut d'un contrat (brouillon/actif/suspendu/échu/résilié), à
+l'unité et en masse. Le module modifie des contrats **en production** que d'autres utilisent — la règle d'or
+« rien d'autre n'a bougé » interdit qu'un faux positif change un statut en silence. Une grande partie des
+transitions est purement MÉCANIQUE (échéance dépassée = échu), donc exacte et testable sans IA ; seuls
+quelques cas relèvent du JUGEMENT (suspendre un contrat dormant, réactiver un suspendu/échu prolongé).
+
+### Décision
+- **Moteur HYBRIDE.** `domain/mntStatutAuto.js` (PUR) tranche les transitions mécaniques par RÈGLES
+  déterministes (échéance dépassée → échu avec confiance 1.0 ; date de début atteinte → actif proposé à
+  0.7 ; résilié = terminal, jamais rétrogradé…) et n'isole pour l'IA que les cas de jugement (`needsAi`).
+  `lib/mntStatutAi.js` interroge alors Claude Opus 4.8 (réflexion adaptative, gestion du refus) **sur ces
+  seuls cas**. La sortie IA est TOUJOURS re-validée (`normalizeStatutProposals` : proposed ∈ énumération,
+  jamais `resilie`, confiance bornée) — l'IA propose, le domaine vérifie.
+- **Auto-application AU-DESSUS d'un seuil** (`STATUT_AUTO_THRESHOLD = 0.85`, réglable par appel, borné
+  0.5–1). Le callable `aiMntContratStatut({ ids?, apply?, threshold? })` calcule, **auto-applique** les
+  transitions dont la confiance ≥ seuil (journalisées `auto_mnt_contrat_statut`, recompute scopé), et
+  **renvoie les autres comme propositions** à valider. En pratique seul l'échu mécanique (1.0) s'auto-
+  applique ; les jugements IA restent quasi toujours des propositions — le comportement le plus sûr.
+- **Unitaire ET en masse.** Bouton « Statut IA » par contrat (`ids:[id]`), action de sélection « Déterminer
+  le statut (IA) », et « Analyser le parc » (tout le parc). Les propositions sous le seuil s'appliquent d'un
+  clic (réutilise `setMntContratStatut`, Lot 3). Interface **dans le module Contrats de maintenance**
+  (emplacement sémantique du statut), pas dans un référentiel clients.
+- **Réutilisation** : signaux dérivés des collections déjà lues (tickets ouverts/activité) + du summary
+  `mnt_risque` déjà matérialisé ; patron IA identique à `aiSuggestMntContrats`/`aiAnalyzeChurn` (clé Secret
+  Manager, rate-limit `ai`, audit d'usage sans contenu). Aucune brique recréée.
+
+### Conséquences
+- Additif : un callable, deux fichiers de domaine/pont, aucun schéma ni statut existant modifié ; à drapeau
+  `mntFeature` éteint, rien n'est atteignable. Les changements auto sont tracés (piste d'audit opposable).
+- Exact et testable là où c'est mécanique (règles, 12 tests) ; conservateur là où il faut juger (l'IA
+  défaut = aucun changement en cas de doute). Aucun statut fiable appliqué sans trace.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs relèvent le seuil pour tout laisser en proposition → l'auto-application ne servait pas,
+repasser en « proposer seulement ». Si l'IA se trompe sur les jugements → durcir les règles (déplacer un cas
+de l'IA vers une règle) plutôt que faire confiance au modèle.
+
+---
+
 ## ADR-026 — Centre de surveillance : flux d'événements PROJETÉ du moteur de risque + abonnements ciblés par utilisateur
 
 - **Date :** 2026-07-17
