@@ -43,3 +43,34 @@ describe("cohérence Alertes ↔ Qualité (mêmes entrées → mêmes comptes)",
     expect(a).toBe(d);   // parité stricte
   });
 });
+
+// Cohérence AMONT (opportunité ↔ commande) — Lot A : les nouveaux prédicats « écart de valorisation » et
+// « opp active sur FP déjà au carnet » DOIVENT compter à l'identique dans le Centre d'alertes et la Qualité.
+describe("cohérence AMONT Alertes ↔ Qualité (écart valorisation + opp sur FP carnet)", () => {
+  // Commandes FUSIONNÉES (portent casPnl + source, comme la sortie de mergeCommandes).
+  const ordersAmont = [
+    { fp: "FP/2026/1", cas: 800, casPnl: 500, source: "opp_won", client: "A", am: "X", yearPo: 2026 }, // écart 800 vs 500 = 60 % > 30 %
+    { fp: "FP/2026/2", cas: 520, casPnl: 500, source: "fiche", client: "B", am: "Y", yearPo: 2026 },   // écart 4 % < 30 % → non
+    { fp: "FP/2026/3", cas: 500, casPnl: 500, source: "pnl", client: "C", am: "Z", yearPo: 2026 },     // pas d'écrasement → non
+  ];
+  const oppsAmont = [
+    { fp: "FP/2026/1", stage: 3, amount: 100, closingDate: "2027-01-01" }, // ACTIVE sur un FP au carnet → signalée
+    { fp: "FP/2026/9", stage: 3, amount: 100, closingDate: "2027-01-01" }, // active hors carnet → non
+    { fp: "FP/2026/1", stage: 6, amount: 800, closingDate: "2026-01-01" }, // gagnée → hors périmètre « active »
+  ];
+  const al2 = alerts(ordersAmont, [], { rows: [] }, [], 2026, "2026-12-31", oppsAmont, null);
+  const dq2 = dataQuality(ordersAmont, [], oppsAmont, [], [], null, [], [], ordersAmont).issues;
+
+  it("écart de valorisation : un seul, compté à l'identique des deux côtés", () => {
+    const a = countOf(al2, "ecart_valorisation");
+    const d = countOf(dq2, "ecart_valorisation");
+    expect(a).toBe(1);   // FP/2026/1 uniquement
+    expect(a).toBe(d);
+  });
+  it("opp active sur FP déjà au carnet : une seule, comptée à l'identique", () => {
+    const a = countOf(al2, "opp_active_carnet");
+    const d = countOf(dq2, "opp_active_carnet");
+    expect(a).toBe(1);   // l'opp stage 3 sur FP/2026/1 (au carnet)
+    expect(a).toBe(d);
+  });
+});

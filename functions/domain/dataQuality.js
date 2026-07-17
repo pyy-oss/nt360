@@ -17,6 +17,7 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
   // Number.isFinite → un seuil configuré à 0 (valide) n'est PAS écrasé par le défaut (le `||` le ferait,
   // en contradiction avec alerts.js). Cf. audit P2.
   const surfacPct = (thr && Number.isFinite(thr.surfacturationPct)) ? thr.surfacturationPct : ALERT_DEFAULTS.surfacturationPct;
+  const valorEcartPct = (thr && Number.isFinite(thr.valorisationEcartPct)) ? thr.valorisationEcartPct : ALERT_DEFAULTS.valorisationEcartPct;
 
   // Σ facturé par FP CANONIQUE (fpKey) — sinon un même FP formaté différemment côté facture/commande
   // fausse la surfacturation (sous-comptage). Clé cohérente avec orderFps ci-dessous.
@@ -68,6 +69,15 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     // GAGNÉES avec N° FP mais SANS ligne P&L : règle P&L strict → non comptées en commande. Réconciliation
     // opp↔P&L à faire (Dossier client / inscrire la ligne au P&L), sinon CAS/backlog absents.
     def("opps_gagnees_sans_pnl", "high", opps.filter((o) => o.stage === 6 && o.fp && !orderFps.has(fpKey(o.fp))), "Opportunités GAGNÉES sans ligne P&L (à réconcilier au P&L — non comptées en commande)", (o) => o.fp || o.client),
+    // AMONT — Écart de valorisation opp↔commande : le CAS RETENU (écrasé par une opp gagnée / fiche) s'écarte
+    // fortement de la valeur P&L d'origine (casPnl, conservé par mergeCommandes). mergeCommandes applique la
+    // règle « opp gagnée > P&L » SANS rien signaler ; un écart important trahit une opp/fiche périmée ou un
+    // mauvais rapprochement — à revoir. Calculé sur les commandes FUSIONNÉES (qui portent `casPnl` + `source`).
+    def("ecart_valorisation", "medium", orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && num(o.casPnl) > 0 && num(o.cas) > 0 && Math.abs(num(o.cas) - num(o.casPnl)) / Math.max(num(o.cas), num(o.casPnl)) > valorEcartPct), "Commandes dont le CAS retenu (opp gagnée/fiche) s'écarte fortement de la valeur P&L d'origine (à revoir)", (o) => o.fp),
+    // AMONT — Opportunité encore ACTIVE (stage 1-5) sur un FP DÉJÀ au carnet : la commande existe déjà, l'opp
+    // fait double emploi. Déjà EXCLUE du pipeline projeté (chaine.js bookedFps) mais JAMAIS signalée → à
+    // requalifier/clôturer pour ne pas fausser le suivi commercial.
+    def("opp_active_carnet", "low", active.filter((o) => { const k = fpKey(o.fp); return k && orderFps.has(k); }), "Opportunités actives sur un FP déjà au carnet (commande existante) — à requalifier/clôturer", (o) => o.fp || o.client),
     // Opportunités FANTÔMES : retirées de la feuille LIVE sans clôture (7/9), EXCLUES du pipeline.
     def("opps_fantomes", "low", staleOpps, "Opportunités retirées de LIVE sans clôture (exclues du pipeline — à clôturer 7/9 ou ré-importer)", (o) => o.fp || o.client),
     // Auto-perte par âge (règle source LIVE : > 1 an ET IdC ≤ 90 %) : exclues du pipeline pondéré.

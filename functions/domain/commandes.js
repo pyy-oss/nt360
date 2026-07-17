@@ -46,7 +46,10 @@ function mergeCommandes(orders, opps, sheets, invoices) {
 
   // 1. P&L = COLONNE VERTÉBRALE. Une commande n'existe QUE si elle a une ligne P&L.
   //    pnlSource = "manuel" : la marge/coût vient de l'import P&L Excel.
-  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, affaire: o.designation || "", pnlSource: "manuel" }); }
+  // casPnl = CAS d'ORIGINE de la ligne P&L, CONSERVÉ même si une opp gagnée / fiche écrase ensuite `cas`
+  // (étapes 2/3). Sert au contrôle de cohérence AMONT « écart de valorisation » (alerts/dataQuality) : sans
+  // lui, la valeur P&L écrasée est perdue et l'écart opp↔P&L devient indétectable. Additif, ne change aucun calcul.
+  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, affaire: o.designation || "", casPnl: num(o.cas), pnlSource: "manuel" }); }
   const pnlFps = new Set(byFp.keys()); // FP présents au P&L = seuls candidats « commande »
 
   // 2. Opportunités GAGNÉES (stage 6) : RÉCONCILIENT une ligne P&L existante (corrigent le CAS),

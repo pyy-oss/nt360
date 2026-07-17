@@ -458,7 +458,9 @@ async function recomputeCore(db, only) {
       raf_incoherent: "backlog", backlog_dormant: "backlog",
       ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
       bc_en_attente: "bc", bc_en_retard: "bc",
-      opp_dormante: "pipeline",
+      opp_dormante: "pipeline", opp_active_carnet: "pipeline",
+      // Écart de valorisation amont : concerne les Commandes (droit `overview`) — défaut explicite.
+      ecart_valorisation: "overview",
     };
     const allAlerts = alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr);
     const bucket = { overview: [], facturation: [], backlog: [], fournisseurs: [], bc: [], pipeline: [] };

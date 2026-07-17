@@ -74,6 +74,32 @@ describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réco
   });
 });
 
+describe("mergeCommandes — casPnl conservé (contrôle de cohérence amont ADR-030+)", () => {
+  // casPnl = CAS d'ORIGINE de la ligne P&L, gardé même quand une opp gagnée / fiche écrase `cas`. Sert au
+  // prédicat « écart de valorisation » (alerts/dataQuality). Sans lui, la valeur P&L écrasée serait perdue.
+  const orders = [
+    { fp: "FP/2026/1", client: "PNL", cas: 500, yearPo: 2026, source: "pnl" }, // écrasé par la fiche
+    { fp: "FP/2026/5", client: "PNLMB", cas: 600, mb: 120, yearPo: 2026, source: "pnl" }, // écrasé par l'opp gagnée
+    { fp: "FP/2026/9", client: "PNLONLY", cas: 300, yearPo: 2026, source: "pnl" }, // ni opp ni fiche
+  ];
+  const opps = [{ fp: "FP/2026/5", client: "OPP5", amount: 700, stage: 6, closingDate: "2026-08-01" }];
+  const sheets = [{ fp: "FP/2026/1", client: "SAFINE", saleTotal: 900, margin: 90 }];
+  const byFp = Object.fromEntries(mergeCommandes(orders, opps, sheets, []).map((c) => [c.fp, c]));
+
+  it("fiche : cas = vente mais casPnl garde la valeur P&L d'origine", () => {
+    expect(byFp["FP/2026/1"].cas).toBe(900);
+    expect(byFp["FP/2026/1"].casPnl).toBe(500);
+  });
+  it("opp gagnée : cas = montant opp mais casPnl garde la valeur P&L d'origine", () => {
+    expect(byFp["FP/2026/5"].cas).toBe(700);
+    expect(byFp["FP/2026/5"].casPnl).toBe(600);
+  });
+  it("ni opp ni fiche : casPnl == cas (aucun écrasement)", () => {
+    expect(byFp["FP/2026/9"].cas).toBe(300);
+    expect(byFp["FP/2026/9"].casPnl).toBe(300);
+  });
+});
+
 describe("réconciliation FP (config/fpAliases) : une opp gagnée sous un AUTRE N° FP se rattache au P&L", () => {
   // Scénario réel : la commande est DÉJÀ au P&L sous FP/2026/500 (lié à la facturation), mais l'opp
   // gagnée a été saisie sous FP/2026/13 (padding/numérotation différente). Sans réconciliation, l'opp

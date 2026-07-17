@@ -132,12 +132,15 @@ export function useCommandesRows(enabled = true) {
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable), avec le
 // SEGMENT interne à pré-sélectionner sur la vue cible quand elle en propose un (ex. « en retard »
 // sur Exécution BC) — le drill-through arrive ainsi filtré, pas sur la liste complète.
-const ALERT_TARGET: Record<string, { module: string; segment?: string }> = {
-  marge_negative: { module: "orderlist" }, achat_sup_vente: { module: "orderlist" }, raf_incoherent: { module: "orderlist" },
-  factures_non_rattachees: { module: "invoicelist", segment: "orphan" }, facture_pre_po: { module: "invoicelist" }, surfacturation: { module: "invoicelist" },
-  backlog_dormant: { module: "backlog" }, ligne_saturee: { module: "fournisseurs" }, ligne_tension: { module: "fournisseurs" },
-  concentration_client: { module: "clients" }, bc_en_attente: { module: "bc", segment: "open" }, bc_en_retard: { module: "bc", segment: "late" },
-  opp_dormante: { module: "opplist" },
+// Valeur = module cible (chaîne) OU { module, segment } quand la vue cible propose un segment à
+// pré-sélectionner. La forme compacte « chaîne seule » évite d'alourdir le chunk d'entrée.
+const ALERT_TARGET: Record<string, string | { module: string; segment?: string }> = {
+  marge_negative: "orderlist", achat_sup_vente: "orderlist", raf_incoherent: "orderlist",
+  factures_non_rattachees: { module: "invoicelist", segment: "orphan" }, facture_pre_po: "invoicelist", surfacturation: "invoicelist",
+  backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",
+  concentration_client: "clients", bc_en_attente: { module: "bc", segment: "open" }, bc_en_retard: { module: "bc", segment: "late" },
+  opp_dormante: "opplist", opp_active_carnet: "opplist",
+  ecart_valorisation: "orderlist",
 };
 
 // Cellule N° FP cliquable → ouvre FP 360° pré-renseigné (maillage transverse). Repli en texte
@@ -557,7 +560,8 @@ export function AlertsBanner() {
     <Card title={`Centre d'alertes · ${items.length}`}>
       <div className="flex flex-col gap-2">
         {items.map((a, i) => {
-          const target = ALERT_TARGET[a.type];
+          const raw = ALERT_TARGET[a.type];
+          const target = typeof raw === "string" ? { module: raw } : raw;
           const actionable = !!target && canGo(target.module);
           const refs = (a.refs || []).filter(Boolean);
           return (
