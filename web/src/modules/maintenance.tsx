@@ -20,6 +20,7 @@ import {
   upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, aiMntContratStatut, revertMntAutoStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
+  aiMntLignees, applyMntLignee, type MntLignee,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention, MntWatch } from "../types";
 import { EVENT_TYPE_LABEL, SEVERITY_LABEL, severityTone, watchMatchesEvent, hasAnyWatch, type MntSurveillanceEvent, type MntSurveillanceSummary } from "../lib/mntSurveillance";
@@ -164,6 +165,8 @@ export const Maintenance: FC<Props> = () => {
   const objetOf = (fp?: string | null) => orderByFp.get(fpKey(fp || "") || "")?.affaire || "";
   // Cellule « Objet » réutilisable (tronquée + title au survol) — même rendu dans toutes les tables du module.
   const objetCell = (fp?: string | null) => { const o = objetOf(fp); return <span className="truncate max-w-[220px] inline-block align-bottom" title={o}>{o || "—"}</span>; };
+  // Lignées de renouvellement PROPOSÉES par l'IA (ADR-030) — état local (proposition seule, appliquée à la demande).
+  const [lignees, setLignees] = useState<MntLignee[]>([]);
   // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
   // du score. Le doc est gaté (drapeau + droit maintenance) côté rules ; on ne le lit que si `gate`.
   const { data: risque } = useDocData<RisqueSummary>(gate ? "summaries/mnt_risque" : null);
@@ -276,6 +279,8 @@ export const Maintenance: FC<Props> = () => {
     colText("N° FP", (c: MntContrat) => <FpLink fp={c.fp} />, (c: MntContrat) => c.fp || ""),
     // Objet/désignation de l'affaire adossée (depuis la commande, par fpKey) — le contrat ne le stocke pas.
     colText("Objet", (c: MntContrat) => objetCell(c.fp), (c: MntContrat) => objetOf(c.fp)),
+    // Lignée de renouvellement (ADR-030) : numéro du GROUPE de reconductions auquel ce contrat appartient.
+    colText("Lignée", (c: MntContrat) => (c.ligneeId ? <Badge tone="steel">{c.ligneeId}</Badge> : <span className="text-faint">—</span>), (c: MntContrat) => c.ligneeId || ""),
     colText("Statut", (c: MntContrat) => <Badge tone={statutTone(c.statut)}>{label(STATUT_LABEL, c.statut)}</Badge>, (c: MntContrat) => label(STATUT_LABEL, c.statut)),
     // « Période » découpée en Début / Fin (colonnes triables séparément).
     colText("Début", (c: MntContrat) => frDate(c.dateDebut), (c: MntContrat) => c.dateDebut || ""),
@@ -768,6 +773,33 @@ export const Maintenance: FC<Props> = () => {
               <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. Coche des lignes pour <b>créer en masse</b> (échéance = date de commande + 12 mois), ou « Créer » pour une fiche <b>pré-remplie</b>.</Tip>
               {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <>{bulkBar}<Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" /></>}
             </>
+          )}
+        </Card>
+      )}
+
+      {canWrite && (
+        <Card title={`Lignées de renouvellement (IA)${lignees.length ? ` · ${lignees.length}` : ""}`}
+          actions={<Busy variant="gold" label="Détecter les lignées (IA)" okMsg="Analyse prête" errMsg="Analyse IA indisponible"
+            fn={async () => { const r = await aiMntLignees(); setLignees(r.lignees); }} />}>
+          <Tip>L'<b>IA</b> met en évidence les <b>reconductions</b> : des contrats distincts (N° FP différents, années successives) qui sont en réalité le <b>même engagement récurrent</b> reconduit. Chaque lignée reçoit un <b>numéro généré</b> (AAAAMM + client). « <b>Appliquer</b> » rattache les contrats à la lignée (champ <code>ligneeId</code>) — ils <b>gardent leur N° FP</b>. Rien n'est écrit sans ce clic.</Tip>
+          {lignees.length === 0 ? <EmptyState label="Aucune lignée détectée — lancez l'analyse IA." /> : (
+            <div className="flex flex-col gap-2">
+              {lignees.map((l) => (
+                <div key={l.numero} className="rounded-lg border border-line bg-panel2 px-3 py-2.5 flex flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="steel">{l.numero}</Badge>
+                    <span className="text-ink font-medium">{l.client}</span>
+                    <span className="text-[12px] text-muted">{l.count} contrats · moyenne {money(l.montantMoyen)}{l.confidence != null ? ` · confiance ${pct(l.confidence)}` : ""}</span>
+                    <Busy variant="ghost" label="Appliquer" okMsg="Lignée appliquée (recalcul lancé)" errMsg="Application refusée"
+                      fn={async () => { await applyMntLignee(l.numero, l.contrats.map((c) => c.id)); }} />
+                  </div>
+                  {l.reason && <div className="text-[11px] text-faint">{l.reason}</div>}
+                  <div className="flex flex-wrap gap-1">
+                    {l.contrats.map((c) => <span key={c.id} className="rounded bg-panel text-faint px-1.5 py-0.5 text-[11px]" title={c.affaire || ""}>{c.fp} · {String(c.dateDebut || "").slice(0, 4)}</span>)}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       )}

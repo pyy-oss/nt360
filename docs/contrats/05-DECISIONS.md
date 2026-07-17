@@ -3,6 +3,35 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-030 — Lignées de renouvellement : regrouper les reconductions sous un numéro généré, les contrats gardent leur FP
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Un même engagement de maintenance est souvent reconduit d'année en année sous des **contrats distincts**
+(N° FP différents, périodes qui s'enchaînent). Rien ne matérialisait qu'ils forment **une seule lignée** —
+impossible de suivre la valeur d'un client dans la durée, ni d'anticiper globalement un renouvellement.
+
+### Décision
+- **Détection PURE + confirmation IA** (« l'IA propose, l'humain valide ») : `domain/mntLignee` regroupe
+  par client normalisé et chaîne les contrats adjacents (dateFin(N) ≈ dateDébut(N+1)) à montant et
+  désignation proches (appariement successeur, gère l'entrelacement) ; `lib/mntLigneeAi` fait confirmer par
+  le modèle que c'est bien une reconduction du **même** service. Le domaine re-valide toute sortie IA.
+- **Numéro généré** `AAAAMM` (mois du plus ancien début) + 2–4 lettres du client + suffixe `-N` par
+  collision. Ce numéro désigne le **GROUPE**.
+- **Les contrats GARDENT leur N° FP** (ADR-001 « 1 contrat = 1 affaire » inchangé). Le rattachement est un
+  champ **additif** `ligneeId` sur `mnt_contrats`, persisté par `applyMntLignee` (merge — upsert/import ne le
+  clobbent pas). Le signal « désignation » vient de la **commande** adossée (par `fpKey`), le contrat ne la
+  stockant pas.
+
+### Conséquences
+- Deux callables : `aiMntLignees` (détection + confirmation, AUCUNE écriture) et `applyMntLignee` (persiste
+  `ligneeId`, geste humain, recompute scopé `maintenance`). Colonne « Lignée » sur la table Contrats.
+- Additif : à drapeau éteint ou sans application, l'ERP est strictement celui d'avant. Aucun schéma
+  existant modifié.
+
 ## ADR-029 — Statut automatique : « échéance dépassée → échu » n'est JAMAIS recommandée en masse (requiresReview)
 
 - **Date :** 2026-07-17

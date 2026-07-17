@@ -247,6 +247,7 @@ export type MntContrat = {
   statut?: string; echeanceType?: string; dateDebut?: string; dateFin?: string | null;
   montantEngage?: number; deviseEngage?: string; engagements?: MntEngagement[];
   objectifsMaintenance?: MntObjectifs | null;
+  ligneeId?: string; // numéro de lignée de renouvellement (ADR-030) — le contrat garde son FP ; le numéro désigne le GROUPE
   updatedAt?: any; createdAt?: any;
 };
 // Tickets & interventions de maintenance (mnt_, Lot 2). Temps d'intervention en heures ; alimente

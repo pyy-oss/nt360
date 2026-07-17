@@ -156,7 +156,66 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     },
   );
 
+  // LIGNÉES DE RENOUVELLEMENT (ADR-030) — l'IA met en évidence que PLUSIEURS contrats distincts (FP
+  // différents, années successives) sont EN RÉALITÉ le même engagement récurrent reconduit, et leur
+  // attribue un NUMÉRO généré (AAAAMM + lettres du client). Détection déterministe PURE (domain/mntLignee) →
+  // confirmation IA (lib/mntLigneeAi). « L'IA propose, l'humain valide » : AUCUNE écriture ici (proposition
+  // seule). `affaire` = désignation de la commande adossée (par fpKey) — le contrat ne la stocke pas (ADR-001).
+  const aiMntLignees = onCallG(
+    "aiMntLignees",
+    { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 },
+    async (req) => {
+      await requireWrite(req, "maintenance");
+      await assertMntEnabled();
+      if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+      const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();
+      if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+      // Contrats + désignation de la commande adossée (par fpKey) pour le signal « affaire ». Scans bornés.
+      const [cSnap, oSnap] = await Promise.all([
+        db.collection("mnt_contrats").limit(MAX_SCAN + 1).get(),
+        db.collection("orders").select("fp", "designation").limit(MAX_SCAN + 1).get(),
+      ]);
+      const affaireByFp = new Map();
+      for (const d of sliceCapped(oSnap.docs).docs) { const o = d.data() || {}; const k = fpKey(o.fp); if (k && !affaireByFp.has(k)) affaireByFp.set(k, o.designation || ""); }
+      const contrats = sliceCapped(cSnap.docs).docs.map((d) => { const c = d.data() || {}; const k = fpKey(c.fp); return { id: d.id, fp: c.fp, client: c.client, dateDebut: c.dateDebut, dateFin: c.dateFin, montantEngage: c.montantEngage, affaire: (k && affaireByFp.get(k)) || "" }; });
+      const { detectLignees } = require("../domain/mntLignee");
+      const { lignees } = detectLignees(contrats);
+      if (!lignees.length) return { ok: true, lignees: [], candidates: 0 };
+      const { aiConfirmMntLignees } = require("../lib/mntLigneeAi");
+      let out;
+      try { out = await aiConfirmMntLignees(apiKey, lignees); }
+      catch (e) {
+        if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+        throw new HttpsError("internal", "L'assistant IA n'a pas pu confirmer les lignées (réessayez).");
+      }
+      // Ne garder que les lignées CONFIRMÉES par le modèle (isRenouvellement true, re-validées par le domaine).
+      const confByNum = new Map(out.confirmations.map((c) => [c.numero, c]));
+      const confirmed = lignees.filter((l) => confByNum.has(l.numero)).map((l) => ({ ...l, confidence: confByNum.get(l.numero).confidence, reason: confByNum.get(l.numero).reason }));
+      if (logOps) await logOps({ kind: "ai", action: "mntLignees", status: "ok", uid: req.auth.uid, detail: { candidates: lignees.length, confirmed: confirmed.length, model: out.model, usage: out.usage } });
+      return { ok: true, lignees: confirmed, model: out.model, candidates: lignees.length };
+    },
+  );
+
+  // APPLIQUER une lignée : persiste le champ ADDITIF `ligneeId` (le numéro généré) sur chaque contrat membre.
+  // Merge → ne clobbe aucun autre champ ; upsertMntContrat/import (merge sans ligneeId) préservent la valeur.
+  // Les contrats GARDENT leur FP (ADR-001) — le numéro désigne le GROUPE. Geste HUMAIN (après confirmation IA).
+  const applyMntLignee = onCallG("applyMntLignee", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations en peu de temps — patientez un instant.");
+    await assertMntEnabled();
+    const numero = String((req.data && req.data.numero) || "").trim();
+    const ids = Array.isArray(req.data && req.data.contratIds) ? req.data.contratIds.filter((x) => x).slice(0, 50).map(String) : [];
+    if (!numero || ids.length < 2) throw new HttpsError("invalid-argument", "numéro de lignée + au moins 2 contrats requis");
+    const batch = db.batch();
+    for (const id of ids) batch.set(db.doc(`mnt_contrats/${id}`), { ligneeId: numero, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await batch.commit();
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "apply_mnt_lignee", module: "maintenance", entity: "mnt_contrat", entityId: numero, detail: { numero, contrats: ids.length }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["maintenance"]);
+    return { ok: true, numero, count: ids.length };
+  });
+
   const deleteMntContrat = onCallG("deleteMntContrat", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "maintenance");
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
     const id = assertPlainId(req.data?.id, "id contrat");
@@ -486,7 +545,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiMntLignees, applyMntLignee, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
