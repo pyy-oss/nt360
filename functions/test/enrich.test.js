@@ -43,4 +43,22 @@ describe("enrichLinks — rattachement facture↔commande", () => {
     expect(res.orphanCount).toBe(1);
     expect(res.orphanAmount).toBe(200);
   });
+  it("marque preCmd : facture datée AVANT la date de commande (au jour près)", () => {
+    const orders = [{ fp: "FP/2026/1", yearPo: 2026, dateCommande: "2026-03-15" }];
+    const invoices = [
+      { fp: "FP/2026/1", amountHt: 100, date: "2026-03-10" }, // avant dateCommande → preCmd
+      { fp: "FP/2026/1", amountHt: 100, date: "2026-04-01" }, // après → non
+      { fp: "FP/2026/1", amountHt: 100, date: "2026-03-15" }, // même jour → non (pas strictement avant)
+    ];
+    enrichLinks({ orders, invoices });
+    expect(invoices[0].preCmd).toBe(true);
+    expect(invoices[1].preCmd).toBe(false);
+    expect(invoices[2].preCmd).toBe(false);
+  });
+  it("preCmd = false quand la commande n'a pas de date de commande", () => {
+    const orders = [{ fp: "FP/2026/1", yearPo: 2026 }]; // pas de dateCommande
+    const invoices = [{ fp: "FP/2026/1", amountHt: 100, date: "2020-01-01" }];
+    enrichLinks({ orders, invoices });
+    expect(invoices[0].preCmd).toBe(false);
+  });
 });

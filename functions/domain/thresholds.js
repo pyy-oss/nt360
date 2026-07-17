@@ -9,6 +9,7 @@ const ALERT_DEFAULTS = {
   rafEcartPct: 0.10,        // écart RAF vs (CAS − facturé) > 10 % → RAF incohérent
   dormantYears: 2,          // backlog dont l'année de PO ≤ exercice − 2 → dormant
   valorisationEcartPct: 0.30, // |CAS retenu (opp gagnée/fiche) − CAS P&L| / max > 30 % → écart de valorisation amont
+  nonFactureJours: 90,      // commande signée (CAS>0) sans AUCUNE facture depuis > N jours → trou de facturation aval
 };
 
 module.exports = { ALERT_DEFAULTS };

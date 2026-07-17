@@ -60,6 +60,9 @@ function enrichLinks(store) {
     const ord = k ? orderByFp[k] : null;
     inv.linked = !!ord;
     inv.prePo = !!(ord && ord.yearPo && inv.date && +inv.date.slice(0, 4) < ord.yearPo);
+    // preCmd = facturée AVANT la date de commande (chronologie au JOUR près, plus fine que prePo qui est
+    // annuel). Alimente l'alerte aval « facture antérieure à la commande ». dateCommande = date_order Odoo.
+    inv.preCmd = !!(ord && ord.dateCommande && inv.date && String(inv.date).slice(0, 10) < String(ord.dateCommande).slice(0, 10));
     if (!inv.linked) { orphanCount++; orphanAmount += inv.amountHt || 0; }
   }
   return { orphanCount, orphanAmount };
