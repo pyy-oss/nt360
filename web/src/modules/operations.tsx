@@ -722,6 +722,11 @@ export const Fp360: FC<Props> = () => {
               {Math.abs((o.cas || 0) - (o.facture || 0) - (o.raf || 0)) > 1 && (
                 <Tip>Identité <b>CAS = Facturé + RAF</b> non vérifiée (écart {fmt((o.cas || 0) - (o.facture || 0) - (o.raf || 0))}) — rattachement facture→FP possiblement partiel, ou RAF curaté (Excel) différent du dérivé. À corriger dans <b>Qualité &amp; correction</b>.</Tip>
               )}
+              {/* Σ des factures LISTÉES (brut, factures annulées incluses) ≠ « Facturé » carnet (autorité, annulées
+                  exclues par fpKey) : on l'explique pour éviter une lecture trompeuse de l'en-tête « Factures ». */}
+              {Math.round(sumFacture) !== Math.round(o.facture || 0) && (
+                <div className="text-[11px] text-faint mt-1">Σ factures listées ({fmt(sumFacture)}) ≠ Facturé carnet ({fmt(o.facture || 0)}) — factures annulées ou graphie de N° FP différente ; le <b>carnet fait autorité</b>.</div>
+              )}
             </Card>
           )}
           <Card title={`Factures · ${invoices.length} · Σ ${fmt(sumFacture)}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>

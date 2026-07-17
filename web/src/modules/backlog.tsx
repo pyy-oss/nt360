@@ -1107,6 +1107,10 @@ const factBucket = (r: Order): "none" | "todo" | "wip" | "done" => {
   if (f <= 0) return "todo";
   return f < c ? "wip" : "done";
 };
+// Tolérance de l'écart AGRÉGÉ CAS = Facturé + RAF (carte « Cohérence du carnet ») : alignée sur le défaut
+// `rafEcartPct` du prédicat PAR LIGNE `raf_incoherent` (10 %). L'agrégat est GROSSIER (des écarts par ligne
+// peuvent se compenser dans la somme) → teinte neutre, pas un feu vert ; le détail par ligne vit au Centre d'alertes.
+const CARNET_ECART_TOL = 0.10;
 
 export const OrderList: FC<Props> = () => {
   const { rows: all, loading } = useCommandesRows();
@@ -1192,9 +1196,9 @@ export const OrderList: FC<Props> = () => {
         <Kpi label="Σ CAS" value={fmt(coh.cas)} sub={`${rows.length.toLocaleString("fr-FR")} commandes`} />
         <Kpi label="Σ Facturé" value={fmt(coh.fact)} sub={pct(coh.cas ? coh.fact / coh.cas : 0)} />
         <Kpi label="Σ RAF" value={fmt(coh.raf)} tone="steel" />
-        <Kpi label="Écart CAS − (Fact + RAF)" value={fmt(coh.ecart)} tone={Math.abs(coh.ecart) > coh.cas * 0.02 ? "clay" : "emerald"} />
+        <Kpi label="Écart CAS − (Fact + RAF)" value={fmt(coh.ecart)} tone={Math.abs(coh.ecart) > coh.cas * CARNET_ECART_TOL ? "clay" : "steel"} />
       </div>
-      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé — voir le <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées.</Tip>
+      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé. <b>Vue grossière</b> : l'écart net peut masquer des incohérences par ligne qui se compensent — le détail est au <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées.</Tip>
     </Card>
     <Card title={`Commandes · ${shown.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
