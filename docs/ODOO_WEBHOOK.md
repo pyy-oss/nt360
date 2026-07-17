@@ -7,12 +7,13 @@ objet connu est **mis à jour**.
 ## Endpoint
 
 ```
-POST https://<région>-propulse-business-87f7a.cloudfunctions.net/odooWebhook
+POST https://odoowebhook-hap6lozbqq-uc.a.run.app
 Content-Type: application/json
 X-Signature: <hex HMAC-SHA256 du corps BRUT, clé = secret partagé>
 ```
 
-L'URL exacte de la fonction est donnée après déploiement (console Firebase → Functions → `odooWebhook`).
+URL de production (Cloud Run / Functions 2ᵉ gén., région `us-central1`). Elle se relit dans la console
+Firebase → Functions → `odooWebhook` si elle change après un redéploiement.
 
 ## Authentification (HMAC)
 
@@ -115,7 +116,7 @@ depuis Odoo (opportunités, commandes, factures) vers l'endpoint `odooWebhook`, 
 
 | Élément | Où | Remarque |
 |---|---|---|
-| **URL** `odooWebhook` | console Firebase → Functions | `https://<région>-propulse-business-87f7a.cloudfunctions.net/odooWebhook` |
+| **URL** `odooWebhook` | console Firebase → Functions | `https://odoowebhook-hap6lozbqq-uc.a.run.app` |
 | **Secret partagé** | posé côté nt360 via `setOdooWebhook({ secret })` | ≥ 16 caractères ; **la même valeur** doit être stockée côté Odoo. Générer p. ex. `openssl rand -hex 32`. |
 
 Le secret est **write-only** côté nt360 (jamais relu). Convenez-le une fois, stockez-le des deux côtés.
@@ -249,7 +250,7 @@ Une *Automated Action* (`base.automation`) par modèle, **sur création et mise 
 
 ```bash
 SECRET='le-secret-partagé'
-URL='https://<région>-propulse-business-87f7a.cloudfunctions.net/odooWebhook'
+URL='https://odoowebhook-hap6lozbqq-uc.a.run.app'
 BODY='{"object":"order","records":[{"fp":"FP/2026/12","client":"ACME","cas":12000000,"bu":"ICT"}]}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.*= //')
 curl -sS -X POST "$URL" -H 'Content-Type: application/json' -H "X-Signature: $SIG" --data "$BODY"
