@@ -73,7 +73,9 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     // fortement de la valeur P&L d'origine (casPnl, conservé par mergeCommandes). mergeCommandes applique la
     // règle « opp gagnée > P&L » SANS rien signaler ; un écart important trahit une opp/fiche périmée ou un
     // mauvais rapprochement — à revoir. Calculé sur les commandes FUSIONNÉES (qui portent `casPnl` + `source`).
-    def("ecart_valorisation", "medium", orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && num(o.casPnl) > 0 && num(o.cas) > 0 && Math.abs(num(o.cas) - num(o.casPnl)) / Math.max(num(o.cas), num(o.casPnl)) > valorEcartPct), "Commandes dont le CAS retenu (opp gagnée/fiche) s'écarte fortement de la valeur P&L d'origine (à revoir)", (o) => o.fp),
+    // `casSource==="override"` exclu : une surcharge manuelle du CAS est une valeur CHOISIE, pas une divergence
+    // opp/fiche à signaler (miroir de alerts.js, préserve la parité).
+    def("ecart_valorisation", "medium", orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && o.casSource !== "override" && num(o.casPnl) > 0 && num(o.cas) > 0 && Math.abs(num(o.cas) - num(o.casPnl)) / Math.max(num(o.cas), num(o.casPnl)) > valorEcartPct), "Commandes dont le CAS retenu (opp gagnée/fiche) s'écarte fortement de la valeur P&L d'origine (à revoir)", (o) => o.fp),
     // AMONT — Opportunité encore ACTIVE (stage 1-5) sur un FP DÉJÀ au carnet : la commande existe déjà, l'opp
     // fait double emploi. Déjà EXCLUE du pipeline projeté (chaine.js bookedFps) mais JAMAIS signalée → à
     // requalifier/clôturer pour ne pas fausser le suivi commercial.

@@ -75,7 +75,9 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   // Écart de valorisation : le CAS RETENU (écrasé par une opp gagnée / fiche) s'écarte fortement de la valeur
   // P&L d'origine (casPnl, conservé par mergeCommandes). Miroir EXACT du prédicat dataQuality.ecart_valorisation
   // (même population → mêmes comptes, verrouillé par consistencyAlertsDq.test.js).
-  const ecartVal = orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && (o.casPnl || 0) > 0 && (o.cas || 0) > 0 && Math.abs((o.cas || 0) - (o.casPnl || 0)) / Math.max(o.cas || 0, o.casPnl || 0) > T.valorisationEcartPct);
+  // `casSource==="override"` exclu : une surcharge manuelle du CAS (config/orderCasOverride) est une valeur
+  // CHOISIE par un opérateur, pas une divergence opp/fiche à signaler (sinon le libellé impute à tort à l'opp/fiche).
+  const ecartVal = orders.filter((o) => (o.source === "opp_won" || o.source === "fiche") && o.casSource !== "override" && (o.casPnl || 0) > 0 && (o.cas || 0) > 0 && Math.abs((o.cas || 0) - (o.casPnl || 0)) / Math.max(o.cas || 0, o.casPnl || 0) > T.valorisationEcartPct);
   if (ecartVal.length) out.push({ type: "ecart_valorisation", severity: "medium", count: ecartVal.length, message: `${ecartVal.length} commande(s) dont le CAS retenu s'écarte de >${(T.valorisationEcartPct * 100).toFixed(0)} % de la valeur P&L d'origine`, refs: ecartVal.slice(0, 10).map((o) => o.fp) });
 
   // Opportunité encore ACTIVE (stage 1-5) sur un FP DÉJÀ au carnet : commande existante → l'opp fait double

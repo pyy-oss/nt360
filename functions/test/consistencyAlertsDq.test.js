@@ -52,6 +52,7 @@ describe("cohérence AMONT Alertes ↔ Qualité (écart valorisation + opp sur F
     { fp: "FP/2026/1", cas: 800, casPnl: 500, source: "opp_won", client: "A", am: "X", yearPo: 2026 }, // écart 800 vs 500 = 60 % > 30 %
     { fp: "FP/2026/2", cas: 520, casPnl: 500, source: "fiche", client: "B", am: "Y", yearPo: 2026 },   // écart 4 % < 30 % → non
     { fp: "FP/2026/3", cas: 500, casPnl: 500, source: "pnl", client: "C", am: "Z", yearPo: 2026 },     // pas d'écrasement → non
+    { fp: "FP/2026/4", cas: 900, casPnl: 500, source: "opp_won", casSource: "override", client: "D", am: "W", yearPo: 2026 }, // écart 80 % MAIS CAS surchargé (valeur choisie) → non signalé
   ];
   const oppsAmont = [
     { fp: "FP/2026/1", stage: 3, amount: 100, closingDate: "2027-01-01" }, // ACTIVE sur un FP au carnet → signalée
