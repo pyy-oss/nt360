@@ -45,6 +45,7 @@ deleteMntContrat
 deleteMntIntervention
 deleteMntTicket
 setMntContratStatut
+setMntWatch
 deleteTimesheet
 listCandidates
 listConsultants

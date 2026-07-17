@@ -6,9 +6,9 @@
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
-import { useCan } from "../lib/rbac";
+import { useCan, useClaims } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx, type BulkAction } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
@@ -17,11 +17,12 @@ import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
-  upsertMntContrat, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
+  upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
-import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
+import type { MntContrat, MntEngagement, MntTicket, MntIntervention, MntWatch } from "../types";
+import { EVENT_TYPE_LABEL, SEVERITY_LABEL, severityTone, watchMatchesEvent, hasAnyWatch, type MntSurveillanceEvent, type MntSurveillanceSummary } from "../lib/mntSurveillance";
 import {
   STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, STATUT_LABEL, ECHEANCE_LABEL, SLA_TYPE_LABEL, COUVERTURE_LABEL,
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
@@ -149,6 +150,11 @@ export const Maintenance: FC<Props> = () => {
   // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
   // du score. Le doc est gaté (drapeau + droit maintenance) côté rules ; on ne le lit que si `gate`.
   const { data: risque } = useDocData<RisqueSummary>(gate ? "summaries/mnt_risque" : null);
+  // Centre de surveillance (Lot 5, ADR-026) : flux d'événements MATÉRIALISÉ (projection du risque) + les
+  // abonnements PAR UTILISATEUR (doc mnt_watches/{uid}, lu en direct — chaque utilisateur ne lit que le sien).
+  const { user } = useClaims();
+  const { data: surv } = useDocData<MntSurveillanceSummary>(gate ? "summaries/mnt_surveillance" : null);
+  const { data: watch } = useDocData<MntWatch>(gate && user?.uid ? `mnt_watches/${user.uid}` : null);
   // Consultants pour la saisie d'intervention (collection consultants = callable-only → listConsultants).
   const [consultants, setConsultants] = useState<{ id: string; name?: string }[]>([]);
   useEffect(() => { if (!gate) return; listConsultants().then((r) => setConsultants((r.rows || []).filter((c) => c.id).map((c) => ({ id: c.id!, name: c.name || undefined })))).catch(() => setConsultants([])); }, [gate]);
@@ -296,6 +302,41 @@ export const Maintenance: FC<Props> = () => {
   // Maintenance par TYPE vs objectifs (ADR-025) : nombre de tickets ET d'interventions par type, par
   // contrat + total agrégé. Vue pure (mntTypeStats), dérivée des collections déjà chargées.
   const typeStats = useMemo(() => mntTypeStats(contrats, tickets, interventions), [contrats, tickets, interventions]);
+  // --- Centre de surveillance (ADR-026) : flux d'événements + abonnements ciblés ---
+  const [survScope, setSurvScope] = useState<"tout" | "abonnements">("tout");
+  const survEvents = useMemo<MntSurveillanceEvent[]>(() => surv?.events || [], [surv]);
+  const survCounts = surv?.counts || { high: 0, medium: 0, low: 0 };
+  const watched = hasAnyWatch(watch);
+  // « Mes abonnements » filtre le flux aux événements couverts par l'abonnement (miroir de watchMatchesEvent back).
+  const survRows = useMemo(() => (survScope === "abonnements" ? survEvents.filter((e) => watchMatchesEvent(watch, e)) : survEvents), [survEvents, survScope, watch]);
+  const isWatchedContrat = (id: string) => !!watch?.global || (watch?.contrats || []).includes(id);
+  // Bascule l'abonnement CIBLÉ d'un contrat (ajout/retrait dans mnt_watches/{uid}). Le reste de l'abonnement
+  // (global, clients, ams) est préservé — le callable renormalise et écrit le doc complet.
+  const toggleWatchContrat = async (contratId: string) => {
+    const set = new Set(watch?.contrats || []);
+    if (set.has(contratId)) set.delete(contratId); else set.add(contratId);
+    await setMntWatch({ global: !!watch?.global, contrats: [...set], clients: watch?.clients || [], ams: watch?.ams || [] });
+  };
+  const setWatchGlobal = async (g: boolean) => setMntWatch({ global: g, contrats: watch?.contrats || [], clients: watch?.clients || [], ams: watch?.ams || [] });
+  const survCols = [
+    colText("Sévérité", (e: MntSurveillanceEvent) => <Badge tone={severityTone(e.severity)}>{SEVERITY_LABEL[e.severity] || e.severity}</Badge>, (e: MntSurveillanceEvent) => (e.severity === "high" ? 0 : e.severity === "medium" ? 1 : 2)),
+    colText("Événement", (e: MntSurveillanceEvent) => (
+      <div className="flex flex-col gap-0.5">
+        <Badge tone="steel">{EVENT_TYPE_LABEL[e.type] || e.type}</Badge>
+        <span className="text-[12px] text-muted">{e.message}</span>
+      </div>
+    ), (e: MntSurveillanceEvent) => e.type),
+    colText("Client", (e: MntSurveillanceEvent) => e.client || "—", (e: MntSurveillanceEvent) => e.client || ""),
+    colText("N° FP", (e: MntSurveillanceEvent) => <FpLink fp={e.fp || undefined} />),
+    colText("AM", (e: MntSurveillanceEvent) => e.am || "—"),
+    colText("", (e: MntSurveillanceEvent) => (
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { const c = contratById[e.contratId]; if (c) { setCForm(toContratForm(c)); setViewC(c); } }}>Consulter</button>
+        {/* S'abonner CIBLÉ à ce contrat. Masqué si abonnement global (déjà tout couvert). */}
+        {!watch?.global && <Busy variant="ghost" label={isWatchedContrat(e.contratId) ? "Suivi ✓" : "Suivre"} okMsg={isWatchedContrat(e.contratId) ? "Désabonné" : "Abonné"} errMsg="Action refusée" fn={() => toggleWatchContrat(e.contratId)} />}
+      </div>
+    )),
+  ];
   const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
   const renouvCols = [
     colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
@@ -532,6 +573,32 @@ export const Maintenance: FC<Props> = () => {
         <Card title="Maintenance par type">
           <Tip>Nombre de <b>tickets</b> et d'<b>interventions</b> classés par type sur l'ensemble du parc — comptés <b>séparément</b>. Les <b>objectifs</b> (max visé) se fixent et se suivent <b>par contrat</b> (fiche en consultation). Les items non classés ne sont pas comptés.</Tip>
           <TypeStatsTable tickets={typeStats.totalTickets} interventions={typeStats.totalInterventions} />
+        </Card>
+      )}
+      {/* Centre de surveillance (ADR-026) — flux d'événements clés (projection du risque) + abonnements
+          ciblés. Proactivité : « Tout » = tout le parc, « Mes abonnements » = ce que je suis (contrat/parc). */}
+      {gate && surv && (
+        <Card title="Centre de surveillance"
+          actions={(
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented value={survScope} onChange={setSurvScope} ariaLabel="Portée de la surveillance"
+                options={[
+                  { value: "tout", label: "Tout", count: survEvents.length },
+                  { value: "abonnements", label: "Mes abonnements", count: survEvents.filter((e) => watchMatchesEvent(watch, e)).length },
+                ]} />
+              <Busy variant={watch?.global ? "gold" : "ghost"} label={watch?.global ? "Parc suivi ✓" : "Suivre tout le parc"}
+                okMsg={watch?.global ? "Désabonné du parc" : "Abonné à tout le parc"} errMsg="Action refusée" fn={() => setWatchGlobal(!watch?.global)} />
+            </div>
+          )}>
+          <Tip>Événements clés dérivés du <b>moteur de risque</b> (SLA rompus, renouvellements, quotas, sous-facturation), <b>les plus graves d'abord</b>. « <b>Suivre</b> » abonne à un contrat (ou tout le parc) : « <b>Mes abonnements</b> » ne montre alors que ce qui vous concerne. Diffusion <b>en direct</b>, sans e-mail.</Tip>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <Kpi label="Urgent" value={String(survCounts.high || 0)} tone={survCounts.high ? "clay" : "ink"} />
+            <Kpi label="À surveiller" value={String(survCounts.medium || 0)} tone={survCounts.medium ? "gold" : "ink"} />
+            <Kpi label="Info" value={String(survCounts.low || 0)} tone="ink" />
+          </div>
+          {survRows.length === 0
+            ? <EmptyState label={survScope === "abonnements" ? (watched ? "Aucun événement sur vos abonnements." : "Aucun abonnement — « Suivre » un contrat ou tout le parc pour un suivi ciblé.") : "Aucun événement — parc sous contrôle."} />
+            : <Table columns={survCols} rows={survRows} colsKey="mnt_surveillance" rowKey={(e) => e.id} />}
         </Card>
       )}
       {risque && (

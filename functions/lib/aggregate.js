@@ -686,6 +686,10 @@ async function recomputeCore(db, only) {
       const ticks = mntTickets.map((t) => { const openMs = tsMs(t.ouvertLe); return { id: t.id, contratId: t.contratId, ouvertMs: openMs, priseEnCompteMs: t.priseEnCompteLe ? tsMs(t.priseEnCompteLe) : null, resoluMs: t.resoluLe ? tsMs(t.resoluLe) : null, dateJour: openMs ? new Date(openMs).toISOString().slice(0, 10) : null }; });
       const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now() });
       w.push({ path: "summaries/mnt_risque", data: { ...risque, ...stamp } });
+      // Centre de surveillance (ADR-026) : flux d'événements PROJETÉ du risque (aucun recalcul) → cohérence
+      // garantie avec summaries/mnt_risque. Même bloc gaté, même stamp. Lu sous droit `maintenance` + drapeau.
+      const { mntSurveillance } = require("../domain/mntSurveillance");
+      w.push({ path: "summaries/mnt_surveillance", data: { ...mntSurveillance(risque, asOf), ...stamp } });
     }
   }
 

@@ -3,6 +3,53 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-026 — Centre de surveillance : flux d'événements PROJETÉ du moteur de risque + abonnements ciblés par utilisateur
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (choix confirmés en session : « flux unifié + abonnements ciblés », « centre in-app live »)
+
+### Contexte
+Besoin : un **centre de surveillance** des contrats — événements clés + alertes, globales ou ciblées,
+« proactivité maximale ». Le module calcule DÉJÀ tous les signaux utiles dans le **moteur de risque**
+(`domain/mntRisque.js` → `summaries/mnt_risque`) : SLA rompus, échéance proche, quota dépassé,
+sous-facturation, par contrat, avec niveau et score. L'ERP diffuse déjà ses alertes par des documents
+`summaries/alerts*` (RBAC-gated, temps réel via `onSnapshot`). Recréer un moteur d'événements ou une
+brique de notification violerait « ne recrée pas ce qui existe » et créerait une 2ᵉ vérité du risque.
+
+### Décision
+- **Événements = PROJECTION du risque, pas un 2ᵉ calcul.** `domain/mntSurveillance.js` (PUR) aplatit
+  les `items[]` de `mntRisque` en un flux d'événements ordonnés par sévérité : chaque `signal`
+  (`sla_rompu`, `echeance_proche`, `quota_depasse`, `sous_facturation`) devient un événement portant le
+  contrat (id, fp, client, am, bu), une **sévérité** (`high`/`medium`/`low` — vocabulaire de
+  `domain/alerts.js`) et un message FR. Consistance garantie par construction avec le centre de risque
+  (« même métrique = même nombre »).
+- **Matérialisation** dans `summaries/mnt_surveillance`, écrit dans le MÊME bloc de recompute que
+  `mnt_risque` (doublement gaté `want("maintenance")` + drapeau `mntFeature`). Rafraîchi après édition
+  par le `requestRecompute(["maintenance"])` déjà en place (Lot 2). Lu via la règle `summaries` existante
+  (ajout de `mnt_surveillance` à `summaryModule()` → `maintenance` + verrou drapeau).
+- **Abonnements ciblés = état PAR UTILISATEUR**, doc dédié `mnt_watches/{uid}` (préfixe `mnt_`, isolé par
+  `request.auth.uid == id`, lu en direct par `onSnapshot`). Forme : `{ global, contrats[], clients[], ams[] }`.
+  Écrit par un callable gouverné `setMntWatch` (droit `maintenance`, drapeau, audité) — jamais en écriture
+  cliente directe. « Global » = tout le parc ; « ciblé » = un contrat / un client / un AM.
+- **Diffusion = in-app live uniquement** (réutilise `summaries` + `onSnapshot`). AUCUNE brique de
+  notification externe (e-mail/push) en v1 : le ciblage se fait côté écran (filtre « Mes abonnements »
+  sur le flux), pas par un envoi serveur. Pas de nouvelle infra de diffusion à sécuriser.
+
+### Conséquences
+- Additif pur : un summary nouveau (`mnt_surveillance`), une collection par-utilisateur (`mnt_watches`),
+  un callable (`setMntWatch`). Aucun calcul de risque dupliqué, aucun signal existant modifié. Drapeau
+  éteint ⇒ rien n'est écrit ni lisible (mêmes verrous que `mnt_risque`).
+- Le flux est aussi juste que le moteur de risque : l'enrichir (nouveaux types d'événements) = enrichir
+  `mntRisque`, une seule source.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs réclament une **notification hors-app** (mail/push) sur les événements critiques →
+ouvrir une brique de diffusion (fonction d'envoi + dédup + préférences) par un ADR dédié. Si les
+abonnements ciblés servent peu → le flux global + filtres suffisait (simplifier).
+
+---
+
 ## ADR-025 — Type de maintenance (prédictive/corrective/évolutive/veille) + objectifs max par contrat
 
 - **Date :** 2026-07-17

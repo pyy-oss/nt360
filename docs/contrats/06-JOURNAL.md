@@ -812,3 +812,37 @@ existante touchée.
 
 **Audit du module contrat : CLÔTURÉ.** 11 constats confirmés → tous remédiés (2 majeurs, 5 mineurs, 4 infos)
 + 5 faux positifs écartés. ADR-021 à 024. Tout sur la PR #400.
+
+---
+
+## 2026-07-17 — Contrats Lots 4 & 5 : types de maintenance + centre de surveillance
+
+**Fait — Lot 4 (types de maintenance + objectifs, ADR-025)** :
+- Énumération unique `TYPES_MAINTENANCE` (predictive/corrective/evolutive/veille), miroir back
+  (`domain/mntContrat.js`) / front (`lib/mntContrat.ts`), libellés FR.
+- Champ optionnel `typeMaintenance` sur tickets ET interventions (validé, fail-loud sur valeur hors
+  énum) ; objectifs (max) par type EMBARQUÉS dans le contrat (`objectifsMaintenance`, entiers, rejet
+  du négatif). Comptage SÉPARÉ tickets/interventions (`mntTypeStats`, vue pure).
+- Double affichage : carte agrégée « Maintenance par type » (tableau de bord) + carte par contrat
+  (consultation, colonne Objectif, dépassement en clay). Composant `TypeStatsTable` réutilisé.
+
+**Fait — Lot 5 (centre de surveillance, ADR-026)** :
+- `domain/mntSurveillance.js` (PUR) PROJETTE `summaries/mnt_risque` en flux d'événements (SLA rompus,
+  renouvellements, quotas, sous-facturation) — aucun recalcul, cohérence garantie avec le centre de
+  risque. Matérialisé dans `summaries/mnt_surveillance` (même bloc de recompute gaté que mnt_risque).
+- Abonnements PAR UTILISATEUR : collection `mnt_watches/{uid}` (global ou ciblé contrat/client/AM),
+  écrite par le callable `setMntWatch` (requireRead + drapeau, audité), lue en direct et isolée par uid.
+- Front : carte « Centre de surveillance » (flux trié par sévérité, Segmented Tout / Mes abonnements,
+  bouton Suivre par contrat + parc). Diffusion in-app live (réutilise summaries + onSnapshot) — pas de
+  notification externe en v1 (rouvrable par ADR si besoin).
+- Refactor connexe : wrappers mnt_ « fire-and-forget » de `writes.ts` factorisés via un helper `mntWrite`
+  (récupère le budget de bundle après ajout de setMntWatch).
+
+**Vérif** — functions 966/966 (+18 : mntSurveillance, objectifs, typeMaintenance ; caractérisation
+recompute mise à jour : le bloc gaté ajoute mnt_risque + mnt_surveillance), web 144/144, lint OK,
+build OK, chunk d'entrée 120,0 KB ≤ 120, gardes CI (deploy-targets/no-undef/indexes) OK. Additif :
+3 champs optionnels + 1 summary + 1 collection par-utilisateur + 1 callable ; drapeau éteint ⇒ rien.
+
+**Appris** — La surveillance n'avait pas besoin d'un nouveau moteur : le moteur de risque calculait déjà
+tous les signaux. La bonne architecture était une PROJECTION (une vue), pas un second calcul — ça évite
+la divergence « même métrique = même nombre » et concentre l'évolution sur une seule source.

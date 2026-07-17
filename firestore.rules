@@ -115,6 +115,8 @@ service cloud.firestore {
         // Scores de risque des contrats de maintenance (Lot 5) → module 'maintenance'. Le drapeau
         // ajoute un second verrou dans le match /summaries (mnt_risque illisible drapeau éteint, C10).
         : id.matches('mnt_risque.*') ? 'maintenance'
+        // Flux du centre de surveillance (Lot 5, ADR-026) → même module + verrou drapeau que mnt_risque.
+        : id.matches('mnt_surveillance.*') ? 'maintenance'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';
@@ -227,6 +229,9 @@ service cloud.firestore {
     match /mnt_tickets/{id}        { allow read: if mntEnabled() && canRead('maintenance'); allow write: if false; }
     match /mnt_interventions/{id}  { allow read: if mntEnabled() && canRead('maintenance'); allow write: if false; }
     match /mnt_evenementsSla/{id}  { allow read: if mntEnabled() && canRead('maintenance'); allow write: if false; }
+    // Abonnements de surveillance PAR UTILISATEUR (Lot 5, ADR-026) : chaque utilisateur ne lit QUE son
+    // propre doc (id = uid). Écriture via le callable setMntWatch (Admin SDK). Double verrou drapeau+droit.
+    match /mnt_watches/{uid}       { allow read: if mntEnabled() && canRead('maintenance') && request.auth.uid == uid; allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour

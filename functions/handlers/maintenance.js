@@ -183,6 +183,22 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true };
   });
 
+  // ABONNEMENTS DE SURVEILLANCE (Lot 5, ADR-026) — préférence PAR UTILISATEUR (doc mnt_watches/{uid}).
+  // S'abonner est une PERSONNALISATION lecture (requireRead suffit : voir le module ⇒ pouvoir le suivre).
+  // Écrit le doc de l'appelant uniquement (id = uid). PAS de recompute : les abonnements ne changent aucun
+  // agrégat — le ciblage se fait à l'affichage sur summaries/mnt_surveillance (déjà matérialisé).
+  const setMntWatch = onCallG("setMntWatch", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireRead(req, "maintenance");
+    await assertMntEnabled();
+    // Garde-débit léger (personnalisation, fail-open) — homogène avec les autres callables gouvernés.
+    if (rateLimit && !(await rateLimit(req.auth.uid, "mntWatch", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de modifications d'abonnement en peu de temps — patientez un instant.");
+    const { normalizeWatch } = require("../domain/mntSurveillance");
+    const watch = normalizeWatch(req.data);
+    await db.doc(`mnt_watches/${req.auth.uid}`).set({ ...watch, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_mnt_watch", module: "maintenance", entity: "mnt_watch", entityId: req.auth.uid, detail: { global: watch.global, contrats: watch.contrats.length, clients: watch.clients.length, ams: watch.ams.length }, ts: FieldValue.serverTimestamp() });
+    return { ok: true };
+  });
+
   const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
@@ -342,7 +358,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };
