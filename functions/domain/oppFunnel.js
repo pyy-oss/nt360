@@ -32,4 +32,27 @@ function oppFunnel(history) {
   return { transitions, won, lost, advanced, regressed, winRate, total };
 }
 
-module.exports = { oppFunnel };
+// Taux de PROGRESSION par étape (« où meurent les deals ») dérivé des transitions : pour chaque étape
+// ACTIVE de départ N (1-5), part des sorties qui PROGRESSENT (to > N, y compris Gagné) vs PERDUES (to=7)
+// vs RECULENT (to < N). NB : dérivé d'ÉVÉNEMENTS de transition (la source n'a pas de date de création),
+// c'est un taux de progression OBSERVÉ, pas un taux de conversion de cohorte. PUR.
+function stageConversion(history) {
+  const byStage = new Map();
+  const ensure = (s) => { let e = byStage.get(s); if (!e) { e = { stage: s, out: 0, advanced: 0, regressed: 0, lost: 0, won: 0 }; byStage.set(s, e); } return e; };
+  for (const h of Array.isArray(history) ? history : []) {
+    const from = Number(h && h.from) || 0;
+    const to = Number(h && h.to) || 0;
+    if (from < 1 || from > 5 || !to) continue; // on ne mesure QUE les sorties d'une étape active
+    const e = ensure(from);
+    e.out++;
+    if (to === 7) e.lost++;
+    else if (to > from) { e.advanced++; if (to === 6) e.won++; }
+    else if (to < from) e.regressed++;
+    // to === from : sur place → ni progression ni recul
+  }
+  return [...byStage.values()]
+    .map((e) => ({ ...e, advanceRate: e.out > 0 ? e.advanced / e.out : 0, lossRate: e.out > 0 ? e.lost / e.out : 0 }))
+    .sort((a, b) => a.stage - b.stage);
+}
+
+module.exports = { oppFunnel, stageConversion };
