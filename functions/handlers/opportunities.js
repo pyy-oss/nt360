@@ -10,7 +10,7 @@ function createOpportunities({
   onCallG, HttpsError, db, FieldValue, logger,
   requireWrite, assertRecordVisible, visibleToFor, isRecordAdmin, recordAccessOwd,
   assertPlainId, requestRecompute, oppScope, OPP_RECOMPUTE, OPP_RECOMPUTE_WON,
-  fireOutbound, readWorkbook, aoaToXlsxBase64,
+  fireOutbound, readWorkbook, aoaToXlsxBase64, rateLimit,
 }) {
   // Journalise une TRANSITION d'étape dans oppHistory (Lot C) → funnel de conversion réel. La source
   // n'ayant ni date de création ni historique, on construit le funnel à partir de MAINTENANT. Best-effort
@@ -243,6 +243,7 @@ function createOpportunities({
   // l'identité, jamais d'effacement). Réservé au droit « pipeline ». Audité + recompute complet. ---
   const importOpportunities = onCallG("importOpportunities", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     await requireWrite(req, "pipeline");
+    if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'imports en peu de temps — patientez un instant.");
     const { fpKey } = require("../lib/ids");
     const { parseOpportunitiesImport } = require("../parsers/oppImport");
     const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("../domain/oppImport");
