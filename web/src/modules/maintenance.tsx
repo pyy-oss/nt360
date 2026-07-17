@@ -8,7 +8,7 @@ import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
 import { useCan } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
@@ -17,7 +17,7 @@ import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
-  upsertMntContrat, deleteMntContrat, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
+  upsertMntContrat, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
@@ -122,6 +122,13 @@ export const Maintenance: FC<Props> = () => {
   const [viewC, setViewC] = useState<MntContrat | null>(null); // fiche contrat en CONSULTATION (lecture seule)
   const setC = <K extends keyof CForm>(k: K, v: CForm[K]) => setCForm((f) => ({ ...f, [k]: v }));
   const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
+  // Action EN MASSE « Passer au statut » — même patron que les BC (operations.tsx). Appels séquentiels
+  // (chaque écriture déclenche un recompute coalescé) ; réutilise setMntContratStatut (ne touche que le statut).
+  const contratBulk: BulkAction[] = canWrite ? [
+    { label: "Passer au statut", pick: { options: STATUTS.map((s) => ({ value: s, label: STATUT_LABEL[s] })), placeholder: "Statut cible" },
+      okMsg: (rs) => { const k = rs.filter((r) => r.id).length; return `${k} contrat${k > 1 ? "s" : ""} mis à jour`; }, errMsg: "Mise à jour refusée",
+      run: async (rs, statut) => { for (const r of rs.filter((x) => x.id)) await setMntContratStatut(r.id!, statut!); } },
+  ] : [];
   const cValid = cForm.fp.trim() && cForm.client.trim() && cForm.dateDebut;
   const addEng = () => setC("engagements", [...cForm.engagements, { type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: "", quota: "" }]);
   const setEng = (i: number, k: string, v: string) => setC("engagements", cForm.engagements.map((e, j) => (j === i ? { ...e, [k]: v } : e)));
@@ -539,7 +546,7 @@ export const Maintenance: FC<Props> = () => {
       <Card title="Contrats de maintenance"
         actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
-        {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" rowKey={(c) => c.id || ""} bulk={[]} />}
+        {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" rowKey={(c) => c.id || ""} bulk={contratBulk} />}
       </Card>
 
       {canWrite && <ImportContratsCard />}

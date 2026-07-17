@@ -1378,6 +1378,7 @@ exports.aiSuggestMntContrats = _maintenance.aiSuggestMntContrats;
 exports.aiAnalyzeChurn = _maintenance.aiAnalyzeChurn;
 exports.mntContratPnl = _maintenance.mntContratPnl;
 exports.deleteMntContrat = _maintenance.deleteMntContrat;
+exports.setMntContratStatut = _maintenance.setMntContratStatut;
 exports.upsertMntTicket = _maintenance.upsertMntTicket;
 exports.deleteMntTicket = _maintenance.deleteMntTicket;
 exports.upsertMntIntervention = _maintenance.upsertMntIntervention;
