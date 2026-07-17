@@ -33,9 +33,14 @@ function mapOpportunity(rec) {
   const doc = {
     source: "odoo", odooId: traceId(r),
     client, am: cleanPerson(r.am), bu: cleanBu(r.bu) || "AUTRE", fp: fp || null,
+    // Désignation = objet de l'affaire (miroir du champ `designation` des opps Excel — sans quoi le
+    // libellé d'affaire disparaissait des opps synchronisées Odoo). `str` comme le parseur salesData.
+    designation: str(r.designation || r.name || r.affaire),
     amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
     probability, weighted: oppWeighted(amount, probability),
     closingDate: isoDay(r.closingDate),
+    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
+    dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
   return { ok: true, object: "opportunity", collection: "opportunities", key: { fp, odooId: doc.odooId }, doc };
 }
@@ -49,14 +54,23 @@ function mapOrder(rec) {
   const suppliers = Array.isArray(r.suppliers)
     ? r.suppliers.map((s) => ({ name: cleanName(s && s.name), amount: Math.max(0, num(s && s.amount)) })).filter((s) => s.name && s.amount > 0)
     : [];
+  // Date de commande (date_order Odoo). Champ `dateCommande` déjà porté par le carnet (jusqu'ici alimenté
+  // seulement par l'overlay ClickUp) — on réutilise le même nom (pas de 2ᵉ vérité).
+  const dateCommande = isoDay(r.dateCommande || r.datePo || r.dateOrder);
+  // yearPo reste le millésime autoritaire ; s'il n'est pas fourni mais que la date l'est, on le dérive
+  // (l'émetteur Odoo peut n'envoyer que la date complète).
+  const yearPo = plausibleYear(parseInt(r.yearPo, 10) || (dateCommande ? parseInt(dateCommande.slice(0, 4), 10) : 0));
   const doc = {
     source: "odoo", odooId: traceId(r),
     fp, client: cleanName(r.client), designation: str(r.designation),
-    bu: cleanBu(r.bu), yearPo: plausibleYear(parseInt(r.yearPo, 10) || 0),
+    bu: cleanBu(r.bu), yearPo,
+    dateCommande,
     cas,
     // RAF Excel FIGÉ seulement si fourni (null = laisser le repli dérivé de mergeCommandes agir).
     raf: r.raf == null || r.raf === "" ? null : Math.max(0, num(r.raf)),
     suppliers,
+    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
+    dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
   return { ok: true, object: "order", collection: "orders", id: safeId(fp), key: { fp, odooId: doc.odooId }, doc };
 }
@@ -72,6 +86,8 @@ function mapInvoice(rec) {
     amountHt: num(r.amountHt), bu: cleanBu(r.bu),
     date: isoDay(r.date), dueDate: isoDay(r.dueDate),
     paid: r.paid === true || /pay[ée]|régl|encaiss|sold/i.test(str(r.paid)),
+    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
+    dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
   return { ok: true, object: "invoice", collection: "invoices", id: safeId(numero), key: { fp: doc.fp, odooId: doc.odooId }, doc };
 }

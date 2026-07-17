@@ -561,7 +561,11 @@ async function recomputeCore(db, only) {
         casSource: o.casSource || null, // 'override' = CAS surchargé depuis l'opp (syncOrderAmount)
         pm: orderPmMap[safeId(o.fp)] || null, // Project Manager affecté (overlay config/orderPm)
         clickupStatus: cu ? (cu.status || null) : null,
-        dateCommande: cu ? isoDay(cu.dateCommande) : null,
+        // Date de commande : l'overlay ClickUp PRIME (source ops temps réel) ; à défaut, on retombe sur la
+        // date portée par la commande elle-même (import P&L ou synchro Odoo `date_order`) — sinon une date
+        // synchronisée depuis Odoo serait perdue ici. `cu.dateCommande` = epoch ms, `o.dateCommande` = ISO.
+        dateCommande: (cu && cu.dateCommande) ? isoDay(cu.dateCommande) : (o.dateCommande || null),
+        dateCreation: o.dateCreation || null, // date de création côté source (Odoo create_date), passe-plat
         dateContractuelle: cu ? isoDay(cu.dateContractuelle) : null,
         dateFinPrev: cu ? isoDay(cu.dateFinPrev) : null,
         clickupTaskId: clickupLinksMap[safeId(o.fp)] || null,
