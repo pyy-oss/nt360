@@ -25,9 +25,10 @@ import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../t
 import {
   STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, STATUT_LABEL, ECHEANCE_LABEL, SLA_TYPE_LABEL, COUVERTURE_LABEL,
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
+  TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -82,18 +83,57 @@ const ImportContratsCard: FC = () => {
 
 // ---------------------------------------------------------------------------------------------------
 // Fiche contrat (création / édition) — Lot 1.
-type CForm = { fp: string; client: string; bu: string; am: string; statut: string; echeanceType: string; dateDebut: string; dateFin: string; montantEngage: string; engagements: { type: string; couverture: string; seuilHeures: string; quota: string }[] };
-const emptyContrat = (): CForm => ({ fp: "", client: "", bu: "AUTRE", am: "", statut: "brouillon", echeanceType: "mensuel", dateDebut: "", dateFin: "", montantEngage: "", engagements: [] });
+type CForm = { fp: string; client: string; bu: string; am: string; statut: string; echeanceType: string; dateDebut: string; dateFin: string; montantEngage: string; engagements: { type: string; couverture: string; seuilHeures: string; quota: string }[]; objectifs: Record<string, string> };
+const emptyContrat = (): CForm => ({ fp: "", client: "", bu: "AUTRE", am: "", statut: "brouillon", echeanceType: "mensuel", dateDebut: "", dateFin: "", montantEngage: "", engagements: [], objectifs: {} });
 const toContratForm = (c: MntContrat): CForm => ({
   fp: c.fp || "", client: c.client || "", bu: c.bu || "AUTRE", am: c.am || "", statut: c.statut || "brouillon", echeanceType: c.echeanceType || "mensuel",
   dateDebut: c.dateDebut || "", dateFin: c.dateFin || "", montantEngage: String(c.montantEngage ?? ""),
   engagements: (c.engagements || []).map((e) => ({ type: e.type, couverture: e.couverture, seuilHeures: String(e.seuilHeures ?? ""), quota: e.quota == null ? "" : String(e.quota) })),
+  objectifs: Object.fromEntries(TYPES_MAINTENANCE.map((t) => { const v = (c.objectifsMaintenance as Record<string, number> | null | undefined)?.[t]; return [t, v == null ? "" : String(v)]; })),
 });
 const contratPayload = (f: CForm): MntContrat => ({
   fp: f.fp.trim(), client: f.client.trim(), bu: f.bu, am: f.am.trim(), statut: f.statut, echeanceType: f.echeanceType,
   dateDebut: f.dateDebut, dateFin: f.dateFin || null, montantEngage: Number(f.montantEngage || 0), deviseEngage: "XOF",
   engagements: f.engagements.map((e): MntEngagement => ({ type: e.type, couverture: e.couverture, seuilHeures: Number(e.seuilHeures || 0), quota: e.quota === "" ? null : Number(e.quota) })),
+  // Objectifs de maintenance embarqués (ADR-025) : ne garde que les types RENSEIGNÉS (entier), null si aucun.
+  objectifsMaintenance: (() => { const o: Record<string, number> = {}; for (const t of TYPES_MAINTENANCE) { const v = (f.objectifs[t] || "").trim(); if (v !== "") o[t] = Math.max(0, Math.round(Number(v) || 0)); } return Object.keys(o).length ? o : null; })(),
 });
+
+// Rendu « Maintenance par type vs objectifs » (ADR-025) — tickets ET interventions comptés SÉPARÉMENT par
+// type ; le Total (tickets + interventions) est confronté à l'objectif (max) quand il est fourni (fiche
+// contrat). Dépassement signalé en clay. Sans objectif (vue agrégée), la colonne Objectif est masquée.
+function TypeStatsTable({ tickets, interventions, objectifs }: { tickets: MntTypeCount; interventions: MntTypeCount; objectifs?: Partial<MntTypeCount> | null }) {
+  const th = "px-3 py-2 font-medium text-xs";
+  return (
+    <div className="overflow-x-auto -mx-1">
+      <table className="w-full text-sm rtable">
+        <thead><tr className="text-muted">
+          <th className={cx(th, "text-left")}>Type</th>
+          <th className={cx(th, "text-right")}>Tickets</th>
+          <th className={cx(th, "text-right")}>Interventions</th>
+          <th className={cx(th, "text-right")}>Total</th>
+          {objectifs && <th className={cx(th, "text-right")}>Objectif</th>}
+        </tr></thead>
+        <tbody>
+          {MNT_TYPES.map((t) => {
+            const total = tickets[t] + interventions[t];
+            const obj = objectifs ? objectifs[t] : undefined;
+            const over = obj != null && total > obj;
+            return (
+              <tr key={t} className="odd:bg-ink/[.03]">
+                <td className="px-3 py-1.5">{TYPE_MAINTENANCE_LABEL[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum">{tickets[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum">{interventions[t]}</td>
+                <td className={cx("px-3 py-1.5 text-right tabnum font-semibold", over && "text-clay")}>{total}</td>
+                {objectifs && <td className="px-3 py-1.5 text-right tabnum text-muted">{obj != null ? obj : "—"}</td>}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export const Maintenance: FC<Props> = () => {
   const canRead = useCan("maintenance");
@@ -176,7 +216,7 @@ export const Maintenance: FC<Props> = () => {
   const ticketInterventions = useMemo(() => interventions.filter((i) => i.ticketId === tForm.id).sort((a, b) => String(b.date).localeCompare(String(a.date))), [interventions, tForm.id]);
 
   // Nouvelle intervention (dans la fiche ticket).
-  const [iForm, setIForm] = useState<{ consultantId: string; date: string; heures: string; commentaire: string }>({ consultantId: "", date: "", heures: "", commentaire: "" });
+  const [iForm, setIForm] = useState<{ consultantId: string; date: string; heures: string; commentaire: string; typeMaintenance: string }>({ consultantId: "", date: "", heures: "", commentaire: "", typeMaintenance: "" });
   const iValid = tForm.id && iForm.consultantId && iForm.date && Number(iForm.heures) > 0;
 
   const contratCols = [
@@ -253,6 +293,9 @@ export const Maintenance: FC<Props> = () => {
   const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
   // Renouvellements à anticiper (Lot 5/7) : contrats actifs dont la fin approche (≤ 90 j), plus urgent d'abord.
   const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
+  // Maintenance par TYPE vs objectifs (ADR-025) : nombre de tickets ET d'interventions par type, par
+  // contrat + total agrégé. Vue pure (mntTypeStats), dérivée des collections déjà chargées.
+  const typeStats = useMemo(() => mntTypeStats(contrats, tickets, interventions), [contrats, tickets, interventions]);
   const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
   const renouvCols = [
     colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
@@ -482,6 +525,15 @@ export const Maintenance: FC<Props> = () => {
           </div>
         </Card>
       )}
+      {/* Maintenance par type (ADR-025) — agrégé sur tout le parc : tickets ET interventions comptés
+          SÉPARÉMENT par type. Vue d'ensemble (sans colonne Objectif — les objectifs sont par contrat,
+          visibles en consultation). N'apparaît que si au moins un item est classé. */}
+      {gate && MNT_TYPES.some((t) => typeStats.totalTickets[t] || typeStats.totalInterventions[t]) && (
+        <Card title="Maintenance par type">
+          <Tip>Nombre de <b>tickets</b> et d'<b>interventions</b> classés par type sur l'ensemble du parc — comptés <b>séparément</b>. Les <b>objectifs</b> (max visé) se fixent et se suivent <b>par contrat</b> (fiche en consultation). Les items non classés ne sont pas comptés.</Tip>
+          <TypeStatsTable tickets={typeStats.totalTickets} interventions={typeStats.totalInterventions} />
+        </Card>
+      )}
       {risque && (
         <Card title="Risque des contrats">
           <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
@@ -615,6 +667,20 @@ export const Maintenance: FC<Props> = () => {
               </div>
             )}
           </div>
+          {/* Objectifs de maintenance par type (ADR-025) — nombre MAX visé par type (prédictive, corrective,
+              évolutive, veille). Optionnel : un champ vide = pas d'objectif sur ce type. Confronté au nombre réel
+              de tickets + interventions dans la consultation et le tableau de bord. */}
+          <div className="mt-4 pt-3 border-t border-line/60">
+            <div className="text-[13px] font-medium mb-2">Objectifs de maintenance <span className="text-[11px] text-muted font-normal">— nombre max visé par type (optionnel)</span></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {TYPES_MAINTENANCE.map((t) => (
+                <Field key={t} label={TYPE_MAINTENANCE_LABEL[t]}>
+                  <input className="field tabnum" inputMode="numeric" value={cForm.objectifs[t] || ""} placeholder="—"
+                    onChange={(e) => setC("objectifs", { ...cForm.objectifs, [t]: digits(e.target.value) })} />
+                </Field>
+              ))}
+            </div>
+          </div>
           <div className="mt-4 pt-3 border-t border-line/60">
             <div className="text-[13px] font-medium mb-2">Échéancier <span className="text-[11px] text-muted font-normal">— engagé (par échéance × {ech.periodsDue}) vs facturé (affaire)</span></div>
             <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
@@ -676,6 +742,9 @@ export const Maintenance: FC<Props> = () => {
         const vcRisk = risqueItems.find((r) => fpKey(r.fp || "") === vfp);
         const openTk = vcTickets.filter((t) => t.statut === "ouvert" || t.statut === "en_cours").length;
         const resoEng = (vc.engagements || []).find((e) => e.type === "resolution"); // engagement de résolution → état SLA des tickets
+        // Maintenance par type de CE contrat (ADR-025) : tickets/interventions comptés séparément, confrontés
+        // aux objectifs (max) embarqués. Affiché si le contrat a une activité classée OU des objectifs posés.
+        const vcType = typeStats.parContrat.find((p) => p.contratId === vc.id);
         return (
           <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="md"
             actions={canWrite ? <button type="button" className="btn-ghost !px-3 !py-1.5 text-sm" onClick={() => { setCId(vc.id || ""); setCEdit(true); setViewC(null); setCOpen(true); }}>Éditer</button> : undefined}>
@@ -708,6 +777,12 @@ export const Maintenance: FC<Props> = () => {
                   </div>
                 )}
               </div>
+              {vcType && (
+                <div>
+                  <div className="text-[13px] font-medium mb-1.5">Maintenance par type <span className="text-[11px] text-muted font-normal">— tickets et interventions vs objectifs (max)</span></div>
+                  <TypeStatsTable tickets={vcType.tickets} interventions={vcType.interventions} objectifs={vcType.objectifs} />
+                </div>
+              )}
               <div>
                 <div className="text-[13px] font-medium mb-1.5">Facturation récurrente <span className="text-[11px] text-muted font-normal">— engagé (échéances × montant) vs facturé (affaire)</span></div>
                 <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
@@ -758,6 +833,8 @@ export const Maintenance: FC<Props> = () => {
             <Field label="Titre"><input className="field" value={tForm.titre || ""} onChange={(e) => setT("titre", e.target.value)} /></Field>
             <Field label="Priorité"><Select value={tForm.priorite || "moyenne"} onChange={(v) => setT("priorite", v)} options={opt(PRIORITE_LABEL, PRIORITES)} ariaLabel="Priorité" /></Field>
             <Field label="Statut"><Select value={tForm.statut || "ouvert"} onChange={(v) => setT("statut", v)} options={opt(TICKET_STATUT_LABEL, TICKET_STATUTS)} ariaLabel="Statut" /></Field>
+            {/* Type de maintenance (ADR-025) — classe le ticket ; optionnel (« — » → non classé, ignoré des compteurs par type). */}
+            <Field label="Type de maintenance"><Select value={tForm.typeMaintenance || ""} onChange={(v) => setT("typeMaintenance", v || null)} options={[{ value: "", label: "—" }, ...opt(TYPE_MAINTENANCE_LABEL, TYPES_MAINTENANCE)]} ariaLabel="Type de maintenance" /></Field>
           </div>
 
           <div className="mt-4 pt-3 border-t border-line/60">
@@ -779,7 +856,9 @@ export const Maintenance: FC<Props> = () => {
                     <Field label="Consultant"><Select value={iForm.consultantId} onChange={(v) => setIForm((f) => ({ ...f, consultantId: v }))} options={consultants.map((c) => ({ value: c.id, label: c.name || c.id }))} ariaLabel="Consultant" placeholder="Choisir…" /></Field>
                     <Field label="Date"><DateField value={iForm.date} onChange={(v) => setIForm((f) => ({ ...f, date: v }))} ariaLabel="Date intervention" /></Field>
                     <Field label="Heures"><input className="field tabnum" inputMode="decimal" value={iForm.heures} onChange={(e) => setIForm((f) => ({ ...f, heures: decimals(e.target.value) }))} placeholder="0" /></Field>
-                    <Busy label="Ajouter" variant={iValid ? "gold" : "ghost"} fn={async () => { if (!iValid) throw new Error("Consultant, date et heures requis"); await upsertMntIntervention({ ticketId: tForm.id, contratId: tForm.contratId, fp: tForm.fp, consultantId: iForm.consultantId, date: iForm.date, heures: Number(iForm.heures), commentaire: iForm.commentaire }); setIForm({ consultantId: "", date: "", heures: "", commentaire: "" }); }} okMsg="Intervention ajoutée" errMsg="Ajout refusé" />
+                    {/* Type de maintenance (ADR-025) — classe l'intervention ; optionnel (défaut : celui du ticket, sinon non classé). */}
+                    <Field label="Type de maintenance"><Select value={iForm.typeMaintenance} onChange={(v) => setIForm((f) => ({ ...f, typeMaintenance: v }))} options={[{ value: "", label: "—" }, ...opt(TYPE_MAINTENANCE_LABEL, TYPES_MAINTENANCE)]} ariaLabel="Type de maintenance intervention" /></Field>
+                    <Busy label="Ajouter" variant={iValid ? "gold" : "ghost"} fn={async () => { if (!iValid) throw new Error("Consultant, date et heures requis"); await upsertMntIntervention({ ticketId: tForm.id, contratId: tForm.contratId, fp: tForm.fp, consultantId: iForm.consultantId, date: iForm.date, heures: Number(iForm.heures), commentaire: iForm.commentaire, typeMaintenance: iForm.typeMaintenance || null }); setIForm({ consultantId: "", date: "", heures: "", commentaire: "", typeMaintenance: "" }); }} okMsg="Intervention ajoutée" errMsg="Ajout refusé" />
                   </div>
                 )}
               </>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -138,5 +138,40 @@ describe("mntRenouvellements — contrats actifs à renouveler", () => {
       c("C", "actif", "2026-06-01"), // passé
     ], asOf);
     expect(r).toEqual([]);
+  });
+});
+
+describe("mntTypeStats — maintenance par type vs objectifs (ADR-025)", () => {
+  const c = (id: string, objectifsMaintenance?: Record<string, number> | null) => ({ id, client: id, statut: "actif", objectifsMaintenance: objectifsMaintenance ?? null });
+  it("compte tickets ET interventions SÉPARÉMENT par type et par contrat + total agrégé", () => {
+    const r = mntTypeStats(
+      [c("A"), c("B")],
+      [{ contratId: "A", typeMaintenance: "corrective" }, { contratId: "A", typeMaintenance: "corrective" }, { contratId: "B", typeMaintenance: "predictive" }],
+      [{ contratId: "A", typeMaintenance: "corrective" }, { contratId: "A", typeMaintenance: "evolutive" }],
+    );
+    expect(r.totalTickets).toEqual({ predictive: 1, corrective: 2, evolutive: 0, veille: 0 });
+    expect(r.totalInterventions).toEqual({ predictive: 0, corrective: 1, evolutive: 1, veille: 0 });
+    const a = r.parContrat.find((p) => p.contratId === "A")!;
+    expect(a.tickets.corrective).toBe(2);
+    expect(a.interventions.corrective).toBe(1);
+    expect(a.interventions.evolutive).toBe(1);
+  });
+  it("ignore les items non classés (typeMaintenance absent ou hors énumération)", () => {
+    const r = mntTypeStats([c("A")], [{ contratId: "A" }, { contratId: "A", typeMaintenance: null }, { contratId: "A", typeMaintenance: "curative" }, { contratId: "A", typeMaintenance: "veille" }], []);
+    expect(r.totalTickets).toEqual({ predictive: 0, corrective: 0, evolutive: 0, veille: 1 });
+  });
+  it("remonte les objectifs embarqués du contrat et n'émet pas de ligne vide (ni activité, ni objectif)", () => {
+    const r = mntTypeStats(
+      [c("A", { corrective: 5 }), c("B")], // B : ni objectif ni activité → exclu
+      [{ contratId: "A", typeMaintenance: "corrective" }],
+      [],
+    );
+    expect(r.parContrat.map((p) => p.contratId)).toEqual(["A"]);
+    expect(r.parContrat[0].objectifs).toEqual({ corrective: 5 });
+  });
+  it("émet une ligne pour un contrat AVEC objectif mais SANS activité (suivi de la cible)", () => {
+    const r = mntTypeStats([c("A", { predictive: 2 })], [], []);
+    expect(r.parContrat).toHaveLength(1);
+    expect(r.parContrat[0].tickets).toEqual({ predictive: 0, corrective: 0, evolutive: 0, veille: 0 });
   });
 });

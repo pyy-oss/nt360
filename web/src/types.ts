@@ -236,13 +236,16 @@ export type PermissionsConfig = { matrix?: Record<string, Record<string, string>
 // Contrats de maintenance (module mnt_, Lot 1). Montants number (FCFA entier), dates ISO AAAA-MM-JJ,
 // statuts/couvertures en code applicatif. Engagements SLA EMBARQUÉS (ADR-012). Clé = N° FP (ADR-001).
 export type MntEngagement = { type: string; couverture: string; seuilHeures: number; quota: number | null };
+// Objectifs de maintenance (max) par type, EMBARQUÉS dans le contrat (ADR-025).
+export type MntObjectifs = { predictive?: number; corrective?: number; evolutive?: number; veille?: number };
 export type MntContrat = {
   id?: string; fp?: string; client?: string; bu?: string; am?: string;
   statut?: string; echeanceType?: string; dateDebut?: string; dateFin?: string | null;
   montantEngage?: number; deviseEngage?: string; engagements?: MntEngagement[];
+  objectifsMaintenance?: MntObjectifs | null;
   updatedAt?: any; createdAt?: any;
 };
 // Tickets & interventions de maintenance (mnt_, Lot 2). Temps d'intervention en heures ; alimente
 // le CRA (timesheets) converti en jours. Rattachés au contrat (contratId) et à l'affaire (fp).
-export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; ouvertLe?: any; priseEnCompteLe?: any; resoluLe?: any; updatedAt?: any };
-export type MntIntervention = { id?: string; ticketId?: string; contratId?: string; fp?: string; consultantId?: string; date?: string; heures?: number; commentaire?: string; updatedAt?: any };
+export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; typeMaintenance?: string | null; ouvertLe?: any; priseEnCompteLe?: any; resoluLe?: any; updatedAt?: any };
+export type MntIntervention = { id?: string; ticketId?: string; contratId?: string; fp?: string; consultantId?: string; date?: string; heures?: number; commentaire?: string; typeMaintenance?: string | null; updatedAt?: any };

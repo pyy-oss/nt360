@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { validateMntContrat, validateEngagement, STATUTS } = require("../domain/mntContrat");
+const { validateMntContrat, validateEngagement, STATUTS, TYPES_MAINTENANCE } = require("../domain/mntContrat");
 
 const base = {
   fp: "FP/2026/7", client: "ACME", statut: "actif", echeanceType: "mensuel",
@@ -43,6 +43,24 @@ describe("mntContrat — validation d'un contrat", () => {
   it("accepte une date de fin absente (contrat sans échéance) mais rejette une date mal formée", () => {
     expect(validateMntContrat({ ...base, dateFin: "" }).ok).toBe(true);
     expect(validateMntContrat({ ...base, dateFin: "31/12/2026" }).ok).toBe(false); // format JJ/MM/AAAA refusé au stockage
+  });
+});
+
+describe("mntContrat — objectifs de maintenance par type (ADR-025)", () => {
+  it("les quatre types de maintenance sont définis", () => {
+    expect(TYPES_MAINTENANCE).toEqual(["predictive", "corrective", "evolutive", "veille"]);
+  });
+  it("normalise les objectifs renseignés en entiers ≥ 0 et ignore les clés vides", () => {
+    const v = validateMntContrat({ ...base, objectifsMaintenance: { predictive: "3", corrective: 5.7, evolutive: "", veille: 0 } });
+    expect(v.ok).toBe(true);
+    expect(v.value.objectifsMaintenance).toEqual({ predictive: 3, corrective: 6, veille: 0 }); // evolutive vide → absent
+  });
+  it("objectifs absents → null (pas d'objectif de maintenance)", () => {
+    expect(validateMntContrat({ ...base }).value.objectifsMaintenance).toBeNull();
+    expect(validateMntContrat({ ...base, objectifsMaintenance: {} }).value.objectifsMaintenance).toBeNull();
+  });
+  it("rejette un objectif négatif (pas de coercion silencieuse)", () => {
+    expect(validateMntContrat({ ...base, objectifsMaintenance: { corrective: -2 } }).ok).toBe(false);
   });
 });
 

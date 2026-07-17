@@ -9,6 +9,26 @@ const STATUTS = ["brouillon", "actif", "suspendu", "echu", "resilie"];
 const ECHEANCES = ["mensuel", "trimestriel", "annuel"];
 const SLA_TYPES = ["prise_en_compte", "resolution"];
 const COUVERTURES = ["ouvre_lun_ven", "h24"];
+// Types de maintenance (ADR-025) : classent tickets ET interventions ; objectifs (max) posés PAR CONTRAT.
+// Code applicatif ; libellés FR à l'affichage (Prédictive / Corrective / Évolutive / Veille technologique).
+const TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"];
+
+// Objectifs de maintenance EMBARQUÉS dans le contrat (ADR-025, cohérent avec les engagements ADR-012) :
+// un maximum (entier ≥ 0) optionnel par type. On ne conserve que les clés valides RENSEIGNÉES (absent =
+// pas d'objectif sur ce type). Toute valeur négative/non entière est rejetée (pas de coercion silencieuse).
+function validateObjectifsMaintenance(o) {
+  if (o == null) return { ok: true, value: null };
+  if (typeof o !== "object") return { ok: false, error: "objectifs de maintenance invalides" };
+  const out = {};
+  for (const t of TYPES_MAINTENANCE) {
+    const v = o[t];
+    if (v == null || v === "") continue;
+    const n = Math.round(num(v));
+    if (n < 0) return { ok: false, error: `objectif ${t} invalide (négatif)` };
+    out[t] = n;
+  }
+  return { ok: true, value: Object.keys(out).length ? out : null };
+}
 
 const isoDate = (v) => { const s = String(v == null ? "" : v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
 
@@ -61,10 +81,12 @@ function validateMntContrat(d) {
   const rawEng = Array.isArray(o.engagements) ? o.engagements : [];
   const engagements = [];
   for (const e of rawEng) { const v = validateEngagement(e); if (!v.ok) return { ok: false, error: v.error }; engagements.push(v.value); }
+  const objM = validateObjectifsMaintenance(o.objectifsMaintenance);
+  if (!objM.ok) return { ok: false, error: objM.error };
   return {
     ok: true,
-    value: { fp, client, bu: cleanBu(o.bu), am: cleanPerson(o.am), statut, echeanceType, dateDebut, dateFin, montantEngage, deviseEngage, engagements },
+    value: { fp, client, bu: cleanBu(o.bu), am: cleanPerson(o.am), statut, echeanceType, dateDebut, dateFin, montantEngage, deviseEngage, engagements, objectifsMaintenance: objM.value },
   };
 }
 
-module.exports = { STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, validateEngagement, validateMntContrat };
+module.exports = { STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, TYPES_MAINTENANCE, validateEngagement, validateObjectifsMaintenance, validateMntContrat };

@@ -3,6 +3,49 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-025 — Type de maintenance (prédictive/corrective/évolutive/veille) + objectifs max par contrat
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Besoin métier : suivre le **nombre de maintenances par nature** — prédictive, corrective, évolutive,
+veille technologique — et les confronter à des **objectifs** (nombre max visé). La maintenance se
+matérialise dans le module par deux objets déjà existants : les **tickets** (demandes sous contrat) et
+les **interventions** (temps consultant). Il n'existait aucune classification par nature ni cible.
+
+### Décision
+- Une énumération unique `TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"]`
+  (code applicatif anglais, libellés FR — ADR-010), miroitée back (`domain/mntContrat.js`) et front
+  (`lib/mntContrat.ts`), sert de **source unique** des quatre types.
+- **Classification à la source** : les tickets **et** les interventions portent un champ optionnel
+  `typeMaintenance` (validé par `validateTicket`/`validateIntervention` ; absent → `null`, valeur hors
+  énumération → **rejet** fail-loud, pas de coercition).
+- **Objectifs embarqués dans le contrat** : `mnt_contrats.objectifsMaintenance` = map partielle
+  `{ [type]: entier ≥ 0 }` (seuls les types renseignés sont écrits ; aucun → `null`). Entier (pas de
+  subdivision) et **rejet** d'un objectif négatif, comme les autres montants du module (audit m1).
+- **Comptage séparé** : tickets et interventions sont comptés **indépendamment** par type (jamais
+  additionnés en un seul compteur) — un ticket « corrective » et son intervention « corrective » sont
+  deux faits distincts. La vue pure `mntTypeStats` (`lib/mntDashboard.ts`) agrège par contrat + total,
+  ignore les items non classés, et n'émet pas de ligne vide (ni activité ni objectif).
+- **Double affichage** (demande utilisateur) : par contrat dans la **fiche en consultation** (colonne
+  Objectif, dépassement signalé en clay), et **agrégé** dans une carte « Maintenance par type » du
+  tableau de bord (sans colonne Objectif — les objectifs sont propres à chaque contrat).
+
+### Conséquences
+- Additif pur : trois champs optionnels (`typeMaintenance` ×2, `objectifsMaintenance`), aucun schéma
+  existant modifié ; à drapeau `mntFeature` éteint, rien n'apparaît. Les données déjà saisies restent
+  « non classées » (comptées nulle part par type) sans migration.
+- La classification est **facultative** : ne pas remplir le type n'empêche aucune saisie ; l'objectif
+  n'est qu'un repère (aucun blocage à le dépasser).
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs classent peu (beaucoup d'items « non classés ») → soit le type doit devenir
+obligatoire à la saisie, soit être déduit (ex. de la priorité/désignation) — nouvel ADR.
+
+---
+
 ## ADR-024 — Le contrat de maintenance est XOF-only : une devise ≠ XOF est rejetée (pas de conversion en v1)
 
 - **Date :** 2026-07-16
