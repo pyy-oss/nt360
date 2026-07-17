@@ -6,9 +6,9 @@
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
-import { useCan } from "../lib/rbac";
+import { useCan, useClaims } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, cx, type BulkAction } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { fmt } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
@@ -17,17 +17,20 @@ import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
-  upsertMntContrat, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
+  upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, aiMntContratStatut, revertMntAutoStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
 } from "../lib/writes";
-import type { MntContrat, MntEngagement, MntTicket, MntIntervention } from "../types";
+import type { MntContrat, MntEngagement, MntTicket, MntIntervention, MntWatch } from "../types";
+import { EVENT_TYPE_LABEL, SEVERITY_LABEL, severityTone, watchMatchesEvent, hasAnyWatch, type MntSurveillanceEvent, type MntSurveillanceSummary } from "../lib/mntSurveillance";
+import { STATUT_SOURCE_LABEL, confidenceTone, type MntStatutProposal, type MntStatutRun } from "../lib/mntStatutAuto";
 import {
   STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, STATUT_LABEL, ECHEANCE_LABEL, SLA_TYPE_LABEL, COUVERTURE_LABEL,
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
+  TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
+import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -82,18 +85,57 @@ const ImportContratsCard: FC = () => {
 
 // ---------------------------------------------------------------------------------------------------
 // Fiche contrat (création / édition) — Lot 1.
-type CForm = { fp: string; client: string; bu: string; am: string; statut: string; echeanceType: string; dateDebut: string; dateFin: string; montantEngage: string; engagements: { type: string; couverture: string; seuilHeures: string; quota: string }[] };
-const emptyContrat = (): CForm => ({ fp: "", client: "", bu: "AUTRE", am: "", statut: "brouillon", echeanceType: "mensuel", dateDebut: "", dateFin: "", montantEngage: "", engagements: [] });
+type CForm = { fp: string; client: string; bu: string; am: string; statut: string; echeanceType: string; dateDebut: string; dateFin: string; montantEngage: string; engagements: { type: string; couverture: string; seuilHeures: string; quota: string }[]; objectifs: Record<string, string> };
+const emptyContrat = (): CForm => ({ fp: "", client: "", bu: "AUTRE", am: "", statut: "brouillon", echeanceType: "mensuel", dateDebut: "", dateFin: "", montantEngage: "", engagements: [], objectifs: {} });
 const toContratForm = (c: MntContrat): CForm => ({
   fp: c.fp || "", client: c.client || "", bu: c.bu || "AUTRE", am: c.am || "", statut: c.statut || "brouillon", echeanceType: c.echeanceType || "mensuel",
   dateDebut: c.dateDebut || "", dateFin: c.dateFin || "", montantEngage: String(c.montantEngage ?? ""),
   engagements: (c.engagements || []).map((e) => ({ type: e.type, couverture: e.couverture, seuilHeures: String(e.seuilHeures ?? ""), quota: e.quota == null ? "" : String(e.quota) })),
+  objectifs: Object.fromEntries(TYPES_MAINTENANCE.map((t) => { const v = (c.objectifsMaintenance as Record<string, number> | null | undefined)?.[t]; return [t, v == null ? "" : String(v)]; })),
 });
 const contratPayload = (f: CForm): MntContrat => ({
   fp: f.fp.trim(), client: f.client.trim(), bu: f.bu, am: f.am.trim(), statut: f.statut, echeanceType: f.echeanceType,
   dateDebut: f.dateDebut, dateFin: f.dateFin || null, montantEngage: Number(f.montantEngage || 0), deviseEngage: "XOF",
   engagements: f.engagements.map((e): MntEngagement => ({ type: e.type, couverture: e.couverture, seuilHeures: Number(e.seuilHeures || 0), quota: e.quota === "" ? null : Number(e.quota) })),
+  // Objectifs de maintenance embarqués (ADR-025) : ne garde que les types RENSEIGNÉS (entier), null si aucun.
+  objectifsMaintenance: (() => { const o: Record<string, number> = {}; for (const t of TYPES_MAINTENANCE) { const v = (f.objectifs[t] || "").trim(); if (v !== "") o[t] = Math.max(0, Math.round(Number(v) || 0)); } return Object.keys(o).length ? o : null; })(),
 });
+
+// Rendu « Maintenance par type vs objectifs » (ADR-025) — tickets ET interventions comptés SÉPARÉMENT par
+// type ; le Total (tickets + interventions) est confronté à l'objectif (max) quand il est fourni (fiche
+// contrat). Dépassement signalé en clay. Sans objectif (vue agrégée), la colonne Objectif est masquée.
+function TypeStatsTable({ tickets, interventions, objectifs }: { tickets: MntTypeCount; interventions: MntTypeCount; objectifs?: Partial<MntTypeCount> | null }) {
+  const th = "px-3 py-2 font-medium text-xs";
+  return (
+    <div className="overflow-x-auto -mx-1">
+      <table className="w-full text-sm rtable">
+        <thead><tr className="text-muted">
+          <th className={cx(th, "text-left")}>Type</th>
+          <th className={cx(th, "text-right")}>Tickets</th>
+          <th className={cx(th, "text-right")}>Interventions</th>
+          <th className={cx(th, "text-right")}>Total</th>
+          {objectifs && <th className={cx(th, "text-right")}>Objectif</th>}
+        </tr></thead>
+        <tbody>
+          {MNT_TYPES.map((t) => {
+            const total = tickets[t] + interventions[t];
+            const obj = objectifs ? objectifs[t] : undefined;
+            const over = obj != null && total > obj;
+            return (
+              <tr key={t} className="odd:bg-ink/[.03]">
+                <td className="px-3 py-1.5">{TYPE_MAINTENANCE_LABEL[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum">{tickets[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum">{interventions[t]}</td>
+                <td className={cx("px-3 py-1.5 text-right tabnum font-semibold", over && "text-clay")}>{total}</td>
+                {objectifs && <td className="px-3 py-1.5 text-right tabnum text-muted">{obj != null ? obj : "—"}</td>}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export const Maintenance: FC<Props> = () => {
   const canRead = useCan("maintenance");
@@ -109,6 +151,11 @@ export const Maintenance: FC<Props> = () => {
   // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
   // du score. Le doc est gaté (drapeau + droit maintenance) côté rules ; on ne le lit que si `gate`.
   const { data: risque } = useDocData<RisqueSummary>(gate ? "summaries/mnt_risque" : null);
+  // Centre de surveillance (Lot 5, ADR-026) : flux d'événements MATÉRIALISÉ (projection du risque) + les
+  // abonnements PAR UTILISATEUR (doc mnt_watches/{uid}, lu en direct — chaque utilisateur ne lit que le sien).
+  const { user } = useClaims();
+  const { data: surv } = useDocData<MntSurveillanceSummary>(gate ? "summaries/mnt_surveillance" : null);
+  const { data: watch } = useDocData<MntWatch>(gate && user?.uid ? `mnt_watches/${user.uid}` : null);
   // Consultants pour la saisie d'intervention (collection consultants = callable-only → listConsultants).
   const [consultants, setConsultants] = useState<{ id: string; name?: string }[]>([]);
   useEffect(() => { if (!gate) return; listConsultants().then((r) => setConsultants((r.rows || []).filter((c) => c.id).map((c) => ({ id: c.id!, name: c.name || undefined })))).catch(() => setConsultants([])); }, [gate]);
@@ -124,11 +171,38 @@ export const Maintenance: FC<Props> = () => {
   const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
   // Action EN MASSE « Passer au statut » — même patron que les BC (operations.tsx). Appels séquentiels
   // (chaque écriture déclenche un recompute coalescé) ; réutilise setMntContratStatut (ne touche que le statut).
+  // Statut automatique (Lot 6, ADR-027 révisé ADR-028) : le callable PROPOSE le statut juste (règles + IA) —
+  // il n'écrit RIEN (l'auto-application a causé un incident : tout le parc basculé en échu). L'application
+  // reste un geste HUMAIN, à l'unité (« Appliquer ») ou en masse (« Appliquer les recommandés »).
+  const [statutRun, setStatutRun] = useState<MntStatutRun | null>(null);
+  const runStatutAuto = async (ids?: string[]) => { const r = await aiMntContratStatut(ids ? { ids } : {}); setStatutRun(r); return r; };
+  const dropProposal = (id: string) => setStatutRun((r) => (r ? { ...r, proposals: r.proposals.filter((p) => p.id !== id) } : r));
+  const applyProposal = async (p: MntStatutProposal) => { await setMntContratStatut(p.id, p.proposed); dropProposal(p.id); };
   const contratBulk: BulkAction[] = canWrite ? [
     { label: "Passer au statut", pick: { options: STATUTS.map((s) => ({ value: s, label: STATUT_LABEL[s] })), placeholder: "Statut cible" },
       okMsg: (rs) => { const k = rs.filter((r) => r.id).length; return `${k} contrat${k > 1 ? "s" : ""} mis à jour`; }, errMsg: "Mise à jour refusée",
       run: async (rs, statut) => { for (const r of rs.filter((x) => x.id)) await setMntContratStatut(r.id!, statut!); } },
+    // Déterminer le statut (IA) sur la sélection : PROPOSE seulement (rien n'est écrit), les propositions
+    // s'affichent dans la carte « Statut automatique » — à appliquer à la main.
+    { label: "Déterminer le statut (IA)",
+      okMsg: (rs) => `${rs.filter((r) => r.id).length} contrat(s) analysé(s) — voir les propositions`, errMsg: "Analyse refusée",
+      run: async (rs) => runStatutAuto(rs.map((r) => r.id).filter(Boolean)) },
   ] : [];
+  const statutCols = [
+    colText("Client", (p: MntStatutProposal) => p.client || "—", (p: MntStatutProposal) => p.client || ""),
+    colText("N° FP", (p: MntStatutProposal) => <FpLink fp={p.fp || undefined} />),
+    colText("Transition", (p: MntStatutProposal) => (
+      <span className="inline-flex items-center gap-1.5">
+        <Badge tone={statutTone(p.current)}>{label(STATUT_LABEL, p.current)}</Badge>
+        <span className="text-faint">→</span>
+        <Badge tone={statutTone(p.proposed)}>{label(STATUT_LABEL, p.proposed)}</Badge>
+      </span>
+    )),
+    colText("Origine", (p: MntStatutProposal) => <Badge tone={p.source === "regle" ? "steel" : "gold"}>{STATUT_SOURCE_LABEL[p.source] || p.source}</Badge>),
+    colNum("Confiance", (p: MntStatutProposal) => <Badge tone={confidenceTone(p.confidence)}>{Math.round(p.confidence * 100)} %</Badge>, (p: MntStatutProposal) => p.confidence),
+    colText("Motif", (p: MntStatutProposal) => <span className="text-[12px] text-muted">{p.motif || "—"}</span>),
+    colText("", (p: MntStatutProposal) => (canWrite ? <Busy variant="ghost" label="Appliquer" okMsg="Statut appliqué" errMsg="Application refusée" fn={() => applyProposal(p)} /> : null)),
+  ];
   const cValid = cForm.fp.trim() && cForm.client.trim() && cForm.dateDebut;
   const addEng = () => setC("engagements", [...cForm.engagements, { type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: "", quota: "" }]);
   const setEng = (i: number, k: string, v: string) => setC("engagements", cForm.engagements.map((e, j) => (j === i ? { ...e, [k]: v } : e)));
@@ -176,7 +250,7 @@ export const Maintenance: FC<Props> = () => {
   const ticketInterventions = useMemo(() => interventions.filter((i) => i.ticketId === tForm.id).sort((a, b) => String(b.date).localeCompare(String(a.date))), [interventions, tForm.id]);
 
   // Nouvelle intervention (dans la fiche ticket).
-  const [iForm, setIForm] = useState<{ consultantId: string; date: string; heures: string; commentaire: string }>({ consultantId: "", date: "", heures: "", commentaire: "" });
+  const [iForm, setIForm] = useState<{ consultantId: string; date: string; heures: string; commentaire: string; typeMaintenance: string }>({ consultantId: "", date: "", heures: "", commentaire: "", typeMaintenance: "" });
   const iValid = tForm.id && iForm.consultantId && iForm.date && Number(iForm.heures) > 0;
 
   const contratCols = [
@@ -192,6 +266,8 @@ export const Maintenance: FC<Props> = () => {
             risque). `cForm` est aussi renseigné → l'échéancier partage la même assiette que l'édition. */}
         <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setViewC(c); }}>Consulter</button>
         {canWrite && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setCForm(toContratForm(c)); setCId(c.id || ""); setCEdit(true); setCOpen(true); }}>Éditer</button>}
+        {/* Statut IA (unitaire, ADR-027) : détermine le statut juste ; appliqué si fiable, sinon proposé dans la carte. */}
+        {canWrite && <Busy variant="ghost" label="Statut IA" okMsg={(r: MntStatutRun) => { const p = r.proposals[0]; return !p ? "Statut déjà cohérent" : `Proposition : ${label(STATUT_LABEL, p.proposed)} (voir la carte pour appliquer)`; }} errMsg="Analyse refusée" fn={() => runStatutAuto([c.id!])} />}
         {canWrite && <DangerBtn label="Suppr." confirm={`Supprimer le contrat ${c.fp} ?`} fn={() => deleteMntContrat(c.id!)} okMsg="Contrat supprimé" errMsg="Suppression refusée" />}
       </div>
     )),
@@ -253,6 +329,44 @@ export const Maintenance: FC<Props> = () => {
   const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
   // Renouvellements à anticiper (Lot 5/7) : contrats actifs dont la fin approche (≤ 90 j), plus urgent d'abord.
   const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
+  // Maintenance par TYPE vs objectifs (ADR-025) : nombre de tickets ET d'interventions par type, par
+  // contrat + total agrégé. Vue pure (mntTypeStats), dérivée des collections déjà chargées.
+  const typeStats = useMemo(() => mntTypeStats(contrats, tickets, interventions), [contrats, tickets, interventions]);
+  // --- Centre de surveillance (ADR-026) : flux d'événements + abonnements ciblés ---
+  const [survScope, setSurvScope] = useState<"tout" | "abonnements">("tout");
+  const survEvents = useMemo<MntSurveillanceEvent[]>(() => surv?.events || [], [surv]);
+  const survCounts = surv?.counts || { high: 0, medium: 0, low: 0 };
+  const watched = hasAnyWatch(watch);
+  // « Mes abonnements » filtre le flux aux événements couverts par l'abonnement (miroir de watchMatchesEvent back).
+  const survRows = useMemo(() => (survScope === "abonnements" ? survEvents.filter((e) => watchMatchesEvent(watch, e)) : survEvents), [survEvents, survScope, watch]);
+  const isWatchedContrat = (id: string) => !!watch?.global || (watch?.contrats || []).includes(id);
+  // Bascule l'abonnement CIBLÉ d'un contrat (ajout/retrait dans mnt_watches/{uid}). Le reste de l'abonnement
+  // (global, clients, ams) est préservé — le callable renormalise et écrit le doc complet.
+  const toggleWatchContrat = async (contratId: string) => {
+    const set = new Set(watch?.contrats || []);
+    if (set.has(contratId)) set.delete(contratId); else set.add(contratId);
+    await setMntWatch({ global: !!watch?.global, contrats: [...set], clients: watch?.clients || [], ams: watch?.ams || [] });
+  };
+  const setWatchGlobal = async (g: boolean) => setMntWatch({ global: g, contrats: watch?.contrats || [], clients: watch?.clients || [], ams: watch?.ams || [] });
+  const survCols = [
+    colText("Sévérité", (e: MntSurveillanceEvent) => <Badge tone={severityTone(e.severity)}>{SEVERITY_LABEL[e.severity] || e.severity}</Badge>, (e: MntSurveillanceEvent) => (e.severity === "high" ? 0 : e.severity === "medium" ? 1 : 2)),
+    colText("Événement", (e: MntSurveillanceEvent) => (
+      <div className="flex flex-col gap-0.5">
+        <Badge tone="steel">{EVENT_TYPE_LABEL[e.type] || e.type}</Badge>
+        <span className="text-[12px] text-muted">{e.message}</span>
+      </div>
+    ), (e: MntSurveillanceEvent) => e.type),
+    colText("Client", (e: MntSurveillanceEvent) => e.client || "—", (e: MntSurveillanceEvent) => e.client || ""),
+    colText("N° FP", (e: MntSurveillanceEvent) => <FpLink fp={e.fp || undefined} />),
+    colText("AM", (e: MntSurveillanceEvent) => e.am || "—"),
+    colText("", (e: MntSurveillanceEvent) => (
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { const c = contratById[e.contratId]; if (c) { setCForm(toContratForm(c)); setViewC(c); } }}>Consulter</button>
+        {/* S'abonner CIBLÉ à ce contrat. Masqué si abonnement global (déjà tout couvert). */}
+        {!watch?.global && <Busy variant="ghost" label={isWatchedContrat(e.contratId) ? "Suivi ✓" : "Suivre"} okMsg={isWatchedContrat(e.contratId) ? "Désabonné" : "Abonné"} errMsg="Action refusée" fn={() => toggleWatchContrat(e.contratId)} />}
+      </div>
+    )),
+  ];
   const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
   const renouvCols = [
     colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
@@ -482,6 +596,41 @@ export const Maintenance: FC<Props> = () => {
           </div>
         </Card>
       )}
+      {/* Maintenance par type (ADR-025) — agrégé sur tout le parc : tickets ET interventions comptés
+          SÉPARÉMENT par type. Vue d'ensemble (sans colonne Objectif — les objectifs sont par contrat,
+          visibles en consultation). N'apparaît que si au moins un item est classé. */}
+      {gate && MNT_TYPES.some((t) => typeStats.totalTickets[t] || typeStats.totalInterventions[t]) && (
+        <Card title="Maintenance par type">
+          <Tip>Nombre de <b>tickets</b> et d'<b>interventions</b> classés par type sur l'ensemble du parc — comptés <b>séparément</b>. Les <b>objectifs</b> (max visé) se fixent et se suivent <b>par contrat</b> (fiche en consultation). Les items non classés ne sont pas comptés.</Tip>
+          <TypeStatsTable tickets={typeStats.totalTickets} interventions={typeStats.totalInterventions} />
+        </Card>
+      )}
+      {/* Centre de surveillance (ADR-026) — flux d'événements clés (projection du risque) + abonnements
+          ciblés. Proactivité : « Tout » = tout le parc, « Mes abonnements » = ce que je suis (contrat/parc). */}
+      {gate && surv && (
+        <Card title="Centre de surveillance"
+          actions={(
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented value={survScope} onChange={setSurvScope} ariaLabel="Portée de la surveillance"
+                options={[
+                  { value: "tout", label: "Tout", count: survEvents.length },
+                  { value: "abonnements", label: "Mes abonnements", count: survEvents.filter((e) => watchMatchesEvent(watch, e)).length },
+                ]} />
+              <Busy variant={watch?.global ? "gold" : "ghost"} label={watch?.global ? "Parc suivi ✓" : "Suivre tout le parc"}
+                okMsg={watch?.global ? "Désabonné du parc" : "Abonné à tout le parc"} errMsg="Action refusée" fn={() => setWatchGlobal(!watch?.global)} />
+            </div>
+          )}>
+          <Tip>Événements clés dérivés du <b>moteur de risque</b> (SLA rompus, renouvellements, quotas, sous-facturation), <b>les plus graves d'abord</b>. « <b>Suivre</b> » abonne à un contrat (ou tout le parc) : « <b>Mes abonnements</b> » ne montre alors que ce qui vous concerne. Diffusion <b>en direct</b>, sans e-mail.</Tip>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <Kpi label="Urgent" value={String(survCounts.high || 0)} tone={survCounts.high ? "clay" : "ink"} />
+            <Kpi label="À surveiller" value={String(survCounts.medium || 0)} tone={survCounts.medium ? "gold" : "ink"} />
+            <Kpi label="Info" value={String(survCounts.low || 0)} tone="ink" />
+          </div>
+          {survRows.length === 0
+            ? <EmptyState label={survScope === "abonnements" ? (watched ? "Aucun événement sur vos abonnements." : "Aucun abonnement — « Suivre » un contrat ou tout le parc pour un suivi ciblé.") : "Aucun événement — parc sous contrôle."} />
+            : <Table columns={survCols} rows={survRows} colsKey="mnt_surveillance" rowKey={(e) => e.id} />}
+        </Card>
+      )}
       {risque && (
         <Card title="Risque des contrats">
           <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
@@ -540,6 +689,29 @@ export const Maintenance: FC<Props> = () => {
           actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
           <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût des interventions</b> (jours CRA × coût journalier du consultant). {pnl.hasCost ? <>Pires marges d'abord.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
           <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
+        </Card>
+      )}
+
+      {/* Statut automatique (ADR-027, révisé ADR-028) — PROPOSE seulement : « Analyser le parc » n'écrit rien,
+          l'application est un geste humain (« Appliquer » à l'unité, « Appliquer les recommandés » en masse).
+          « Rétablir » annule des statuts auto-appliqués par l'ancienne version (rétablissement d'incident). */}
+      {canWrite && (contrats.length > 0 || !!statutRun) && (
+        <Card title={statutRun ? `Statut automatique (IA) · ${statutRun.proposals.length} proposition(s)` : "Statut automatique (IA)"}
+          actions={(
+            <div className="flex flex-wrap items-center gap-2">
+              {statutRun && statutRun.proposals.some((p) => p.recommended) && (
+                <Busy variant="gold" label="Appliquer les recommandés"
+                  okMsg={(n: number) => `${n} statut(s) appliqué(s)`} errMsg="Application refusée"
+                  fn={async () => { const rec = (statutRun.proposals || []).filter((p) => p.recommended); for (const p of rec) await setMntContratStatut(p.id, p.proposed); setStatutRun((r) => (r ? { ...r, proposals: r.proposals.filter((p) => !p.recommended) } : r)); return rec.length; }} />
+              )}
+              <Busy variant="ghost" label="Analyser le parc" okMsg={(r: MntStatutRun) => `${r.proposals.length} proposition(s)`} errMsg="Analyse refusée" fn={() => runStatutAuto()} />
+              <Busy variant="ghost" label="Rétablir (annuler l'auto)" okMsg={(r: { restored: number }) => `${r.restored} statut(s) rétabli(s) à leur valeur d'avant`} errMsg="Rétablissement refusé" fn={revertMntAutoStatut} />
+            </div>
+          )}>
+          <Tip>Propose le statut juste de chaque contrat : transitions <b>mécaniques</b> (date de début atteinte → <b>actif</b>…) par règles, cas de <b>jugement</b> (dormant, réactivation) par l'<b>IA</b>. <b>Rien n'est appliqué automatiquement</b> — vous validez chaque proposition (« Appliquer »), ou en bloc les <b>recommandées</b> (confiance élevée). Les <b>« recommandés » incluent « échéance dépassée → échu »</b> : vérifiez avant d'appliquer si vos contrats gardent une date de fin passée tout en restant actifs.</Tip>
+          {statutRun && (statutRun.proposals.length === 0
+            ? <EmptyState label="Aucun changement de statut — le parc est cohérent." />
+            : <Table columns={statutCols} rows={statutRun.proposals} colsKey="mnt_statut_ia" rowKey={(p) => p.id} />)}
         </Card>
       )}
 
@@ -615,6 +787,20 @@ export const Maintenance: FC<Props> = () => {
               </div>
             )}
           </div>
+          {/* Objectifs de maintenance par type (ADR-025) — nombre MAX visé par type (prédictive, corrective,
+              évolutive, veille). Optionnel : un champ vide = pas d'objectif sur ce type. Confronté au nombre réel
+              de tickets + interventions dans la consultation et le tableau de bord. */}
+          <div className="mt-4 pt-3 border-t border-line/60">
+            <div className="text-[13px] font-medium mb-2">Objectifs de maintenance <span className="text-[11px] text-muted font-normal">— nombre max visé par type (optionnel)</span></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {TYPES_MAINTENANCE.map((t) => (
+                <Field key={t} label={TYPE_MAINTENANCE_LABEL[t]}>
+                  <input className="field tabnum" inputMode="numeric" value={cForm.objectifs[t] || ""} placeholder="—"
+                    onChange={(e) => setC("objectifs", { ...cForm.objectifs, [t]: digits(e.target.value) })} />
+                </Field>
+              ))}
+            </div>
+          </div>
           <div className="mt-4 pt-3 border-t border-line/60">
             <div className="text-[13px] font-medium mb-2">Échéancier <span className="text-[11px] text-muted font-normal">— engagé (par échéance × {ech.periodsDue}) vs facturé (affaire)</span></div>
             <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
@@ -676,6 +862,9 @@ export const Maintenance: FC<Props> = () => {
         const vcRisk = risqueItems.find((r) => fpKey(r.fp || "") === vfp);
         const openTk = vcTickets.filter((t) => t.statut === "ouvert" || t.statut === "en_cours").length;
         const resoEng = (vc.engagements || []).find((e) => e.type === "resolution"); // engagement de résolution → état SLA des tickets
+        // Maintenance par type de CE contrat (ADR-025) : tickets/interventions comptés séparément, confrontés
+        // aux objectifs (max) embarqués. Affiché si le contrat a une activité classée OU des objectifs posés.
+        const vcType = typeStats.parContrat.find((p) => p.contratId === vc.id);
         return (
           <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="md"
             actions={canWrite ? <button type="button" className="btn-ghost !px-3 !py-1.5 text-sm" onClick={() => { setCId(vc.id || ""); setCEdit(true); setViewC(null); setCOpen(true); }}>Éditer</button> : undefined}>
@@ -708,6 +897,12 @@ export const Maintenance: FC<Props> = () => {
                   </div>
                 )}
               </div>
+              {vcType && (
+                <div>
+                  <div className="text-[13px] font-medium mb-1.5">Maintenance par type <span className="text-[11px] text-muted font-normal">— tickets et interventions vs objectifs (max)</span></div>
+                  <TypeStatsTable tickets={vcType.tickets} interventions={vcType.interventions} objectifs={vcType.objectifs} />
+                </div>
+              )}
               <div>
                 <div className="text-[13px] font-medium mb-1.5">Facturation récurrente <span className="text-[11px] text-muted font-normal">— engagé (échéances × montant) vs facturé (affaire)</span></div>
                 <div className="flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
@@ -758,6 +953,8 @@ export const Maintenance: FC<Props> = () => {
             <Field label="Titre"><input className="field" value={tForm.titre || ""} onChange={(e) => setT("titre", e.target.value)} /></Field>
             <Field label="Priorité"><Select value={tForm.priorite || "moyenne"} onChange={(v) => setT("priorite", v)} options={opt(PRIORITE_LABEL, PRIORITES)} ariaLabel="Priorité" /></Field>
             <Field label="Statut"><Select value={tForm.statut || "ouvert"} onChange={(v) => setT("statut", v)} options={opt(TICKET_STATUT_LABEL, TICKET_STATUTS)} ariaLabel="Statut" /></Field>
+            {/* Type de maintenance (ADR-025) — classe le ticket ; optionnel (« — » → non classé, ignoré des compteurs par type). */}
+            <Field label="Type de maintenance"><Select value={tForm.typeMaintenance || ""} onChange={(v) => setT("typeMaintenance", v || null)} options={[{ value: "", label: "—" }, ...opt(TYPE_MAINTENANCE_LABEL, TYPES_MAINTENANCE)]} ariaLabel="Type de maintenance" /></Field>
           </div>
 
           <div className="mt-4 pt-3 border-t border-line/60">
@@ -779,7 +976,9 @@ export const Maintenance: FC<Props> = () => {
                     <Field label="Consultant"><Select value={iForm.consultantId} onChange={(v) => setIForm((f) => ({ ...f, consultantId: v }))} options={consultants.map((c) => ({ value: c.id, label: c.name || c.id }))} ariaLabel="Consultant" placeholder="Choisir…" /></Field>
                     <Field label="Date"><DateField value={iForm.date} onChange={(v) => setIForm((f) => ({ ...f, date: v }))} ariaLabel="Date intervention" /></Field>
                     <Field label="Heures"><input className="field tabnum" inputMode="decimal" value={iForm.heures} onChange={(e) => setIForm((f) => ({ ...f, heures: decimals(e.target.value) }))} placeholder="0" /></Field>
-                    <Busy label="Ajouter" variant={iValid ? "gold" : "ghost"} fn={async () => { if (!iValid) throw new Error("Consultant, date et heures requis"); await upsertMntIntervention({ ticketId: tForm.id, contratId: tForm.contratId, fp: tForm.fp, consultantId: iForm.consultantId, date: iForm.date, heures: Number(iForm.heures), commentaire: iForm.commentaire }); setIForm({ consultantId: "", date: "", heures: "", commentaire: "" }); }} okMsg="Intervention ajoutée" errMsg="Ajout refusé" />
+                    {/* Type de maintenance (ADR-025) — classe l'intervention ; optionnel (défaut : celui du ticket, sinon non classé). */}
+                    <Field label="Type de maintenance"><Select value={iForm.typeMaintenance} onChange={(v) => setIForm((f) => ({ ...f, typeMaintenance: v }))} options={[{ value: "", label: "—" }, ...opt(TYPE_MAINTENANCE_LABEL, TYPES_MAINTENANCE)]} ariaLabel="Type de maintenance intervention" /></Field>
+                    <Busy label="Ajouter" variant={iValid ? "gold" : "ghost"} fn={async () => { if (!iValid) throw new Error("Consultant, date et heures requis"); await upsertMntIntervention({ ticketId: tForm.id, contratId: tForm.contratId, fp: tForm.fp, consultantId: iForm.consultantId, date: iForm.date, heures: Number(iForm.heures), commentaire: iForm.commentaire, typeMaintenance: iForm.typeMaintenance || null }); setIForm({ consultantId: "", date: "", heures: "", commentaire: "", typeMaintenance: "" }); }} okMsg="Intervention ajoutée" errMsg="Ajout refusé" />
                   </div>
                 )}
               </>

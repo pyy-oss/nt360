@@ -183,6 +183,149 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true };
   });
 
+  // ABONNEMENTS DE SURVEILLANCE (Lot 5, ADR-026) — préférence PAR UTILISATEUR (doc mnt_watches/{uid}).
+  // S'abonner est une PERSONNALISATION lecture (requireRead suffit : voir le module ⇒ pouvoir le suivre).
+  // Écrit le doc de l'appelant uniquement (id = uid). PAS de recompute : les abonnements ne changent aucun
+  // agrégat — le ciblage se fait à l'affichage sur summaries/mnt_surveillance (déjà matérialisé).
+  const setMntWatch = onCallG("setMntWatch", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireRead(req, "maintenance");
+    await assertMntEnabled();
+    // Garde-débit léger (personnalisation, fail-open) — homogène avec les autres callables gouvernés.
+    if (rateLimit && !(await rateLimit(req.auth.uid, "mntWatch", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de modifications d'abonnement en peu de temps — patientez un instant.");
+    const { normalizeWatch } = require("../domain/mntSurveillance");
+    const watch = normalizeWatch(req.data);
+    await db.doc(`mnt_watches/${req.auth.uid}`).set({ ...watch, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_mnt_watch", module: "maintenance", entity: "mnt_watch", entityId: req.auth.uid, detail: { global: watch.global, contrats: watch.contrats.length, clients: watch.clients.length, ams: watch.ams.length }, ts: FieldValue.serverTimestamp() });
+    return { ok: true };
+  });
+
+  // STATUT AUTOMATIQUE (Lot 6, ADR-027) — détermine le statut juste d'un contrat en HYBRIDE : règles
+  // déterministes (échéance→échu, début→actif…) + IA pour les seuls cas de jugement (dormant, réactivation).
+  // AUTO-APPLIQUE au-dessus d'un seuil de confiance (échu mécanique = 1.0), PROPOSE en deçà. Action unitaire
+  // (`ids:[id]`) ou en masse (`ids:[…]` / tout le parc). Double garde (requireWrite + drapeau) + garde-débit IA.
+  const aiMntContratStatut = onCallG("aiMntContratStatut", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+    const { proposeStatutRule, decideStatut, STATUT_AUTO_THRESHOLD } = require("../domain/mntStatutAuto");
+    // `apply` n'est plus honoré : la détermination NE PEUT PLUS écrire (voir plus bas). Seul le seuil sert à
+    // marquer les propositions « recommandées » (repère visuel), l'application restant un geste humain.
+    const threshold = Math.max(0.5, Math.min(1, Number(req.data?.threshold) || STATUT_AUTO_THRESHOLD));
+    const asOf = new Date().toISOString().slice(0, 10);
+    const today = Date.parse(`${asOf}T00:00:00Z`);
+
+    // Contrats visés : ids fournis (action unitaire/lot, borné) sinon tout le parc (capé).
+    const ids = Array.isArray(req.data?.ids) ? req.data.ids.filter((x) => x).slice(0, 300).map(String) : null;
+    let contrats;
+    if (ids && ids.length) {
+      const snaps = await Promise.all(ids.map((id) => db.doc(`mnt_contrats/${id}`).get()));
+      contrats = snaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...s.data() }));
+    } else {
+      const snap = await db.collection("mnt_contrats").limit(MAX_SCAN + 1).get();
+      contrats = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    if (!contrats.length) return { ok: true, proposals: [], appliedCount: 0, analyzed: 0, threshold };
+
+    // Signaux par contrat : tickets ouverts + ancienneté du dernier ticket (activité), depuis mnt_tickets.
+    const tSnap = await db.collection("mnt_tickets").limit(MAX_SCAN + 1).get();
+    const tickBy = new Map();
+    for (const d of sliceCapped(tSnap.docs).docs) {
+      const t = d.data() || {}; const cid = t.contratId; if (!cid) continue;
+      const e = tickBy.get(cid) || { open: 0, lastMs: null };
+      if (t.statut === "ouvert" || t.statut === "en_cours") e.open += 1;
+      const ms = t.ouvertLe && typeof t.ouvertLe.toMillis === "function" ? t.ouvertLe.toMillis() : 0;
+      if (ms && (e.lastMs == null || ms > e.lastMs)) e.lastMs = ms;
+      tickBy.set(cid, e);
+    }
+    // Niveau de risque matérialisé (facultatif) pour enrichir le jugement IA.
+    const risque = (await db.doc("summaries/mnt_risque").get()).data() || {};
+    const riskBy = new Map((risque.items || []).map((it) => [it.id, it]));
+    const dj = (iso) => { const ms = Date.parse(`${String(iso || "").slice(0, 10)}T00:00:00Z`); return Number.isFinite(ms) ? Math.round((today - ms) / 86400000) : null; };
+    const sigOf = (c) => {
+      const tk = tickBy.get(c.id) || { open: 0, lastMs: null };
+      return { ticketsOuverts: tk.open, dernierTicketJours: tk.lastMs ? Math.round((today - tk.lastMs) / 86400000) : null, joursDepuisDebut: dj(c.dateDebut) };
+    };
+
+    // 1er passage : règles déterministes ; on isole les cas de JUGEMENT pour l'IA.
+    const ruleProps = [], aiCases = [];
+    const CAP_AI = 40; // borne coût/latence de l'IA (comme les autres assistants du module)
+    for (const c of contrats) {
+      const sig = sigOf(c);
+      const r = proposeStatutRule(c, sig, asOf);
+      if (r.needsAi) {
+        if (aiCases.length < CAP_AI) { const rk = riskBy.get(c.id) || {}; aiCases.push({ id: c.id, fp: c.fp || "", current: String(c.statut || "brouillon"), client: c.client || "", hint: r.hint, ticketsOuverts: sig.ticketsOuverts, dernierTicketJours: sig.dernierTicketJours, joursAvantFin: rk.joursAvantFin ?? null, risqueNiveau: rk.niveau || "vert" }); }
+        else ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client || "", current: String(c.statut || "brouillon"), proposed: String(c.statut || "brouillon"), confidence: 0, motif: "Non analysé (lot IA plafonné)", source: "regle" });
+      } else {
+        ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client || "", current: String(c.statut || "brouillon"), proposed: r.proposed, confidence: r.confidence, motif: r.motif, source: "regle" });
+      }
+    }
+
+    // Volet IA (cas de jugement) — best-effort : un refus/échec IA laisse ces contrats « sans changement ».
+    let model = null;
+    if (aiCases.length) {
+      const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();
+      if (apiKey) {
+        try {
+          const { aiMntContratStatut: runAi } = require("../lib/mntStatutAi");
+          const out = await runAi(apiKey, aiCases); model = out.model;
+          const byFp = new Map(out.proposals.map((p) => [p.fp, p]));
+          for (const c of aiCases) {
+            const p = byFp.get(c.fp);
+            if (p) ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client, current: c.current, proposed: p.proposed, confidence: p.confidence, motif: p.motif, source: "ia" });
+            else ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client, current: c.current, proposed: c.current, confidence: 0, motif: "Indéterminé (l'IA n'a rien proposé)", source: "ia" });
+          }
+          if (logOps) await logOps({ kind: "ai", action: "mntContratStatut", status: "ok", uid: req.auth.uid, detail: { cases: aiCases.length, proposals: out.proposals.length, model: out.model, usage: out.usage } });
+        } catch (e) {
+          if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
+          for (const c of aiCases) ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client, current: c.current, proposed: c.current, confidence: 0, motif: "IA indisponible", source: "ia" });
+        }
+      } else {
+        for (const c of aiCases) ruleProps.push({ id: c.id, fp: c.fp || null, client: c.client, current: c.current, proposed: c.current, confidence: 0, motif: "Assistant IA non configuré", source: "ia" });
+      }
+    }
+
+    // PROPOSE UNIQUEMENT — n'écrit AUCUN statut (incident 2026-07-17 : l'auto-application de « échéance
+    // dépassée → échu » a basculé tout le parc en échu, car beaucoup de contrats gardent une date de fin
+    // passée tout en restant actifs). L'application est désormais un GESTE HUMAIN explicite (setMntContratStatut,
+    // à l'unité ou via « Appliquer les recommandés »). `recommended` = confiance ≥ seuil (repère visuel, pas une
+    // action). Aucun changement de statut ne peut plus se produire en silence.
+    const decided = ruleProps.map((p) => decideStatut(p, threshold));
+    const proposals = decided.filter((d) => d.changed).map((d) => ({ id: d.id, fp: d.fp, client: d.client, current: d.current, proposed: d.proposed, confidence: d.confidence, motif: d.motif, source: d.source, recommended: d.apply }));
+    return { ok: true, proposals, analyzed: contrats.length, threshold, model };
+  });
+
+  // RÉTABLISSEMENT des statuts auto-appliqués (incident 2026-07-17). Lit les changements AUTO tracés
+  // (auditLog action `auto_mnt_contrat_statut`, via l'index (module, ts) existant), dédoublonne au DERNIER
+  // par contrat, et restaure le statut ANTÉRIEUR (`detail.from`) — SEULEMENT si le contrat porte TOUJOURS le
+  // statut auto-appliqué (`detail.to`). Idempotent : ne touche pas ce qui a bougé depuis, rejouable sans risque.
+  const revertMntAutoStatut = onCallG("revertMntAutoStatut", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const snap = await db.collection("auditLog").where("module", "==", "maintenance").orderBy("ts", "desc").limit(3000).get();
+    // Par contrat : `to` = statut auto le PLUS RÉCENT (celui qu'il porte censément), `from` = statut ORIGINAL
+    // (le plus ANCIEN avant toute auto-application) — robuste si l'auto a été lancé plusieurs fois.
+    const info = new Map();
+    for (const d of snap.docs) {
+      const x = d.data() || {}; if (x.action !== "auto_mnt_contrat_statut") continue;
+      const id = x.entityId; if (!id) continue; const det = x.detail || {};
+      const e = info.get(id);
+      if (!e) info.set(id, { to: det.to, from: det.from }); // 1ʳᵉ vue (desc) = plus récente → `to`
+      else if (det.from) e.from = det.from;                 // vues suivantes (plus anciennes) → `from` original
+    }
+    let restored = 0;
+    for (const [id, e] of info) {
+      if (!e.from || !e.to || e.from === e.to) continue;
+      const ref = db.doc(`mnt_contrats/${id}`);
+      const cur = (await ref.get()).data();
+      if (!cur || cur.statut !== e.to) continue; // a déjà changé depuis → on n'y touche pas
+      await ref.set({ statut: e.from, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await db.collection("auditLog").add({ uid: req.auth.uid, action: "revert_mnt_auto_statut", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { from: e.to, to: e.from }, ts: FieldValue.serverTimestamp() });
+      restored += 1;
+    }
+    if (restored) await requestRecompute(["maintenance"]);
+    return { ok: true, restored, considered: info.size };
+  });
+
   const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
@@ -342,7 +485,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, mntContratPnl, deleteMntContrat, setMntContratStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
 }
 
 module.exports = { createMaintenance };

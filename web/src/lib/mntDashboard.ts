@@ -4,6 +4,7 @@
 // Convention ERP : dates ISO AAAA-MM-JJ, montants FCFA entiers, statuts en code applicatif.
 
 import { slaState } from "./mntSla";
+import { TYPES_MAINTENANCE } from "./mntContrat";
 
 export const ECHEANCE_PROCHE_JOURS = 60; // aligné sur le signal « échéance proche » du moteur de risque
 const DAY = 86400000;
@@ -191,4 +192,49 @@ export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: nu
     return a.dueMs - b.dueMs;
   });
   return out;
+}
+
+// ── Statistiques par TYPE de maintenance (ADR-025) — nombre de tickets ET d'interventions par type,
+// PAR contrat, confrontés aux objectifs (max) embarqués. Comptés SÉPARÉMENT (tickets ≠ interventions).
+// Les items non classés (typeMaintenance absent) sont ignorés des compteurs par type. PUR (aucune I/O).
+// SOURCE UNIQUE des quatre types = TYPES_MAINTENANCE (ADR-025) : on ré-exporte, on ne recopie pas.
+export const MNT_TYPES = TYPES_MAINTENANCE;
+export type MntType = typeof MNT_TYPES[number];
+export type MntTypeCount = { predictive: number; corrective: number; evolutive: number; veille: number };
+export type MntTypeContrat = {
+  contratId: string; fp?: string | null; client?: string; statut?: string;
+  tickets: MntTypeCount; interventions: MntTypeCount; objectifs: Partial<MntTypeCount> | null;
+};
+export type MntTypeStats = { parContrat: MntTypeContrat[]; totalTickets: MntTypeCount; totalInterventions: MntTypeCount };
+
+const zeroCount = (): MntTypeCount => ({ predictive: 0, corrective: 0, evolutive: 0, veille: 0 });
+type TypedLike = { contratId?: string; typeMaintenance?: string | null };
+type ContratObjLike = { id?: string; fp?: string | null; client?: string; statut?: string; objectifsMaintenance?: Partial<MntTypeCount> | null };
+const isMntType = (t: string): t is MntType => (MNT_TYPES as readonly string[]).includes(t);
+
+export function mntTypeStats(contrats: ContratObjLike[], tickets: TypedLike[], interventions: TypedLike[]): MntTypeStats {
+  const byC = new Map<string, { tickets: MntTypeCount; interventions: MntTypeCount }>();
+  const ensure = (id: string) => { let e = byC.get(id); if (!e) { e = { tickets: zeroCount(), interventions: zeroCount() }; byC.set(id, e); } return e; };
+  const totalTickets = zeroCount(), totalInterventions = zeroCount();
+  const tally = (items: TypedLike[], kind: "tickets" | "interventions", total: MntTypeCount) => {
+    for (const it of items || []) {
+      const t = String(it.typeMaintenance || ""); if (!isMntType(t)) continue; // non classé → ignoré
+      total[t]++;
+      const id = String(it.contratId || ""); if (id) ensure(id)[kind][t]++;
+    }
+  };
+  tally(tickets, "tickets", totalTickets);
+  tally(interventions, "interventions", totalInterventions);
+  const parContrat: MntTypeContrat[] = [];
+  for (const c of contrats || []) {
+    const id = String(c.id || ""); if (!id) continue;
+    const e = byC.get(id) || { tickets: zeroCount(), interventions: zeroCount() };
+    const obj = c.objectifsMaintenance || null;
+    const hasObj = !!obj && MNT_TYPES.some((t) => obj[t] != null);
+    const hasActivity = MNT_TYPES.some((t) => e.tickets[t] || e.interventions[t]);
+    if (!hasActivity && !hasObj) continue; // pas de ligne vide
+    parContrat.push({ contratId: id, fp: c.fp, client: c.client, statut: c.statut, tickets: e.tickets, interventions: e.interventions, objectifs: hasObj ? obj : null });
+  }
+  parContrat.sort((a, b) => String(a.client || "").localeCompare(String(b.client || "")));
+  return { parContrat, totalTickets, totalInterventions };
 }

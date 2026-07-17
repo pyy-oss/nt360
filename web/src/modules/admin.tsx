@@ -6,10 +6,10 @@ import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, ListView, Badge, Tip, Busy, DangerBtn, Toggle, Eyebrow, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { trackWrite } from "../lib/activity";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setClientAliases, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, fuzzyDuplicateClients, type FuzzyPair, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
-import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClientAliasConfig, ClickupHealthSummary } from "../types";
+import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClickupHealthSummary } from "../types";
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
 const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
@@ -87,9 +87,9 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <NotificationCard />}
       {isDirection && <EmailNotifyCard />}
 
+      {/* Normalisation clients (alias + quasi-doublons) : DÉPLACÉE dans l'écran dédié Référentiels >
+          Normalisation clients (module clientnorm). Retirée d'ici pour éviter le doublon. */}
       {isDirection && <Rubrique>Référentiels</Rubrique>}
-      {isDirection && <ClientAliasCard />}
-      {isDirection && <FuzzyDuplicatesCard />}
       {isDirection && <FxRatesCard />}
       {isDirection && <RefListCard kind="projectManagers" title="Référentiel — Project Managers" placeholder="Nom du PM" clickupImport tip="Liste des Project Managers proposée à l'affectation des commandes (écran Commandes). Pour une assignation ClickUp fiable, utilisez « Importer depuis ClickUp » (noms exacts) puis retirez les non-PM. L'auto-complétion combine ce référentiel et les PM déjà affectés." />}
       {isDirection && <RefListCard kind="businessUnits" title="Référentiel — Business Units (BU)" placeholder="ICT" upper tip="Liste des BU proposée dans les sélecteurs (filtre transverse, saisie d'opportunité/commande, objectifs). Les valeurs sont normalisées en MAJUSCULES. Sans référentiel, les BU par défaut (ICT, CLOUD, FORMATION, AUTRE) s'appliquent." />}
@@ -559,76 +559,6 @@ function ActiveToggle({ uid, active }: { uid: string; active?: boolean }) {
         ? <DangerBtn label="Désactiver" confirm="Désactiver ce compte ? L'utilisateur perdra l'accès dès sa prochaine actualisation de session." confirmLabel="Désactiver" okMsg="Compte désactivé" errMsg="Désactivation refusée" fn={() => callSetUserActive(uid, false)} />
         : <Busy variant="ghost" label="Réactiver" okMsg="Compte réactivé" fn={() => callSetUserActive(uid, true)} />}
     </span>
-  );
-}
-
-// Normalisation des noms de clients : règles déterministes (serveur) + table d'alias éditable pour
-// fusionner les graphies distinctes d'un même client. L'enregistrement relance un recalcul complet.
-function ClientAliasCard() {
-  const { data } = useDocData<ClientAliasConfig>("config/clientAliases");
-  const [draft, setDraft] = useState<{ from: string; to: string }[] | null>(null);
-  const list = draft ?? (data?.pairs || []);
-  const set = (i: number, k: "from" | "to", v: string) => setDraft(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  const add = () => setDraft([...list, { from: "", to: "" }]);
-  const del = (i: number) => setDraft(list.filter((_, j) => j !== i));
-  const save = async () => { await setClientAliases(list.filter((r) => r.from.trim() && r.to.trim())); setDraft(null); };
-  return (
-    <Card title="Normalisation clients — alias" actions={
-      <div className="flex gap-2">
-        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={add}>+ Alias</button>
-        <Busy label="Enregistrer" okMsg="Alias enregistrés (recalcul lancé)" fn={save} />
-      </div>}>
-      <div className="flex flex-col gap-1.5">
-        {list.length ? list.map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <input className="field !py-1 flex-1" placeholder="Variante (ex. SGBCI)" value={r.from} onChange={(e) => set(i, "from", e.target.value)} aria-label={`Variante ${i + 1}`} />
-            <span className="text-muted" aria-hidden="true">→</span>
-            <input className="field !py-1 flex-1" placeholder="Nom canonique (ex. Société Générale)" value={r.to} onChange={(e) => set(i, "to", e.target.value)} aria-label={`Nom canonique ${i + 1}`} />
-            <button className="btn-ghost !px-2 !py-1" onClick={() => del(i)} aria-label={`Supprimer l'alias ${i + 1}`}>×</button>
-          </div>
-        )) : <div className="text-[13px] text-muted">Aucun alias — les noms sont normalisés par règles automatiques.</div>}
-      </div>
-      <Tip>Les noms de clients sont d'abord normalisés par <b>règles</b> (MAJUSCULES, accents, ponctuation, formes juridiques SA/SARL…, suffixe « Côte d'Ivoire »/« CI »). Ajoutez un <b>alias</b> pour fusionner deux graphies que les règles ne rapprochent pas (ex. « SGBCI » → « Société Générale »). L'enregistrement relance un recalcul complet ; les <b>documents sources ne sont pas modifiés</b>.</Tip>
-    </Card>
-  );
-}
-
-// Fuzzy matching qualité (Lot 9) : repère les QUASI-DOUBLONS de noms clients (typos, mot en plus) que
-// la normalisation exacte n'a pas fusionnés — chaque paire peut être fusionnée en un clic (ajoute un
-// alias variante→canonique et relance le recalcul). Améliore la justesse de la rentabilité par client.
-function FuzzyDuplicatesCard() {
-  const { data } = useDocData<ClientAliasConfig>("config/clientAliases");
-  const toast = useToast();
-  const [pairs, setPairs] = useState<FuzzyPair[] | null>(null);
-  const [done, setDone] = useState<Set<string>>(new Set());
-  const scan = async () => { const r = await fuzzyDuplicateClients(); setPairs(r.pairs); toast(`${r.pairs.length} paire(s) suspecte(s) sur ${r.scanned} noms`, "ok"); };
-  const merge = async (p: FuzzyPair) => {
-    // Fusionne la variante la PLUS COURTE vers la plus longue (heuristique : la forme longue est souvent
-    // la plus complète/canonique). Ajoute l'alias à la table existante (ne remplace pas).
-    const [from, to] = p.a.length <= p.b.length ? [p.a, p.b] : [p.b, p.a];
-    const existing = (data?.pairs || []).filter((x) => x.from.trim() && x.to.trim());
-    await setClientAliases([...existing, { from, to }]);
-    setDone((s) => new Set(s).add(`${p.a}|${p.b}`));
-    toast(`Alias « ${from} » → « ${to} » ajouté (recalcul lancé)`, "ok");
-  };
-  return (
-    <Card title="Qualité — quasi-doublons clients (fuzzy)" actions={<Busy variant="ghost" label="Analyser" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={scan} />}>
-      {pairs == null ? (
-        <Tip>Lance une détection des noms clients <b>quasi-identiques</b> (fautes de frappe, mot en plus) que la normalisation automatique n'a pas fusionnés. Chaque paire peut être fusionnée en un clic (crée un alias).</Tip>
-      ) : pairs.length ? (
-        <div className="flex flex-col">
-          {pairs.map((p) => {
-            const key = `${p.a}|${p.b}`; const merged = done.has(key);
-            return (
-              <div key={key} className="flex items-center justify-between gap-2 border-t border-hair py-2 text-[13px]">
-                <span className="inline-flex items-center gap-2"><Badge tone={p.score >= 0.92 ? "clay" : "gold"}>{Math.round(p.score * 100)}%</Badge><span>« {p.a} »</span><span className="text-muted">≈</span><span>« {p.b} »</span></span>
-                {merged ? <Badge tone="emerald">fusionné</Badge> : <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => merge(p)}>fusionner</button>}
-              </div>
-            );
-          })}
-        </div>
-      ) : <Tip>Aucun quasi-doublon détecté au seuil courant. ✔️</Tip>}
-    </Card>
   );
 }
 

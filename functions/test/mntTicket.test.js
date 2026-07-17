@@ -15,6 +15,11 @@ describe("mntTicket — ticket", () => {
     expect(validateTicket({ ...tk, priorite: "urgente" }).ok).toBe(false);
     expect(validateTicket({ ...tk, fp: "FP/2026/0000" }).ok).toBe(false);
   });
+  it("type de maintenance optionnel : absent → null, valide accepté, invalide rejeté (ADR-025)", () => {
+    expect(validateTicket(tk).value.typeMaintenance).toBeNull();
+    expect(validateTicket({ ...tk, typeMaintenance: "evolutive" }).value.typeMaintenance).toBe("evolutive");
+    expect(validateTicket({ ...tk, typeMaintenance: "curative" }).ok).toBe(false);
+  });
 });
 
 describe("mntTicket — intervention", () => {
@@ -27,6 +32,11 @@ describe("mntTicket — intervention", () => {
     expect(validateIntervention({ ...iv, ticketId: "" }).ok).toBe(false);
     expect(validateIntervention({ ...iv, heures: 0 }).ok).toBe(false);
     expect(validateIntervention({ ...iv, date: "04/03/2026" }).ok).toBe(false);
+  });
+  it("type de maintenance optionnel sur intervention (absent → null, invalide rejeté)", () => {
+    expect(validateIntervention(iv).value.typeMaintenance).toBeNull();
+    expect(validateIntervention({ ...iv, typeMaintenance: "predictive" }).value.typeMaintenance).toBe("predictive");
+    expect(validateIntervention({ ...iv, typeMaintenance: "x" }).ok).toBe(false);
   });
 });
 

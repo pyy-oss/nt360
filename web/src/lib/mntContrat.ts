@@ -5,6 +5,12 @@ export const STATUTS = ["brouillon", "actif", "suspendu", "echu", "resilie"] as 
 export const ECHEANCES = ["mensuel", "trimestriel", "annuel"] as const;
 export const SLA_TYPES = ["prise_en_compte", "resolution"] as const;
 export const COUVERTURES = ["ouvre_lun_ven", "h24"] as const;
+// Types de maintenance (ADR-025) — miroir de functions/domain/mntContrat.js. Classent tickets ET
+// interventions ; objectifs (max) posés PAR CONTRAT. Libellés FR à l'affichage.
+export const TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"] as const;
+export const TYPE_MAINTENANCE_LABEL: Record<string, string> = {
+  predictive: "Prédictive", corrective: "Corrective", evolutive: "Évolutive", veille: "Veille technologique",
+};
 
 export const STATUT_LABEL: Record<string, string> = {
   brouillon: "Brouillon", actif: "Actif", suspendu: "Suspendu", echu: "Échu", resilie: "Résilié",

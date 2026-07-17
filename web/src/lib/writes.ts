@@ -1032,17 +1032,21 @@ export async function upsertOpsBulletin(b: { fy: number; week: number; sections:
 // CONTRATS DE MAINTENANCE (module mnt_, Lot 1). Écriture callable-only, double garde serveur
 // (droit `maintenance` + drapeau config/mntFeature). L'UI est désactivée en amont si le rôle
 // n'a pas le droit ; les rules restent la barrière opposable.
-export async function upsertMntContrat(c: MntContrat) {
-  const res = await httpsCallable(functions, "upsertMntContrat")(c);
-  return res.data as { ok: boolean; id: string };
-}
-export async function deleteMntContrat(id: string) {
-  await httpsCallable(functions, "deleteMntContrat")({ id });
-}
+// Appels mnt_ gouvernés (double garde serveur : droit `maintenance` + drapeau). `mntCall` renvoie la
+// donnée du callable ; `mntWrite` ignore le retour (suppressions/changements ciblés).
+const mntCall = <T>(name: string, data: unknown): Promise<T> => httpsCallable(functions, name)(data).then((r) => r.data as T);
+const mntWrite = (name: string, data: unknown): Promise<void> => httpsCallable(functions, name)(data).then(() => {});
+export const upsertMntContrat = (c: MntContrat) => mntCall<{ ok: boolean; id: string }>("upsertMntContrat", c);
+export const deleteMntContrat = (id: string) => mntWrite("deleteMntContrat", { id });
 // Changement de statut MINIMAL (ne touche que `statut`) — sert l'action en masse « Passer au statut ».
-export async function setMntContratStatut(id: string, statut: string) {
-  await httpsCallable(functions, "setMntContratStatut")({ id, statut });
-}
+export const setMntContratStatut = (id: string, statut: string) => mntWrite("setMntContratStatut", { id, statut });
+// Abonnements de surveillance de l'utilisateur (ADR-026) — écrit mnt_watches/{uid} (normalisé serveur).
+export const setMntWatch = (watch: MntWatch) => mntWrite("setMntWatch", watch);
+// Statut automatique (ADR-027, révisé ADR-028) — PROPOSE uniquement (n'écrit aucun statut). L'application
+// reste un geste humain (setMntContratStatut). `revertMntAutoStatut` rétablit les statuts auto-appliqués
+// par l'ancienne version (rétablissement d'incident, idempotent).
+export const aiMntContratStatut = (opts?: { ids?: string[]; threshold?: number }) => mntCall<MntStatutRun>("aiMntContratStatut", opts || {});
+export const revertMntAutoStatut = () => mntCall<{ ok: boolean; restored: number; considered: number }>("revertMntAutoStatut", {});
 export type MntImportResult = {
   ok: boolean; applied: boolean; created: number; updated: number; skipped: number; rowsParsed: number;
   samples?: { create: { fp: string; client: string; statut: string }[]; update: { fp: string; client: string; statut: string }[]; errors: { line: number; error: string; fp: string | null }[] };
@@ -1085,11 +1089,12 @@ export async function aiAnalyzeChurn(contrats: ChurnInput[]): Promise<ChurnResul
 }
 
 // Tickets & interventions de maintenance (mnt_, Lot 2). Callable-only, double garde serveur.
-import type { MntTicket, MntIntervention } from "../types";
-export async function upsertMntTicket(t: MntTicket) { const res = await httpsCallable(functions, "upsertMntTicket")(t); return res.data as { ok: boolean; id: string }; }
-export async function deleteMntTicket(id: string) { await httpsCallable(functions, "deleteMntTicket")({ id }); }
-export async function upsertMntIntervention(i: MntIntervention) { const res = await httpsCallable(functions, "upsertMntIntervention")(i); return res.data as { ok: boolean; id: string }; }
-export async function deleteMntIntervention(id: string) { await httpsCallable(functions, "deleteMntIntervention")({ id }); }
+import type { MntTicket, MntIntervention, MntWatch } from "../types";
+import type { MntStatutRun } from "./mntStatutAuto";
+export const upsertMntTicket = (t: MntTicket) => mntCall<{ ok: boolean; id: string }>("upsertMntTicket", t);
+export const deleteMntTicket = (id: string) => mntWrite("deleteMntTicket", { id });
+export const upsertMntIntervention = (i: MntIntervention) => mntCall<{ ok: boolean; id: string }>("upsertMntIntervention", i);
+export const deleteMntIntervention = (id: string) => mntWrite("deleteMntIntervention", { id });
 
 // Décision de contrat (renouvellement / résiliation) soumise au moteur d'approbation (Lot 4, ADR-004).
 export async function submitMntDecision(contratId: string, kind: "renouvellement_contrat" | "resiliation_contrat", note?: string) {

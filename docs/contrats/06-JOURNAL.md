@@ -812,3 +812,90 @@ existante touchée.
 
 **Audit du module contrat : CLÔTURÉ.** 11 constats confirmés → tous remédiés (2 majeurs, 5 mineurs, 4 infos)
 + 5 faux positifs écartés. ADR-021 à 024. Tout sur la PR #400.
+
+---
+
+## 2026-07-17 — Contrats Lots 4 & 5 : types de maintenance + centre de surveillance
+
+**Fait — Lot 4 (types de maintenance + objectifs, ADR-025)** :
+- Énumération unique `TYPES_MAINTENANCE` (predictive/corrective/evolutive/veille), miroir back
+  (`domain/mntContrat.js`) / front (`lib/mntContrat.ts`), libellés FR.
+- Champ optionnel `typeMaintenance` sur tickets ET interventions (validé, fail-loud sur valeur hors
+  énum) ; objectifs (max) par type EMBARQUÉS dans le contrat (`objectifsMaintenance`, entiers, rejet
+  du négatif). Comptage SÉPARÉ tickets/interventions (`mntTypeStats`, vue pure).
+- Double affichage : carte agrégée « Maintenance par type » (tableau de bord) + carte par contrat
+  (consultation, colonne Objectif, dépassement en clay). Composant `TypeStatsTable` réutilisé.
+
+**Fait — Lot 5 (centre de surveillance, ADR-026)** :
+- `domain/mntSurveillance.js` (PUR) PROJETTE `summaries/mnt_risque` en flux d'événements (SLA rompus,
+  renouvellements, quotas, sous-facturation) — aucun recalcul, cohérence garantie avec le centre de
+  risque. Matérialisé dans `summaries/mnt_surveillance` (même bloc de recompute gaté que mnt_risque).
+- Abonnements PAR UTILISATEUR : collection `mnt_watches/{uid}` (global ou ciblé contrat/client/AM),
+  écrite par le callable `setMntWatch` (requireRead + drapeau, audité), lue en direct et isolée par uid.
+- Front : carte « Centre de surveillance » (flux trié par sévérité, Segmented Tout / Mes abonnements,
+  bouton Suivre par contrat + parc). Diffusion in-app live (réutilise summaries + onSnapshot) — pas de
+  notification externe en v1 (rouvrable par ADR si besoin).
+- Refactor connexe : wrappers mnt_ « fire-and-forget » de `writes.ts` factorisés via un helper `mntWrite`
+  (récupère le budget de bundle après ajout de setMntWatch).
+
+**Vérif** — functions 966/966 (+18 : mntSurveillance, objectifs, typeMaintenance ; caractérisation
+recompute mise à jour : le bloc gaté ajoute mnt_risque + mnt_surveillance), web 144/144, lint OK,
+build OK, chunk d'entrée 120,0 KB ≤ 120, gardes CI (deploy-targets/no-undef/indexes) OK. Additif :
+3 champs optionnels + 1 summary + 1 collection par-utilisateur + 1 callable ; drapeau éteint ⇒ rien.
+
+**Appris** — La surveillance n'avait pas besoin d'un nouveau moteur : le moteur de risque calculait déjà
+tous les signaux. La bonne architecture était une PROJECTION (une vue), pas un second calcul — ça évite
+la divergence « même métrique = même nombre » et concentre l'évolution sur une seule source.
+
+---
+
+## 2026-07-17 — Contrats Lot 6 : statut automatique (hybride règles + IA, ADR-027)
+
+**Fait** — Détermination automatique du statut d'un contrat, à l'unité et en masse :
+- `domain/mntStatutAuto.js` (PUR) : règles DÉTERMINISTES pour les transitions mécaniques (échéance
+  dépassée → échu à 1.0 ; début atteint → actif à 0.7 ; résilié terminal…) ; isole les cas de JUGEMENT
+  (dormant, réactivation, échéance prolongée) pour l'IA. Re-validation stricte de la sortie IA
+  (`normalizeStatutProposals` : énumération, jamais resilie, confiance bornée).
+- `lib/mntStatutAi.js` : pont Claude Opus 4.8 (adaptative, refus géré) sur les seuls cas ambigus.
+- Callable `aiMntContratStatut({ ids?, apply?, threshold? })` : règles + IA, AUTO-APPLIQUE au-dessus du
+  seuil (0.85, journalisé `auto_mnt_contrat_statut`, recompute scopé), PROPOSE en deçà. rate-limit `ai`.
+- Front : bouton « Statut IA » par contrat (unitaire), action de sélection « Déterminer le statut (IA) »,
+  carte « Statut automatique (IA) » (« Analyser le parc ») listant les propositions à valider (Appliquer
+  d'un clic via setMntContratStatut). Emplacement : module Contrats (confirmé en session).
+- Refactor connexe : wrappers mnt_ de `writes.ts` factorisés (`mntCall`/`mntWrite`) — budget bundle tenu.
+
+**Vérif** — functions 979 → +12 (mntStatutAuto), web 144, lint OK, build OK, chunk d'entrée 119,9 KB ≤ 120,
+gardes CI (deploy-targets `aiMntContratStatut` listé / no-undef / indexes) OK. Additif ; drapeau éteint ⇒ rien.
+
+**Note** — Consigne mi-parcours « afficher uniquement dans Référentiel > Normalisation clients » levée par
+question : un module de STATUT DE CONTRAT dans un écran clients aurait trompé l'œil (indiscernabilité) →
+emplacement retenu = module Contrats de maintenance.
+
+**Appris** — L'« auto IA » la plus sûre est surtout NON-IA : les règles déterministes tranchent l'essentiel
+(échu) avec une exactitude testable, et l'IA ne touche qu'aux quelques cas de jugement — presque toujours
+en simple proposition. L'hybride donne le meilleur des deux : exact où c'est mécanique, prudent où ça juge.
+
+---
+
+## 2026-07-17 — INCIDENT statut auto : tout le parc en échu → auto-application supprimée (ADR-028)
+
+**Échoué** — L'auto-application du statut (Lot 6, ADR-027) a basculé TOUT le parc en `échu` : la règle
+« date de fin dépassée → échu » (confiance 1.0, auto) a frappé tous les contrats à `dateFin` passée — or
+beaucoup restent actifs (renouvelés sans MAJ de la date). Hypothèse fausse rendue auto = dégât de masse
+silencieux. La leçon d'origine du module (« la règle de l'ERP gagne », « rien d'autre n'a bougé ») a été
+violée par excès de confiance dans une règle « mécanique » qui ne l'était pas.
+
+**Fait — correctif** :
+- `aiMntContratStatut` ne fait plus que PROPOSER (n'écrit plus aucun statut). Application = geste humain
+  (setMntContratStatut), à l'unité ou « Appliquer les recommandés » (explicite).
+- Nouveau callable `revertMntAutoStatut` : rétablit chaque contrat à son statut ANTÉRIEUR depuis la piste
+  d'audit `auto_mnt_contrat_statut` (from/to), seulement s'il porte encore le statut auto-appliqué.
+  Idempotent. Bouton « Rétablir (annuler l'auto) ». ADR-028.
+- UI : avertissement explicite que « échu dérivé d'une date passée » est à vérifier avant d'appliquer.
+
+**Vérif** — functions 979, web 144, lint/build OK, chunk 120,0 KB ≤ 120, gardes (revertMntAutoStatut listé).
+
+**Appris** — Aucune écriture de masse ne doit être « automatique » sur des données que d'autres utilisent.
+Une règle déterministe « correcte au sens strict » (dateFin < today) peut être opérationnellement fausse ;
+la seule position sûre par défaut est PROPOSER, l'humain applique. La piste d'audit from/to a permis un
+rétablissement exact — d'où l'importance de tout tracer avant d'écrire.

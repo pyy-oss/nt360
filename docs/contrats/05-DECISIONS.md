@@ -3,6 +3,178 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-028 — Statut automatique : SUPPRESSION de l'auto-application (incident) — propose seulement + rétablissement
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté (corrige ADR-027)
+- **Décideur :** Direction des Opérations (incident de production)
+
+### Contexte — incident
+L'auto-application d'ADR-027 (transitions de confiance ≥ 0.85 écrites automatiquement) a basculé **tout le
+parc en `échu`**. Cause : la règle « `dateFin` dépassée → échu » avec confiance 1.0. Dans le parc réel,
+**beaucoup de contrats conservent une date de fin passée tout en restant opérationnellement actifs**
+(renouvelés sans mettre à jour `dateFin`). L'hypothèse « échéance dépassée = échu » était fausse pour leur
+réalité, et l'avoir rendue **auto-appliquée** l'a propagée en masse et en silence — exactement ce que la
+règle d'or « rien d'autre n'a bougé » interdit.
+
+### Décision
+- **Plus AUCUNE auto-application.** `aiMntContratStatut` ne fait plus que **PROPOSER** : il n'écrit aucun
+  statut, quels que soient `apply`/`threshold` (paramètres ignorés pour l'écriture ; le seuil ne sert plus
+  qu'à marquer les propositions `recommended`). Un changement de statut est **toujours** un geste humain
+  (`setMntContratStatut`), à l'unité (« Appliquer ») ou en masse explicite (« Appliquer les recommandés »).
+- **Rétablissement** : nouveau callable `revertMntAutoStatut` — lit la piste d'audit `auto_mnt_contrat_statut`
+  (qui a tracé `from`/`to` par contrat), et **restaure le statut antérieur** UNIQUEMENT si le contrat porte
+  encore le statut auto-appliqué. Idempotent, rejouable sans risque. Bouton « Rétablir (annuler l'auto) ».
+- **Avertissement UI** : la carte signale que « échéance dépassée → échu » figure parmi les recommandés et
+  invite à vérifier avant d'appliquer (contrats à date de fin passée mais toujours actifs).
+
+### Conséquences
+- Le module ne peut plus modifier un statut sans action humaine explicite : la classe d'incident est fermée.
+- La règle « dateFin dépassée → échu » reste une **proposition** (utile pour repérer les vrais échus), pas
+  une vérité auto-appliquée.
+
+### Ce qu'on saura dans six mois
+Si l'application manuelle en masse est jugée fastidieuse → prévoir une pré-visualisation + confirmation
+avant une éventuelle ré-introduction très encadrée de l'auto (jamais sur `échu` dérivé d'une date).
+
+---
+
+## ADR-027 — Statut automatique : HYBRIDE règles déterministes + IA, auto-application au-dessus d'un seuil
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (choix confirmés en session : « hybride règles + IA », « auto au-dessus d'un seuil, proposer sinon », interface **dans le module Contrats**)
+
+### Contexte
+Besoin : déterminer AUTOMATIQUEMENT le statut d'un contrat (brouillon/actif/suspendu/échu/résilié), à
+l'unité et en masse. Le module modifie des contrats **en production** que d'autres utilisent — la règle d'or
+« rien d'autre n'a bougé » interdit qu'un faux positif change un statut en silence. Une grande partie des
+transitions est purement MÉCANIQUE (échéance dépassée = échu), donc exacte et testable sans IA ; seuls
+quelques cas relèvent du JUGEMENT (suspendre un contrat dormant, réactiver un suspendu/échu prolongé).
+
+### Décision
+- **Moteur HYBRIDE.** `domain/mntStatutAuto.js` (PUR) tranche les transitions mécaniques par RÈGLES
+  déterministes (échéance dépassée → échu avec confiance 1.0 ; date de début atteinte → actif proposé à
+  0.7 ; résilié = terminal, jamais rétrogradé…) et n'isole pour l'IA que les cas de jugement (`needsAi`).
+  `lib/mntStatutAi.js` interroge alors Claude Opus 4.8 (réflexion adaptative, gestion du refus) **sur ces
+  seuls cas**. La sortie IA est TOUJOURS re-validée (`normalizeStatutProposals` : proposed ∈ énumération,
+  jamais `resilie`, confiance bornée) — l'IA propose, le domaine vérifie.
+- **Auto-application AU-DESSUS d'un seuil** (`STATUT_AUTO_THRESHOLD = 0.85`, réglable par appel, borné
+  0.5–1). Le callable `aiMntContratStatut({ ids?, apply?, threshold? })` calcule, **auto-applique** les
+  transitions dont la confiance ≥ seuil (journalisées `auto_mnt_contrat_statut`, recompute scopé), et
+  **renvoie les autres comme propositions** à valider. En pratique seul l'échu mécanique (1.0) s'auto-
+  applique ; les jugements IA restent quasi toujours des propositions — le comportement le plus sûr.
+- **Unitaire ET en masse.** Bouton « Statut IA » par contrat (`ids:[id]`), action de sélection « Déterminer
+  le statut (IA) », et « Analyser le parc » (tout le parc). Les propositions sous le seuil s'appliquent d'un
+  clic (réutilise `setMntContratStatut`, Lot 3). Interface **dans le module Contrats de maintenance**
+  (emplacement sémantique du statut), pas dans un référentiel clients.
+- **Réutilisation** : signaux dérivés des collections déjà lues (tickets ouverts/activité) + du summary
+  `mnt_risque` déjà matérialisé ; patron IA identique à `aiSuggestMntContrats`/`aiAnalyzeChurn` (clé Secret
+  Manager, rate-limit `ai`, audit d'usage sans contenu). Aucune brique recréée.
+
+### Conséquences
+- Additif : un callable, deux fichiers de domaine/pont, aucun schéma ni statut existant modifié ; à drapeau
+  `mntFeature` éteint, rien n'est atteignable. Les changements auto sont tracés (piste d'audit opposable).
+- Exact et testable là où c'est mécanique (règles, 12 tests) ; conservateur là où il faut juger (l'IA
+  défaut = aucun changement en cas de doute). Aucun statut fiable appliqué sans trace.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs relèvent le seuil pour tout laisser en proposition → l'auto-application ne servait pas,
+repasser en « proposer seulement ». Si l'IA se trompe sur les jugements → durcir les règles (déplacer un cas
+de l'IA vers une règle) plutôt que faire confiance au modèle.
+
+---
+
+## ADR-026 — Centre de surveillance : flux d'événements PROJETÉ du moteur de risque + abonnements ciblés par utilisateur
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (choix confirmés en session : « flux unifié + abonnements ciblés », « centre in-app live »)
+
+### Contexte
+Besoin : un **centre de surveillance** des contrats — événements clés + alertes, globales ou ciblées,
+« proactivité maximale ». Le module calcule DÉJÀ tous les signaux utiles dans le **moteur de risque**
+(`domain/mntRisque.js` → `summaries/mnt_risque`) : SLA rompus, échéance proche, quota dépassé,
+sous-facturation, par contrat, avec niveau et score. L'ERP diffuse déjà ses alertes par des documents
+`summaries/alerts*` (RBAC-gated, temps réel via `onSnapshot`). Recréer un moteur d'événements ou une
+brique de notification violerait « ne recrée pas ce qui existe » et créerait une 2ᵉ vérité du risque.
+
+### Décision
+- **Événements = PROJECTION du risque, pas un 2ᵉ calcul.** `domain/mntSurveillance.js` (PUR) aplatit
+  les `items[]` de `mntRisque` en un flux d'événements ordonnés par sévérité : chaque `signal`
+  (`sla_rompu`, `echeance_proche`, `quota_depasse`, `sous_facturation`) devient un événement portant le
+  contrat (id, fp, client, am, bu), une **sévérité** (`high`/`medium`/`low` — vocabulaire de
+  `domain/alerts.js`) et un message FR. Consistance garantie par construction avec le centre de risque
+  (« même métrique = même nombre »).
+- **Matérialisation** dans `summaries/mnt_surveillance`, écrit dans le MÊME bloc de recompute que
+  `mnt_risque` (doublement gaté `want("maintenance")` + drapeau `mntFeature`). Rafraîchi après édition
+  par le `requestRecompute(["maintenance"])` déjà en place (Lot 2). Lu via la règle `summaries` existante
+  (ajout de `mnt_surveillance` à `summaryModule()` → `maintenance` + verrou drapeau).
+- **Abonnements ciblés = état PAR UTILISATEUR**, doc dédié `mnt_watches/{uid}` (préfixe `mnt_`, isolé par
+  `request.auth.uid == id`, lu en direct par `onSnapshot`). Forme : `{ global, contrats[], clients[], ams[] }`.
+  Écrit par un callable gouverné `setMntWatch` (droit `maintenance`, drapeau, audité) — jamais en écriture
+  cliente directe. « Global » = tout le parc ; « ciblé » = un contrat / un client / un AM.
+- **Diffusion = in-app live uniquement** (réutilise `summaries` + `onSnapshot`). AUCUNE brique de
+  notification externe (e-mail/push) en v1 : le ciblage se fait côté écran (filtre « Mes abonnements »
+  sur le flux), pas par un envoi serveur. Pas de nouvelle infra de diffusion à sécuriser.
+
+### Conséquences
+- Additif pur : un summary nouveau (`mnt_surveillance`), une collection par-utilisateur (`mnt_watches`),
+  un callable (`setMntWatch`). Aucun calcul de risque dupliqué, aucun signal existant modifié. Drapeau
+  éteint ⇒ rien n'est écrit ni lisible (mêmes verrous que `mnt_risque`).
+- Le flux est aussi juste que le moteur de risque : l'enrichir (nouveaux types d'événements) = enrichir
+  `mntRisque`, une seule source.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs réclament une **notification hors-app** (mail/push) sur les événements critiques →
+ouvrir une brique de diffusion (fonction d'envoi + dédup + préférences) par un ADR dédié. Si les
+abonnements ciblés servent peu → le flux global + filtres suffisait (simplifier).
+
+---
+
+## ADR-025 — Type de maintenance (prédictive/corrective/évolutive/veille) + objectifs max par contrat
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations
+
+### Contexte
+Besoin métier : suivre le **nombre de maintenances par nature** — prédictive, corrective, évolutive,
+veille technologique — et les confronter à des **objectifs** (nombre max visé). La maintenance se
+matérialise dans le module par deux objets déjà existants : les **tickets** (demandes sous contrat) et
+les **interventions** (temps consultant). Il n'existait aucune classification par nature ni cible.
+
+### Décision
+- Une énumération unique `TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"]`
+  (code applicatif anglais, libellés FR — ADR-010), miroitée back (`domain/mntContrat.js`) et front
+  (`lib/mntContrat.ts`), sert de **source unique** des quatre types.
+- **Classification à la source** : les tickets **et** les interventions portent un champ optionnel
+  `typeMaintenance` (validé par `validateTicket`/`validateIntervention` ; absent → `null`, valeur hors
+  énumération → **rejet** fail-loud, pas de coercition).
+- **Objectifs embarqués dans le contrat** : `mnt_contrats.objectifsMaintenance` = map partielle
+  `{ [type]: entier ≥ 0 }` (seuls les types renseignés sont écrits ; aucun → `null`). Entier (pas de
+  subdivision) et **rejet** d'un objectif négatif, comme les autres montants du module (audit m1).
+- **Comptage séparé** : tickets et interventions sont comptés **indépendamment** par type (jamais
+  additionnés en un seul compteur) — un ticket « corrective » et son intervention « corrective » sont
+  deux faits distincts. La vue pure `mntTypeStats` (`lib/mntDashboard.ts`) agrège par contrat + total,
+  ignore les items non classés, et n'émet pas de ligne vide (ni activité ni objectif).
+- **Double affichage** (demande utilisateur) : par contrat dans la **fiche en consultation** (colonne
+  Objectif, dépassement signalé en clay), et **agrégé** dans une carte « Maintenance par type » du
+  tableau de bord (sans colonne Objectif — les objectifs sont propres à chaque contrat).
+
+### Conséquences
+- Additif pur : trois champs optionnels (`typeMaintenance` ×2, `objectifsMaintenance`), aucun schéma
+  existant modifié ; à drapeau `mntFeature` éteint, rien n'apparaît. Les données déjà saisies restent
+  « non classées » (comptées nulle part par type) sans migration.
+- La classification est **facultative** : ne pas remplir le type n'empêche aucune saisie ; l'objectif
+  n'est qu'un repère (aucun blocage à le dépasser).
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs classent peu (beaucoup d'items « non classés ») → soit le type doit devenir
+obligatoire à la saisie, soit être déduit (ex. de la priorité/désignation) — nouvel ADR.
+
+---
+
 ## ADR-024 — Le contrat de maintenance est XOF-only : une devise ≠ XOF est rejetée (pas de conversion en v1)
 
 - **Date :** 2026-07-16

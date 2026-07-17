@@ -74,13 +74,14 @@ describe("C3 — recompute : le bloc maintenance est additif et gaté", () => {
     expect([...paths].some((p) => p.includes("mnt"))).toBe(false);
   });
 
-  it("drapeau ON → summaries/mnt_risque est le SEUL chemin nouveau (tous les autres inchangés)", async () => {
+  it("drapeau ON → seuls summaries/mnt_risque + mnt_surveillance sont nouveaux (tous les autres inchangés)", async () => {
     const off = await pathsWith(false);
     const on = await pathsWith(true);
-    // Différence symétrique = exactement { summaries/mnt_risque }.
-    const added = [...on].filter((p) => !off.has(p));
+    // Différence symétrique = exactement les summaries mnt_ matérialisés (risque + sa PROJECTION surveillance,
+    // ADR-026). Aucun summary existant modifié/retiré : le bloc reste strictement additif et gaté.
+    const added = [...on].filter((p) => !off.has(p)).sort();
     const removed = [...off].filter((p) => !on.has(p));
-    expect(added).toEqual(["summaries/mnt_risque"]);
+    expect(added).toEqual(["summaries/mnt_risque", "summaries/mnt_surveillance"]);
     expect(removed).toEqual([]);
   });
 });
