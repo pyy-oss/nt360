@@ -102,14 +102,17 @@ export const Pipeline: FC<Props> = ({ period }) => {
       )}
       <div className={cols2}>
         <Card title="Pondéré par AM"><HBars rows={objToArr(data.byAM).slice(0, 10)} colorFn={() => T.gold} /></Card>
-        <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
+        <Card title="Pondéré par BU"><HBars rows={objToArr(data.byBU).slice(0, 10)} colorFn={() => T.steel} /></Card>
       </div>
+      <div className={cols2}>
+        <Card title="Écoulement mensuel (pondéré)">{Object.keys(data.byMonth || {}).length ? <AreaTrend data={monthsAsc(data.byMonth)} color={T.gold} name="Pondéré" h={200} /> : <EmptyState label="Dates de closing indisponibles." />}</Card>
       {monthsAsc(data.byWeek).filter((x) => x.name !== "?").length > 0 && (
         <Card title="Écoulement hebdomadaire du closing (pondéré)">
           <AreaTrend data={monthsAsc(data.byWeek).filter((x) => x.name !== "?")} color={T.steel} name="Pondéré" h={200} />
           <Tip>Granularité <b>hebdomadaire</b> (semaine ISO de la <b>D Prev</b>) de l'écoulement du pondéré projeté — même population et même pondération que l'écoulement mensuel, en plus fin pour le pilotage à court terme. Fondé sur la seule <b>date de clôture prévue</b> (la source n'ayant pas de date de création, ce n'est pas un « entrant »).</Tip>
         </Card>
       )}
+      </div>
       {/* Le CLASSEMENT complet par commercial vit UNIQUEMENT dans AM 360° (source unique summaries/ams) —
           la carte-renvoi qui vivait ici a été retirée (doublon d'accès : AM 360° est déjà dans la nav, et
           la carte n'apportait aucune donnée). La distribution « Pondéré par AM » (période) ci-dessus reste
@@ -235,6 +238,8 @@ export const Am360: FC<Props> = () => {
           colNum("Pipeline pond.", (r) => money(r.pipelinePondere), (r) => r.pipelinePondere),
           colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
           colNum("R/O CAS", (r) => (r.roCas != null ? <span className={cx(r.roCas >= 1 ? "text-emerald" : r.roCas >= 0.7 ? "text-gold" : "text-clay")}>{pct(r.roCas)}</span> : "—"), (r) => r.roCas ?? -1),
+          // Couverture du reste-à-faire par commercial (pipeline pondéré / (objectif − réalisé)) : ≥1× = couvert.
+          colNum("Couverture", (r) => (r.couverture != null ? <span className={cx(r.couverture >= 1 ? "text-emerald" : r.couverture >= 0.7 ? "text-gold" : "text-clay")}>{`${r.couverture.toFixed(1)}×`}</span> : "—"), (r) => r.couverture ?? -1),
         ]} rows={rows} colsKey="pipeline-am360" />
         <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line/60 pt-2 text-[12px] text-muted">
           <span className="font-semibold text-ink">Total portefeuille</span>
