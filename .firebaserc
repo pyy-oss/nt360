@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "propulse-business-87f7a"
+    "default": "propulse-business-87f7a",
+    "neurones-360": "neurones-360"
   }
 }

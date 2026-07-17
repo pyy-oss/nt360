@@ -4,12 +4,46 @@ Migration de nt360 du projet **partagé** `propulse-business-87f7a` vers un **no
 dédié** sur un autre compte Google. Décisions actées : la base Firestore reste **nommée `nt360`** (zéro
 changement de code), les **données de production sont migrées** (Firestore + Storage + Auth).
 
-> Remplacer partout `<NEW_PROJECT_ID>` (ID du nouveau projet) et `<NEW_REGION>` (région de la base `nt360`,
-> ex. `europe-west1` — elle conditionne `RECOMPUTE_REGION`/`INGEST_REGION` et la localisation des buckets).
+## Valeurs concrètes de cette migration
 
-Le dépôt est rendu *project-agnostic* : les valeurs par défaut restent celles d'aujourd'hui, la bascule se
-fait en posant des **variables/secrets GitHub** — tant qu'ils ne sont pas posés, le comportement est
-identique à l'actuel.
+| Élément | Valeur |
+|---|---|
+| Projet cible | **`neurones-360`** (n° `165643317476`) |
+| Base Firestore nommée | **`nt360`** en région **`europe-west1`** |
+| `RECOMPUTE_REGION` / `INGEST_REGION` | **`europe-west1`** (région simple co-localisée à la base) |
+| Buckets (imports + sauvegardes) | Europe (`europe-west1` ou multi-région `eu`) |
+| apiKey web | `AIzaSyA80fBp3QlqrJMXi5sCruapazuLvj5pju8` |
+| authDomain | `neurones-360.firebaseapp.com` |
+| storageBucket (Firebase) | `neurones-360.firebasestorage.app` |
+| messagingSenderId / appId | `165643317476` / `1:165643317476:web:228e6c75b34e5c8e37fcf1` |
+
+> `<NEW_PROJECT_ID>` = `neurones-360`, `<NEW_REGION>` = `europe-west1` dans tout ce qui suit.
+
+### Bascule pilotée par variables GitHub (aucune bascule au merge)
+
+Le dépôt est *project-agnostic* : le workflow `firebase-deploy.yml` lit `vars.FIREBASE_PROJECT_ID` (**repli
+sur `propulse-business-87f7a`**) et injecte les `VITE_FIREBASE_*` depuis les variables de dépôt (repli sur
+l'ancien projet via l'opérateur `||` de `web/src/lib/firebase.ts`). **Tant que les variables ci-dessous ne
+sont pas posées, tout push — y compris le merge de la PR migration — déploie sur l'ANCIEN projet.** La
+bascule ne se produit qu'en posant ces **variables de dépôt** (Settings → Variables) ET les secrets :
+
+| Variable GitHub (Settings → Variables) | Valeur à la bascule |
+|---|---|
+| `FIREBASE_PROJECT_ID` | `neurones-360` |
+| `FIREBASE_API_KEY` | `AIzaSyA80fBp3QlqrJMXi5sCruapazuLvj5pju8` |
+| `FIREBASE_AUTH_DOMAIN` | `neurones-360.firebaseapp.com` |
+| `FIREBASE_STORAGE_BUCKET` | `neurones-360.firebasestorage.app` |
+| `FIREBASE_MESSAGING_SENDER_ID` | `165643317476` |
+| `FIREBASE_APP_ID` | `1:165643317476:web:228e6c75b34e5c8e37fcf1` |
+| `FIREBASE_HOSTING_SITE` | nom du site hosting neurones-360 (garder `nt360` si créé ainsi) |
+| `IMPORTS_BUCKET` | nom du bucket d'imports du nouveau projet |
+| `BACKUP_BUCKET` | `neurones-360-backups` |
+
+| Secret GitHub (Settings → Secrets) | Valeur |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` | clé JSON du SA de déploiement de `neurones-360` |
+| `RECOMPUTE_REGION` | `europe-west1` |
+| `APPCHECK_SITE_KEY` | clé reCAPTCHA v3 du domaine `neurones-360` |
 
 ---
 
