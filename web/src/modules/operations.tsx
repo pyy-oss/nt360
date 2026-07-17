@@ -5,6 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
+import { fpKey } from "../lib/ids";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
@@ -663,31 +664,39 @@ export const Fp360: FC<Props> = () => {
   // Ouverture depuis une cellule FP (maillage) → pré-remplit la recherche avec le N° FP cliqué.
   useEffect(() => { if (intent?.fp) setQ(intent.fp); }, [intent]);
   const canMargin = useCanSeeMargin();
-  const fp = q.trim().toUpperCase();
-  const cons = [where("fp", "==", fp || "__none__")];
+  const raw = q.trim();
+  // RAPPROCHEMENT PAR fpKey (invariant ERP : rapprocher DEUX FP passe TOUJOURS par fpKey, jamais la casse
+  // brute — sinon « FP/2026/007 » ≠ « FP/2026/7 »). `key` = forme canonique ; on interroge Firestore sur
+  // un `in` de graphies candidates (brut, MAJ, canonique) pour couvrir zéros de tête / espaces SANS scanner
+  // la collection, et on re-filtre côté client par fpKey (la vérité). Fallback « __none__ » = ne matche rien.
+  const key = fpKey(raw) || ""; // "" = FP non canonicalisable (recherche vide ou format invalide)
+  const fpCands = [...new Set([raw, raw.toUpperCase(), key].filter(Boolean))].slice(0, 10);
+  const cons = [where("fp", "in", fpCands.length ? fpCands : ["__none__"])];
   // Commande lue depuis commandesRows (marge fusionnée si accès Rentabilité) — plus de lecture directe
   // de orders/* côté client (qui porte la marge et est désormais réservé à « Rentabilité »).
-  const { rows: cmdRows } = useCommandesRows(!!fp); // chargé seulement quand un N° FP est saisi
-  // queryKey = fp ; abonnements ouverts UNIQUEMENT quand un N° FP est saisi (sinon name null).
-  const { rows: invoices } = useCollectionData<Invoice>(fp ? "invoices" : null, cons, fp);
-  const { rows: sheetsBase } = useCollectionData<ProjectSheet>(fp ? "projectSheets" : null, cons, fp);
+  const { rows: cmdRows } = useCommandesRows(!!key); // chargé seulement quand un N° FP valide est saisi
+  // queryKey = clé canonique ; abonnements ouverts UNIQUEMENT quand un N° FP valide est saisi (sinon name null).
+  const { rows: invoices } = useCollectionData<Invoice>(key ? "invoices" : null, cons, key);
+  const { rows: sheetsBase } = useCollectionData<ProjectSheet>(key ? "projectSheets" : null, cons, key);
   // Marge de la fiche isolée (accès Rentabilité) : fusionnée par FP quand le rôle a le droit.
-  const { rows: sheetsMargin } = useCollectionData<ProjectSheet>(fp && canMargin ? "projectSheetsMargin" : null, cons, fp);
+  const { rows: sheetsMargin } = useCollectionData<ProjectSheet>(key && canMargin ? "projectSheetsMargin" : null, cons, key);
   const sheetsMBy = new Map(sheetsMargin.map((m) => [m.fp, m]));
   const sheets = sheetsBase.map((s) => ({ ...s, ...(sheetsMBy.get(s.fp) || {}) }));
-  const { rows: bc } = useCollectionData<BcLine>(fp ? "bcLines" : null, cons, fp);
+  const { rows: bc } = useCollectionData<BcLine>(key ? "bcLines" : null, cons, key);
   // Sécurité par enregistrement : sous OWD « private », les opps sont filtrées par visibleTo (array-contains,
-  // seule contrainte serveur possible sans index composite) puis re-filtrées par N° FP côté client.
+  // seule contrainte serveur possible sans index composite) puis re-filtrées par fpKey côté client.
   const oppScope = useRecordScope("opportunities");
-  const { rows: oppsRaw } = useCollectionData<Opportunity>(fp && oppScope.ready ? "opportunities" : null, oppScope.scoped ? oppScope.constraints : cons, fp + (oppScope.scoped ? "|s" : ""));
-  const opps = oppScope.scoped ? oppsRaw.filter((x) => (x.fp || "").toUpperCase() === fp) : oppsRaw;
-  const o = fp ? cmdRows.find((r) => (r.fp || "").toUpperCase() === fp) : undefined;
+  const { rows: oppsRaw } = useCollectionData<Opportunity>(key && oppScope.ready ? "opportunities" : null, oppScope.scoped ? oppScope.constraints : cons, key + (oppScope.scoped ? "|s" : ""));
+  const opps = oppScope.scoped ? oppsRaw.filter((x) => fpKey(x.fp) === key) : oppsRaw;
+  const o = key ? cmdRows.find((r) => fpKey(r.fp) === key) : undefined;
+  // Σ facturé listé pour ce FP (détail) ; l'AUTORITÉ reste o.facture (Σ par fpKey du carnet, mergeCommandes).
+  const sumFacture = invoices.reduce((s, i) => s + (i.amountHt || 0), 0);
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recherche par N° FP">
         <input className="field w-full md:w-96" aria-label="Rechercher un N° FP" placeholder="FP/2026/13542" value={q} onChange={(e) => setQ(e.target.value)} />
       </Card>
-      {fp && ((o || invoices.length || opps.length || bc.length || sheets.length) ? (
+      {raw && (key ? ((o || invoices.length || opps.length || bc.length || sheets.length) ? (
         <>
           {/* Un N° FP peut exister HORS carnet (opp gagnée sans P&L, facture/BC orphelins) : on ne masque
               plus les maillons rattachés faute de commande — on affiche tout ce qui porte ce FP. */}
@@ -699,14 +708,30 @@ export const Fp360: FC<Props> = () => {
               {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
             </div>
           ) : (
-            <Tip><b>Aucune commande</b> (carnet P&L) pour {fp} — ce N° FP existe <b>hors carnet</b> : opportunité gagnée non adossée, facture ou BC orphelin. Les maillons rattachés sont listés ci-dessous ; corrigez le rattachement dans <b>Qualité &amp; correction</b>.</Tip>
+            <Tip><b>Aucune commande</b> (carnet P&L) pour {key} — ce N° FP existe <b>hors carnet</b> : opportunité gagnée non adossée, facture ou BC orphelin. Les maillons rattachés sont listés ci-dessous ; corrigez le rattachement dans <b>Qualité &amp; correction</b>.</Tip>
           )}
-          <Card title={`Factures · ${invoices.length}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
+          {/* Réconciliation AVAL (facturation) — rend chiffré le rapprochement commande↔factures, jusqu'ici absent. */}
+          {o && (
+            <Card title="Réconciliation aval (facturation)">
+              <div className={grid4}>
+                <Kpi label="Facturé" value={fmt(o.facture || 0)} />
+                <Kpi label="% facturé" value={pct(o.cas ? (o.facture || 0) / o.cas : 0)} />
+                <Kpi label="Reste à facturer" value={fmt(Math.max((o.cas || 0) - (o.facture || 0), 0))} tone="steel" />
+                <Kpi label="RAF (carnet)" value={fmt(o.raf || 0)} tone="gold" />
+              </div>
+              {Math.abs((o.cas || 0) - (o.facture || 0) - (o.raf || 0)) > 1 && (
+                <Tip>Identité <b>CAS = Facturé + RAF</b> non vérifiée (écart {fmt((o.cas || 0) - (o.facture || 0) - (o.raf || 0))}) — rattachement facture→FP possiblement partiel, ou RAF curaté (Excel) différent du dérivé. À corriger dans <b>Qualité &amp; correction</b>.</Tip>
+              )}
+            </Card>
+          )}
+          <Card title={`Factures · ${invoices.length} · Σ ${fmt(sumFacture)}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
           {canMargin && <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>}
           <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("Affaire", (x) => x.designation || "—"), colText("Commercial", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
-      ) : <EmptyState label={`Aucun élément rattaché à ${fp}.`} />)}
+      ) : <EmptyState label={`Aucun élément rattaché à ${key}.`} />) : (
+        <Tip>« {raw} » n'est pas un N° FP reconnu (format attendu : <b>FP/AAAA/N</b>).</Tip>
+      ))}
     </div>
   );
 };

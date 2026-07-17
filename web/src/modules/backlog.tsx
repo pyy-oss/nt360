@@ -1095,12 +1095,35 @@ function PmWorkload() {
   );
 }
 
+// Couverture de facturation d'une commande : « à facturer » (0 facturé), « en cours » (partiel), « soldée »
+// (Σ factures ≥ CAS). `r.facture` = Σ factures rattachées par fpKey (autorité mergeCommandes). CAS ≤ 0 → « none »
+// (rien à facturer) — écarté des segments todo/wip/done. Pur, module-level (référence stable pour useMemo).
+const factBucket = (r: Order): "none" | "todo" | "wip" | "done" => {
+  const c = r.cas || 0, f = r.facture || 0;
+  if (!(c > 0)) return "none";
+  if (f <= 0) return "todo";
+  return f < c ? "wip" : "done";
+};
+
 export const OrderList: FC<Props> = () => {
   const { rows: all, loading } = useCommandesRows();
   const { match } = useFilters();
   // Filtre MÉMOÏSÉ : sur un gros carnet (toute la collection en mémoire), refiltrer à CHAQUE render
   // (frappe, ouverture de modale…) est coûteux. Recalculé seulement si les données/filtres changent.
   const rows = useMemo(() => all.filter((r) => match(r, ["bu", "am", "client", "pm"])), [all, match]);
+  // Filtre de FACTURATION (suivi aval) : concentrer sur les commandes à facturer sans quitter l'écran.
+  const [factSeg, setFactSeg] = useState<"all" | "todo" | "wip" | "done">("all");
+  const shown = useMemo(() => (factSeg === "all" ? rows : rows.filter((r) => factBucket(r) === factSeg)), [rows, factSeg]);
+  const FACT_SEGS = useMemo(() => {
+    let todo = 0, wip = 0, done = 0;
+    for (const r of rows) { const b = factBucket(r); if (b === "todo") todo++; else if (b === "wip") wip++; else if (b === "done") done++; }
+    return [
+      { value: "all" as const, label: "Toutes", count: rows.length },
+      { value: "todo" as const, label: "À facturer", count: todo },
+      { value: "wip" as const, label: "En cours", count: wip },
+      { value: "done" as const, label: "Soldées", count: done },
+    ];
+  }, [rows]);
   const canImport = useCanImport();
   const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation LIT les opportunités (droit pipeline)
@@ -1150,12 +1173,13 @@ export const OrderList: FC<Props> = () => {
     {canImport && canPipeline && <ReconcileWonOpps commandeFps={commandeFps} canPipelineWrite={canPipelineWrite} />}
     {canImport && <CancelledOrders />}
     <PmWorkload />
-    <Card title={`Commandes · ${rows.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
+    <Card title={`Commandes · ${shown.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
+      <div className="mb-2"><Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" /></div>
       {/* Suggestions d'auto-complétion partagées par les champs d'affectation PM de chaque ligne. */}
       <datalist id="pm-options">{pmOptions.map((p) => <option key={p} value={p} />)}</datalist>
       <ListView
-        rows={rows}
+        rows={shown}
         colsKey="commandes"
         initialSearch={intent?.search}
         expand={orderActions}
@@ -1176,6 +1200,10 @@ export const OrderList: FC<Props> = () => {
           colNum("CAS", (r) => (canImport && (r.source === "pnl" || r.source === "manuel") && r.fp
             ? <OrderCasFixer row={r} /> : money(r.cas)), (r) => r.cas),
           colNum("RAF", (r) => money(r.raf), (r) => r.raf),
+          // Suivi AVAL : facturé (Σ factures rattachées par fpKey) + taux de couverture. Rendait invisible
+          // l'avancement commande→facture, jusqu'ici éclaté sur Suivi Backlog / FP 360°.
+          det(colNum("Facturé", (r) => money(r.facture || 0), (r) => r.facture || 0)),
+          det(colNum("% facturé", (r) => pct(r.cas ? (r.facture || 0) / r.cas : 0), (r) => (r.cas ? (r.facture || 0) / r.cas : 0))),
           // Marges masquées pour les rôles sans accès « Rentabilité » (confidentialité).
           ...(canMargin ? [
             det(colNum("MB", (r: Order) => money(r.mb), (r: Order) => r.mb)),
