@@ -47,6 +47,19 @@ describe("clickupHealth — diagnostic de couverture", () => {
     expect(h.cafGapTotal).toBe(300);
   });
 
+  it("liens fantômes : lien vers une tâche absente du scan (supprimée/déplacée) → dérive signalée", () => {
+    // Deux liens : FP/1 → t1 (présente), FP/9 → t99 (absente du scan) → 1 lien fantôme.
+    const links2 = { [lkey("FP/1")]: "t1", [lkey("FP/9")]: "t99" };
+    const h = clickupHealth([{ fp: "FP/1" }], tasks, links2, {}, fpKey, safeId);
+    expect(h.phantomLinks).toBe(1);
+    expect(h.phantomSample).toEqual([{ ref: lkey("FP/9"), taskId: "t99" }]);
+  });
+
+  it("aucun lien fantôme quand toutes les tâches liées existent", () => {
+    const h = clickupHealth([{ fp: "FP/1" }], tasks, { [lkey("FP/1")]: "t1" }, {}, fpKey, safeId);
+    expect(h.phantomLinks).toBe(0);
+  });
+
   it("doublons rendus visibles : compte les tâches surnuméraires par FP", () => {
     // FP/1 porté par 3 tâches, FP/2 par 2 → 2 + 1 = 3 tâches surnuméraires, sur 2 FP en double.
     const dupTasks = [

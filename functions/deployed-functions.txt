@@ -115,6 +115,7 @@ runAutomations
 runReport
 scheduledBcPull
 scheduledClickupEnrich
+scheduledClickupHealth
 scheduledClickupPull
 scheduledFirestoreExport
 scheduledRecompute
