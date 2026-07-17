@@ -58,6 +58,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
   // domain/mntImport) ; exceljs requis PARESSEUSEMENT (readWorkbook async). Budget aligné import (512/300).
   const importMntContrats = onCallG("importMntContrats", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     await requireWrite(req, "maintenance");
+    if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'imports en peu de temps — patientez un instant.");
     await assertMntEnabled();
     const fileB64 = req.data && req.data.fileB64;
     const apply = !!(req.data && req.data.apply);

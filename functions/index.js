@@ -113,7 +113,7 @@ if (process.env.INGEST_REGION) {
 if (process.env.RECOMPUTE_REGION) {
   const { onDocumentWritten } = require("firebase-functions/v2/firestore");
   exports.onRecomputeRequest = onDocumentWritten(
-    { document: "config/recomputeRequest", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 512, timeoutSeconds: 540, retry: false },
+    { document: "config/recomputeRequest", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 1024, timeoutSeconds: 540, retry: false },
     async (event) => {
       const after = event.data && event.data.after && event.data.after.data();
       if (!after) return; // suppression du doc → rien à faire
@@ -886,8 +886,9 @@ exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeco
 // tous les summaries (boucle sur chaque période) — le défaut 256 MiB / 60 s provoquait un
 // timeout/OOM sur un gros volume, surfacé en « Action refusée » côté UI, alors que le même
 // recompute lancé APRÈS un import (512 MiB / 300 s) réussissait.
-exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 1024, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
   const { recomputeAll } = require("./lib/aggregate");
   const t0 = Date.now();
   try {
@@ -965,6 +966,7 @@ exports.syncSalesData = onSchedule({ schedule: "every day 06:00", memoryMiB: 512
 // de payload (~22 Mo, ci-dessous) borne l'entrée, et un ZIP énorme reste à découper (import idempotent).
 exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 540 }, async (req) => {
   await requireWrite(req, "import");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'imports en peu de temps — patientez un instant.");
   const b64 = req.data?.fileB64;
   const filename = String(req.data?.filename || "delta.xlsx");
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
@@ -2847,7 +2849,7 @@ const _opps = createOpportunities({
   onCallG, HttpsError, db, FieldValue, logger,
   requireWrite, assertRecordVisible, visibleToFor, isRecordAdmin, recordAccessOwd,
   assertPlainId, requestRecompute, oppScope, OPP_RECOMPUTE, OPP_RECOMPUTE_WON,
-  fireOutbound, readWorkbook, aoaToXlsxBase64,
+  fireOutbound, readWorkbook, aoaToXlsxBase64, rateLimit,
 });
 exports.upsertOpportunity = _opps.upsertOpportunity;
 exports.deleteOpportunity = _opps.deleteOpportunity;
@@ -3089,6 +3091,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
 // timeout pendant que le traitement se poursuit côté serveur (le journal d'audit enregistre la fin).
 exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations en peu de temps — patientez un instant.");
   const clickup = require("./lib/clickup");
   const cf = require("./lib/clickupFields");
   const { fpKey } = require("./lib/ids");
@@ -3349,6 +3352,7 @@ async function maybeSyncCaf(trigger) {
 // syncClickupCaf : force la synchro du CAF de TOUTES les tâches liées (bouton Habilitations). Direction.
 exports.syncClickupCaf = onCallG("syncClickupCaf", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations en peu de temps — patientez un instant.");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   let res;
@@ -3541,6 +3545,7 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
 // NON encore liés sont créés/adoptés ; force=true resynchronise aussi les tâches existantes. Direction.
 exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations en peu de temps — patientez un instant.");
   const clickup = require("./lib/clickup");
   const bc = require("./lib/clickupBc");
   const { safeId } = require("./lib/sheets");
@@ -3848,30 +3853,36 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
   const batch = records.slice(0, ODOO_MAX_RECORDS);
   const results = [], errors = [];
   let wrote = false;
+  // Traitement d'UN enregistrement (résolution d'id + upsert + audit). Les ids cibles sont DÉTERMINISTES
+  // (safeId(fp)/safeId(numero) pour commande/facture ; odoo_+safeId(odooId||fp) pour une opp non rapprochée),
+  // donc deux écritures concurrentes sur le même doc CONVERGENT (upsert idempotent) — parallélisation sûre.
+  const processOne = async (rec) => {
+    const m = mapOdooRecord(object, rec);
+    if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
+    let id = m.id; // commandes/factures : déterministe
+    if (!id) {
+      // opportunités : rapprocher par fp CANONIQUE puis par odooId ; sinon créer un id déterministe.
+      let found = null;
+      if (m.key.fp) { const s = await db.collection("opportunities").where("fp", "==", m.key.fp).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
+      if (!found && m.key.odooId) { const s = await db.collection("opportunities").where("odooId", "==", m.key.odooId).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
+      id = found || ("odoo_" + safeId(m.key.odooId || m.key.fp));
+    }
+    const ref = db.doc(`${m.collection}/${id}`);
+    const exists = (await ref.get()).exists;
+    const doc = { ...m.doc, updatedAt: FieldValue.serverTimestamp() };
+    if (m.collection === "opportunities") doc.oppId = id;
+    if (!exists) doc.createdAt = FieldValue.serverTimestamp();
+    await ref.set(doc, { merge: true });
+    wrote = true;
+    results.push({ id, object: m.object, action: exists ? "updated" : "created", fp: m.key.fp || null });
+    await db.collection("auditLog").add({ uid: "odoo:webhook", action: exists ? "odoo_update" : "odoo_create", module: "pipeline", entity: m.object, entityId: id, detail: { fp: m.key.fp || null, odooId: m.key.odooId || null }, ts: FieldValue.serverTimestamp() });
+  };
   try {
-    for (const rec of batch) {
-      const m = mapOdooRecord(object, rec);
-      if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); continue; }
-      // Résolution de l'id cible.
-      let id = m.id; // commandes/factures : déterministe
-      if (!id) {
-        // opportunités : rapprocher par fp CANONIQUE puis par odooId ; sinon créer un id déterministe.
-        let found = null;
-        if (m.key.fp) { const s = await db.collection("opportunities").where("fp", "==", m.key.fp).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
-        if (!found && m.key.odooId) { const s = await db.collection("opportunities").where("odooId", "==", m.key.odooId).limit(1).get(); if (!s.empty) found = s.docs[0].id; }
-        // Aucune correspondance → création avec un id DÉTERMINISTE (odooId prioritaire, sinon fp) : le map
-        // garantit fp || odooId, donc un renvoi du même enregistrement retombe sur le même id (idempotent).
-        id = found || ("odoo_" + safeId(m.key.odooId || m.key.fp));
-      }
-      const ref = db.doc(`${m.collection}/${id}`);
-      const exists = (await ref.get()).exists;
-      const doc = { ...m.doc, updatedAt: FieldValue.serverTimestamp() };
-      if (m.collection === "opportunities") doc.oppId = id;
-      if (!exists) doc.createdAt = FieldValue.serverTimestamp();
-      await ref.set(doc, { merge: true });
-      wrote = true;
-      results.push({ id, object: m.object, action: exists ? "updated" : "created", fp: m.key.fp || null });
-      await db.collection("auditLog").add({ uid: "odoo:webhook", action: exists ? "odoo_update" : "odoo_create", module: "pipeline", entity: m.object, entityId: id, detail: { fp: m.key.fp || null, odooId: m.key.odooId || null }, ts: FieldValue.serverTimestamp() });
+    // Concurrence BORNÉE : jusqu'à ODOO_MAX_RECORDS (500) records, chacun ~4-5 aller-retours Firestore. En
+    // séquentiel un gros lot frôlait le timeout 120 s (audit 2026-07) ; on traite par paquets parallèles.
+    const CONC = 8;
+    for (let i = 0; i < batch.length; i += CONC) {
+      await Promise.all(batch.slice(i, i + CONC).map((rec) => processOne(rec)));
     }
     if (wrote) await requestRecompute(null); // recompute différé/coalescé (un seul pour tout le lot)
     res.status(200).json({ ok: true, object, written: results.length, failed: errors.length, truncated, results, errors });
@@ -4185,6 +4196,7 @@ exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 12
 // métier, garde le meilleur représentant, supprime les autres. `apply:false` = analyse seule. ---
 exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
   const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
   const { buildFpAliasResolver } = require("./lib/ids");
   const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
@@ -4234,6 +4246,7 @@ exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, asyn
 // (contournement de la source unique de vérité). Cf. audit de bon fonctionnement.
 exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'exports en peu de temps — patientez un instant.");
   const ExcelJS = require("exceljs");
   const { canRead } = require("./domain/authz");
   const role = req.auth.token?.nt360Role;
@@ -4287,6 +4300,7 @@ exports.exportReport = onCallG("exportReport", async (req) => {
 // --- Migration prototype → Firestore (BUILD_KIT §13) ---
 exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
   const b = req.data?.backup || {};
   const { safeId } = require("./lib/sheets");
   const writes = [];

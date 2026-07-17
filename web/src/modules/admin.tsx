@@ -1151,6 +1151,7 @@ function ApiKeysCard() {
           const r = await createApiKey(label.trim() || "clé API", scopes); setFresh(r.key); setLabel(""); await load();
         }} />
       </div>}>
+      <Tip>Une clé API accède à l'organisation <b>entière</b> : le scope <b>read</b> retourne <b>toutes</b> les opportunités et tous les comptes, <b>indépendamment</b> du cloisonnement par propriétaire (OWD privé) de l'app. Les champs confidentiels (marge) restent masqués. N'émettez une clé qu'à un système de confiance.</Tip>
       {fresh && (
         <div className="mb-3 rounded border border-gold/40 bg-gold/10 p-2">
           <div className="text-[12px] text-muted mb-1">Copiez cette clé maintenant — elle ne sera plus affichée :</div>
