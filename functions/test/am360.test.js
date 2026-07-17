@@ -45,6 +45,9 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     expect(byAm.DATCHA.targetCas).toBe(3000);
     expect(byAm.DATCHA.roCas).toBeCloseTo(0.5, 6);
     expect(byAm.KOUADIO.roCas).toBeNull(); // pas d'objectif AM
+    // Couverture = pipeline pondéré / (objectif − réalisé) = 1000 / (3000 − 1500) = 0,667×.
+    expect(byAm.DATCHA.couverture).toBeCloseTo(1000 / 1500, 6);
+    expect(byAm.KOUADIO.couverture).toBeNull(); // pas d'objectif → rien à couvrir
   });
   it("SANS marge : aucun champ mb/pmb exposé", () => {
     expect(byAm.DATCHA.mb).toBeUndefined();

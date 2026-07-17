@@ -73,6 +73,10 @@ function am360(orders, invoices, opps, objectives, fy, tiers, excludeDormant = t
         pipelinePondere, activeCount: active.length, won, lost,
         conv: won + lost > 0 ? won / (won + lost) : 0,
         targetCas, roCas: targetCas > 0 ? casFy / targetCas : null,
+        // Couverture du reste-à-faire (miroir PAR COMMERCIAL de la « Couverture reste-à-faire » du cockpit) :
+        // pipeline pondéré / (objectif CAS − réalisé exercice). < 1× = objectif non couvert par le pipe.
+        // null si pas d'objectif ou objectif déjà atteint (rien à couvrir).
+        couverture: targetCas > casFy ? pipelinePondere / (targetCas - casFy) : null,
         orderCount: os.length,
       };
     })

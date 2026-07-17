@@ -47,7 +47,7 @@ export interface PipelineSummary {
   susp?: { brut?: number; count?: number };
   tierBreakdown?: TierBucket[];
   conv?: number; wonCount?: number; lostCount?: number;
-  byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byMonth?: Record<string, number>;
+  byStage?: Record<number, StageBucket>; byAM?: Record<string, number>; byBU?: Record<string, number>; byMonth?: Record<string, number>;
   byWeek?: Record<string, number>; // écoulement HEBDO du closing (clés ISO « AAAA-Www »), miroir de byMonth
   // Phases amont (tag transverse dérivé) : Budget / Gelé / Dev sur opps actives — volume + brut.
   phase0?: { budget?: { count?: number; brut?: number }; gele?: { count?: number; brut?: number }; dev?: { count?: number; brut?: number } };
@@ -98,7 +98,7 @@ export interface EntitySummary { period?: string; rows?: EntityRow[] }
 export type AmRow = {
   am: string; cas: number; casFy: number; backlog: number; facture: number;
   pipelinePondere: number; activeCount: number; won: number; lost: number;
-  conv: number; targetCas: number; roCas: number | null; orderCount: number;
+  conv: number; targetCas: number; roCas: number | null; couverture: number | null; orderCount: number;
 };
 export interface AmsSummary { fy?: number | null; rows?: AmRow[] }
 // Funnel de conversion (Lot C) : dérivé de l'historique des transitions d'étape (oppHistory).
