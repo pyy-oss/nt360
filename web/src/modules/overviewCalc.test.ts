@@ -102,6 +102,18 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(withAlias.facture).toBe(400); // facture rattachée à la commande via le FP redirigé
   });
 
+  // « déjà au carnet » borné à la PÉRIODE (miroir overview() serveur, audit 2026-07) : une opp active dont le
+  // FP porte une commande d'un AUTRE millésime NE doit PAS être sur-exclue du pipeline de la période courante.
+  it("bookedFps borné à la période : opp active partageant un FP avec une commande d'un autre millésime reste au pipeline", () => {
+    const ord = [{ fp: "FP/2024/5", bu: "ICT", am: "X", client: "ACME", cas: 1000, raf: 0, mb: 0, yearPo: 2024 }]; // commande 2024
+    const opp = [{ fp: "FP/2024/5", bu: "ICT", am: "X", client: "ACME", amount: 1000, stage: 3, probability: 0.95, closingDate: "2026-06-01" }]; // opp active, closing 2026
+    // Période 2026 + filtre ICT actif : la commande 2024 n'est PAS dans `commandes` (hors cohorte) → l'opp ne
+    // double-compte pas et doit rester en certitude. bookedFps borné à ordP (2026, vide) → opp conservée.
+    const r = computeFilteredOverview(ord as any, [] as any, opp as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.commandes).toBe(0);     // commande 2024 hors cohorte 2026
+    expect(r.certitudes).toBe(1000); // opp conservée (PAS sur-exclue par une commande d'un autre millésime)
+  });
+
   // Exclusion des DORMANTES en mode « Tout » (miroir aggregate.js) : une opp ouverte de closing d'un
   // millésime révolu ne doit plus alimenter le pondéré/certitudes cumulé quand l'option est active.
   it("période « all » : exclut les opportunités dormantes (année de closing < exercice) du pondéré", () => {

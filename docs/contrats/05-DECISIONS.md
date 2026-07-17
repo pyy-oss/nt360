@@ -3,6 +3,38 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-029 — Statut automatique : « échéance dépassée → échu » n'est JAMAIS recommandée en masse (requiresReview)
+
+- **Date :** 2026-07-17
+- **Statut :** Accepté (durcit ADR-028)
+- **Décideur :** Direction des Opérations (audit complet, avant migration)
+
+### Contexte
+ADR-028 a supprimé l'auto-application côté serveur (propose-only) après l'incident où tout le parc est
+passé en `echu`. L'audit de juillet a montré que le risque n'était pas totalement clos : la règle marquait
+encore la transition « `dateFin` passée → `echu` » comme **recommandée** (confiance 1.0), et le bouton
+« Appliquer les recommandés » l'appliquait **en un clic, sans confirmation**. La prémisse « date de fin
+passée ⇒ contrat échu » est mécaniquement vraie mais **opérationnellement fausse** : un contrat reconduit
+sans mise à jour de sa `dateFin` reste actif. Le vecteur de réincidence subsistait donc.
+
+### Décision
+- La transition « échéance dépassée → échu » porte désormais `requiresReview: true` dans
+  `proposeStatutRule`. `decideStatut` exclut toute proposition `requiresReview` de `apply` (« recommandé »),
+  même à confiance 1.0. Elle reste **proposée** (visible) et **applicable à l'unité** par un humain.
+- Le bouton « Appliquer les recommandés » demande en plus une **confirmation avec décompte** (garde-fou de
+  masse générique).
+
+### Conséquences
+- L'application de masse ne peut plus rebasculer le parc en `echu`. Les fins échues restent signalées et
+  se traitent au cas par cas. Aucune autre transition n'est affectée (dormant→suspendu etc. passent par
+  l'IA, conservatrice, sous le seuil).
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs demandent une application de masse des `→echu` (parc où la `dateFin` est fiable) →
+rouvrir avec un garde-fou explicite (aperçu + double confirmation), pas en revenant au clic unique.
+
+---
+
 ## ADR-028 — Statut automatique : SUPPRESSION de l'auto-application (incident) — propose seulement + rétablissement
 
 - **Date :** 2026-07-17

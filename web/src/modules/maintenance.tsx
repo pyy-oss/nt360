@@ -8,9 +8,9 @@ import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
 import { useCan, useClaims } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, type BulkAction } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, useConfirm, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
-import { fmt } from "../design/tokens";
+import { fmt, pct } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
@@ -123,11 +123,13 @@ function TypeStatsTable({ tickets, interventions, objectifs }: { tickets: MntTyp
             const over = obj != null && total > obj;
             return (
               <tr key={t} className="odd:bg-ink/[.03]">
-                <td className="px-3 py-1.5">{TYPE_MAINTENANCE_LABEL[t]}</td>
-                <td className="px-3 py-1.5 text-right tabnum">{tickets[t]}</td>
-                <td className="px-3 py-1.5 text-right tabnum">{interventions[t]}</td>
-                <td className={cx("px-3 py-1.5 text-right tabnum font-semibold", over && "text-clay")}>{total}</td>
-                {objectifs && <td className="px-3 py-1.5 text-right tabnum text-muted">{obj != null ? obj : "—"}</td>}
+                {/* data-label : requis par .rtable (mode carte < 640 px) — sans lui, les colonnes s'affichent
+                    sans libellé sur mobile (aligné sur le primitif Table). */}
+                <td className="px-3 py-1.5" data-label="Type">{TYPE_MAINTENANCE_LABEL[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum" data-label="Tickets">{tickets[t]}</td>
+                <td className="px-3 py-1.5 text-right tabnum" data-label="Interventions">{interventions[t]}</td>
+                <td className={cx("px-3 py-1.5 text-right tabnum font-semibold", over && "text-clay")} data-label="Total">{total}</td>
+                {objectifs && <td className="px-3 py-1.5 text-right tabnum text-muted" data-label="Objectif">{obj != null ? obj : "—"}</td>}
               </tr>
             );
           })}
@@ -140,6 +142,7 @@ function TypeStatsTable({ tickets, interventions, objectifs }: { tickets: MntTyp
 export const Maintenance: FC<Props> = () => {
   const canRead = useCan("maintenance");
   const canWrite = canRead === "write";
+  const [askConfirm, confirmNode] = useConfirm(); // confirmation des actions en masse (statut auto)
   // Défense en profondeur : le gate exige le DROIT `maintenance` ET le drapeau config/mntFeature — même
   // invariant que la nav (App) et les rules Firestore. Si un futur refactor rendait ce composant atteignable
   // hors du filtre de nav, aucun abonnement mnt_ ne partirait drapeau éteint (audit info). Doc minuscule.
@@ -393,7 +396,7 @@ export const Maintenance: FC<Props> = () => {
           {(r.missingCjm || 0) > 0 && <span className="text-gold" title={`${r.missingCjm} j d'intervention sans CJM connu — marge non fiable (coût sous-estimé)`}> ⚠</span>}
         </span>
       ), (r: MntContratPnlRow) => r.marge || 0),
-      colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : `${Math.round(r.margePct * 100)} %`), (r: MntContratPnlRow) => r.margePct || 0),
+      colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : pct(r.margePct)), (r: MntContratPnlRow) => r.margePct || 0),
     ] : []),
   ] : [];
   // Analyse de rétention IA (Lot 6/7) : contrats à risque (moteur existant) enrichis de stats tickets +
@@ -702,13 +705,22 @@ export const Maintenance: FC<Props> = () => {
               {statutRun && statutRun.proposals.some((p) => p.recommended) && (
                 <Busy variant="gold" label="Appliquer les recommandés"
                   okMsg={(n: number) => `${n} statut(s) appliqué(s)`} errMsg="Application refusée"
-                  fn={async () => { const rec = (statutRun.proposals || []).filter((p) => p.recommended); for (const p of rec) await setMntContratStatut(p.id, p.proposed); setStatutRun((r) => (r ? { ...r, proposals: r.proposals.filter((p) => !p.recommended) } : r)); return rec.length; }} />
+                  fn={async () => {
+                    const rec = (statutRun.proposals || []).filter((p) => p.recommended);
+                    // Garde-fou : application de MASSE → confirmation avec décompte (les propositions à réviser,
+                    // dont « échéance dépassée → échu », ne sont PAS recommandées et restent à l'unité).
+                    const ok = await askConfirm(`Appliquer ${rec.length} changement(s) de statut recommandé(s) ?`, { title: "Appliquer les recommandés", confirmLabel: "Appliquer" });
+                    if (!ok) return 0;
+                    for (const p of rec) await setMntContratStatut(p.id, p.proposed);
+                    setStatutRun((r) => (r ? { ...r, proposals: r.proposals.filter((p) => !p.recommended) } : r));
+                    return rec.length;
+                  }} />
               )}
               <Busy variant="ghost" label="Analyser le parc" okMsg={(r: MntStatutRun) => `${r.proposals.length} proposition(s)`} errMsg="Analyse refusée" fn={() => runStatutAuto()} />
               <Busy variant="ghost" label="Rétablir (annuler l'auto)" okMsg={(r: { restored: number }) => `${r.restored} statut(s) rétabli(s) à leur valeur d'avant`} errMsg="Rétablissement refusé" fn={revertMntAutoStatut} />
             </div>
           )}>
-          <Tip>Propose le statut juste de chaque contrat : transitions <b>mécaniques</b> (date de début atteinte → <b>actif</b>…) par règles, cas de <b>jugement</b> (dormant, réactivation) par l'<b>IA</b>. <b>Rien n'est appliqué automatiquement</b> — vous validez chaque proposition (« Appliquer »), ou en bloc les <b>recommandées</b> (confiance élevée). Les <b>« recommandés » incluent « échéance dépassée → échu »</b> : vérifiez avant d'appliquer si vos contrats gardent une date de fin passée tout en restant actifs.</Tip>
+          <Tip>Propose le statut juste de chaque contrat : transitions <b>mécaniques</b> (date de début atteinte → <b>actif</b>…) par règles, cas de <b>jugement</b> (dormant, réactivation) par l'<b>IA</b>. <b>Rien n'est appliqué automatiquement</b> — vous validez chaque proposition (« Appliquer »), ou en bloc les <b>recommandées</b> (confiance élevée). La transition <b>« échéance dépassée → échu » reste à réviser à l'unité</b> (jamais recommandée en masse) : un contrat reconduit peut garder une date de fin passée tout en restant actif.</Tip>
           {statutRun && (statutRun.proposals.length === 0
             ? <EmptyState label="Aucun changement de statut — le parc est cohérent." />
             : <Table columns={statutCols} rows={statutRun.proposals} colsKey="mnt_statut_ia" rowKey={(p) => p.id} />)}
@@ -937,7 +949,7 @@ export const Maintenance: FC<Props> = () => {
               <div className="flex flex-wrap gap-x-8 gap-y-2 text-[13px] border-t border-line/60 pt-3">
                 <div><div className="text-[11px] text-muted">Interventions</div><div className="tabnum">{vcInterv.length} · {vcHeures} h</div></div>
                 {vcPnl && <div><div className="text-[11px] text-muted">Revenu engagé</div><div className="tabnum">{money(vcPnl.revenue)}</div></div>}
-                {vcPnl && vcPnl.marge != null && <div><div className="text-[11px] text-muted">Marge</div><div className={cx("tabnum", vcPnl.marge >= 0 ? "text-emerald" : "text-clay")}>{money(vcPnl.marge)}{vcPnl.margePct != null ? ` · ${Math.round(vcPnl.margePct * 100)} %` : ""}</div></div>}
+                {vcPnl && vcPnl.marge != null && <div><div className="text-[11px] text-muted">Marge</div><div className={cx("tabnum", vcPnl.marge >= 0 ? "text-emerald" : "text-clay")}>{money(vcPnl.marge)}{vcPnl.margePct != null ? ` · ${pct(vcPnl.margePct)}` : ""}</div></div>}
               </div>
             </div>
           </Modal>
@@ -986,6 +998,7 @@ export const Maintenance: FC<Props> = () => {
           </div>
         </Modal>
       )}
+      {confirmNode}
     </div>
   );
 };

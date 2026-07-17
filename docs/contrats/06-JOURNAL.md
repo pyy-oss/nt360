@@ -899,3 +899,24 @@ violée par excès de confiance dans une règle « mécanique » qui ne l'était
 Une règle déterministe « correcte au sens strict » (dateFin < today) peut être opérationnellement fausse ;
 la seule position sûre par défaut est PROPOSER, l'humain applique. La piste d'audit from/to a permis un
 rétablissement exact — d'où l'importance de tout tracer avant d'écrire.
+
+---
+
+## 2026-07-17 — Audit complet (6 axes) avant migration + correctifs
+
+**Fait** — Audit transverse en 6 axes (sécurité, cohérence des chiffres, correction, perf, migration,
+UX). Rapport priorisé : `docs/AUDIT-2026-07.md` ; runbook de migration projet dédié :
+`docs/MIGRATION_PROJET.md`. Aucun P0. Correctifs mnt_ de ce lot :
+- **P1** statut auto : « échéance dépassée → échu » marquée `requiresReview` → jamais recommandée en masse
+  (ADR-029) ; confirmation avec décompte sur « Appliquer les recommandés ». Ferme le vecteur de réincidence
+  de l'incident du 17/07 tout en gardant l'application à l'unité.
+- **P1** régression mobile : `TypeStatsTable` — ajout des `data-label` (mode carte `.rtable` < 640 px).
+- **P2** renouvellement de contrat : le terme se composait au 2ᵉ renouvellement (mesuré dateDebut→dateFin
+  courante) ; on fige `termeMois` au 1er renouvellement et on le réutilise. Invariant.
+- **P2** marge contrat : `pct()` (1 décimale) au lieu de `Math.round` — aligné sur le reste de l'ERP.
+- **P3** dates mnt_ : `validateMntContrat` rejette une année de début implausible (discipline `plausibleYear`,
+  bloque la sentinelle 1899 → échéancier gonflé → faux signal critique).
+
+**Appris** — Un correctif d'incident (propose-only, ADR-028) peut laisser un vecteur résiduel dans l'UI
+(bouton d'application de masse). Fermer l'incident, c'est aussi retirer l'action dangereuse du chemin
+« un clic », pas seulement l'auto-application serveur.

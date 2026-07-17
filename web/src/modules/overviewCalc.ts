@@ -96,10 +96,13 @@ export function computeFilteredOverview(
   for (const [fp, base] of facByFp) { const r = rateByFp.get(fp); if (r && r.cas > 0) factureMb += r.rate * Math.min(base, r.cas); }
   const facturePmb = facture > 0 ? factureMb / facture : 0;
   // Exclusion « déjà au carnet » (miroir chaine.js) : une opp active dont le FP porte déjà une commande
-  // est comptée dans `commandes` (CAS) ; la garder au pipeline la double-compterait au dénominateur de
-  // conversion. FP CANONIQUE des deux côtés.
+  // DE LA PÉRIODE est comptée dans `commandes` (CAS) ; la garder au pipeline la double-compterait au
+  // dénominateur de conversion. Le serveur construit `bookedFps` à partir de `ord = filterOrders(orders,
+  // period)` — on borne donc à `ordP` (même population que `commandes`), PAS tout `cmdRows`, sinon une opp
+  // active dont le FP porte une commande d'un AUTRE millésime serait sur-exclue (rupture du miroir, audit
+  // 2026-07). FP CANONIQUE des deux côtés.
   const bookedFps = new Set<string>();
-  for (const o of cmdRows) { const k = fpKey(o.fp); if (k) bookedFps.add(k); }
+  for (const o of ordP) { const k = fpKey(o.fp); if (k) bookedFps.add(k); }
   const active = oppP.filter((o) => { const st = o.stage || 0; if (st < 1 || st > 5) return false; const k = fpKey(o.fp); return !(k && bookedFps.has(k)); });
   // Pipeline projeté = Σ des niveaux ACTIFS (moteur configurable, miroir serveur). Certitudes =
   // contribution pondérée du niveau ≥90 (0 si désactivé).

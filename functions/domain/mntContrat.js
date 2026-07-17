@@ -2,7 +2,7 @@
 // Règles de l'ERP (02-REGLES.md) : montants `number` arrondis FCFA ENTIER (Math.round), dates métier
 // string ISO AAAA-MM-JJ, statuts en CODE applicatif (comme `stage`), N° FP canonicalisé par `fpKey`
 // (jamais brut — ADR-001 : 1 contrat = 1 affaire). Les engagements SLA sont EMBARQUÉS (ADR-012).
-const { fpKey, num, cleanName, cleanBu, cleanPerson } = require("../lib/ids");
+const { fpKey, num, cleanName, cleanBu, cleanPerson, plausibleYear } = require("../lib/ids");
 
 // Énumérations (code applicatif). Libellés FR à l'affichage (côté front), valeurs stables ici.
 const STATUTS = ["brouillon", "actif", "suspendu", "echu", "resilie"];
@@ -62,6 +62,10 @@ function validateMntContrat(d) {
   if (!ECHEANCES.includes(echeanceType)) return { ok: false, error: "périodicité d'échéance invalide" };
   const dateDebut = isoDate(o.dateDebut);
   if (!dateDebut) return { ok: false, error: "date de début invalide (AAAA-MM-JJ)" };
+  // Discipline `plausibleYear` de l'ERP (comme le pipeline/carnet) : une année aberrante (sentinelle Excel
+  // 1899-12-30, saisie erronée) passerait la regex mais gonflerait l'échéancier (240 périodes → engagé faux,
+  // faux signal « sous-facturation » critique, cf. audit 2026-07). On la REJETTE à la frontière.
+  if (!plausibleYear(dateDebut.slice(0, 4))) return { ok: false, error: "année de début implausible (hors [2015 .. année+3])" };
   const dateFin = o.dateFin ? isoDate(o.dateFin) : null;
   if (o.dateFin && !dateFin) return { ok: false, error: "date de fin invalide (AAAA-MM-JJ)" };
   // dateFin est la borne de RENOUVELLEMENT (exclusive) : une fin ≤ début donne un contrat à couverture NULLE

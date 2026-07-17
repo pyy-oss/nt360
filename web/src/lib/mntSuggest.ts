@@ -6,6 +6,7 @@
 
 import type { MntContrat } from "../types";
 import { ECHEANCES } from "./mntContrat";
+import { plausibleYear } from "./ids";
 
 // Mots-clés (normalisés sans accents) qui trahissent une prestation récurrente / de maintenance.
 export const MNT_KEYWORDS = [
@@ -125,10 +126,9 @@ export function buildContratDraft(
   todayIso: string,
   echeance?: string | null,
 ): MntContrat {
-  const curY = Number(String(todayIso).slice(0, 4)) || 0;
-  const yr = Number(o.yearPo) || 0;
-  const yearPlausible = yr >= 2015 && yr <= curY + 3; // même bornage que plausibleYear (ids)
-  const dateDebut = validIso(o.dateCommande) || (yearPlausible ? `${yr}-01-01` : todayIso);
+  // Autorité unique de plausibilité des millésimes (ids) — pas de ré-implémentation de la fenêtre (audit 2026-07).
+  const yr = plausibleYear(o.yearPo); // année plausible ([2015 .. année+3]) ou 0
+  const dateDebut = validIso(o.dateCommande) || (yr > 0 ? `${yr}-01-01` : todayIso);
   const dateFin = addMonths(dateDebut, 12) || dateDebut;
   const ech = echeance && (ECHEANCES as readonly string[]).includes(echeance) ? echeance : "annuel";
   return {

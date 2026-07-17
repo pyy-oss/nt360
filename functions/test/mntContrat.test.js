@@ -26,6 +26,11 @@ describe("mntContrat — validation d'un contrat", () => {
     expect(validateMntContrat({ ...base, montantEngage: "(1 200 000)" }).ok).toBe(false); // comptable → négatif
     expect(validateMntContrat({ ...base, montantEngage: "500000-" }).ok).toBe(false);
   });
+  it("rejette une date de début à l'année implausible (sentinelle 1899, discipline plausibleYear — audit 2026-07)", () => {
+    expect(validateMntContrat({ ...base, dateDebut: "1899-12-30" }).ok).toBe(false);
+    expect(validateMntContrat({ ...base, dateDebut: "0199-01-01", dateFin: null }).ok).toBe(false);
+    expect(validateMntContrat({ ...base, dateDebut: "2026-01-01" }).ok).toBe(true); // année plausible : OK
+  });
   it("rejette un statut / une périodicité hors énumération", () => {
     expect(validateMntContrat({ ...base, statut: "en_cours" }).ok).toBe(false);
     expect(validateMntContrat({ ...base, echeanceType: "hebdo" }).ok).toBe(false);

@@ -39,11 +39,15 @@ function proposeStatutRule(c, sig, asOf) {
   // 1. Résilié : décision humaine TERMINALE — jamais rétrogradée automatiquement.
   if (current === "resilie") return noChange("Contrat résilié (statut terminal)", 1);
 
-  // 2. Échéance dépassée → échu (transition mécanique, la plus sûre).
+  // 2. Échéance dépassée → échu. ATTENTION (incident 2026-07-17) : « dateFin passée ⇒ échu » est
+  //    mécaniquement vrai mais OPÉRATIONNELLEMENT FAUX — un contrat reconduit sans MAJ de sa dateFin
+  //    reste actif alors que sa date est passée. Cette transition est donc marquée `requiresReview` :
+  //    elle est PROPOSÉE (et applicable à l'unité par un humain) mais JAMAIS « recommandée » pour une
+  //    application de masse. On ne rejoue pas la bascule en masse de tout le parc en échu.
   if (finMs != null && today != null && finMs < today) {
     if (current === "echu") return noChange("Contrat échu (date de fin dépassée)", 1);
-    if (current === "actif" || current === "suspendu") return { proposed: "echu", confidence: 1, motif: `Date de fin dépassée (${c.dateFin})`, source: "regle" };
-    if (current === "brouillon") return { proposed: "echu", confidence: 0.9, motif: `Échéance déjà passée (${c.dateFin}) — jamais activé`, source: "regle" };
+    if (current === "actif" || current === "suspendu") return { proposed: "echu", confidence: 1, motif: `Date de fin dépassée (${c.dateFin})`, source: "regle", requiresReview: true };
+    if (current === "brouillon") return { proposed: "echu", confidence: 0.9, motif: `Échéance déjà passée (${c.dateFin}) — jamais activé`, source: "regle", requiresReview: true };
   }
 
   // 3. Brouillon : activation quand la date de début est atteinte (proposé, sous le seuil auto — activer un
@@ -124,10 +128,13 @@ function normalizeStatutProposals(raw, cases) {
   return out;
 }
 
-// Fusionne règles + IA en décisions finales. `apply` = confiance ≥ seuil ET transition réelle (proposed ≠ current).
+// Fusionne règles + IA en décisions finales. `apply` (= « recommandé » pour l'application de masse) exige :
+// transition réelle ET confiance ≥ seuil ET PAS `requiresReview`. `requiresReview` (échéance dépassée → échu,
+// cf. incident 2026-07-17) reste `changed:true` (proposé, applicable à l'unité) mais `apply:false` — jamais
+// happé par « Appliquer les recommandés ».
 function decideStatut(proposal, threshold = STATUT_AUTO_THRESHOLD) {
   const changed = proposal.proposed && proposal.proposed !== proposal.current;
-  return { ...proposal, changed, apply: changed && proposal.confidence >= threshold };
+  return { ...proposal, changed, apply: changed && proposal.confidence >= threshold && !proposal.requiresReview };
 }
 
 module.exports = {

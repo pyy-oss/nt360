@@ -1,5 +1,5 @@
 // Modules finance : Objectifs / R-O, Facturation, liste Factures, Rentabilité.
-import { useState, useEffect, type FC } from "react";
+import { useState, useEffect, useMemo, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
@@ -172,20 +172,22 @@ export const InvoiceList: FC<Props> = () => {
   // Overlay des factures ANNULÉES (statut persistant, hors agrégats). La facture reste lisible ici
   // (collection brute) mais est exclue côté serveur de la facturation/cash/créances/qualité.
   const { data: cxl } = useDocData<CancellationsDoc>("config/cancelInvoices");
-  const cancelled = new Set((cxl?.items || []).map((e) => e.id));
+  const cancelled = useMemo(() => new Set((cxl?.items || []).map((e) => e.id)), [cxl]);
   const { match } = useFilters();
   const clientKey = useClientKey(); // canonicalise le client (miroir serveur) pour matcher l'option canonique
-  const rows = allRows.filter((r) => match({ ...r, client: clientKey(r.client) }, ["bu", "client"])); // les factures ne portent pas d'AM
+  // Mémoïsé : `invoices` peut être volumineux ; `match` (mémo [f] du contexte) et `clientKey` (mémo) sont
+  // stables → identités de tableaux stables → la mémo interne de <ListView> tient (audit perf 2026-07).
+  const rows = useMemo(() => allRows.filter((r) => match({ ...r, client: clientKey(r.client) }, ["bu", "client"])), [allRows, match, clientKey]); // les factures ne portent pas d'AM
   const canImport = useCanImport();
   const { intent } = useNav();
   const [f, setF] = useState<"all" | "linked" | "orphan">(intent?.segment === "orphan" ? "orphan" : "all");
   // Drill-through depuis le Centre d'alertes (« factures non rattachées ») → segment pré-sélectionné.
   useEffect(() => { if (intent?.segment === "orphan") setF("orphan"); }, [intent]);
-  if (loading && !allRows.length) return <CardSkeleton />;
   // Une facture annulée n'est pas une orpheline à traiter (elle est déjà écartée des agrégats).
-  const orphan = rows.filter((r) => r.linked !== true && !cancelled.has(r.id!));
-  const orphanAmt = orphan.reduce((s, r) => s + (r.amountHt || 0), 0);
-  const filtered = f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true);
+  const orphan = useMemo(() => rows.filter((r) => r.linked !== true && !cancelled.has(r.id!)), [rows, cancelled]);
+  const orphanAmt = useMemo(() => orphan.reduce((s, r) => s + (r.amountHt || 0), 0), [orphan]);
+  const filtered = useMemo(() => (f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true)), [f, rows, orphan]);
+  if (loading && !allRows.length) return <CardSkeleton />;
   // Actions en masse (réservées à qui peut importer, comme les actions par ligne) : annulation / rétablissement
   // en LOT, réutilisant l'overlay `setCancellation` (statut persistant, rétablissable, survit au ré-import).
   // NB : `setCancellation` sérialise déjà le read-modify-write de l'overlay (transaction serveur). On enchaîne
