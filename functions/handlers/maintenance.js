@@ -206,16 +206,25 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const numero = String((req.data && req.data.numero) || "").trim();
     const ids = Array.isArray(req.data && req.data.contratIds) ? req.data.contratIds.filter((x) => x).slice(0, 50).map(String) : [];
     if (!numero || ids.length < 2) throw new HttpsError("invalid-argument", "numéro de lignée + au moins 2 contrats requis");
+    // Ne rattacher QUE des contrats réellement présents : `batch.set(merge)` sur un id ABSENT le CRÉERAIT
+    // (l'Admin SDK contourne les rules write:false) → doc fantôme sans fp/statut. On lit d'abord et on
+    // filtre les existants (un membre a pu être supprimé entre la détection et l'application).
+    const snaps = await db.getAll(...ids.map((id) => db.doc(`mnt_contrats/${id}`)));
+    const present = snaps.filter((s) => s.exists);
+    if (present.length < 2) throw new HttpsError("failed-precondition", "Contrats introuvables — la lignée n'a plus au moins 2 membres (relancez la détection).");
+    // Rattachements qui ÉCRASENT une lignée déjà posée : tracés (ancien → nouveau) pour réversibilité, jamais muets.
+    const reassignes = present
+      .map((s) => ({ id: s.id, from: String((s.data() || {}).ligneeId || "") }))
+      .filter((r) => r.from && r.from !== numero);
     const batch = db.batch();
-    for (const id of ids) batch.set(db.doc(`mnt_contrats/${id}`), { ligneeId: numero, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    for (const s of present) batch.set(s.ref, { ligneeId: numero, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await batch.commit();
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: "apply_mnt_lignee", module: "maintenance", entity: "mnt_contrat", entityId: numero, detail: { numero, contrats: ids.length }, ts: FieldValue.serverTimestamp() });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "apply_mnt_lignee", module: "maintenance", entity: "mnt_contrat", entityId: numero, detail: { numero, contrats: present.length, ignores: ids.length - present.length, reassignes }, ts: FieldValue.serverTimestamp() });
     await requestRecompute(["maintenance"]);
-    return { ok: true, numero, count: ids.length };
+    return { ok: true, numero, count: present.length, ignored: ids.length - present.length };
   });
 
   const deleteMntContrat = onCallG("deleteMntContrat", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-    await requireWrite(req, "maintenance");
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
     const id = assertPlainId(req.data?.id, "id contrat");

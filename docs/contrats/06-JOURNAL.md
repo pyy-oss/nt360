@@ -969,3 +969,31 @@ n'appelait aucune correction de fiche. ADR-029 avait déjà établi que « `date
 opérationnellement faux ; il restait à en tirer la conséquence dans la vue conformité. Séparer les deux
 dimensions (complétude vs décision de renouvellement) rend chaque compteur univoque — sans champ nouveau,
 en réutilisant la carte renouvellements existante.
+
+---
+
+## 2026-07-17 — Remédiation audit module Contrats (3 passes adverses)
+
+**Fait** — Audit adverse en 3 passes parallèles (régression, conformité ERP, correction/cohérence) sur le
+module complété (#427 objet, #428 lignées, #429 conformité). Verdicts : régression **VERT** (functions
+1004, web 146, gardes CI vertes, bundle 120,0 KB) ; correction **2 MEDIUM** ; conformité **1 NON-CONFORME**.
+Correctifs livrés :
+- **F1/F2 (`applyMntLignee`, back)** : `batch.set(merge)` sur un id absent le CRÉAIT (doc fantôme malformé,
+  l'Admin SDK contournant les rules) → on lit d'abord via `db.getAll`, on ne rattache que les contrats
+  **réellement présents** (refus si < 2 membres subsistent). Les rattachements qui **écrasent** un `ligneeId`
+  déjà posé sont désormais **tracés** (ancien → nouveau dans `auditLog.detail.reassignes`, jamais muets).
+- **Conformité (front)** : la colonne « Objet » (#427) devient **« Affaire »** — libellé universel de la
+  désignation d'affaire dans l'ERP (>10 sites, 5 modules) et déjà utilisé par les tables de suggestions du
+  **même** module ; « Objet » créait deux libellés pour un concept dans le même écran. Helpers renommés
+  `affaireOf`/`affaireCell`.
+- **Ton (front)** : KPI « Sans date de fin » repassé `clay → gold`, cohérent avec ses KPI frères (« Sans SLA »,
+  « Montant nul ») et le badge « Manques » du même écran (sémantique `gold` = avertissement structurel).
+- **Broutille** : `requireWrite` dupliqué dans `deleteMntContrat` (résidu #428) supprimé.
+- **F3 (LOW)** : divergence de source du signal « affaire » (détection = `orders` bruts vs affichage = carnet
+  fusionné) **assumée et documentée** en ADR-032 (heuristique confirmée IA + humain, pas un défaut silencieux).
+
+**Appris** — Un `batch.set(..., {merge:true})` côté Admin SDK n'est jamais anodin sur un id non garanti : il
+crée le document au lieu d'échouer, et contourne les rules `write:false`. Le garde-fou n'est pas la validation
+d'entrée mais la **lecture préalable** (`getAll` → filtre `exists`). Côté conformité, le signal le plus fort
+n'était pas la règle ERP externe mais l'**auto-incohérence** : le module s'appelait « Affaire » à un endroit et
+« Objet » à l'autre pour la même donnée — un module doit d'abord être cohérent avec lui-même.

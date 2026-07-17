@@ -161,10 +161,10 @@ export const Maintenance: FC<Props> = () => {
     for (const o of commandes) { const k = fpKey(o.fp); if (k && !m.has(k)) m.set(k, o); }
     return m;
   }, [commandes]);
-  // Objet d'un contrat = désignation de la commande adossée (fpKey). Chaîne vide si le FP est hors carnet.
-  const objetOf = (fp?: string | null) => orderByFp.get(fpKey(fp || "") || "")?.affaire || "";
-  // Cellule « Objet » réutilisable (tronquée + title au survol) — même rendu dans toutes les tables du module.
-  const objetCell = (fp?: string | null) => { const o = objetOf(fp); return <span className="truncate max-w-[220px] inline-block align-bottom" title={o}>{o || "—"}</span>; };
+  // Affaire d'un contrat = désignation de la commande adossée (fpKey). Chaîne vide si le FP est hors carnet.
+  const affaireOf = (fp?: string | null) => orderByFp.get(fpKey(fp || "") || "")?.affaire || "";
+  // Cellule « Affaire » réutilisable (tronquée + title au survol) — même rendu dans toutes les tables du module.
+  const affaireCell = (fp?: string | null) => { const o = affaireOf(fp); return <span className="truncate max-w-[220px] inline-block align-bottom" title={o}>{o || "—"}</span>; };
   // Lignées de renouvellement PROPOSÉES par l'IA (ADR-030) — état local (proposition seule, appliquée à la demande).
   const [lignees, setLignees] = useState<MntLignee[]>([]);
   // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
@@ -277,8 +277,8 @@ export const Maintenance: FC<Props> = () => {
     // sur l'ISO brut (c.dateDebut/c.dateFin), donc chronologiquement même si l'affichage est en JJ/MM/AAAA.
     colText("Client", (c: MntContrat) => c.client || "—", (c: MntContrat) => c.client || ""),
     colText("N° FP", (c: MntContrat) => <FpLink fp={c.fp} />, (c: MntContrat) => c.fp || ""),
-    // Objet/désignation de l'affaire adossée (depuis la commande, par fpKey) — le contrat ne le stocke pas.
-    colText("Objet", (c: MntContrat) => objetCell(c.fp), (c: MntContrat) => objetOf(c.fp)),
+    // Désignation de l'affaire adossée (depuis la commande, par fpKey) — le contrat ne le stocke pas.
+    colText("Affaire", (c: MntContrat) => affaireCell(c.fp), (c: MntContrat) => affaireOf(c.fp)),
     // Lignée de renouvellement (ADR-030) : numéro du GROUPE de reconductions auquel ce contrat appartient.
     colText("Lignée", (c: MntContrat) => (c.ligneeId ? <Badge tone="steel">{c.ligneeId}</Badge> : <span className="text-faint">—</span>), (c: MntContrat) => c.ligneeId || ""),
     colText("Statut", (c: MntContrat) => <Badge tone={statutTone(c.statut)}>{label(STATUT_LABEL, c.statut)}</Badge>, (c: MntContrat) => label(STATUT_LABEL, c.statut)),
@@ -337,7 +337,7 @@ export const Maintenance: FC<Props> = () => {
   const risqueCols = [
     colText("Client", (r: RisqueItem) => r.client || "—", (r: RisqueItem) => r.client || ""),
     colText("N° FP", (r: RisqueItem) => <FpLink fp={r.fp || undefined} />),
-    colText("Objet", (r: RisqueItem) => objetCell(r.fp), (r: RisqueItem) => objetOf(r.fp)),
+    colText("Affaire", (r: RisqueItem) => affaireCell(r.fp), (r: RisqueItem) => affaireOf(r.fp)),
     colText("Niveau", (r: RisqueItem) => <Badge tone={niveauTone(r.niveau)}>{riskLabel(NIVEAU_LABEL, r.niveau)}</Badge>),
     colNum("Score", (r: RisqueItem) => String(r.score), (r: RisqueItem) => r.score),
     colText("Signaux", (r: RisqueItem) => (
@@ -402,7 +402,7 @@ export const Maintenance: FC<Props> = () => {
     colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "depasse" || r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
     colText("Client", (r: MntRenouvellement) => r.client || "—", (r: MntRenouvellement) => r.client || ""),
     colText("N° FP", (r: MntRenouvellement) => <FpLink fp={r.fp || undefined} />),
-    colText("Objet", (r: MntRenouvellement) => objetCell(r.fp), (r: MntRenouvellement) => objetOf(r.fp)),
+    colText("Affaire", (r: MntRenouvellement) => affaireCell(r.fp), (r: MntRenouvellement) => affaireOf(r.fp)),
     colText("Fin", (r: MntRenouvellement) => frDate(r.dateFin)),
     colNum("Jours restants", (r: MntRenouvellement) => String(r.jours), (r: MntRenouvellement) => r.jours),
     colText("", (r: MntRenouvellement) => (canWrite ? <Busy variant="ghost" label="Demander le renouvellement" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} /> : null)),
@@ -477,7 +477,7 @@ export const Maintenance: FC<Props> = () => {
   const complianceCols = [
     colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
     colText("N° FP", (r: MntComplianceItem) => <FpLink fp={r.fp || undefined} />),
-    colText("Objet", (r: MntComplianceItem) => objetCell(r.fp), (r: MntComplianceItem) => objetOf(r.fp)),
+    colText("Affaire", (r: MntComplianceItem) => affaireCell(r.fp), (r: MntComplianceItem) => affaireOf(r.fp)),
     colText("Manques", (r: MntComplianceItem) => <div className="flex flex-wrap gap-1">{r.issues.map((k) => <Badge key={k} tone="gold">{MNT_COMPLIANCE_LABEL[k]}</Badge>)}</div>),
     colText("", (r: MntComplianceItem) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openContrat(r.id)}>Corriger</button> : null)),
   ];
@@ -486,7 +486,7 @@ export const Maintenance: FC<Props> = () => {
   // Suggestions (Lot 7) — affaires du carnet ressemblant à de la maintenance et sans contrat. Le carnet
   // n'est lu que si l'on a le droit (gate) ; sinon liste vide. Chaque suggestion PRÉ-REMPLIT la fiche
   // contrat (aucune création automatique). Réutilise fpKey pour le rapprochement commande ↔ contrat.
-  // (`commandes` + `orderByFp` sont chargés en tête du composant — source de l'objet de chaque table.)
+  // (`commandes` + `orderByFp` sont chargés en tête du composant — source de l'affaire de chaque table.)
   const suggestions = useMemo(() => suggestMntContrats(commandes, contrats, fpKey), [commandes, contrats]);
   // Lot d'affaires SANS contrat soumis à l'IA (bornage aligné sur le plafond serveur). L'IA juge le FOND,
   // au-delà des seuls mots-clés — d'où un pool plus large que les suggestions heuristiques instantanées.
@@ -498,7 +498,7 @@ export const Maintenance: FC<Props> = () => {
     const have = new Set(contrats.map((c) => fpKey(c.fp)).filter(Boolean));
     return aiSug.suggestions.filter((s) => !have.has(fpKey(s.fp)));
   }, [aiSug, contrats]);
-  // (`orderByFp` — commande par FP canonique — est construit en tête du composant, cf. objet des contrats.)
+  // (`orderByFp` — commande par FP canonique — est construit en tête du composant, cf. affaire des contrats.)
   type SugLike = { fp?: string; client?: string; bu?: string; am?: string; cas?: number; echeance?: string | null };
   const keyOf = (s: SugLike) => fpKey(s.fp || "") || "";
   // Brouillon pré-rempli (dateFin = date commande + 12 mois, montant = CAS…). Repli sur la suggestion si la
@@ -703,7 +703,7 @@ export const Maintenance: FC<Props> = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             <Kpi label="Conformes" value={`${compliance.conformes}/${compliance.activeTotal}`} tone={compliance.items.length === 0 ? "emerald" : "gold"} />
             <Kpi label="Sans SLA" value={String(compliance.byIssue.sans_sla)} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
-            <Kpi label="Sans date de fin" value={String(compliance.byIssue.sans_echeance)} tone={compliance.byIssue.sans_echeance ? "clay" : "ink"} />
+            <Kpi label="Sans date de fin" value={String(compliance.byIssue.sans_echeance)} tone={compliance.byIssue.sans_echeance ? "gold" : "ink"} />
             <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
           </div>
           {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}
