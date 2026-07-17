@@ -91,51 +91,56 @@ describe("slaAgenda — calendrier SLA des tickets ouverts", () => {
   });
 });
 
-describe("mntCompliance — conformité des contrats actifs", () => {
+describe("mntCompliance — conformité STRUCTURELLE des contrats actifs", () => {
   const base = { id: "C", client: "ACME", statut: "actif", montantEngage: 1_000_000, dateFin: "2027-01-01", engagements: [{ type: "resolution" }] };
   it("ne juge que les contrats actifs ; un contrat complet est conforme", () => {
-    const r = mntCompliance([{ ...base }, { ...base, id: "B", statut: "brouillon", engagements: [] }], asOf);
+    const r = mntCompliance([{ ...base }, { ...base, id: "B", statut: "brouillon", engagements: [] }]);
     expect(r.activeTotal).toBe(1);      // le brouillon est ignoré
     expect(r.conformes).toBe(1);
     expect(r.items).toEqual([]);
   });
-  it("repère chaque manque : SLA, date de fin, échéance dépassée, montant nul", () => {
+  it("repère chaque manque STRUCTUREL : SLA, date de fin, montant nul", () => {
     const r = mntCompliance([
       { ...base, id: "A", engagements: [] },                       // sans_sla
       { ...base, id: "B", dateFin: null },                         // sans_echeance
-      { ...base, id: "C", dateFin: "2026-01-01" },                 // echeance_depassee (asOf 2026-07-15)
       { ...base, id: "D", montantEngage: 0 },                      // montant_nul
-    ], asOf);
-    expect(r.byIssue).toEqual({ sans_sla: 1, sans_echeance: 1, echeance_depassee: 1, montant_nul: 1 });
+    ]);
+    expect(r.byIssue).toEqual({ sans_sla: 1, sans_echeance: 1, montant_nul: 1 });
     expect(r.conformes).toBe(0);
-    expect(r.activeTotal).toBe(4);
+    expect(r.activeTotal).toBe(3);
+  });
+  it("une échéance DÉPASSÉE n'est PAS un défaut de conformité (relève des renouvellements)", () => {
+    const r = mntCompliance([{ ...base, id: "E", dateFin: "2026-01-01" }]); // fin passée mais contrat complet
+    expect(r.activeTotal).toBe(1);
+    expect(r.conformes).toBe(1);
+    expect(r.items).toEqual([]);
   });
   it("trie par nombre de manques décroissant", () => {
     const r = mntCompliance([
       { ...base, id: "A", engagements: [{ type: "resolution" }], dateFin: null },      // 1 manque
       { ...base, id: "B", engagements: [], dateFin: null, montantEngage: 0 },          // 3 manques
-    ], asOf);
+    ]);
     expect(r.items[0].id).toBe("B");
     expect(r.items[0].issues.length).toBe(3);
   });
 });
 
-describe("mntRenouvellements — contrats actifs à renouveler", () => {
+describe("mntRenouvellements — contrats actifs à renouveler & échéances dépassées", () => {
   const c = (id: string, statut: string, dateFin: string | null) => ({ id, client: id, statut, dateFin });
-  it("classe par urgence (≤30 critique, ≤60 proche, ≤90 à venir) et exclut > horizon", () => {
+  it("classe par urgence (dépassé, ≤30 critique, ≤60 proche, ≤90 à venir), dépassés en tête, exclut > horizon", () => {
     const r = mntRenouvellements([
       c("A", "actif", "2026-07-25"), // +10 j → critique
       c("B", "actif", "2026-08-29"), // +45 j → proche
       c("C", "actif", "2026-09-28"), // +75 j → a_venir
       c("D", "actif", "2026-11-12"), // +120 j → exclu
+      c("E", "actif", "2026-06-01"), // -44 j → dépassé (en tête)
     ], asOf);
-    expect(r.map((x) => [x.id, x.bucket])).toEqual([["A", "critique"], ["B", "proche"], ["C", "a_venir"]]);
+    expect(r.map((x) => [x.id, x.bucket])).toEqual([["E", "depasse"], ["A", "critique"], ["B", "proche"], ["C", "a_venir"]]);
   });
-  it("exclut les non-actifs, les sans date de fin, et les déjà échus (jours < 0)", () => {
+  it("exclut les non-actifs et les contrats sans date de fin", () => {
     const r = mntRenouvellements([
-      c("A", "brouillon", "2026-07-25"),
-      c("B", "actif", null),
-      c("C", "actif", "2026-06-01"), // passé
+      c("A", "brouillon", "2026-07-25"), // non actif
+      c("B", "actif", null),             // pas de date de fin
     ], asOf);
     expect(r).toEqual([]);
   });

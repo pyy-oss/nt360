@@ -37,7 +37,7 @@ import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
-const MNT_COMPLIANCE_LABEL: Record<string, string> = { sans_sla: "Sans engagement SLA", sans_echeance: "Sans date de fin", echeance_depassee: "Échéance dépassée", montant_nul: "Montant nul" };
+const MNT_COMPLIANCE_LABEL: Record<string, string> = { sans_sla: "Sans engagement SLA", sans_echeance: "Sans date de fin", montant_nul: "Montant nul" };
 const opt = (map: Record<string, string>, vals: readonly string[]) => vals.map((v) => ({ value: v, label: map[v] || v }));
 const digits = (s: string) => s.replace(/[^\d]/g, "");
 const decimals = (s: string) => s.replace(/[^\d.,]/g, "").replace(",", ".");
@@ -354,8 +354,10 @@ export const Maintenance: FC<Props> = () => {
   const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
   // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
-  const compliance = useMemo(() => mntCompliance(contrats, asOfIso), [contrats, asOfIso]);
-  // Renouvellements à anticiper (Lot 5/7) : contrats actifs dont la fin approche (≤ 90 j), plus urgent d'abord.
+  // Conformité STRUCTURELLE (Lot 3/7) : défauts de saisie des contrats actifs — indépendante de la date.
+  const compliance = useMemo(() => mntCompliance(contrats), [contrats]);
+  // Renouvellements & échéances à revoir (Lot 5/7) : contrats actifs dont la fin est dépassée (statut à
+  // revoir) ou approche (≤ 90 j), plus urgent d'abord.
   const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
   // Maintenance par TYPE vs objectifs (ADR-025) : nombre de tickets ET d'interventions par type, par
   // contrat + total agrégé. Vue pure (mntTypeStats), dérivée des collections déjà chargées.
@@ -395,9 +397,9 @@ export const Maintenance: FC<Props> = () => {
       </div>
     )),
   ];
-  const RENOUV_LABEL: Record<string, string> = { critique: "Critique", proche: "Proche", a_venir: "À venir" };
+  const RENOUV_LABEL: Record<string, string> = { depasse: "Dépassé", critique: "Critique", proche: "Proche", a_venir: "À venir" };
   const renouvCols = [
-    colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
+    colText("Urgence", (r: MntRenouvellement) => <Badge tone={r.bucket === "depasse" || r.bucket === "critique" ? "clay" : r.bucket === "proche" ? "gold" : "steel"}>{RENOUV_LABEL[r.bucket]}</Badge>, (r: MntRenouvellement) => r.jours),
     colText("Client", (r: MntRenouvellement) => r.client || "—", (r: MntRenouvellement) => r.client || ""),
     colText("N° FP", (r: MntRenouvellement) => <FpLink fp={r.fp || undefined} />),
     colText("Objet", (r: MntRenouvellement) => objetCell(r.fp), (r: MntRenouvellement) => objetOf(r.fp)),
@@ -476,7 +478,7 @@ export const Maintenance: FC<Props> = () => {
     colText("Client", (r: MntComplianceItem) => r.client || "—", (r: MntComplianceItem) => r.client || ""),
     colText("N° FP", (r: MntComplianceItem) => <FpLink fp={r.fp || undefined} />),
     colText("Objet", (r: MntComplianceItem) => objetCell(r.fp), (r: MntComplianceItem) => objetOf(r.fp)),
-    colText("Manques", (r: MntComplianceItem) => <div className="flex flex-wrap gap-1">{r.issues.map((k) => <Badge key={k} tone={k === "echeance_depassee" ? "clay" : "gold"}>{MNT_COMPLIANCE_LABEL[k]}</Badge>)}</div>),
+    colText("Manques", (r: MntComplianceItem) => <div className="flex flex-wrap gap-1">{r.issues.map((k) => <Badge key={k} tone="gold">{MNT_COMPLIANCE_LABEL[k]}</Badge>)}</div>),
     colText("", (r: MntComplianceItem) => (canWrite ? <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => openContrat(r.id)}>Corriger</button> : null)),
   ];
   const atRiskCount = (counts.ambre || 0) + (counts.rouge || 0) + (counts.critique || 0);
@@ -682,8 +684,8 @@ export const Maintenance: FC<Props> = () => {
       )}
 
       {gate && renouvellements.length > 0 && (
-        <Card title={`Renouvellements à anticiper · ${renouvellements.length}`}>
-          <Tip>Contrats <b>actifs</b> dont la fin approche (≤ 90 j) — <b>critique ≤ 30 j</b>. « Demander le renouvellement » soumet la décision au <b>circuit d'approbation</b> (comme depuis la fiche).</Tip>
+        <Card title={`Renouvellements & échéances à revoir · ${renouvellements.length}`}>
+          <Tip>Contrats <b>actifs</b> dont la fin est <b>déjà dépassée</b> (statut à revoir, en tête) ou <b>approche</b> (≤ 90 j) — <b>critique ≤ 30 j</b>. « Demander le renouvellement » soumet la décision au <b>circuit d'approbation</b> (comme depuis la fiche).</Tip>
           <Table columns={renouvCols} rows={renouvellements} colsKey="mnt_renouv" />
         </Card>
       )}
@@ -697,11 +699,11 @@ export const Maintenance: FC<Props> = () => {
 
       {gate && compliance.activeTotal > 0 && (
         <Card title="Conformité des contrats">
-          <Tip>Contrôle des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> non dépassée et un <b>montant d'engagement</b>. « Corriger » ouvre la fiche.</Tip>
+          <Tip>Contrôle de <b>complétude</b> des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> et un <b>montant d'engagement</b>. Une échéance <b>dépassée</b> n'est pas un défaut de conformité — elle relève des <b>renouvellements</b> ci-dessus. « Corriger » ouvre la fiche.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             <Kpi label="Conformes" value={`${compliance.conformes}/${compliance.activeTotal}`} tone={compliance.items.length === 0 ? "emerald" : "gold"} />
             <Kpi label="Sans SLA" value={String(compliance.byIssue.sans_sla)} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
-            <Kpi label="Échéance manquante/dépassée" value={String(compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee)} tone={compliance.byIssue.sans_echeance + compliance.byIssue.echeance_depassee ? "clay" : "ink"} />
+            <Kpi label="Sans date de fin" value={String(compliance.byIssue.sans_echeance)} tone={compliance.byIssue.sans_echeance ? "clay" : "ink"} />
             <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
           </div>
           {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}

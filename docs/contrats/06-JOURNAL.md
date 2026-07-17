@@ -950,3 +950,22 @@ carte front « Lignées de renouvellement (IA) » + colonne « Lignée » sur la
 les 3 fichiers (domaine + IA + test, 8 tests verts) et de câbler l'I/O (callables) + l'UI. La contrainte de
 budget de chunk d'entrée (120 KB) a été tenue en **mutualisant** les appels IA longs de `writes.ts` dans un
 helper `mntCallLong` (dé-duplication qui a plus que compensé l'ajout).
+
+---
+
+## 2026-07-17 — Conformité recentrée sur la complétude ; « échéance dépassée » → renouvellements (ADR-031)
+
+**Fait** — `mntCompliance` (Lot 3/7) ne juge plus que la **complétude structurelle** des contrats actifs
+(`sans_sla`, `sans_echeance`, `montant_nul`) ; le manque `echeance_depassee` est **retiré** et la fonction
+devient indépendante de la date (plus d'`asOfIso`). Les contrats actifs **échus** rejoignent
+`mntRenouvellements` en nouveau palier `depasse` (jours < 0), affiché **en tête** sous la carte renommée
+« Renouvellements & échéances à revoir ». Fronts alignés : KPI conformité « Sans date de fin » (au lieu de
+« Échéance manquante/dépassée »), tip recadré, badge « Manques » simplifié. Tests `mntDashboard.test.ts`
+mis à jour (17 verts), bundle 120,0 KB tenu.
+
+**Appris** — Une même métrique qui portait deux sens (défaut de saisie **et** signal de cycle de vie)
+créait un double-compte silencieux : un contrat complet mais échu apparaissait « non conforme » alors qu'il
+n'appelait aucune correction de fiche. ADR-029 avait déjà établi que « `dateFin` passée ⇒ échu » est
+opérationnellement faux ; il restait à en tirer la conséquence dans la vue conformité. Séparer les deux
+dimensions (complétude vs décision de renouvellement) rend chaque compteur univoque — sans champ nouveau,
+en réutilisant la carte renouvellements existante.
