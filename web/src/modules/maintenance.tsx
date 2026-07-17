@@ -257,12 +257,16 @@ export const Maintenance: FC<Props> = () => {
   const iValid = tForm.id && iForm.consultantId && iForm.date && Number(iForm.heures) > 0;
 
   const contratCols = [
+    // 3ᵉ argument = accesseur de TRI (colonnes triables via l'en-tête, primitif Table). Les dates se trient
+    // sur l'ISO brut (c.dateDebut/c.dateFin), donc chronologiquement même si l'affichage est en JJ/MM/AAAA.
     colText("Client", (c: MntContrat) => c.client || "—", (c: MntContrat) => c.client || ""),
-    colText("N° FP", (c: MntContrat) => <FpLink fp={c.fp} />),
-    colText("Statut", (c: MntContrat) => <Badge tone={statutTone(c.statut)}>{label(STATUT_LABEL, c.statut)}</Badge>),
-    colText("Période", (c: MntContrat) => `${frDate(c.dateDebut)} → ${c.dateFin ? frDate(c.dateFin) : "—"}`),
+    colText("N° FP", (c: MntContrat) => <FpLink fp={c.fp} />, (c: MntContrat) => c.fp || ""),
+    colText("Statut", (c: MntContrat) => <Badge tone={statutTone(c.statut)}>{label(STATUT_LABEL, c.statut)}</Badge>, (c: MntContrat) => label(STATUT_LABEL, c.statut)),
+    // « Période » découpée en Début / Fin (colonnes triables séparément).
+    colText("Début", (c: MntContrat) => frDate(c.dateDebut), (c: MntContrat) => c.dateDebut || ""),
+    colText("Fin", (c: MntContrat) => (c.dateFin ? frDate(c.dateFin) : "—"), (c: MntContrat) => c.dateFin || ""),
     colNum("Engagé", (c: MntContrat) => money(c.montantEngage), (c: MntContrat) => c.montantEngage || 0),
-    colNum("SLA", (c: MntContrat) => c.engagements?.length || 0),
+    colNum("SLA", (c: MntContrat) => c.engagements?.length || 0, (c: MntContrat) => c.engagements?.length || 0),
     colText("", (c: MntContrat) => (
       <div className="flex items-center justify-end gap-1.5">
         {/* Consulter : fiche 360° en LECTURE SEULE (engagements, échéancier, tickets, interventions, P&L,
@@ -730,7 +734,7 @@ export const Maintenance: FC<Props> = () => {
       <Card title="Contrats de maintenance"
         actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
-        {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" rowKey={(c) => c.id || ""} bulk={contratBulk} />}
+        {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" rowKey={(c) => c.id || ""} bulk={contratBulk} searchKeys={[(c: MntContrat) => c.client, (c: MntContrat) => c.fp, (c: MntContrat) => label(STATUT_LABEL, c.statut)]} searchPlaceholder="Rechercher (client, N° FP, statut)…" />}
       </Card>
 
       {canWrite && <ImportContratsCard />}
