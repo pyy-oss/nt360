@@ -264,7 +264,18 @@ function passColFilters(r: any, cols: Col[], colFilters: Record<string, string[]
   return true;
 }
 
-export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bulk, searchKeys, searchPlaceholder = "Rechercher…" }:
+// Pagination : 10 lignes par défaut, réglable 10/20/30 par l'utilisateur (sélecteur du pager). Partagé
+// par Table et ListView pour un comportement identique partout.
+export const PAGE_SIZES = [10, 20, 30];
+function RowsPerPage({ value, onChange, options }: { value: number; onChange: (n: number) => void; options: number[] }) {
+  return (
+    <select className="field !py-1 !px-2 text-xs" aria-label="Lignes par page" title="Lignes par page" value={value} onChange={(e) => onChange(Number(e.target.value))}>
+      {options.map((n) => <option key={n} value={n}>{n} / page</option>)}
+    </select>
+  );
+}
+
+export function Table({ columns, rows, empty, colsKey, pageSize = 10, rowKey, bulk, searchKeys, searchPlaceholder = "Rechercher…" }:
   { columns: Col[]; rows: any[]; empty?: string; colsKey?: string; pageSize?: number;
     // `rowKey` (clé stable) est requis pour la sélection en masse — sinon `bulk` est inerte.
     rowKey?: (r: any) => string; bulk?: BulkAction[]; searchKeys?: ((r: any) => any)[]; searchPlaceholder?: string }) {
@@ -272,6 +283,8 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
   const [open, setOpen] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(0);
+  // Lignes par page réglables (défaut = prop `pageSize`, désormais 10 ; barème 10/20/30).
+  const [ps, setPs] = useState(pageSize);
   const [q, setQ] = useState("");
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
   const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
@@ -305,15 +318,15 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
   // Pagination des longues listes : au-delà de `pageSize` lignes on ne rend qu'une fenêtre + un pager.
   // Les listes courtes (< pageSize) restent inchangées (aucun pager). `pageSize={0}` désactive.
   const total = sorted.length;
-  const paged = pageSize > 0 && total > pageSize;
-  const pageCount = paged ? Math.ceil(total / pageSize) : 1;
+  const paged = ps > 0 && total > ps;
+  const pageCount = paged ? Math.ceil(total / ps) : 1;
   const safePage = Math.min(page, pageCount - 1);
   // Le tri/la recherche ramènent à la première page. On NE dépend PAS de `total` : l'app est temps réel
   // (onSnapshot), et tout changement du nombre de lignes (import delta, ajout optimiste, annulation)
   // téléporterait l'utilisateur en page 1 en pleine navigation. Le clamp `safePage` suffit à rester dans
   // les bornes quand la liste rétrécit (parité avec ListView).
-  useEffect(() => { setPage(0); }, [sort, pageSize, q, colFilters]);
-  const pageRows = paged ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted;
+  useEffect(() => { setPage(0); }, [sort, ps, q, colFilters]);
+  const pageRows = paged ? sorted.slice(safePage * ps, safePage * ps + ps) : sorted;
   if (!rows.length) return <EmptyState label={empty} />;
   const sortToggle = (i: number) => setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 }));
   const toggleRow = (i: number) => setOpen((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
@@ -389,19 +402,24 @@ export function Table({ columns, rows, empty, colsKey, pageSize = 50, rowKey, bu
           </tbody>
         </table>
       </div>
-      {paged && (() => {
+      {total > PAGE_SIZES[0] && (() => {
         const pbtn = "btn-ghost !px-2 !py-1 inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none";
         return (
-        <div className="flex items-center justify-between gap-2 text-xs text-muted">
-          <span className="tabnum">{safePage * pageSize + 1}–{Math.min(safePage * pageSize + pageSize, total)} sur {total}</span>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={safePage <= 0} className={pbtn} aria-label="Page précédente">
-              <ChevronLeft size={14} aria-hidden="true" />Préc.
-            </button>
-            <span className="tabnum px-1" aria-live="polite">{safePage + 1} / {pageCount}</span>
-            <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className={pbtn} aria-label="Page suivante">
-              Suiv.<ChevronRight size={14} aria-hidden="true" />
-            </button>
+        <div className="flex items-center justify-between gap-2 text-xs text-muted flex-wrap">
+          <span className="tabnum">{paged ? `${safePage * ps + 1}–${Math.min(safePage * ps + ps, total)} sur ${total}` : `${total} sur ${total}`}</span>
+          <div className="flex items-center gap-3">
+            <RowsPerPage value={ps} onChange={setPs} options={PAGE_SIZES} />
+            {pageCount > 1 && (
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={safePage <= 0} className={pbtn} aria-label="Page précédente">
+                  <ChevronLeft size={14} aria-hidden="true" />Préc.
+                </button>
+                <span className="tabnum px-1" aria-live="polite">{safePage + 1} / {pageCount}</span>
+                <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className={pbtn} aria-label="Page suivante">
+                  Suiv.<ChevronRight size={14} aria-hidden="true" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
         );
@@ -462,7 +480,7 @@ export function Tip({ children }: { children: ReactNode }) {
 }
 
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
-export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey, bulk }:
+export function ListView({ rows, columns, searchKeys, pageSize = 10, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey, bulk }:
   { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string;
     // Détail masquable sous la ligne : `expand(row)` rend le panneau déplié (null ⇒ ligne non extensible).
     // `rowKey` identifie la ligne de façon stable (l'ouverture survit au tri/pagination/recherche).
@@ -471,6 +489,8 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
     expand?: (row: any) => ReactNode; rowKey?: (row: any) => string; colsKey?: string; bulk?: BulkAction[] }) {
   const [q, setQ] = useState(initialSearch);
   const [page, setPage] = useState(0);
+  // Lignes par page réglables (défaut 10 ; barème 10/20/30).
+  const [ps, setPs] = useState(pageSize);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
   const { sel, toggle: toggleSel, clear: clearSel, setAll } = useSelection();
@@ -487,7 +507,7 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
   // Remédiation guidée : quand une navigation transporte une recherche (ex. anomalie → ligne à
   // corriger), on pré-remplit le filtre. Se met à jour si l'intention change (nouvelle anomalie).
   useEffect(() => { if (initialSearch) { setQ(initialSearch); setPage(0); } }, [initialSearch]);
-  useEffect(() => { setPage(0); }, [colFilters]);
+  useEffect(() => { setPage(0); }, [colFilters, ps]);
   const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(null);
 
   const filtered = useMemo(() => {
@@ -506,9 +526,9 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, q, sort, hidden, colFilters]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pages = Math.max(1, Math.ceil(filtered.length / ps));
   const cur = Math.min(page, pages - 1);
-  const slice = filtered.slice(cur * pageSize, (cur + 1) * pageSize);
+  const slice = filtered.slice(cur * ps, (cur + 1) * ps);
   const toggle = (i: number) => { setSort((s) => (s && s.i === i ? { i, dir: (s.dir * -1) as 1 | -1 } : { i, dir: 1 })); };
   // Sélection portée sur TOUTES les lignes filtrées (toutes pages), comme Table.
   const allKeys = useMemo(() => (selectable ? filtered.map((r, i) => keyOf(r, i)) : []), [filtered, selectable]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -594,11 +614,16 @@ export function ListView({ rows, columns, searchKeys, pageSize = 25, placeholder
           </table>
         </div>
       )}
-      {pages > 1 && (
-        <div className="flex items-center justify-end gap-3 text-sm">
-          <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page précédente" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={18} /></button>
-          <span className="text-muted tabnum">Page {cur + 1} / {pages}</span>
-          <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page suivante" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={18} /></button>
+      {filtered.length > PAGE_SIZES[0] && (
+        <div className="flex items-center justify-end gap-4 text-sm flex-wrap">
+          <RowsPerPage value={ps} onChange={setPs} options={PAGE_SIZES} />
+          {pages > 1 && (
+            <div className="flex items-center gap-3">
+              <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page précédente" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={18} /></button>
+              <span className="text-muted tabnum">Page {cur + 1} / {pages}</span>
+              <button className="btn-ghost !px-3 min-h-[40px]" aria-label="Page suivante" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={18} /></button>
+            </div>
+          )}
         </div>
       )}
     </div>
