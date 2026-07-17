@@ -302,20 +302,28 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
     const snap = await db.collection("auditLog").where("module", "==", "maintenance").orderBy("ts", "desc").limit(3000).get();
-    const latest = new Map(); // entityId → detail du DERNIER auto-changement
-    for (const d of snap.docs) { const x = d.data() || {}; if (x.action !== "auto_mnt_contrat_statut") continue; const id = x.entityId; if (id && !latest.has(id)) latest.set(id, x.detail || {}); }
+    // Par contrat : `to` = statut auto le PLUS RÉCENT (celui qu'il porte censément), `from` = statut ORIGINAL
+    // (le plus ANCIEN avant toute auto-application) — robuste si l'auto a été lancé plusieurs fois.
+    const info = new Map();
+    for (const d of snap.docs) {
+      const x = d.data() || {}; if (x.action !== "auto_mnt_contrat_statut") continue;
+      const id = x.entityId; if (!id) continue; const det = x.detail || {};
+      const e = info.get(id);
+      if (!e) info.set(id, { to: det.to, from: det.from }); // 1ʳᵉ vue (desc) = plus récente → `to`
+      else if (det.from) e.from = det.from;                 // vues suivantes (plus anciennes) → `from` original
+    }
     let restored = 0;
-    for (const [id, det] of latest) {
-      if (!det.from || !det.to) continue;
+    for (const [id, e] of info) {
+      if (!e.from || !e.to || e.from === e.to) continue;
       const ref = db.doc(`mnt_contrats/${id}`);
       const cur = (await ref.get()).data();
-      if (!cur || cur.statut !== det.to) continue; // a déjà changé depuis → on n'y touche pas
-      await ref.set({ statut: det.from, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-      await db.collection("auditLog").add({ uid: req.auth.uid, action: "revert_mnt_auto_statut", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { from: det.to, to: det.from }, ts: FieldValue.serverTimestamp() });
+      if (!cur || cur.statut !== e.to) continue; // a déjà changé depuis → on n'y touche pas
+      await ref.set({ statut: e.from, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await db.collection("auditLog").add({ uid: req.auth.uid, action: "revert_mnt_auto_statut", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { from: e.to, to: e.from }, ts: FieldValue.serverTimestamp() });
       restored += 1;
     }
     if (restored) await requestRecompute(["maintenance"]);
-    return { ok: true, restored, considered: latest.size };
+    return { ok: true, restored, considered: info.size };
   });
 
   const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
