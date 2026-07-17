@@ -88,3 +88,25 @@ describe("am360 — pilotage par commercial (sans marge)", () => {
     expect(am360([], [], op, [], 2026).rows.find((x) => x.am === "DATCHA").activeCount).toBe(2);
   });
 });
+
+describe("am360 — tendance mensuelle par commercial (CAS booké + facturé)", () => {
+  it("agrège le CAS par mois de commande et le facturé par mois de facture, rattaché à l'AM", () => {
+    const orders = [
+      { fp: "FP/2026/1", am: "DATCHA", cas: 1000, yearPo: 2026, dateCommande: "2026-02-15" },
+      { fp: "FP/2026/2", am: "DATCHA", cas: 300, yearPo: 2026, dateCommande: "2026-03-01" },
+    ];
+    const invoices = [
+      { fp: "FP/2026/1", amountHt: 600, date: "2026-04-10" }, // rattaché à DATCHA via FP→AM
+    ];
+    const d = am360(orders, invoices, [], [], 2026).rows.find((r) => r.am === "DATCHA");
+    expect(d.trend).toEqual([
+      { month: "2026-02", cas: 1000, facture: 0 },
+      { month: "2026-03", cas: 300, facture: 0 },
+      { month: "2026-04", cas: 0, facture: 600 },
+    ]);
+  });
+  it("sans dateCommande ni date de facture → tendance vide", () => {
+    const d = am360([{ fp: "FP/2026/1", am: "X", cas: 100, yearPo: 2026 }], [], [], [], 2026).rows.find((r) => r.am === "X");
+    expect(d.trend).toEqual([]);
+  });
+});

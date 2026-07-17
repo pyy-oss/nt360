@@ -238,6 +238,12 @@ export const Am360: FC<Props> = () => {
         <Kpi label="Taux de transfo." value={sel.won + sel.lost > 0 ? pct(sel.conv) : "—"} />
         <Kpi label="CAS exercice" value={fmt(sel.casFy)} sub={`année ${data?.fy ?? ""}`} />
       </div>
+      {(sel.trend?.length ?? 0) > 1 && (
+        <Card title={`Tendance de ${sel.am} — 12 derniers mois`}>
+          <GroupedBars data={(sel.trend || []).map((t) => ({ name: t.month, "CAS booké": t.cas, "Facturé": t.facture }))} series={[{ key: "CAS booké", color: T.steel, name: "CAS booké" }, { key: "Facturé", color: T.emerald, name: "Facturé" }]} h={220} size={20} interval={0} />
+          <Tip>Performance <b>dans le temps</b> du commercial : <b>CAS booké</b> (mois de la commande) et <b>facturé</b> (mois de la facture), sur les 12 derniers mois renseignés. Dérivé rétroactivement des commandes et factures — voir en un coup d'œil un vendeur qui décroche ou qui monte.</Tip>
+        </Card>
+      )}
       <Card title="Classement des commerciaux">
         <Table columns={[
           colText("#", (r) => <span className="text-faint tabnum">{rankOf.get(r.am)}</span>, (r) => rankOf.get(r.am) ?? 999),
