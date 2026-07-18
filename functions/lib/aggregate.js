@@ -775,7 +775,16 @@ async function recomputeCore(db, only) {
 
       // Relances d'assignation : assignations en retard ou dans une fenêtre de relance (J-30/14/7).
       const relances = assignmentWatch(parAssigns, asOf);
-      w.push({ path: "summaries/par_relances", data: { asOf, items: relances.slice(0, 200), counts: assignCounts(relances), ...stamp } });
+      const relanceCounts = assignCounts(relances);
+      w.push({ path: "summaries/par_relances", data: { asOf, items: relances.slice(0, 200), counts: relanceCounts, ...stamp } });
+
+      // Actualité partenariats (ADR-P09) : bulletins DÉRIVÉS des états ci-dessus (conformité, renouvellements,
+      // retards) — PUR, sans toucher l'autorité buildNews. Écrit summaries/par_news (préfixe par_ ⇒ gaté
+      // drapeau + droit `partenariats` par les mêmes rules ; aucun montant confidentiel). Le front l'agrège
+      // au fil Actualité (comme newsFacturation/…). Contrairement à maintenance, le module CONTRIBUE au fil.
+      const { parNews } = require("../domain/parNews");
+      const news = parNews({ quotas: { partners: quotas }, renouvellements: { counts: watchCounts(watch), total: watch.length }, relances: { counts: relanceCounts } });
+      w.push({ path: "summaries/par_news", data: { asOf, ...news, ...stamp } });
     }
   }
 

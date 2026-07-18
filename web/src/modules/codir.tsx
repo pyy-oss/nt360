@@ -10,7 +10,7 @@ import { FreshnessGuard, type Props } from "./_shared";
 import { T, fmt } from "../design/tokens";
 import { relTime } from "../lib/format";
 import { useDocData } from "../lib/hooks";
-import { useCanExport, useClaims } from "../lib/rbac";
+import { useCan, useCanExport, useClaims } from "../lib/rbac";
 import { callExportReport, upsertOpsBulletin, type OpsBulletin, type BulletinSection } from "../lib/writes";
 import type { AtterrissageSummary, EntitySummary, BacklogSummary, BillingTrendSummary, PeriodsConfig } from "../types";
 
@@ -393,6 +393,15 @@ export const Codir: FC<Props> = () => {
   const week = isoWeek(new Date());
   const { data: bulletin } = useDocData<OpsBulletin>(fy ? `opsBulletins/${fy}_W${String(week).padStart(2, "0")}` : null);
   const canExport = useCanExport();
+  // Volet Partenariats (module gaté, ADR-P09) : lu seulement drapeau parFeature ALLUMÉ + droit `partenariats`.
+  const canPar = useCan("partenariats") !== "none";
+  const { data: parFeature } = useDocData<{ enabled?: boolean }>("config/parFeature");
+  const parOn = parFeature?.enabled === true && canPar;
+  const { data: parQuotas } = useDocData<{ partners?: { status?: string }[] }>(parOn ? "summaries/par_quotas" : null);
+  const { data: parAlerts } = useDocData<{ total?: number; counts?: { expired?: number } }>(parOn ? "summaries/par_alerts" : null);
+  const parPartners = parQuotas?.partners || [];
+  const parConf = parPartners.filter((p) => p.status === "on_track").length;
+  const parRisk = parPartners.filter((p) => p.status === "at_risk" || p.status === "non_compliant").length;
 
   // KPI (atterrissage CAF) : facturé YTD, backlog, CAF projeté (certitudes) et yc forecast (pipeline pondéré).
   const cafYtd = att?.factureN || 0;
@@ -526,6 +535,20 @@ export const Codir: FC<Props> = () => {
               <SectionTitle legend={<Legend items={[{ color: T.emerald, label: "réalisé" }, { color: T.gold, label: "planifié", faded: true }]} />}>Projection facturation</SectionTitle>
               <MonthBars rows={monthRows} />
             </Panel>
+
+            {/* Partenariats & certifications (module gaté, ADR-P09) — conformité des quotas constructeurs +
+                certifs à renouveler. Aucun montant (le CA reste confidentiel, hors CODIR). */}
+            {parOn && (
+              <Panel>
+                <SectionTitle>Partenariats & certifications</SectionTitle>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <InsightChip label="Partenaires conformes" value={`${parConf}/${parPartners.length}`} hint="quotas de certification atteints" color={parPartners.length && parConf === parPartners.length ? T.emerald : T.steel} />
+                  <InsightChip label="À risque / non conformes" value={String(parRisk)} hint="quotas au seuil ou non atteints" color={parRisk > 0 ? T.clay : T.emerald} />
+                  <InsightChip label="Certifs à renouveler" value={String(parAlerts?.total || 0)} hint="≤ 90 jours" color={(parAlerts?.total || 0) > 0 ? T.gold : T.steel} />
+                  <InsightChip label="Certifs expirées" value={String(parAlerts?.counts?.expired || 0)} hint="ne comptent plus dans les quotas" color={(parAlerts?.counts?.expired || 0) > 0 ? T.clay : T.emerald} />
+                </div>
+              </Panel>
+            )}
           </div>
         )}
       </div>

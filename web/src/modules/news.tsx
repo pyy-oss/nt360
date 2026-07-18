@@ -15,6 +15,7 @@ const SEV_LABEL = { high: "Urgent", medium: "À surveiller", info: "Info" } as c
 const DOMAIN_LABEL: Record<string, string> = {
   commandes: "Commandes", facturation: "Facturation", pipeline: "Pipeline",
   backlog: "Backlog", fournisseurs: "Fournisseurs", bc: "Exécution BC", qualite: "Qualité",
+  partenariats: "Partenariats",
 };
 
 export const Actualite: FC<Props> = () => {
@@ -27,6 +28,11 @@ export const Actualite: FC<Props> = () => {
   const { data: dBl } = useDocData<NewsSummary>(useCan("backlog") !== "none" ? "summaries/newsBacklog" : null);
   const { data: dBc } = useDocData<NewsSummary>(useCan("bc") !== "none" ? "summaries/newsBc" : null);
   const { data: dPl } = useDocData<NewsSummary>(useCan("pipeline") !== "none" ? "summaries/newsPipeline" : null);
+  // Volet Partenariats (module gaté, ADR-P09) : lu seulement si le drapeau parFeature est ALLUMÉ ET le droit
+  // `partenariats` accordé — sinon `null` (pas d'abonnement, donc pas de permission-denied drapeau éteint).
+  const canPar = useCan("partenariats") !== "none"; // hoisté (règles des hooks : jamais d'appel conditionnel)
+  const { data: parFeature } = useDocData<{ enabled?: boolean }>("config/parFeature");
+  const { data: dPar } = useDocData<NewsSummary>(parFeature?.enabled === true && canPar ? "summaries/par_news" : null);
   const { go, canGo } = useNav();
   // Curation LLM (scores de pertinence par TYPE de bulletin) — lue toujours (module overview) ; absente
   // (secret non configuré / jamais exécutée) → tout est affiché tel quel (dégradation gracieuse).
@@ -35,7 +41,7 @@ export const Actualite: FC<Props> = () => {
   const [showAll, setShowAll] = useState(false);
   // Pagination du fil : on n'affiche qu'une fenêtre, étendue par « Voir plus » (zéro liste interminable).
   const [limit, setLimit] = useState(20);
-  const parts = [data, dFac, dFrn, dBl, dBc, dPl];
+  const parts = [data, dFac, dFrn, dBl, dBc, dPl, dPar];
   const rankS: Record<string, number> = { high: 0, medium: 1, info: 2 };
   const relOf = (b: NewsBulletin) => cur?.scores?.[b.id]?.relevance ?? 50; // non curé → neutre (affiché)
   // Type jugé peu pertinent par la curation → DÉMOTÉ (masqué derrière « voir tout »), SAUF sévérité

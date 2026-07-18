@@ -214,3 +214,17 @@ relances + renouvellements → liste `recipients.codir` (car `par_alerts` ne por
 (symétrie stricte avec le module sœur). **Double gate d'extinction** : drapeau `config/parFeature` ALLUMÉ,
 puis `emailNotify.enabled && triggers.partenariats` — éteint = no-op strict. Regroupement + gabarits
 **PURS et testés** (`domain/emailNotify.js`, `test/emailNotify.test.js`). Statut : **acté (Lot P1)**.
+
+### ADR-P09 — Le module CONTRIBUE au fil Actualité (summary `par_news`), contrairement à maintenance
+**Contexte** : le module sœur maintenance ne contribue PAS au fil Actualité (il garde ses signaux dans son
+propre centre de surveillance) ; ajouter Partenariats au fil crée donc une asymétrie assumée. **Décision
+(validée par l'humain)** : Partenariats produit un summary `summaries/par_news` (bulletins de conformité de
+quotas, renouvellements de certifs, retards d'assignation), agrégé au fil Actualité comme les volets
+`newsFacturation`/… Le summary est **DÉRIVÉ dans le bloc `want("partenariats")` de `aggregate.js`** (fonction
+PURE `domain/parNews`) — **sans toucher l'autorité `buildNews`** : aucune régression sur le fil existant.
+Préfixe `par_` ⇒ **gaté par les rules existantes** (drapeau `parFeature` + droit `partenariats` ;
+`summaryModule('par_.*')='partenariats'`) — aucune règle nouvelle, et **aucun montant confidentiel** dans
+les bulletins (le CA reste hors `par_news`). Le front (`news.tsx`) n'abonne `par_news` que si le drapeau est
+allumé ET le droit accordé (sinon `null` → pas de permission-denied). En parallèle, le **Bilan CODIR** reçoit
+une carte partenariats (conformité + certifs à renouveler, sans montant), même gate. Vérif : `test/parNews.test.js`,
+`test-rules/rules.test.js` (par_news lisible sous `partenariats` seul). Statut : **acté (Lot P2)**.
