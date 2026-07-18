@@ -289,3 +289,21 @@
   lues en direct par `generateParQbr` (pas re-dérivé comme au recompute) → la liste affichée en QBR peut
   être légèrement périmée. N'affecte pas les quotas (M1 clos). À traiter si le besoin d'exactitude de
   cette liste se confirme (re-dériver `computeCertStatus(c.expiryDate, today)` avant le filtre).
+
+---
+
+## Remédiation post-Lot 7 (suite) — QBR : statut de certif re-dérivé (note close)
+
+**Fait**
+- Traitement de la note laissée en attente : `qbrSnapshot.certifications_actives` filtrait sur le statut
+  PERSISTÉ des certifs lues en direct par `generateParQbr` → liste QBR potentiellement périmée.
+- Correctif : `handlers/partenariats.js` re-dérive `c.status = computeCertStatus(c.expiryDate, today)`
+  pour toutes les certifs AVANT `qbrSnapshot` — même fonction pure et même symétrie que le recompute
+  (`aggregate.js`, GARDIEN-M1). La QBR reflète désormais le statut « à date » comme les quotas.
+- Test durci (`test/parAi.test.js`) : `qbrSnapshot` exclut bien une certif au statut `expired` de
+  `certifications_actives` (verrouille la moitié « filtre active-only » ; l'autre moitié, `computeCertStatus`,
+  est déjà testée). functions 1099/1099, garde no-undef verte.
+
+**Appris**
+- La règle « le statut à date se re-dérive, jamais lu du cache persisté » vaut pour TOUT lecteur de certifs,
+  pas seulement le recompute : le QBR lisait les certifs en direct et devait donc re-dériver aussi.
