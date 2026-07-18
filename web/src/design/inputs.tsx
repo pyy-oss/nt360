@@ -44,7 +44,7 @@ export function Panel({ anchor, onClose, children, minWidth }: { anchor: HTMLEle
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[120] rounded-xl border border-line bg-panel shadow-card p-1 animate-fade-in"
+      className="fixed z-popover rounded-xl border border-line bg-panel shadow-card p-1 animate-fade-in"
       style={{
         left: pos.left, width: Math.max(pos.width, minWidth || 0),
         ...(pos.drop === "down" ? { top: pos.top } : { top: pos.top, transform: "translateY(-100%)" }),

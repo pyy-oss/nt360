@@ -24,6 +24,20 @@ export default {
         sans: ['"Inter Variable"', "system-ui", "sans-serif"],
       },
       borderRadius: { xl2: "1rem" },
+      // Échelle d'empilement CENTRALISÉE (superpositions flottantes). Un seul endroit fait foi : on ne
+      // dispersera plus des `z-[87]` magiques dont l'ordre relatif dérive. Ordre croissant = du plus bas
+      // au plus haut. Invariants tenus : un pop-over de champ (select), un toast et une infobulle
+      // déclenchés DEPUIS une modale doivent passer AU-DESSUS d'elle (sinon retour d'action / choix
+      // masqués). Les `z-10/20` locaux (en-têtes de tableau collants) restent hors de cette échelle.
+      zIndex: {
+        menu: "30",     // menus déroulants d'actions (bulk, colonnes)
+        badge: "40",    // badge de statut persistant (recompute en bas d'écran)
+        drawer: "50",   // tiroir plein écran (Centre d'activité)
+        overlay: "60",  // modales / dialogues bloquants
+        toast: "70",    // retours d'action — AU-DESSUS des modales (feedback toujours visible)
+        popover: "80",  // pop-overs de champ (select/combobox) — AU-DESSUS d'une modale
+        tooltip: "90",  // infobulles (Tip) — couche la plus haute
+      },
       boxShadow: {
         card: "var(--shadow-card)",
       },

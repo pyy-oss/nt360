@@ -24,7 +24,7 @@ export function ColumnFilterMenu({ columns, rows, value, onChange }:
       <summary className={cx("btn-ghost !px-2.5 !py-1 text-xs cursor-pointer list-none inline-flex items-center gap-1.5", active > 0 && "text-gold")} title="Filtrer par colonne">
         <Filter size={14} aria-hidden="true" />Filtres{active > 0 && <span className="rounded-full bg-gold/15 text-gold px-1.5 leading-tight tabnum">{active}</span>}
       </summary>
-      <div role="menu" className="absolute right-0 z-30 mt-1 w-64 max-h-80 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
+      <div role="menu" className="absolute right-0 z-menu mt-1 w-64 max-h-80 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
         {active > 0 && (
           <button type="button" onClick={() => onChange({})} className="w-full text-left px-2 py-1.5 rounded text-[12px] text-clay hover:bg-panel2">Réinitialiser les filtres</button>
         )}
@@ -81,7 +81,7 @@ export function ColumnsMenu({ columns, hidden, onToggle }: { columns: Col[]; hid
       <summary className="btn-ghost !px-2.5 !py-1 text-xs cursor-pointer list-none inline-flex items-center gap-1.5" title="Choisir les colonnes affichées">
         <Columns3 size={14} aria-hidden="true" />Colonnes<span className="text-faint tabnum">{shown}/{items.length}</span>
       </summary>
-      <div role="menu" className="absolute right-0 z-30 mt-1 w-56 max-h-72 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
+      <div role="menu" className="absolute right-0 z-menu mt-1 w-56 max-h-72 overflow-auto rounded-lg border border-line bg-panel shadow-lg p-1.5">
         {items.map((x) => {
           const on = !hidden.has(x.id);
           const last = on && shown <= 1; // ne pas masquer la dernière colonne visible

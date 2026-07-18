@@ -607,7 +607,7 @@ export const OppList: FC<Props> = () => {
         </div>
       )}
       {canWrite && (
-        <Modal open={open} onClose={() => setOpen(false)} size="md"
+        <Modal open={open} onClose={() => setOpen(false)} size="form"
           title={f.patch ? "Actualiser l'opportunité importée" : f.id ? "Modifier l'opportunité (saisie)" : "Ajouter une opportunité (saisie)"}
           actions={
             <>

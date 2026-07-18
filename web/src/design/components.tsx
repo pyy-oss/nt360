@@ -650,7 +650,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-[90] flex flex-col gap-2 sm:max-w-[380px] pointer-events-none">
+      <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-toast flex flex-col gap-2 sm:max-w-[380px] pointer-events-none">
         {toasts.map((t) => {
           const sk = TOAST_SKIN[t.type];
           return (
@@ -691,7 +691,7 @@ export function Toggle({ checked, onChange, ariaLabel, disabled }: { checked: bo
 // fait main. Focus initial : [data-autofocus] sinon la carte elle-même (tabIndex -1). À la fermeture,
 // le focus est RESTITUÉ à l'élément déclencheur (sinon il retombait sur <body>, perdu pour le clavier).
 export function Modal({ open, onClose, title, children, actions, size = "sm" }:
-  { open: boolean; onClose: () => void; title?: ReactNode; children?: ReactNode; actions?: ReactNode; size?: "sm" | "md" }) {
+  { open: boolean; onClose: () => void; title?: ReactNode; children?: ReactNode; actions?: ReactNode; size?: "sm" | "md" | "form" }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   // `onClose` capturé par REF : les appelants passent une lambda inline (identité neuve à chaque rendu).
@@ -731,12 +731,15 @@ export function Modal({ open, onClose, title, children, actions, size = "sm" }:
   }, [open]); // volontairement PAS `onClose` (cf. onCloseRef ci-dessus) — sinon perte de focus par frappe
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center p-4">
+    <div className="fixed inset-0 z-overlay grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-overlay-in" onClick={onClose} />
       {/* Carte en COLONNE : en-tête + pied FIXES, seul le corps défile → sur un long formulaire le titre et
-          les actions (« Enregistrer ») restent toujours visibles (fin du défilement du CTA hors écran). */}
+          les actions (« Enregistrer ») restent toujours visibles (fin du défilement du CTA hors écran).
+          `form` = grand canevas de SAISIE : ~80 % de la largeur (plafonné) et un plancher de hauteur pour
+          respirer (50-70 % d'écran) ; `md` = contenu/aperçu ; `sm` = confirmations. */}
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}
-        className={cx("relative card w-full max-h-[90vh] flex flex-col animate-scale-in outline-none", size === "md" ? "max-w-lg" : "max-w-sm")}>
+        className={cx("relative card w-full max-h-[90vh] flex flex-col animate-scale-in outline-none",
+          size === "form" ? "modal-form" : size === "md" ? "max-w-lg" : "max-w-sm")}>
         <div className="flex items-start justify-between gap-3 shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3">
           {title ? <h2 id={titleId} className="font-display text-[17px] leading-tight text-ink">{title}</h2> : <span />}
           <button onClick={onClose} aria-label="Fermer" className="shrink-0 -mr-1 -mt-1 p-1 text-faint hover:text-ink transition-colors"><X size={18} /></button>
@@ -773,7 +776,7 @@ export function WriteActivityBar() {
   const active = useWriteActivity();
   if (!active) return null;
   return (
-    <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[60] pointer-events-none" role="status" aria-live="polite">
+    <div className="fixed top-2 left-1/2 -translate-x-1/2 z-tooltip pointer-events-none" role="status" aria-live="polite">
       <div className="flex items-center gap-2 rounded-full border border-gold/40 bg-panel2 px-3 py-1 text-[11px] text-ink shadow-lg">
         <span className="w-2 h-2 rounded-full bg-gold animate-pulse" aria-hidden="true" />
         Traitement en cours… <span className="text-faint hidden sm:inline">recalcul des agrégats</span>
@@ -798,7 +801,7 @@ export function ActivityCenter() {
       <button
         type="button" onClick={() => setOpen((o) => !o)}
         aria-label={`Centre d'activité${running ? ` — ${running} en cours` : ""}`} aria-expanded={open}
-        className="fixed bottom-4 left-4 z-[80] flex items-center gap-1.5 rounded-full border border-line bg-panel2 px-3 py-1.5 text-[11px] text-ink shadow-lg hover:border-gold/50 transition-colors"
+        className="fixed bottom-4 left-4 z-badge flex items-center gap-1.5 rounded-full border border-line bg-panel2 px-3 py-1.5 text-[11px] text-ink shadow-lg hover:border-gold/50 transition-colors"
       >
         {running ? <Loader2 size={13} className="animate-spin text-gold" /> : <Activity size={13} className={errors ? "text-clay" : "text-faint"} />}
         <span>Activité</span>

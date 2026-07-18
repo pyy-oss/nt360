@@ -85,6 +85,16 @@
   .card {
     @apply bg-panel border border-line rounded-xl2 shadow-card;
   }
+  /* Dégradé de la pastille logo « N » (marque) — factorisé (était dupliqué en style inline). */
+  .logo-n {
+    background: linear-gradient(135deg, #c9a24b, #8e6f2a);
+  }
+  /* Grand canevas de SAISIE (Modal size="form") : un formulaire occupe 70-85 % de la largeur (82vw,
+     plafonné pour ne pas devenir démesuré sur très grand écran) et ~64 % de la hauteur (dans la cible
+     50-70 %). Défini ici (comme .card/.btn) pour rester hors du budget du chunk JS d'entrée. */
+  .modal-form {
+    @apply w-[82vw] max-w-5xl h-[64vh];
+  }
   .btn {
     /* min-h : garantit une cible tactile confortable (≥ 36 px) même sur les boutons compacts
        (!px-2 !py-1 text-xs des actions de liste) — sans avoir à surcharger chaque appel. */

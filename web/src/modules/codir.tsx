@@ -304,7 +304,7 @@ function BulletinEditor({ fy, week, initial, onClose, onSaved }: { fy: number; w
     toast(`Importé : ${parsed.length} section(s)`, "ok");
   };
   return (
-    <Modal open title={`Hot Topics Opérations — S${week} / FY ${fy}`} onClose={onClose} size="md" actions={<Busy label="Enregistrer" fn={save} okMsg="Enregistré" errMsg="Enregistrement refusé" />}>
+    <Modal open title={`Hot Topics Opérations — S${week} / FY ${fy}`} onClose={onClose} size="form" actions={<Busy label="Enregistrer" fn={save} okMsg="Enregistré" errMsg="Enregistrement refusé" />}>
       <div className="flex flex-col gap-4 text-[13px]">
         {/* IMPORT par collage (Excel / PowerPoint / mail) → structuré, éditable ensuite */}
         <div className="rounded-lg border border-gold/40 bg-gold/5 p-2.5">

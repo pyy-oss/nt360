@@ -681,7 +681,7 @@ function OrderEditor({ row }: { row: Order }) {
   return (
     <>
       <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setOpen(true)}>Corriger</button>
-      <Modal open={open} onClose={() => setOpen(false)} size="md"
+      <Modal open={open} onClose={() => setOpen(false)} size="form"
         title={<>Corriger la commande <span className="text-gold">{fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
         <div className="grid grid-cols-2 gap-3 mt-1">
@@ -918,7 +918,7 @@ function ClickupBtn({ row }: { row: Order }) {
       <button type="button" onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-1 text-xs" title="Créer / mettre à jour la tâche ClickUp">
         {row.clickupTaskId ? "ClickUp ↗" : "ClickUp"}
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} size="md"
+      <Modal open={open} onClose={() => setOpen(false)} size="form"
         title={<>Tâche ClickUp — <span className="text-gold">{row.fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
         <div className="text-[12px] text-muted mb-3 rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2">
