@@ -4,21 +4,23 @@ import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntT
 const asOf = "2026-07-15";
 
 describe("computeMntDashboard", () => {
-  it("ne compte le montant engagé QUE sur les contrats actifs", () => {
+  it("ARR : normalise le montant PAR ÉCHÉANCE en base annuelle, sur les seuls contrats actifs", () => {
     const d = computeMntDashboard(
       [
-        { statut: "actif", montantEngage: 1_000_000 },
-        { statut: "actif", montantEngage: 500_000 },
-        { statut: "brouillon", montantEngage: 9_000_000 }, // exclu
-        { statut: "resilie", montantEngage: 9_000_000 },   // exclu
+        { statut: "actif", echeanceType: "mensuel", montantEngage: 1_000_000 },    // × 12 = 12 000 000
+        { statut: "actif", echeanceType: "trimestriel", montantEngage: 500_000 },  // × 4  =  2 000 000
+        { statut: "actif", echeanceType: "annuel", montantEngage: 3_000_000 },     // × 1  =  3 000 000
+        { statut: "brouillon", echeanceType: "annuel", montantEngage: 9_000_000 }, // exclu (non actif)
+        { statut: "resilie", echeanceType: "annuel", montantEngage: 9_000_000 },   // exclu
       ],
       [],
       asOf,
     );
-    expect(d.contratsTotal).toBe(4);
-    expect(d.contratsActifs).toBe(2);
-    expect(d.montantEngageActifs).toBe(1_500_000);
-    expect(d.parStatut).toEqual({ actif: 2, brouillon: 1, resilie: 1 });
+    expect(d.contratsTotal).toBe(5);
+    expect(d.contratsActifs).toBe(3);
+    // 12M + 2M + 3M = 17M (avant le fix : 1M+0,5M+3M = 4,5M, un total sans signification car périodicités mélangées).
+    expect(d.arrActifs).toBe(17_000_000);
+    expect(d.parStatut).toEqual({ actif: 3, brouillon: 1, resilie: 1 });
   });
 
   it("repère les échéances proches (0..60 j) des contrats actifs, triées, exclut passées et lointaines", () => {
