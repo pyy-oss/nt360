@@ -249,6 +249,11 @@ describe("Historique des transitions d'étape (oppHistory · funnel)", () => {
   it("summaries/oppFunnel lisible au niveau pipeline (commercial OK)", async () => {
     await assertSucceeds(getDoc(doc(as("commercial"), "summaries/oppFunnel")));
   });
+  it("summaries/oppSlippage lisible au niveau pipeline (commercial OK)", async () => {
+    // Glissement (DC Lot 4) classé 'pipeline' comme le funnel : le bandeau cockpit doit être lisible
+    // par un commercial non-direction (sinon signal invisible + permission-denied en console).
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/oppSlippage")));
+  });
 });
 
 describe("Matrice de droits (habilitations)", () => {

@@ -69,6 +69,9 @@ service cloud.firestore {
         : id.matches('pipeline.*') ? 'pipeline'
         : id.matches('ams.*') ? 'pipeline'
         : id.matches('oppFunnel.*') ? 'pipeline'
+        // Glissement des deals (DC Lot 4) : agrégat par catégorie/commercial, même assiette que le funnel → 'pipeline'.
+        // Sans cette branche, oppSlippage tombait en '__deny__' → bandeau glissement invisible pour les non-direction.
+        : id.matches('oppSlippage.*') ? 'pipeline'
         : id.matches('suppliers.*') ? 'fournisseurs'
         : id.matches('atterrissage.*') ? 'overview'
         : id.matches('backlog.*') ? 'backlog'
