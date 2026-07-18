@@ -549,9 +549,21 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const interventions = sliceCapped(iSnap.docs).docs.map((d) => d.data());
     const cjmById = {};
     for (const d of sliceCapped(conSnap.docs).docs) { const x = d.data() || {}; if (x.cjm != null) cjmById[d.id] = Number(x.cjm); }
+    // Coût P&L de l'affaire par FP (achats BC + provisions) — lu du carnet isolé (marge), sous le MÊME droit
+    // `rentabilite`. Sans cette composante, un contrat sans intervention affichait coût 0 → marge 100 % (ADR-033).
+    const pnlCostByFp = {};
+    if (hasCost) {
+      const mSnap = await db.collection("commandesRowsMargin").limit(MAX_SCAN + 1).get();
+      for (const d of sliceCapped(mSnap.docs).docs) {
+        for (const r of ((d.data() || {}).rows || [])) {
+          const k = fpKey(r.fp);
+          if (k && r.costTotal != null) pnlCostByFp[k] = (pnlCostByFp[k] || 0) + (Number(r.costTotal) || 0);
+        }
+      }
+    }
     const { computeContratPnl } = require("../domain/mntContratPnl");
     const asOf = new Date().toISOString().slice(0, 10);
-    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost), hasCost };
+    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost, pnlCostByFp), hasCost };
   });
 
   return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiMntLignees, applyMntLignee, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };

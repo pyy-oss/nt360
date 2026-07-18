@@ -22,6 +22,34 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     expect(c1.margePct).toBe(0.75);
   });
 
+  it("le coût inclut le P&L de l'affaire (carnet, par FP) EN PLUS des interventions (ADR-033)", () => {
+    // C2 (revenu 500 000) sans intervention : sans P&L → coût 0 → marge 100 % (l'anomalie signalée en prod).
+    // Avec le coût carnet de FP/2026/2 = 400 000, la marge redevient réaliste.
+    const pnlCostByFp = { "FP/2026/2": 400_000, "FP/2026/1": 300_000 };
+    const rows = computeContratPnl(contrats, interventions, cjmById, asOf, true, pnlCostByFp);
+    const c2 = rows.find((r) => r.id === "C2");
+    expect(c2.coutInterventions).toBe(0);
+    expect(c2.coutPnl).toBe(400_000);
+    expect(c2.cout).toBe(400_000);
+    expect(c2.marge).toBe(100_000);      // 500 000 − 400 000, plus 100 %
+    expect(c2.margePct).toBe(0.2);
+    const c1 = rows.find((r) => r.id === "C1");
+    expect(c1.coutInterventions).toBe(250_000); // 2,5 j × CJM
+    expect(c1.coutPnl).toBe(300_000);           // coût carnet FP/2026/1
+    expect(c1.cout).toBe(550_000);
+    // Rapprochement par fpKey : un FP zero-paddé/à casse différente joint la même affaire.
+    const r2 = computeContratPnl([{ id: "C1", fp: "fp/2026/001", client: "ACME", statut: "actif", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" }], [], {}, asOf, true, { "FP/2026/1": 300_000 });
+    expect(r2[0].coutPnl).toBe(300_000);
+  });
+
+  it("le coût P&L reste masqué SANS droit rentabilité", () => {
+    const rows = computeContratPnl(contrats, interventions, cjmById, asOf, false, { "FP/2026/1": 300_000 });
+    const c1 = rows.find((r) => r.id === "C1");
+    expect(c1.coutInterventions).toBeNull();
+    expect(c1.coutPnl).toBeNull();
+    expect(c1.cout).toBeNull();
+  });
+
   it("signale missingCjm : jours d'intervention sans CJM connu (marge non fiable, audit m6)", () => {
     // K2 n'est pas dans cjmById → ses jours comptent en coût 0 mais sont drapeautés.
     const iv = [{ contratId: "C1", consultantId: "K1", heures: 8 }, { contratId: "C1", consultantId: "K2", heures: 16 }];
