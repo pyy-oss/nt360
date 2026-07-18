@@ -83,7 +83,7 @@ export const Partenariats: FC<Props> = () => {
       {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
-      {tab === "config" && <ConfigTab partners={partners || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
+      {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
       {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
     </div>
   );
@@ -471,10 +471,25 @@ const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label:
 };
 
 // ─────────────────────────────────────────────────────────────────────── Paramétrage (mapping fournisseur → constructeur)
-const ConfigTab: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean }> = ({ partners, partnerOpts, mapDoc, ca, canWrite }) => {
+const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean }> = ({ partners, certifs, assigns, partnerOpts, mapDoc, ca, canWrite }) => {
   const [rows, setRows] = useState<{ supplier: string; partnerId: string }[]>([]);
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
+  // Garde d'intégrité (PA3) : compter les certifs/assignations rattachées à un partenaire avant suppression.
+  // deleteParPartner ne cascade PAS — supprimer un partenaire pointé laisserait des orphelins : on prévient.
+  const links = useMemo(() => {
+    const m = new Map<string, { certs: number; assigns: number }>();
+    const bump = (id: string, k: "certs" | "assigns") => { const e = m.get(id) || { certs: 0, assigns: 0 }; e[k]++; m.set(id, e); };
+    for (const c of certifs) if (c.partnerId) bump(c.partnerId, "certs");
+    for (const a of assigns) if (a.partnerId) bump(a.partnerId, "assigns");
+    return m;
+  }, [certifs, assigns]);
+  const delConfirm = (p: Partner) => {
+    const l = links.get(p.id);
+    const rattache = l ? [l.certs ? `${l.certs} certification(s)` : "", l.assigns ? `${l.assigns} assignation(s)` : ""].filter(Boolean).join(" et ") : "";
+    return `Supprimer le partenaire « ${p.name} » et tout son référentiel (niveaux, compétences, catalogue, exigences, plan d'affaires) ?`
+      + (rattache ? ` ⚠️ ${rattache} lui reste(nt) rattachée(s) — elles deviendront orphelines (à supprimer séparément dans les onglets Certifications / Assignations).` : "");
+  };
   useEffect(() => { setRows(Object.entries(mapDoc?.map || {}).map(([supplier, partnerId]) => ({ supplier, partnerId }))); }, [mapDoc]);
   const unmapped = ca?.unmapped || [];
   const save = async () => {
@@ -522,7 +537,13 @@ const ConfigTab: FC<{ partners: Partner[]; partnerOpts: { value: string; label: 
             colNum("Niveaux", (r) => String((r.tiers || []).length)),
             colNum("Certifs au catalogue", (r) => String((r.certificationCatalog || []).length)),
             colNum("Exigences", (r) => String((r.requirements || []).length)),
-            ...(canWrite ? [colText("", (r) => <button className="btn-ghost text-[11px]" onClick={() => setEdit(r)}>Éditer</button>)] : []),
+            colNum("Rattachés", (r) => { const l = links.get(r.id); return l ? String(l.certs + l.assigns) : "—"; }, (r) => { const l = links.get(r.id); return l ? l.certs + l.assigns : 0; }),
+            ...(canWrite ? [colText("", (r) => (
+              <span className="inline-flex items-center gap-2">
+                <button className="btn-ghost text-[11px]" onClick={() => setEdit(r)}>Éditer</button>
+                <DangerBtn label="Suppr." confirm={delConfirm(r)} fn={() => callFn("deleteParPartner", { id: r.id })} okMsg="Partenaire supprimé" />
+              </span>
+            ))] : []),
           ]}
           rows={partners} rowKey={(r) => r.id}
           empty="Aucun partenaire — créez le premier constructeur avec « Nouveau partenaire »."
