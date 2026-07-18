@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { validatePartner, validateCatalogEntry, validateRequirement, computeExpiry, DEFAULT_VALIDITY_MONTHS } = require("../domain/parPartner");
+const { validatePartner, validateCatalogEntry, validateRequirement, computeExpiry, DEFAULT_VALIDITY_MONTHS, validateBusinessPlan, bpAchievement } = require("../domain/parPartner");
 
 // Référentiel partenaire (par_) — validation PURE. Miroir front : web/src/lib/parPartner.ts.
 describe("parPartner — validation du référentiel", () => {
@@ -60,5 +60,45 @@ describe("parPartner — validation du référentiel", () => {
     // en mars. Immatériel pour l'alerte J-90/60/30 ; documenté plutôt que masqué.
     expect(computeExpiry("2024-01-31", 1)).toBe("2024-03-02");
     expect(computeExpiry("pas-une-date", 24)).toBe(null);
+  });
+
+  // Champs additifs (plan d'affaires + statut + échéance + validation) — miroir Partners_Status_Tracking.
+  it("statut / échéance / validation : normalisés et optionnels", () => {
+    const v = validatePartner({ ...base, status: "Platinum", renewalDate: "2026-01-31", validationStatus: "Valide" });
+    expect(v.ok).toBe(true);
+    expect(v.value.status).toBe("Platinum");
+    expect(v.value.renewalDate).toBe("2026-01-31");
+    expect(v.value.validationStatus).toBe("valide"); // normalisé en minuscules
+    // Valeurs invalides ignorées (jamais imposées) : date non ISO, statut hors énumération.
+    const w = validatePartner({ ...base, renewalDate: "31/12/2025", validationStatus: "peut-être" });
+    expect(w.value.renewalDate).toBeUndefined();
+    expect(w.value.validationStatus).toBeUndefined();
+    // Aucun champ additif → aucun champ ajouté.
+    expect(validatePartner(base).value.businessPlan).toBeUndefined();
+  });
+
+  it("validateBusinessPlan : ne garde que les champs ≥ 0 fournis, null si vide", () => {
+    expect(validateBusinessPlan(null)).toBe(null);
+    expect(validateBusinessPlan({})).toBe(null);
+    const bp = validateBusinessPlan({ pipelineBp: 300000, pipelineYtd: 3000000, growthBp: 25, growthYtd: 20, bookingBp: -5, certBp: "x" });
+    expect(bp).toEqual({ pipelineBp: 300000, pipelineYtd: 3000000, growthBp: 25, growthYtd: 20 }); // négatif et non-nombre écartés
+  });
+
+  it("bpAchievement : ratio par axe + % global = moyenne (reproduit la colonne du fichier)", () => {
+    // Ligne KASPERSKY du fichier : pipeline 3M/300k=10, booking 215k/220k≈0.977, cert 8/6≈1.333, growth 20/25=0.8.
+    const a = bpAchievement({ pipelineBp: 300000, pipelineYtd: 3000000, bookingBp: 220000, bookingYtd: 215000, certBp: 6, certYtd: 8, growthBp: 25, growthYtd: 20 });
+    expect(a.pipeline).toBeCloseTo(10, 6);
+    expect(a.growth).toBeCloseTo(0.8, 6);
+    expect(a.global).toBeCloseTo((10 + 215000 / 220000 + 8 / 6 + 0.8) / 4, 6); // ≈ 3.2777
+    // Objectif nul → ratio null, exclu de la moyenne (pas de division par zéro).
+    const b = bpAchievement({ pipelineBp: 0, pipelineYtd: 100, growthBp: 25, growthYtd: 20 });
+    expect(b.pipeline).toBe(null);
+    expect(b.global).toBeCloseTo(0.8, 6);
+    expect(bpAchievement({}).global).toBe(null);
+  });
+
+  it("plan d'affaires embarqué dans le référentiel validé", () => {
+    const v = validatePartner({ ...base, businessPlan: { pipelineBp: 300000, pipelineYtd: 3000000 } });
+    expect(v.value.businessPlan).toEqual({ pipelineBp: 300000, pipelineYtd: 3000000 });
   });
 });
