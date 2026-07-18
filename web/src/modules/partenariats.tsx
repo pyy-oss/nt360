@@ -9,11 +9,12 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
 import { buildPartnerPayload, partnerToForm, PAR_LEVELS, type PartnerFormState } from "../lib/parPartnerForm";
+import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
 import { fmt, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
@@ -276,7 +277,8 @@ function useConsultants(active: boolean) {
 
 // ─────────────────────────────────────────────────────────────────────── Certifications
 const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Record<string, string>; partnerOpts: { value: string; label: string }[]; canWrite: boolean }> = ({ certifs, partners, partnerName, partnerOpts, canWrite }) => {
-  const [open, setOpen] = useState(false);
+  // undefined = formulaire fermé ; null = nouvelle certif ; Certif = édition d'une existante.
+  const [edit, setEdit] = useState<Certif | null | undefined>(undefined);
   const exportCols = [
     { header: "Ingénieur", render: (r: Certif) => r.consultantName || r.consultantId },
     { header: "BU", render: (r: Certif) => r.consultantBu || "" },
@@ -287,7 +289,7 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
     { header: "Statut", render: (r: Certif) => label(CERT_STATUS_LABEL, r.status) },
   ];
   return (
-    <Card title="Certifications des ingénieurs" actions={<div className="flex items-center gap-2"><ExportBtn name="certifications" cols={exportCols} rows={certifs} />{canWrite && <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button>}</div>}>
+    <Card title="Certifications des ingénieurs" actions={<div className="flex items-center gap-2"><ExportBtn name="certifications" cols={exportCols} rows={certifs} />{canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Table
         columns={[
           colText("Ingénieur", (r) => r.consultantName || r.consultantId),
@@ -297,41 +299,67 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
           colText("Obtenue", (r) => frDate(r.obtainedDate)),
           colText("Expire", (r) => r.expiryDate ? frDate(r.expiryDate) : "—"),
           colText("Statut", (r) => <Badge tone={certStatusTone(r.status)}>{label(CERT_STATUS_LABEL, r.status)}</Badge>),
+          // Actions par ligne (écriture seulement) : réviser la date d'obtention ou retirer la certif.
+          ...(canWrite ? [colText("", (r) => (
+            <span className="inline-flex items-center gap-2">
+              <button className="btn-ghost text-[11px]" onClick={() => setEdit(r)}>Éditer</button>
+              <DangerBtn label="Suppr." confirm={`Supprimer la certification « ${r.certName || r.certificationCatalogId} » de ${r.consultantName || r.consultantId} ?`} fn={() => callFn("deleteParCertification", { id: r.id })} okMsg="Certification supprimée" />
+            </span>
+          ))] : []),
         ]}
         rows={certifs} rowKey={(r) => r.id} searchKeys={[(r) => r.consultantName, (r) => r.certName, (r) => r.partnerId]}
         empty="Aucune certification enregistrée."
       />
-      {open && <CertifForm partners={partners} partnerOpts={partnerOpts} onClose={() => setOpen(false)} />}
+      {edit !== undefined && <CertifForm partners={partners} partnerOpts={partnerOpts} edit={edit} onClose={() => setEdit(undefined)} />}
     </Card>
   );
 };
 
-const CertifForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; onClose: () => void }> = ({ partners, partnerOpts, onClose }) => {
+const CertifForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; edit?: Certif | null; onClose: () => void }> = ({ partners, partnerOpts, edit, onClose }) => {
   const consultants = useConsultants(true);
-  const [consultantId, setConsultantId] = useState("");
-  const [partnerId, setPartnerId] = useState("");
-  const [catalogId, setCatalogId] = useState("");
-  const [obtainedDate, setObtainedDate] = useState("");
+  const [consultantId, setConsultantId] = useState(edit?.consultantId || "");
+  const [partnerId, setPartnerId] = useState(edit?.partnerId || "");
+  const [catalogId, setCatalogId] = useState(edit?.certificationCatalogId || "");
+  const [obtainedDate, setObtainedDate] = useState(edit?.obtainedDate || "");
   const catalog = useMemo(() => (partners.find((p) => p.id === partnerId)?.certificationCatalog) || [], [partners, partnerId]);
   const valid = !!(consultantId && partnerId && catalogId && obtainedDate);
+  // En édition, l'id est dérivé (consultant × catalogue) : on verrouille ces clés, seule la date d'obtention change.
   const submit = async () => { await callFn("upsertParCertification", { consultantId, partnerId, certificationCatalogId: catalogId, obtainedDate }); onClose(); };
   return (
-    <Modal open title="Ajouter une certification" size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Certification enregistrée" />}>
+    <Modal open title={edit ? "Modifier la certification" : "Ajouter une certification"} size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Certification enregistrée" />}>
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Ingénieur (consultant)"><Select value={consultantId} onChange={setConsultantId} options={consultants.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choisir…" /></Field>
-        <Field label="Constructeur"><Select value={partnerId} onChange={(v) => { setPartnerId(v); setCatalogId(""); }} options={partnerOpts} placeholder="Choisir…" /></Field>
-        <Field label="Certification (catalogue)"><Select value={catalogId} onChange={setCatalogId} options={catalog.map((e) => ({ value: e.id, label: e.name }))} placeholder={partnerId ? "Choisir…" : "Choisir un constructeur d'abord"} /></Field>
+        <Field label="Ingénieur (consultant)"><Select value={consultantId} onChange={setConsultantId} options={consultants.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choisir…" disabled={!!edit} /></Field>
+        <Field label="Constructeur"><Select value={partnerId} onChange={(v) => { setPartnerId(v); setCatalogId(""); }} options={partnerOpts} placeholder="Choisir…" disabled={!!edit} /></Field>
+        <Field label="Certification (catalogue)"><Select value={catalogId} onChange={setCatalogId} options={catalog.map((e) => ({ value: e.id, label: e.name }))} placeholder={partnerId ? "Choisir…" : "Choisir un constructeur d'abord"} disabled={!!edit} /></Field>
         <Field label="Date d'obtention"><DateField value={obtainedDate} onChange={setObtainedDate} /></Field>
       </div>
-      <Tip>La date d'expiration et le statut sont <b>calculés</b> à partir de la validité du catalogue — jamais saisis.{!valid && <span className="block text-gold mt-1">Renseignez les quatre champs.</span>}</Tip>
+      <Tip>La date d'expiration et le statut sont <b>calculés</b> à partir de la validité du catalogue — jamais saisis.{edit ? <span className="block text-muted mt-1">Ingénieur et certification ne se modifient pas ; supprimez pour recréer.</span> : null}{!valid && <span className="block text-gold mt-1">Renseignez les quatre champs.</span>}</Tip>
     </Modal>
   );
 };
 
 // ─────────────────────────────────────────────────────────────────────── Assignations
+// Statuts pilotables À LA MAIN dans le cycle de vie. « en_retard » est DÉRIVÉ (calculé des relances par
+// l'échéance, domain/parAssignment) : jamais posé manuellement — on l'exclut du sélecteur.
+const MANUAL_ASSIGN_STATUSES = ["a_planifier", "planifie", "en_formation", "obtenu"] as const;
+
+// Sélecteur de statut inline (cycle de vie de l'assignation). Reprend le retour toast des autres écritures.
+const AssignStatusCell: FC<{ a: Assign }> = ({ a }) => {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const change = async (status: string) => {
+    if (status === a.status || busy) return;
+    setBusy(true);
+    try { await callFn("setParAssignmentStatus", { id: a.id, status }); toast("Statut mis à jour", "ok"); }
+    catch (e: any) { const d = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(d ? `Changement refusé — ${d}` : "Changement refusé", "err"); }
+    finally { setBusy(false); }
+  };
+  return <div className="w-40"><Select value={MANUAL_ASSIGN_STATUSES.includes(a.status as typeof MANUAL_ASSIGN_STATUSES[number]) ? a.status : ""} onChange={change} options={MANUAL_ASSIGN_STATUSES.map((s) => ({ value: s, label: label(ASSIGNMENT_STATUS_LABEL, s) }))} ariaLabel="Statut de l'assignation" placeholder={label(ASSIGNMENT_STATUS_LABEL, a.status)} disabled={busy} /></div>;
+};
+
 const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Record<string, string>; partnerOpts: { value: string; label: string }[]; canWrite: boolean }> = ({ assigns, partners, partnerName, partnerOpts, canWrite }) => {
-  const [open, setOpen] = useState(false);
-  const markObtenu = (id: string) => callFn("setParAssignmentStatus", { id, status: "obtenu" });
+  // undefined = formulaire fermé ; null = nouvelle assignation ; Assign = édition d'une existante.
+  const [edit, setEdit] = useState<Assign | null | undefined>(undefined);
   const exportCols = [
     { header: "Ingénieur", render: (r: Assign) => r.consultantName || r.consultantId },
     { header: "Constructeur", render: (r: Assign) => partnerName[r.partnerId] || r.partnerId },
@@ -341,7 +369,7 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
     { header: "Lien ClickUp", render: (r: Assign) => r.clickupUrl || "" },
   ];
   return (
-    <Card title="Assignations de certification" actions={<div className="flex items-center gap-2"><ExportBtn name="assignations-certification" cols={exportCols} rows={assigns} />{canWrite && <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button>}</div>}>
+    <Card title="Assignations de certification" actions={<div className="flex items-center gap-2"><ExportBtn name="assignations-certification" cols={exportCols} rows={assigns} />{canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Tip>Affecter à un ingénieur l'obtention d'une certification à une échéance ; les relances (J-30/14/7) et les retards apparaissent au Tableau de bord.</Tip>
       <Table
         columns={[
@@ -349,7 +377,10 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
           colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId),
           colText("Certif visée", (r) => r.cert || r.certificationCatalogId),
           colText("Échéance", (r) => frDate(r.targetDate)),
-          colText("Statut", (r) => <Badge tone={assignmentTone(r.status)}>{label(ASSIGNMENT_STATUS_LABEL, r.status)}</Badge>),
+          // Écriture : le statut se pilote via le sélecteur (cycle de vie) ; lecture seule : badge.
+          canWrite
+            ? colText("Statut", (r) => <AssignStatusCell a={r} />, (r) => r.status)
+            : colText("Statut", (r) => <Badge tone={assignmentTone(r.status)}>{label(ASSIGNMENT_STATUS_LABEL, r.status)}</Badge>),
           colText("ClickUp", (r) => (
             <span className="inline-flex items-center gap-2">
               {r.clickupUrl && <a href={r.clickupUrl} target="_blank" rel="noreferrer" className="text-[11px] text-emerald hover:underline">Ouvrir la tâche</a>}
@@ -357,34 +388,40 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
               {!r.clickupUrl && !canWrite && <span className="text-faint">—</span>}
             </span>
           )),
-          ...(canWrite ? [colText("Action", (r) => r.status !== "obtenu" ? <Busy label="Marquer obtenue" variant="ghost" fn={() => markObtenu(r.id)} okMsg="Statut mis à jour" /> : <span className="text-faint">—</span>)] : []),
+          ...(canWrite ? [colText("", (r) => (
+            <span className="inline-flex items-center gap-2">
+              <button className="btn-ghost text-[11px]" onClick={() => setEdit(r)}>Éditer</button>
+              <DangerBtn label="Suppr." confirm={`Supprimer l'assignation « ${r.cert || r.certificationCatalogId} » de ${r.consultantName || r.consultantId} ?`} fn={() => callFn("deleteParAssignment", { id: r.id })} okMsg="Assignation supprimée" />
+            </span>
+          ))] : []),
         ]}
         rows={assigns} rowKey={(r) => r.id} searchKeys={[(r) => r.consultantName, (r) => r.cert, (r) => r.partnerId]}
         empty="Aucune assignation."
       />
-      {open && <AssignForm partners={partners} partnerOpts={partnerOpts} onClose={() => setOpen(false)} />}
+      {edit !== undefined && <AssignForm partners={partners} partnerOpts={partnerOpts} edit={edit} onClose={() => setEdit(undefined)} />}
     </Card>
   );
 };
 
-const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; onClose: () => void }> = ({ partners, partnerOpts, onClose }) => {
+const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; edit?: Assign | null; onClose: () => void }> = ({ partners, partnerOpts, edit, onClose }) => {
   const consultants = useConsultants(true);
-  const [consultantId, setConsultantId] = useState("");
-  const [partnerId, setPartnerId] = useState("");
-  const [catalogId, setCatalogId] = useState("");
-  const [targetDate, setTargetDate] = useState("");
+  const [consultantId, setConsultantId] = useState(edit?.consultantId || "");
+  const [partnerId, setPartnerId] = useState(edit?.partnerId || "");
+  const [catalogId, setCatalogId] = useState(edit?.certificationCatalogId || "");
+  const [targetDate, setTargetDate] = useState(edit?.targetDate || "");
   const catalog = useMemo(() => (partners.find((p) => p.id === partnerId)?.certificationCatalog) || [], [partners, partnerId]);
   const valid = !!(consultantId && partnerId && catalogId && targetDate);
+  // En édition, l'id est dérivé (consultant × catalogue) : on verrouille ces clés, seule l'échéance change.
   const submit = async () => { await callFn("upsertParAssignment", { consultantId, partnerId, certificationCatalogId: catalogId, targetDate }); onClose(); };
   return (
-    <Modal open title="Ajouter une assignation" size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Assignation enregistrée" />}>
+    <Modal open title={edit ? "Modifier l'assignation" : "Ajouter une assignation"} size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Assignation enregistrée" />}>
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Ingénieur (consultant)"><Select value={consultantId} onChange={setConsultantId} options={consultants.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choisir…" /></Field>
-        <Field label="Constructeur"><Select value={partnerId} onChange={(v) => { setPartnerId(v); setCatalogId(""); }} options={partnerOpts} placeholder="Choisir…" /></Field>
-        <Field label="Certification à obtenir"><Select value={catalogId} onChange={setCatalogId} options={catalog.map((e) => ({ value: e.id, label: e.name }))} placeholder={partnerId ? "Choisir…" : "Choisir un constructeur d'abord"} /></Field>
+        <Field label="Ingénieur (consultant)"><Select value={consultantId} onChange={setConsultantId} options={consultants.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choisir…" disabled={!!edit} /></Field>
+        <Field label="Constructeur"><Select value={partnerId} onChange={(v) => { setPartnerId(v); setCatalogId(""); }} options={partnerOpts} placeholder="Choisir…" disabled={!!edit} /></Field>
+        <Field label="Certification à obtenir"><Select value={catalogId} onChange={setCatalogId} options={catalog.map((e) => ({ value: e.id, label: e.name }))} placeholder={partnerId ? "Choisir…" : "Choisir un constructeur d'abord"} disabled={!!edit} /></Field>
         <Field label="Échéance cible"><DateField value={targetDate} onChange={setTargetDate} /></Field>
       </div>
-      {!valid && <Tip>Renseignez les quatre champs.</Tip>}
+      {edit ? <Tip>Ingénieur et certification ne se modifient pas ; supprimez pour recréer. Le statut se pilote depuis le tableau.</Tip> : !valid ? <Tip>Renseignez les quatre champs.</Tip> : null}
     </Modal>
   );
 };
@@ -483,6 +520,16 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
     <Modal open title={initial ? `Éditer ${initial.name}` : "Nouveau partenaire"} size="form" onClose={onClose}
       actions={<Busy label="Enregistrer" fn={submit} okMsg="Partenaire enregistré" />}>
       <div className="space-y-4">
+        {/* Modèles constructeurs : pré-remplissent tout le référentiel (évite la page blanche et les listes
+            déroulantes vides des exigences). Réservé à la création — on ne clobbère pas un partenaire édité. */}
+        {!initial && (
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-line p-2">
+            <span className="text-[11px] text-muted">Partir d'un modèle :</span>
+            {PARTNER_PRESETS.map((p) => (
+              <button key={p.id} type="button" className="btn-ghost text-[11px]" onClick={() => setF(buildPartnerPreset(p.id, nk))}>{p.label}</button>
+            ))}
+          </div>
+        )}
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Constructeur (nom)"><input className="field" value={f.name} placeholder="Ex. Fortinet" onChange={(e) => set({ name: e.target.value })} /></Field>
           <Field label="Programme"><input className="field" value={f.programName} placeholder="Ex. Engage (optionnel)" onChange={(e) => set({ programName: e.target.value })} /></Field>
@@ -523,12 +570,17 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
         </FormBlock>
 
         <FormBlock title="Exigences de quota (objectifs)" onAdd={() => set({ reqs: [...f.reqs, { k: nk(), tierK: "", targetK: "", minCount: "" }] })}>
+          {/* Une exigence référence un niveau + une cible : sans niveaux ni compétences/certifs, ses listes
+              déroulantes seraient vides — on le dit plutôt que de laisser un menu vide sans explication. */}
+          {f.reqs.length > 0 && (!tierOpts.length || !targetOpts.length) && (
+            <Tip>Ajoutez d'abord un <b>niveau</b> et au moins une <b>compétence</b> ou <b>certification</b> ci-dessus — ou repartez d'un modèle constructeur en haut du formulaire.</Tip>
+          )}
           {f.reqs.map((r, i) => (
             <div key={r.k} className="flex items-center gap-2 flex-wrap">
               <div className="w-40"><Select value={r.tierK} onChange={(v) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, tierK: v } : x) })} options={tierOpts} placeholder="Niveau…" /></div>
-              <span className="text-faint text-[12px]">exige</span>
+              <span className="text-faint text-[11px]">exige</span>
               <input className="field w-16" type="number" value={r.minCount} placeholder="min" onChange={(e) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, minCount: e.target.value } : x) })} />
-              <span className="text-faint text-[12px]">ingénieur(s) sur</span>
+              <span className="text-faint text-[11px]">ingénieur(s) sur</span>
               <div className="flex-1 min-w-[180px]"><Select value={r.targetK} onChange={(v) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, targetK: v } : x) })} options={targetOpts} placeholder="Cible (compétence/certif)…" /></div>
               <button className="btn-ghost text-clay text-[11px]" onClick={() => set({ reqs: f.reqs.filter((_, j) => j !== i) })}>Retirer</button>
             </div>
