@@ -631,3 +631,20 @@ le lien avant d'agir. Front seul (certifs/assigns déjà chargées en temps rée
 **Conception.** Réutilise `DangerBtn` (confirmation + toast) comme le reste de l'ERP. On **prévient** plutôt
 que de bloquer (le backend autorise la suppression) : cohérent avec l'esprit additif et laisse la décision à
 l'utilisateur, tout en rendant le risque visible. Pas d'ADR : additif, aucune nouvelle donnée ni convention.
+
+---
+
+## PA4 — Relance de renouvellement de certif au manager de l'ingénieur — 2026-07-18
+
+**Fait.** Les managers recevaient déjà par email (`parRelancesSweep`) leurs **assignations** à relancer, mais
+les **renouvellements de certif** (par_alerts ≤ 90 j) n'allaient qu'au digest DIRECTION (par_alerts n'avait pas
+de destinataire). Comblé : (1) `upsertParCertification` dénormalise désormais le **managerUid** du consultant
+(comme les assignations) ; (2) `certRenewalWatch` remonte ce managerUid sur chaque item ; (3) `parRelancesSweep`
+groupe les renouvellements par manager (`groupParAlertsByManager`) et envoie à chaque manager **un seul email**
+couvrant SES assignations à relancer ET SES certifs à renouveler (section dédiée dans `buildParManagerEmail`).
+
+**Conception.** Additif, aucun nouvel export (parRelancesSweep préexiste ; `deployed-functions.txt` intouché).
+Grouping factorisé en `groupByManagerUid` (une logique, deux sources). Tests : `parAlert` (managerUid remonté)
++ `emailNotify` (section renouvellements + grouping alertes). **Migration douce** : une certif écrite AVANT ce
+lot n'a pas de managerUid tant qu'elle n'est pas ré-enregistrée → elle reste au digest direction (filet), pas
+d'orphelin. Pas d'ADR (extension d'ADR-P08 : relances email par manager).

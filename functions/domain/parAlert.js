@@ -32,6 +32,8 @@ function certRenewalWatch(certs, todayIso) {
     if (!bucket) continue;
     items.push({
       id: c.id, consultantId: c.consultantId, consultantName: c.consultantName || "", partnerId: c.partnerId,
+      // managerUid dénormalisé (PA4) : destinataire de la relance de renouvellement de CE consultant.
+      managerUid: c.managerUid || null,
       certName: c.certName || c.certificationCatalogId, expiryDate: c.expiryDate, daysLeft, bucket,
     });
   }
