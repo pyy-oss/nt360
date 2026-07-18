@@ -72,4 +72,24 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, p
   return rows;
 }
 
-module.exports = { computeContratPnl };
+// Seuil bas de marge « saine » (décision DO Lot 5). Sous ce palier, un contrat pèse sur le score de risque.
+const MARGE_FAIBLE_PCT = 0.15;
+
+/**
+ * Palier de risque de marge, DÉRIVÉ d'une ligne de rentabilité (margePct PRUDENT, ADR-033) :
+ *   - "negative" : marge < 0 (le contrat ne couvre pas son coût à ce jour) ;
+ *   - "faible"   : 0 ≤ marge < 15 % (marge trop mince) ;
+ *   - null       : marge saine, OU inconnue (droit coût absent → margePct null, ou revenu nul).
+ * NE renvoie JAMAIS de montant : sert à alimenter le score de risque (matérialisé sous droit `maintenance`)
+ * sans exposer le coût/marge confidentiels (le montant exact reste dans le callable gaté `rentabilite`).
+ * @param {{margePct:number|null}} row  ligne renvoyée par computeContratPnl
+ * @returns {"negative"|"faible"|null}
+ */
+function margeRisqueNiveau(row) {
+  if (!row || row.margePct == null) return null; // marge inconnue → pas de signal (évite le bruit revenu nul)
+  if (row.margePct < 0) return "negative";
+  if (row.margePct < MARGE_FAIBLE_PCT) return "faible";
+  return null;
+}
+
+module.exports = { computeContratPnl, margeRisqueNiveau, MARGE_FAIBLE_PCT };

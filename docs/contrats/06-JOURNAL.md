@@ -31,6 +31,35 @@
 
 ---
 
+## 2026-07-18 — La rentabilité entre dans le score de risque des contrats (ADR-034)
+
+**Fait**
+- 5e signal `marge_faible` ajouté au moteur de risque (`mntRisque`) : `negative` (marge < 0, +30) ou
+  `faible` (0 ≤ marge < 15 %, +15). Un contrat en perte n'est plus « Vert » par défaut.
+- Calcul de la marge **côté serveur** (recompute) via `computeContratPnl` — **source unique** de la marge,
+  donc même nombre que la vue Rentabilité — réduit à un **palier** par `margeRisqueNiveau(row)`. Seul le
+  palier entre dans `summaries/mnt_risque` (lu sous droit `maintenance`) : **le montant confidentiel n'y
+  transite jamais** (il reste dans le callable gaté `mntContratPnl`). Pas de fuite RBAC.
+- `mntRisque` reste PUR : il **reçoit** `margeByContrat` (map contratId → palier), ne calcule pas la marge.
+- Miroir front `mntRisque.ts` : type `marge_faible`, `signalText` distingue « Marge négative » / « Marge
+  faible », `RisqueItem.margeNiveau` exposé. La pastille apparaît automatiquement dans la table de risque.
+- Tests : `mntRisque.test.js` (+3 : paliers negative/faible/absent), `mntContratPnl.test.js` (+4 :
+  `margeRisqueNiveau`), `mntRisque.test.ts` front (+1 : libellé par sévérité). 1046 tests back verts.
+
+**Appris sur l'existant**
+- Le recompute charge `orders` inconditionnellement → le coût P&L par FP (`costTotal`) est dérivable dans
+  le bloc risque sans dépendre de la garde `commandes`. CJM lu de `consultants.select("cjm")`, interventions
+  de `mnt_interventions` : même assiette que le callable `mntContratPnl`, donc chiffres cohérents.
+
+**Décidé**
+- ADR-034 : divulgation **qualitative** de la santé de marge aux détenteurs `maintenance` (jamais le
+  montant). Seuil 15 % ajustable. Signal prudent (hérite d'ADR-033) : plancher, jamais de sur-alerte de coût.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Correctif : « Montant engagé (actifs) » → Revenu récurrent annuel (ARR)
 
 **Fait**

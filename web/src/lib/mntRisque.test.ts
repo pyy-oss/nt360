@@ -20,4 +20,8 @@ describe("mntRisque (front) — libellés & tons", () => {
     expect(signalText({ type: "echeance_proche", jours: -2 })).toBe("Échéance proche (dépassée)");
     expect(signalText({ type: "quota_depasse", depassement: 2 })).toBe("Quota dépassé (+2)");
   });
+  it("marge_faible distingue négative et faible via la sévérité (DO Lot 5)", () => {
+    expect(signalText({ type: "marge_faible", severite: "negative" })).toBe("Marge négative");
+    expect(signalText({ type: "marge_faible", severite: "faible" })).toBe("Marge faible");
+  });
 });

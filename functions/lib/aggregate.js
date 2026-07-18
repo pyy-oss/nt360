@@ -697,12 +697,29 @@ async function recomputeCore(db, only) {
     const mntCfg = (await db.doc("config/mntFeature").get()).data();
     if (isMntEnabled(mntCfg)) {
       const { mntRisque } = require("../domain/mntRisque");
+      const { computeContratPnl, margeRisqueNiveau } = require("../domain/mntContratPnl");
       const tsMs = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : (Number(t) || 0));
-      const [mntContrats, mntTickets] = await Promise.all([readAll(db, "mnt_contrats", true), readAll(db, "mnt_tickets", true)]);
+      const [mntContrats, mntTickets, mntInterv, consultantsSnap] = await Promise.all([
+        readAll(db, "mnt_contrats", true), readAll(db, "mnt_tickets", true),
+        readAll(db, "mnt_interventions", true), db.collection("consultants").select("cjm").get(),
+      ]);
       // Horodatages Firestore → millisecondes à la FRONTIÈRE I/O (le domaine reste pur). Le mois
       // d'ouverture (quota) se dérive de ouvertLe.
       const ticks = mntTickets.map((t) => { const openMs = tsMs(t.ouvertLe); return { id: t.id, contratId: t.contratId, ouvertMs: openMs, priseEnCompteMs: t.priseEnCompteLe ? tsMs(t.priseEnCompteLe) : null, resoluMs: t.resoluLe ? tsMs(t.resoluLe) : null, dateJour: openMs ? new Date(openMs).toISOString().slice(0, 10) : null }; });
-      const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now() });
+      // Rentabilité → PALIER de risque (ADR-034). On calcule la marge PRUDENTE côté serveur (hasCost=true,
+      // le calcul est de confiance) via computeContratPnl — SOURCE UNIQUE de la marge, donc même nombre que
+      // la vue Rentabilité — puis on ne matérialise QUE le palier (negative/faible), jamais le montant
+      // confidentiel, dans summaries/mnt_risque (lu sous droit `maintenance`). coutTotal affaire = costTotal
+      // du carnet (orders) rapproché par fpKey ; CJM des consultants pour la main-d'œuvre TMA.
+      const cjmById = {};
+      consultantsSnap.forEach((d) => { const x = d.data() || {}; if (x.cjm != null) cjmById[d.id] = Number(x.cjm); });
+      const pnlCostByFp = {};
+      for (const o of orders) { const k = fpKey(o.fp); if (k && o.costTotal != null) pnlCostByFp[k] = (pnlCostByFp[k] || 0) + (Number(o.costTotal) || 0); }
+      const margeByContrat = {};
+      for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp)) {
+        const lvl = margeRisqueNiveau(row); if (lvl) margeByContrat[row.id] = lvl;
+      }
+      const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now(), margeByContrat });
       w.push({ path: "summaries/mnt_risque", data: { ...risque, ...stamp } });
       // Centre de surveillance (ADR-026) : flux d'événements PROJETÉ du risque (aucun recalcul) → cohérence
       // garantie avec summaries/mnt_risque. Même bloc gaté, même stamp. Lu sous droit `maintenance` + drapeau.

@@ -3,6 +3,41 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-034 — La rentabilité entre dans le score de risque, sous forme de PALIER (jamais le montant)
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (évaluation en profondeur — axe contrat)
+
+### Contexte
+Le moteur de risque des contrats (Lot 5, `mntRisque`) agrégeait 4 signaux (SLA rompu, échéance proche,
+quota dépassé, sous-facturation) mais **ignorait la rentabilité** : un contrat qui ne couvre pas son coût
+pouvait rester « Vert ». Or, du point de vue du Directeur des Opérations, un contrat en perte est un risque
+d'exécution de premier ordre. Contrainte : le coût/CJM/marge sont **confidentiels** (droit `rentabilite`),
+alors que `summaries/mnt_risque` est lu sous le droit `maintenance` (plus large). On ne peut donc pas y
+matérialiser un montant de marge sans créer une fuite RBAC.
+
+### Décision
+- Ajout d'un **5e signal `marge_faible`** au score de risque, à deux sévérités : `negative` (marge < 0,
+  poids **+30**) et `faible` (0 ≤ marge < **15 %**, poids **+15**).
+- La marge est calculée **côté serveur** dans le recompute via `computeContratPnl` — **source unique de la
+  marge** (même nombre que la vue Rentabilité, invariant « même métrique = même chiffre ») — puis **réduite à
+  un palier** par `margeRisqueNiveau(row)`. Seul le **palier** (`negative`/`faible`) entre dans
+  `summaries/mnt_risque`. **Le montant n'y transite jamais** : il reste dans le callable gaté `mntContratPnl`.
+- Le domaine `mntRisque` ne calcule pas la marge : il **reçoit** le palier (`margeByContrat`) et reste pur,
+  agnostique du coût.
+
+### Conséquences / limite assumée
+- **Divulgation qualitative assumée** : un détenteur du droit `maintenance` (sans `rentabilite`) voit
+  désormais qu'un contrat a une « Marge négative / faible » — **pas le montant**. C'est l'objet même de la
+  demande (rendre la rentabilité pilotable dans le risque) ; le chiffre exact reste à un clic, sous droit.
+- **Signal prudent (hérite d'ADR-033)** : la marge est un plancher (revenu engagé à ce jour vs coût total).
+  Un contrat jeune peut donc être signalé « négative » puis se redresser — acceptable pour un signal de
+  *risque* (l'exposition de coût précoce EST un risque) ; le seuil de 15 % est ajustable sans changer le
+  contrat de données. Si le coût est sous-estimé (jours sans CJM), le signal est conservateur (sous-alerte
+  possible sur un « sain » qui serait en fait « faible »), jamais l'inverse.
+- **Éteint = ERP d'avant** : bloc entièrement dans la garde `want("maintenance")` + drapeau `config/mntFeature`.
+
 ## ADR-033 — Rentabilité contrat : le coût inclut le P&L de l'affaire (carnet), pas seulement les interventions
 
 - **Date :** 2026-07-18
