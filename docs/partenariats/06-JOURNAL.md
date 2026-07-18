@@ -263,3 +263,29 @@
   fournisseurs BC non rattachés (annotée du CA) dans Paramétrage — il mappe alors à la saisie manuelle.
   Choix conservateur (le montant EST le CA confidentiel) ; à revoir si le besoin d'un libellé
   fournisseur sans montant se confirme (nécessiterait un summary non confidentiel dédié).
+
+---
+
+## Remédiation post-Lot 7 (suite) — vérification adverse : fuite CA résiduelle QBR
+
+**Fait**
+- La vérification gardien du correctif M2 a trouvé une **fuite résiduelle** : `generateParQbr`
+  calculait bien `seeCa = parCanSeeCa(req)` mais ne l'appliquait PAS au snapshot — le CA brut
+  (`ca_realise_ytd_fcfa`) était transmis au modèle ET renvoyé au client, contournant rules + front.
+  Le masque avait été posé sur `generateParActionPlan` et **oublié sur la QBR**.
+- Correctif : `handlers/partenariats.js` — `ca: seeCa ? (caSnap.data() || {}) : {}` (comme le plan
+  d'action). Sans le droit `rentabilite`, `qbrSnapshot` retombe sur `ca_realise_ytd_fcfa: 0`.
+- Test de contrat ajouté (`test/parAi.test.js`) : `ca={}` ⇒ montant 0 dans les DEUX snapshots
+  (plan + QBR) → verrouille la non-régression. functions 1099/1099.
+
+**Appris**
+- Une variable de garde calculée mais non branchée est pire qu'absente : elle donne l'illusion du
+  cloisonnement. Un correctif de confidentialité doit être vérifié sur CHAQUE point de sortie (ici
+  deux callables IA symétriques), pas seulement sur celui qu'on a en tête.
+- La vérification adverse post-merge a fait son travail : le premier passage avait manqué ce point.
+
+**Échoué / en attente (note, pas un changement silencieux)**
+- `qbrSnapshot.certifications_actives` filtre `c.status === "active"` sur le statut PERSISTÉ des certifs
+  lues en direct par `generateParQbr` (pas re-dérivé comme au recompute) → la liste affichée en QBR peut
+  être légèrement périmée. N'affecte pas les quotas (M1 clos). À traiter si le besoin d'exactitude de
+  cette liste se confirme (re-dériver `computeCertStatus(c.expiryDate, today)` avant le filtre).

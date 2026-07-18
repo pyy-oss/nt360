@@ -243,7 +243,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     ]);
     const certifs = sliceCapped(certSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const { qbrSnapshot } = require("../domain/parAi");
-    const snapshot = qbrSnapshot({ partnerId, partner: partSnap.data() || {}, periode, ca: caSnap.data() || {}, quotas: quotaSnap.data() || {}, certifs, relances: relSnap.data() || {} });
+    const snapshot = qbrSnapshot({ partnerId, partner: partSnap.data() || {}, periode, ca: seeCa ? (caSnap.data() || {}) : {}, quotas: quotaSnap.data() || {}, certifs, relances: relSnap.data() || {} });
     const { generateQbr } = require("../lib/parAi");
     let out;
     try { out = await generateQbr(apiKey, snapshot); }
