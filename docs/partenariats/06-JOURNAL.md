@@ -439,3 +439,21 @@
   constructeur (confidentiel) est VOLONTAIREMENT exclu des exports (seules les données non confidentielles :
   conformité, certifs, assignations). Un export PDF ou un export incluant le CA (gaté rentabilite) = lot
   ultérieur si le besoin se confirme.
+
+---
+
+## Lot P6 — Test de parcours de bout en bout + audit d'activation
+
+**Fait**
+- Test d'intégration DOMAINE `test/parParcours.test.js` : chaîne complète référentiel → certification
+  (expiration + statut à date) → couverture des quotas → alertes de renouvellement → bulletins d'Actualité
+  → point d'historisation. Deux scénarios (conforme / non conforme) prouvant la COHÉRENCE de bout en bout
+  (un même signal — l'expiration — se retrouve identique dans la couverture, les alertes et les bulletins :
+  invariant « même métrique = même nombre »). Pas de Playwright : le parcours gaté (drapeau + seed + secrets
+  IA/ClickUp) n'est pas testable en navigateur sans environnement seedé ; le test domaine pur couvre la
+  logique de bout en bout sans émulateur. functions 1114/1114.
+- Audit d'activation (gardien + conformiste) sur le module étendu (P1-P5) — voir résultats/remédiations.
+
+**Appris**
+- La chaîne dérivée du module est entièrement PURE (domain/) : un seul test d'intégration vitest exerce
+  tout le parcours métier sans I/O — le meilleur « filet » pour un pipeline de dérivation.
