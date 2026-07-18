@@ -15,6 +15,7 @@ import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
 import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
 import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
+import { tierProgress } from "../lib/parTier";
 import { fmt, pct, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
@@ -189,6 +190,11 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
     .map((p) => ({ p, a: bpAchievement(p.businessPlan) }))
     .sort((x, y) => (x.a.global ?? -1) - (y.a.global ?? -1)); // les moins avancés en tête (à traiter)
   const bpTone = (r: number | null) => (r == null ? "neutral" : r >= 1 ? "emerald" : r >= 0.8 ? "gold" : "clay");
+  // Niveau de partenariat tenu / prochain (PA2) : dérivé de la couverture des quotas + des rangs de niveaux
+  // du référentiel. Aucun re-calcul de couverture — on interprète les `ok` du summary (parité preservée).
+  const tiersByPartner = new Map(partners.map((p) => [p.id, p.tiers || []]));
+  const tp = (r: { partnerId: string; coverage?: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[] }) =>
+    tierProgress(tiersByPartner.get(r.partnerId), r.coverage);
   const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => pct(r.a[ax]), (r: typeof bpRows[number]) => r.a[ax] ?? -1);
   return (
     <div className="space-y-4">
@@ -242,13 +248,18 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
       <Card title="Conformité des quotas de certification" actions={<ExportBtn name="conformite-quotas" cols={[
         { header: "Constructeur", render: (r: any) => r.name },
         { header: "Statut", render: (r: any) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
+        { header: "Niveau tenu", render: (r: any) => tp(r).achieved?.name || "" },
+        { header: "Prochain niveau", render: (r: any) => tp(r).next?.name || "" },
+        { header: "Écart au prochain", render: (r: any) => tp(r).gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
         { header: "Exigences couvertes", render: (r: any) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}` },
-        { header: "Écarts", render: (r: any) => (r.gaps || []).map((g: any) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
       ]} rows={quotaPartners} />}>
+        <Tip>Le <b>niveau tenu</b> est le plus haut palier dont toutes les exigences (et celles d'en dessous) sont couvertes ; le <b>prochain niveau</b> et son <b>écart</b> disent ce qu'il manque pour monter d'un cran. Dérivé de la couverture des quotas ci-après (mêmes chiffres).</Tip>
         <Table
           columns={[
             colText("Constructeur", (r) => r.name),
             colText("Statut", (r) => <Badge tone={partnershipTone(r.status)}>{label(PARTNERSHIP_STATUS_LABEL, r.status)}</Badge>),
+            colText("Niveau tenu", (r) => tp(r).achieved?.name || "—"),
+            colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
             colText("Exigences couvertes", (r) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}`),
             colText("Écarts", (r) => (r.gaps || []).length ? (r.gaps as any[]).map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
           ]}

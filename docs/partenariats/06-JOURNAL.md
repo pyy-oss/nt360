@@ -601,3 +601,18 @@ vide. C'est un choix assumé (calcul cohérent > mimétisme d'une incohérence d
 l'enregistrement. Les modèles vivent dans le chunk LAZY du module (bundle d'entrée inchangé, 118,3 KB).
 Tests : `parPartnerPresets.test.ts` couvre les 20 (intégrité référentielle + plan d'affaires calculable) —
 101 cas.
+
+---
+
+## PA2 — Niveau de partenariat tenu + écart au niveau suivant — 2026-07-18
+
+**Fait.** Helper PUR `web/src/lib/parTier.ts` (`tierProgress`) : à partir des niveaux d'un partenaire (rangs)
+et de la couverture de ses exigences de quota (summary `par_quotas`), dérive le **niveau tenu** (plus haut
+palier dont toutes les exigences ET celles d'en dessous sont couvertes — échelle CUMULATIVE), le **prochain
+niveau** et l'**écart** (exigences manquantes : cible, détenteurs/minimum, manque). Surfacé en trois colonnes
+sur la carte « Conformité des quotas » du tableau de bord (+ export). 5 tests.
+
+**Conception.** **Aucun re-calcul de couverture** : on interprète les `ok` déjà produits par le backend →
+mêmes chiffres que la carte de conformité (invariant de parité respecté). Front seul, additif, aucun backend
+touché. Un niveau sans exigence est « couvert » (rien à satisfaire), cohérent avec le backend. Bundle
+d'entrée inchangé (118,3 KB). Pas d'ADR : additif, aucune nouvelle donnée ni convention.
