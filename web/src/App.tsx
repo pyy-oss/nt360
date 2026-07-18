@@ -1,17 +1,20 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "firebase/auth";
 import { LogOut, Sun, Moon } from "lucide-react";
 import { auth } from "./lib/firebase";
 import { currentTheme, toggleTheme, type Theme } from "./lib/theme";
 import { useClaims, useCanFn } from "./lib/rbac";
 import { useDocData } from "./lib/hooks";
-import Login from "./components/Login";
+// Login en LAZY : écran pré-auth autoportant, chargé à la demande (hors chunk d'entrée) — libère du
+// budget bundle pour l'enregistrement des onglets gatés. Suspense affiche un fond neutre le temps du chunk.
+const Login = lazy(() => import("./components/Login"));
 import { ErrorBoundary, KpiSkeletons, CardSkeleton, WriteActivityBar, ActivityCenter, cx } from "./design/components";
 import { NavContext, useNav, type NavIntent } from "./lib/nav";
 import { FilterProvider, useFilters } from "./lib/filters";
 import { FilterBar, FreshnessGuard } from "./modules/_shared";
 import { MODULES, GROUPS } from "./modules";
 import { moduleFlagOn, type MntFeature } from "./lib/mntFeature";
+import { type ParFeature } from "./lib/parFeature";
 
 function ActiveModule({ mod, period }: { mod: (typeof MODULES)[number]; period: string }) {
   const Comp = mod.Component;
@@ -34,6 +37,8 @@ export default function App() {
   // Drapeau du module Contrats de maintenance (ADR-009). Absent ⇒ éteint : l'onglet reste masqué
   // même si un rôle porte le droit `maintenance`. C'est le maître-interrupteur du module.
   const { data: mntFeature } = useDocData<MntFeature>("config/mntFeature");
+  // Drapeau du module Partenariats & Certifications (ADR-P01), même patron.
+  const { data: parFeature } = useDocData<ParFeature>("config/parFeature");
   const [period, setPeriod] = useState<string>("all");
   const [active, setActive] = useState<string>("overview");
   // Intention de navigation courante (filtre / segment / FP à pré-appliquer par le module cible).
@@ -46,7 +51,11 @@ export default function App() {
   const available: string[] = useMemo(() => periods?.available || ["all"], [periods]);
   // Visible = droit RBAC ET drapeau de fonctionnalité allumé (le cas échéant). Un module sans `flag`
   // garde son comportement historique (piloté par le seul RBAC).
-  const visible = useMemo(() => MODULES.filter((m) => can(m.key) !== "none" && moduleFlagOn(m.flag, mntFeature)), [can, mntFeature]);
+  // Table des drapeaux résolus, indexée par identifiant de flag (chaque module gaté y contribue).
+  const visible = useMemo(() => {
+    const flags = { mntFeature: mntFeature?.enabled === true, parFeature: parFeature?.enabled === true };
+    return MODULES.filter((m) => can(m.key) !== "none" && moduleFlagOn(m.flag, flags));
+  }, [can, mntFeature, parFeature]);
   const current = MODULES.find((m) => m.id === active) || visible[0];
   const allowed = current && can(current.key) !== "none" ? current : visible[0];
 
@@ -100,7 +109,7 @@ export default function App() {
   if (loading) {
     return <div className="min-h-screen grid place-items-center text-muted">Chargement…</div>;
   }
-  if (!user) return <Login />;
+  if (!user) return <Suspense fallback={<div className="min-h-screen bg-bg" />}><Login /></Suspense>;
   // Compte authentifié mais SANS rôle : écran explicite et ACTIONNABLE (au lieu du shell « aucun module »).
   // Le rôle est un custom claim → il n'apparaît qu'après re-délivrance du jeton ; le bouton force le
   // rafraîchissement (getIdToken(true)) puis recharge, sinon l'utilisateur resterait bloqué même une fois
