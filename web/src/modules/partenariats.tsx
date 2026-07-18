@@ -16,6 +16,7 @@ import { ExportBtn } from "../design/bulk";
 import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
 import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
 import { tierProgress } from "../lib/parTier";
+import { byEngineer } from "../lib/parEngineer";
 import { fmt, pct, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
@@ -51,7 +52,7 @@ export const Partenariats: FC<Props> = () => {
   // ADR-P07). Sans ce droit on NE S'ABONNE PAS à summaries/par_ca (sinon permission-denied par les rules)
   // et le KPI + la carte CA sont masqués — comme MB/%MB ailleurs (useCanSeeMargin).
   const canSeeCa = useCanSeeMargin();
-  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "config" | "ia">("dash");
+  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "engineers" | "config" | "ia">("dash");
 
   // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
   const { rows: partners } = useCollectionData<Partner>("par_partners");
@@ -67,6 +68,10 @@ export const Partenariats: FC<Props> = () => {
   const partnerName = useMemo(() => { const m: Record<string, string> = {}; for (const p of partners || []) m[p.id] = p.name; return m; }, [partners]);
   const partnerOpts = useMemo(() => (partners || []).map((p) => ({ value: p.id, label: p.name })), [partners]);
 
+  // Onboarding (PA5) : module activé mais référentiel VIDE — on guide vers la création plutôt que de laisser
+  // un tableau de bord à zéro sans indice (leçon du formulaire de référentiel : la complétude se mesure au
+  // parcours). N'apparaît qu'en écriture et quand aucun partenaire n'existe.
+  const empty = (partners || []).length === 0;
   return (
     <div className="space-y-4">
       <Segmented
@@ -75,17 +80,61 @@ export const Partenariats: FC<Props> = () => {
           { value: "dash", label: "Tableau de bord" },
           { value: "certifs", label: "Certifications", count: certifs?.length },
           { value: "assigns", label: "Assignations", count: assigns?.length },
+          { value: "engineers", label: "Ingénieurs" },
           { value: "config", label: "Paramétrage" },
           { value: "ia", label: "IA & QBR" },
         ]}
       />
 
+      {empty && canWrite && (
+        <Card title="Démarrer le module Partenariats">
+          <Tip>Le module est <b>activé mais vide</b>. Pour l'amorcer : ouvrez <b>Paramétrage</b> et créez votre premier constructeur avec <b>« Nouveau partenaire »</b>, ou gagnez du temps en <b>partant d'un modèle</b> (Fortinet, Palo Alto, Cisco, Huawei…). Ajoutez ensuite les <b>certifications</b> de vos ingénieurs et leurs <b>assignations</b> à venir — le tableau de bord se remplit tout seul.</Tip>
+          <button className="btn mt-2" onClick={() => setTab("config")}><Plus size={14} /> Créer un partenaire</button>
+        </Card>
+      )}
+
       {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
+      {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
       {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
       {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
     </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────── Ingénieurs (vue par consultant)
+// Pivote certifs (détenues) + assignations (à obtenir) par ingénieur — parcours de certification d'un coup
+// d'œil (PA5). Regroupement PUR (lib/parEngineer) ; aucun re-calcul (mêmes lignes que les onglets dédiés).
+const EngineersTab: FC<{ certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ certifs, assigns, partnerName }) => {
+  const rows = useMemo(() => byEngineer(certifs, assigns), [certifs, assigns]);
+  const certList = (r: typeof rows[number]) => r.certs.map((c) => `${c.certName || c.certificationCatalogId} (${partnerName[c.partnerId] || c.partnerId})`).join(", ");
+  const assignList = (r: typeof rows[number]) => r.assigns.map((a) => `${a.cert || a.certificationCatalogId} (${partnerName[a.partnerId] || a.partnerId})`).join(", ");
+  const exportCols = [
+    { header: "Ingénieur", render: (r: typeof rows[number]) => r.consultantName },
+    { header: "BU", render: (r: typeof rows[number]) => r.consultantBu },
+    { header: "Certifs détenues", render: (r: typeof rows[number]) => String(r.certCount) },
+    { header: "Dont valides", render: (r: typeof rows[number]) => String(r.activeCerts) },
+    { header: "Assignations en cours", render: (r: typeof rows[number]) => String(r.assignCount) },
+    { header: "Certifications", render: certList },
+    { header: "À obtenir", render: assignList },
+  ];
+  return (
+    <Card title={`Certifications par ingénieur${rows.length ? ` · ${rows.length}` : ""}`} actions={<ExportBtn name="certifs-par-ingenieur" cols={exportCols} rows={rows} />}>
+      <Tip>Le parcours de certification de chaque ingénieur : ce qu'il <b>détient</b> (dont combien encore valides) et ce qui lui est <b>assigné</b> à obtenir. Pivot des onglets Certifications et Assignations — mêmes données.</Tip>
+      <Table
+        columns={[
+          colText("Ingénieur", (r) => r.consultantName),
+          colText("BU", (r) => r.consultantBu || "—"),
+          colNum("Certifs détenues", (r) => `${r.activeCerts}/${r.certCount}`, (r) => r.certCount),
+          colNum("Assignations", (r) => String(r.assignCount), (r) => r.assignCount),
+          colText("Certifications", (r) => certList(r) || "—"),
+          colText("À obtenir", (r) => assignList(r) || "—"),
+        ]}
+        rows={rows} rowKey={(r) => r.consultantId} searchKeys={[(r) => r.consultantName, (r) => r.consultantBu]}
+        empty="Aucune certification ni assignation enregistrée."
+      />
+    </Card>
   );
 };
 
@@ -528,7 +577,19 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
         )}
       </Card>
 
-      <Card title="Référentiel des partenaires" actions={canWrite ? <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button> : undefined}>
+      <Card title="Référentiel des partenaires" actions={<div className="flex items-center gap-2">
+        <ExportBtn name="referentiel-partenaires" cols={[
+          { header: "Constructeur", render: (r: Partner) => r.name },
+          { header: "Programme", render: (r: Partner) => r.programName || "" },
+          { header: "Statut", render: (r: Partner) => r.status || "" },
+          { header: "Échéance", render: (r: Partner) => r.renewalDate ? frDate(r.renewalDate) : "" },
+          { header: "Validation", render: (r: Partner) => label(VALIDATION_STATUS_LABEL, r.validationStatus) },
+          { header: "Niveaux", render: (r: Partner) => String((r.tiers || []).length) },
+          { header: "Certifs catalogue", render: (r: Partner) => String((r.certificationCatalog || []).length) },
+          { header: "Exigences", render: (r: Partner) => String((r.requirements || []).length) },
+        ]} rows={partners} />
+        {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
+      </div>}>
         <Tip>Un <b>partenaire</b> = un constructeur (Dell, Cisco, Fortinet…) avec ses <b>niveaux</b>, ses <b>compétences</b>, son <b>catalogue de certifications</b> et ses <b>exigences de quota</b> (les objectifs : par niveau, combien d'ingénieurs certifiés sur quelle cible). Ces exigences alimentent la conformité des quotas et les partenariats à risque du tableau de bord.</Tip>
         <Table
           columns={[
