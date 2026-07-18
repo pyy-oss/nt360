@@ -151,6 +151,18 @@ sous le verrou de recompute existant, comme `summaries/mnt_risque`. **Conséquen
 l'autorité de recompute sérialisée, évite le bug de clé, et respecte l'invariant « même métrique = même
 nombre » (le front re-dérive du même summary). Statut : **acté (à implémenter Lots 3-4)**.
 
+### ADR-P06 — Référentiel partenaire EMBARQUÉ (par_partners), exigences aplaties
+**Contexte** : le kit éclate le référentiel partenaire en sous-collections (`tiers`, `competencies`,
+`certificationCatalog`, `requirements`) et imbrique les exigences par niveau (objet keyé par tierId).
+**Décision** : `par_partners/{id}` porte le référentiel COMPLET en structures **embarquées** (arrays
+`tiers`/`competencies`/`certificationCatalog`/`requirements`), sur le même idiome que les engagements
+SLA embarqués du module maintenance (ADR-012). Les exigences sont **aplaties** en tableau (`tierId`
+embarqué). **Conséquence** : lecture en un doc (temps réel `onSnapshot`), validation PURE d'un seul
+objet avec **intégrité référentielle** vérifiée (une exigence pointe un niveau + une cible connus ;
+une certif pointe une compétence connue) — corrige au passage l'incohérence de contrat `computeCoverage`
+du kit. L'écriture REMPLACE le référentiel (sémantique « je pose l'état »), adaptée à une donnée de
+référence pilotée par la direction/steward. Statut : **acté (Lot 1)**.
+
 ### ADR-P05 — Convention IA nt360 imposée
 **Décision** : les appels IA du module (`generateParActionPlan`, `generateParQbr`) suivent le pont
 `lib/aiChurn.js` : `@anthropic-ai/sdk`, modèle `claude-opus-4-8`, `thinking:{type:"adaptive"}`, gestion

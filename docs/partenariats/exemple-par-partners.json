@@ -1,0 +1,101 @@
+{
+  "_note": "EXEMPLE (données de départ du kit, portées au schéma embarqué nt360). À ADAPTER au réel avant usage (n'invente aucune donnée). Chaque entrée est un payload valide de upsertParPartner ; requirements APLATIES (tierId embarqué), validité portée par certificationCatalog.validityMonths (jamais en dur). Cisco 360 : portefeuilles→competencies, désignations→tiers.",
+  "partners": [
+    {
+      "id": "dell",
+      "name": "Dell Technologies",
+      "programName": "Dell Technologies Partner Program",
+      "portalUrl": "https://partner.delltechnologies.com",
+      "tiers": [
+        { "id": "authorized", "name": "Authorized", "rank": 1 },
+        { "id": "gold", "name": "Gold", "rank": 2 },
+        { "id": "platinum", "name": "Platinum", "rank": 3 },
+        { "id": "titanium", "name": "Titanium", "rank": 4 }
+      ],
+      "competencies": [
+        { "id": "server", "name": "Server" },
+        { "id": "storage", "name": "Storage" },
+        { "id": "networking", "name": "Networking" },
+        { "id": "data-protection", "name": "Data Protection" }
+      ],
+      "certificationCatalog": [
+        { "id": "dell-dc-competency", "competencyId": "server", "code": "DCC", "name": "Dell DC Competency", "level": "professional", "validityMonths": 24, "examProvider": "Dell Certification" }
+      ],
+      "requirements": [
+        { "tierId": "gold", "certIdOrCompetencyId": "dell-dc-competency", "minCount": 1, "requiredRole": "SE" }
+      ]
+    },
+    {
+      "id": "cisco",
+      "name": "Cisco",
+      "programName": "Cisco 360 Partner Program",
+      "portalUrl": "https://partner.cisco.com",
+      "tiers": [
+        { "id": "cisco-partner", "name": "Cisco Partner", "rank": 1 },
+        { "id": "cisco-preferred", "name": "Cisco Preferred Partner", "rank": 2 }
+      ],
+      "competencies": [
+        { "id": "security", "name": "Security" },
+        { "id": "networking", "name": "Networking" },
+        { "id": "cloud-ai-infra", "name": "Cloud & AI Infrastructure" },
+        { "id": "collaboration", "name": "Collaboration" },
+        { "id": "splunk", "name": "Splunk" },
+        { "id": "services", "name": "Services" }
+      ],
+      "certificationCatalog": [
+        { "id": "cisco-ccna", "competencyId": "networking", "code": "CCNA", "name": "Cisco Certified Network Associate", "level": "associate", "validityMonths": 36, "examProvider": "Pearson VUE" },
+        { "id": "cisco-ccnp-security", "competencyId": "security", "code": "CCNP-SEC", "name": "CCNP Security", "level": "professional", "validityMonths": 36, "examProvider": "Pearson VUE" }
+      ],
+      "requirements": []
+    },
+    {
+      "id": "fortinet",
+      "name": "Fortinet",
+      "programName": "Fortinet Engage Partner Program",
+      "portalUrl": "https://partnerportal.fortinet.com",
+      "tiers": [
+        { "id": "advocate", "name": "Advocate", "rank": 1 },
+        { "id": "select", "name": "Select", "rank": 2 },
+        { "id": "advanced", "name": "Advanced", "rank": 3 },
+        { "id": "expert", "name": "Expert", "rank": 4 }
+      ],
+      "competencies": [
+        { "id": "secure-networking", "name": "Secure Networking" },
+        { "id": "security-operations", "name": "Security Operations" },
+        { "id": "cloud-security", "name": "Cloud Security" },
+        { "id": "sase", "name": "SASE" }
+      ],
+      "certificationCatalog": [
+        { "id": "fortinet-nse4", "competencyId": "secure-networking", "code": "NSE4", "name": "Fortinet Certified Professional — NSE 4", "level": "professional", "validityMonths": 24, "examProvider": "Fortinet Training Institute" },
+        { "id": "fortinet-nse7", "competencyId": "secure-networking", "code": "NSE7", "name": "Fortinet Certified Solution Specialist — NSE 7", "level": "expert", "validityMonths": 24, "examProvider": "Fortinet Training Institute" }
+      ],
+      "requirements": [
+        { "tierId": "advanced", "certIdOrCompetencyId": "fortinet-nse4", "minCount": 2, "requiredRole": "SE" },
+        { "tierId": "advanced", "certIdOrCompetencyId": "fortinet-nse7", "minCount": 2, "requiredRole": "SE" }
+      ]
+    },
+    {
+      "id": "huawei",
+      "name": "Huawei",
+      "programName": "Huawei Partner Program",
+      "portalUrl": "https://partner.huawei.com",
+      "tiers": [
+        { "id": "authorized", "name": "Authorized", "rank": 1 },
+        { "id": "silver", "name": "Silver", "rank": 2 },
+        { "id": "gold", "name": "Gold", "rank": 3 }
+      ],
+      "competencies": [
+        { "id": "datacom", "name": "Datacom" },
+        { "id": "cloud", "name": "Cloud" },
+        { "id": "security", "name": "Security" },
+        { "id": "storage", "name": "Storage" }
+      ],
+      "certificationCatalog": [
+        { "id": "huawei-hcip-datacom", "competencyId": "datacom", "code": "HCIP-Datacom", "name": "Huawei Certified ICT Professional — Datacom", "level": "professional", "validityMonths": 36, "examProvider": "Pearson VUE" }
+      ],
+      "requirements": [
+        { "tierId": "gold", "certIdOrCompetencyId": "huawei-hcip-datacom", "minCount": 3, "requiredRole": "SE" }
+      ]
+    }
+  ]
+}
