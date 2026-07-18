@@ -216,7 +216,7 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
 
   const stepInfo = STEPS[etape];
   return (
-    <Modal open title={<span className="flex items-center gap-2">Fiche {fiche.numero_fp} <Badge tone={(STATUT_TONE[fiche.statut] || "neutral") as any}>{STATUT_LABEL[fiche.statut] || fiche.statut}</Badge></span>} onClose={onClose} size="md">
+    <Modal open title={<span className="flex items-center gap-2">Fiche {fiche.numero_fp} <Badge tone={(STATUT_TONE[fiche.statut] || "neutral") as any}>{STATUT_LABEL[fiche.statut] || fiche.statut}</Badge></span>} onClose={onClose} size="form">
       <div className="flex flex-col gap-3 text-[13px]">
         <Stepper etape={etape} terminee={terminee} />
         {fiche.pmMasked && <div className="text-[12px] text-steel">Vue Chef de projet — données financières confidentielles masquées.</div>}
@@ -301,7 +301,7 @@ function CreateFiche({ onClose, onCreated }: { onClose: () => void; onCreated: (
     toast("Fiche créée (brouillon)", "ok"); onCreated(r.id);
   };
   return (
-    <Modal open title="Nouvelle fiche d'affaire" onClose={onClose} size="md" actions={<Busy label="Créer le brouillon" fn={submit} okMsg="Créée" errMsg="Création refusée" />}>
+    <Modal open title="Nouvelle fiche d'affaire" onClose={onClose} size="form" actions={<Busy label="Créer le brouillon" fn={submit} okMsg="Créée" errMsg="Création refusée" />}>
       <div className="flex flex-col gap-3 text-[13px]">
         <div className="flex flex-wrap items-end gap-3">
           <Lbl t="N° de FP (FP/AAAA/N)"><TxtField value={f.numero_fp || ""} onChange={(v) => set({ numero_fp: v })} aria="N° de FP" w="w-40" placeholder="FP/2026/1" /></Lbl>

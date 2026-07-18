@@ -27,7 +27,7 @@ export default function ActivityDrawer({ onClose }: { onClose: () => void }) {
   const log = useActivityLog();
   const running = log.filter((e) => e.status === "running").length;
   return createPortal(
-    <div className="fixed inset-0 z-[95]" role="dialog" aria-label="Centre d'activité">
+    <div className="fixed inset-0 z-drawer" role="dialog" aria-label="Centre d'activité">
       <div className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" onClick={onClose} />
       <div className="absolute right-0 top-0 h-full w-full sm:max-w-[380px] bg-panel border-l border-line shadow-xl flex flex-col animate-slide-in">
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-hair">

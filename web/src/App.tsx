@@ -109,7 +109,7 @@ export default function App() {
     return (
       <div className="min-h-screen grid place-items-center p-6">
         <div className="card max-w-[420px] w-full p-6 sm:p-8 flex flex-col gap-3 text-center">
-          <div className="mx-auto grid place-items-center w-10 h-10 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
+          <div className="logo-n mx-auto grid place-items-center w-10 h-10 rounded-[10px] font-display font-bold text-bg text-lg">N</div>
           <h1 className="font-display font-bold text-lg">Compte en attente d'habilitation</h1>
           <p className="text-sm text-muted">Votre compte <span className="text-ink">{user.email}</span> est créé, mais aucun rôle ne vous a encore été attribué. Contactez la Direction pour obtenir vos accès, puis actualisez ci-dessous.</p>
           <button onClick={async () => { try { await user.getIdToken(true); } catch { /* ignore */ } window.location.reload(); }} className="btn-gold mt-1">Actualiser mes droits</button>
@@ -134,7 +134,7 @@ export default function App() {
         {/* Header */}
         <header className="flex items-center justify-between flex-wrap gap-3 py-3 sm:py-4">
           <div className="flex items-center gap-3">
-            <div className="grid place-items-center w-9 h-9 rounded-[10px] font-display font-bold text-bg text-lg" style={{ background: "linear-gradient(135deg,#C9A24B,#8E6F2A)" }}>N</div>
+            <div className="logo-n grid place-items-center w-9 h-9 rounded-[10px] font-display font-bold text-bg text-lg">N</div>
             <div>
               <div className="font-display font-bold text-lg leading-none">Neurones 360</div>
               <div className="text-[11px] text-muted mt-0.5 hidden sm:block">Neurones Technologies CI · cockpit P&amp;L + Facturation DF</div>

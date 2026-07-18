@@ -858,7 +858,7 @@ export const Maintenance: FC<Props> = () => {
 
       {/* --- Fiche contrat --- */}
       {cOpen && (
-        <Modal open={cOpen} onClose={() => setCOpen(false)} title={cEdit ? "Modifier le contrat" : "Nouveau contrat de maintenance"} size="md"
+        <Modal open={cOpen} onClose={() => setCOpen(false)} title={cEdit ? "Modifier le contrat" : "Nouveau contrat de maintenance"} size="form"
           actions={canWrite ? <Busy label="Enregistrer" variant={cValid ? "gold" : "ghost"} fn={async () => { if (!cValid) throw new Error("N° FP, client et date de début requis"); await upsertMntContrat(contratPayload(cForm)); setCOpen(false); }} okMsg="Contrat enregistré" errMsg="Enregistrement refusé" /> : undefined}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="N° FP (affaire)"><input className={cx("field", cEdit && "opacity-60")} value={cForm.fp} disabled={cEdit} placeholder="FP/2026/123" onChange={(e) => setC("fp", e.target.value)} /></Field>
@@ -965,7 +965,7 @@ export const Maintenance: FC<Props> = () => {
         // aux objectifs (max) embarqués. Affiché si le contrat a une activité classée OU des objectifs posés.
         const vcType = typeStats.parContrat.find((p) => p.contratId === vc.id);
         return (
-          <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="md"
+          <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="form"
             actions={canWrite ? <button type="button" className="btn-ghost !px-3 !py-1.5 text-sm" onClick={() => { setCId(vc.id || ""); setCEdit(true); setViewC(null); setCOpen(true); }}>Éditer</button> : undefined}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -1045,7 +1045,7 @@ export const Maintenance: FC<Props> = () => {
 
       {/* --- Fiche ticket + interventions --- */}
       {tOpen && (
-        <Modal open={tOpen} onClose={() => setTOpen(false)} title={tForm.id ? "Ticket" : "Nouveau ticket"} size="md"
+        <Modal open={tOpen} onClose={() => setTOpen(false)} title={tForm.id ? "Ticket" : "Nouveau ticket"} size="form"
           actions={canWrite ? <Busy label="Enregistrer" variant={tValid ? "gold" : "ghost"} fn={async () => { if (!tValid) throw new Error("Contrat et titre requis"); const r = await upsertMntTicket(tForm); setTForm((f) => ({ ...f, id: r.id })); }} okMsg="Ticket enregistré" errMsg="Enregistrement refusé" /> : undefined}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Contrat"><Select value={tForm.contratId || ""} onChange={pickContrat} options={contrats.map((c) => ({ value: c.id!, label: `${c.client || "—"} · ${c.fp || ""}` }))} ariaLabel="Contrat" placeholder="Choisir un contrat…" /></Field>
