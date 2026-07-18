@@ -337,3 +337,31 @@
 - Aucun anti-spam (dédup « déjà envoyé ») : comme `emailRelancesDigest` et `mntSlaSweep`, on envoie la photo
   quotidienne. Choix aligné sur l'existant, pas une dette propre au module. À revoir globalement si l'ERP
   se dote un jour d'un mécanisme « déjà notifié » (aucun précédent à copier aujourd'hui).
+
+---
+
+## Lot P2 — Actualité + CODIR (le module devient visible au niveau direction)
+
+**Fait**
+- **Actualité** : nouveau summary `summaries/par_news` (bulletins conformité quotas / renouvellements /
+  retards), DÉRIVÉ dans le bloc `want("partenariats")` de `aggregate.js` via `domain/parNews` (PUR) —
+  SANS toucher l'autorité `buildNews`. Préfixe `par_` ⇒ gaté par les rules existantes (aucune règle
+  nouvelle). Front `news.tsx` agrège `par_news` au fil (abonnement conditionné drapeau + droit).
+- **CODIR** : carte « Partenariats & certifications » dans le Bilan CODIR (conformes / à risque / à
+  renouveler / expirées), même gate. Aucun montant (le CA reste confidentiel, hors CODIR).
+- Décision de convention (divergence avec maintenance qui reste hors Actualité) VALIDÉE par l'humain →
+  ADR-P09. Tests : `test/parNews.test.js`, `test-rules/rules.test.js` (par_news lisible sous
+  `partenariats` seul, contrairement à par_ca). functions 1106/1106, rules 73/73, web lint/build OK,
+  bundle 118.1 KB, no-undef OK.
+
+**Appris**
+- `par_news` (préfixe `par_`) hérite gratuitement du double verrou drapeau+droit ET du mapping
+  `summaryModule` — nommer un nouvel agrégat avec le préfixe du module évite toute règle Firestore
+  supplémentaire (et le risque de dépasser la limite d'évaluations).
+- Piège hooks : `flag && useCan(...)` court-circuite l'appel du hook → hoisté en `const canPar = useCan(...)`
+  avant le ternaire d'abonnement (règles des hooks).
+
+**Échoué / en attente**
+- Les nouveaux ids de bulletins (`par_*`) ne sont pas dans le catalogue de la curation IA (`newsCuration`)
+  → toujours affichés (jamais démotés), dégradation gracieuse documentée. À intégrer au catalogue de
+  curation si le besoin de filtrage fin de ces bulletins se confirme.
