@@ -30,13 +30,60 @@ export interface MntDashboard {
   echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 60] jours
 }
 
-type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; echeanceType?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
+type ContratLike = { id?: string; fp?: string | null; client?: string; bu?: string; statut?: string; echeanceType?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
 // Mois par période (miroir de functions/domain/mntEcheancier.PERIOD_MONTHS) — normalise le montant PAR
 // ÉCHÉANCE en base annuelle. Sans ça, additionner un mensuel + un trimestriel + un annuel donne un total
 // sans signification (bug signalé : « Montant engagé » de tête faussé).
 const PERIOD_MONTHS: Record<string, number> = { mensuel: 1, trimestriel: 3, annuel: 12 };
 const annualise = (montantEngage: number, echeanceType?: string) => montantEngage * (12 / (PERIOD_MONTHS[echeanceType || ""] || 1));
 type TicketLike = { statut?: string; priorite?: string };
+
+// Revenu récurrent CONSOLIDÉ (DO Lot 4). Un contrat de maintenance porte un revenu ENGAGÉ récurrent : la
+// direction pilote la BASE récurrente (prévisible), distincte du revenu one-shot des projets.
+//   ARR (Annual Recurring Revenue) = montant PAR ÉCHÉANCE annualisé (même annualise() que le KPI ARR → mêmes
+//   nombres). MRR (Monthly Recurring Revenue) = ARR / 12. Assiette = contrats ACTIFS uniquement (un
+//   brouillon n'est pas engagé, un échu/résilié ne court plus) — cohérent avec arrActifs du tableau de bord.
+export interface MntRecurringGroup { key: string; mrr: number; arr: number; contrats: number }
+export interface MntRecurring {
+  contratsActifs: number;
+  totalMrr: number;                 // MRR consolidé (FCFA entier)
+  totalArr: number;                 // ARR consolidé (FCFA entier) — = arrActifs du tableau de bord
+  byBu: MntRecurringGroup[];        // ventilation par BU, ARR décroissant
+  byClient: MntRecurringGroup[];    // ventilation par client, ARR décroissant
+  byPeriodicite: MntRecurringGroup[]; // ventilation par périodicité (mensuel/trimestriel/annuel)
+}
+
+/** Consolide le revenu récurrent (MRR/ARR) des contrats ACTIFS, ventilé par BU, client et périodicité. PUR. */
+export function recurringRevenue(contrats: ContratLike[]): MntRecurring {
+  const bu = new Map<string, { arr: number; n: number }>();
+  const client = new Map<string, { arr: number; n: number }>();
+  const per = new Map<string, { arr: number; n: number }>();
+  const bump = (m: Map<string, { arr: number; n: number }>, key: string, arr: number) => {
+    const e = m.get(key) || { arr: 0, n: 0 }; e.arr += arr; e.n += 1; m.set(key, e);
+  };
+  let contratsActifs = 0, totalArr = 0;
+  for (const c of contrats || []) {
+    if ((c.statut || "brouillon") !== "actif") continue;
+    contratsActifs++;
+    const arr = annualise(Number(c.montantEngage) || 0, c.echeanceType); // même source que arrActifs
+    totalArr += arr;
+    bump(bu, c.bu || "AUTRE", arr);
+    bump(client, c.client || "—", arr);
+    bump(per, c.echeanceType || "—", arr);
+  }
+  // MRR dérivé de l'ARR (= /12) au niveau GROUPE — pas par contrat, pour éviter la dérive d'arrondi cumulée.
+  const toGroups = (m: Map<string, { arr: number; n: number }>) => [...m.entries()]
+    .map(([key, v]) => ({ key, arr: Math.round(v.arr), mrr: Math.round(v.arr / 12), contrats: v.n }))
+    .sort((a, b) => b.arr - a.arr);
+  return {
+    contratsActifs,
+    totalMrr: Math.round(totalArr / 12),
+    totalArr: Math.round(totalArr),
+    byBu: toGroups(bu),
+    byClient: toGroups(client),
+    byPeriodicite: toGroups(per),
+  };
+}
 
 /** Agrège les contrats + tickets à une date donnée (asOfIso, AAAA-MM-JJ). PUR. */
 export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike[], asOfIso: string): MntDashboard {
