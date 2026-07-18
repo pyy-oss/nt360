@@ -730,9 +730,11 @@ export const Maintenance: FC<Props> = () => {
       {tab === "pilotage" && recurring.contratsActifs > 0 && (
         <Card title="Revenu récurrent (consolidé)">
           <Tip>Base de revenu <b>récurrent engagé</b> des contrats actifs, distincte du revenu one-shot des projets. <b>ARR</b> = montant par échéance annualisé (même calcul que le KPI ARR du tableau de bord) ; <b>MRR</b> = ARR ÷ 12. Ventilé par BU, client et périodicité.</Tip>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub="revenu mensuel récurrent" />
-            <Kpi label="ARR consolidé" value={fmt(recurring.totalArr)} tone="emerald" sub={`${recurring.contratsActifs} contrat(s) actif(s)`} />
+          {/* Fusion revenu (ADR-039) : l'ARR est déjà le KPI de tête du Tableau de bord — on ne le redit pas
+              ici. Cette carte porte le complément (MRR mensuel + nombre de clients récurrents) et surtout la
+              VENTILATION (par BU / client / périodicité). Un chiffre, un endroit. */}
+          <div className="grid grid-cols-2 gap-3">
+            <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub={`revenu mensuel · ${recurring.contratsActifs} contrat(s) actif(s)`} />
             <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
           </div>
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
@@ -803,7 +805,10 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {tab === "surveillance" && gate && churnInput.length > 0 && (
+      {/* Fusion risque & rétention (ADR-039) : le churn IA analyse EXACTEMENT les contrats à risque du moteur
+          ci-dessus → rapatrié dans l'onglet Pilotage, juste après la carte Risque, pour lire « qui est à
+          risque » et « pourquoi il partirait » d'un seul tenant (au lieu d'un aller-retour vers Surveillance). */}
+      {tab === "pilotage" && gate && churnInput.length > 0 && (
         <Card title={churn ? `Analyse de rétention IA · ${churn.analyses.length}` : "Analyse de rétention IA"}
           actions={<Busy variant="gold" label={churn ? "Réanalyser" : "Analyser le churn (IA)"} okMsg="Analyse prête" errMsg="Analyse IA indisponible" fn={async () => setChurn(await aiAnalyzeChurn(churnInput))} />}>
           {!churn ? (

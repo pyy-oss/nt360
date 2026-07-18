@@ -3,6 +3,36 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-039 — Fusion de vues redondantes (revenu dédupliqué, risque & rétention réunis)
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction (retour d'usage : « il y a peut-être des vues qu'on peut fusionner »)
+
+### Contexte
+Après la mise en onglets (ADR-036), plusieurs sujets restaient dispersés / redits : l'**ARR** apparaissait
+deux fois (KPI de tête du Tableau de bord **et** carte « Revenu récurrent »), et le **churn IA** (rétention)
+vivait dans l'onglet Surveillance alors qu'il analyse **exactement** les contrats à risque du moteur, carte
+« Risque des contrats » (onglet Pilotage) — obligeant un aller-retour entre onglets pour lire « qui est à
+risque » puis « pourquoi il partirait ».
+
+### Décision
+- **Revenu (dédup)** : l'ARR reste le KPI de tête du Tableau de bord ; la carte « Revenu récurrent » ne le
+  redit plus — elle porte le **complément** (MRR mensuel + clients récurrents) et surtout la **ventilation**
+  (par BU / client / périodicité). Un chiffre, un endroit.
+- **Risque & rétention (réunion)** : la carte « Analyse de rétention IA » (churn) est rapatriée dans l'onglet
+  **Pilotage**, immédiatement **après** la carte « Risque des contrats » (même population : les contrats à
+  risque). Lecture d'un seul tenant. Aucun calcul modifié (churn ← mêmes contrats à risque).
+- Front seul, additif, présentationnel. Aucun score re-calculé.
+
+### Conséquences
+- Moins de redondance, moins d'allers-retours. L'onglet Surveillance se recentre sur le Centre de surveillance
+  + le Registre d'audit.
+- **Restant (optionnel, non fait dans ce lot)** : réunir « Renouvellements » + « Lignées de renouvellement IA »
+  (déjà tous deux dans l'onglet Contrats) et « Contrats par statut » (glance) + « Statut automatique IA »
+  (proposition d'action) — fusions de moindre valeur (les vues IA concernées sont le plus souvent vides), à
+  arbitrer si le besoin se confirme.
+
 ## ADR-038 — Le module respecte le filtre global BU/AM/Client (sous-ensemble de contrats visibles)
 
 - **Date :** 2026-07-18
