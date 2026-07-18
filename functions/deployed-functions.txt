@@ -149,6 +149,7 @@ setParAssignmentStatus
 deleteParAssignment
 generateParActionPlan
 generateParQbr
+parRelancesSweep
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig

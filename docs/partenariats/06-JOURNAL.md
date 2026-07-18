@@ -307,3 +307,33 @@
 **Appris**
 - La règle « le statut à date se re-dérive, jamais lu du cache persisté » vaut pour TOUT lecteur de certifs,
   pas seulement le recompute : le QBR lisait les certifs en direct et devait donc re-dériver aussi.
+
+---
+
+## Lot P1 — Relances actives (extension : le module envoie enfin)
+
+**Fait**
+- Scheduler quotidien `parRelancesSweep` (07:45) qui envoie les relances que le module calculait sans
+  jamais les émettre. Patron `mntSlaSweep` à l'identique : double gate (drapeau parFeature + emailNotify
+  activée & trigger `partenariats`), lecture des summaries frais (par_relances + par_alerts), best-effort.
+- Deux audiences : par MANAGER (assignations à relancer, résolution `managerUid` → `users/{uid}.email`) ;
+  DIRECTION (vue d'ensemble relances + renouvellements → `recipients.codir`).
+- Réutilise l'infra email existante (`sendEmail`, gabarits `domain/emailNotify.js`, `GRAPH_CLIENT_SECRET`).
+  Ajout du trigger `partenariats` à `TRIGGERS` (additif, défaut true, gaté par le drapeau). Non exposé
+  dans l'UI Habilitations, exactement comme `maintenance` (symétrie module sœur).
+- Logique PURE + testée : `groupParRelancesByManager`, `parBucketLabel`, `buildParManagerEmail`,
+  `buildParDirectionEmail` (+ mise à jour des tests de TRIGGERS). functions 1103/1103, deploy-targets 177,
+  no-undef OK. `parRelancesSweep` inscrit dans `deployed-functions.txt`. ADR-P08.
+
+**Appris**
+- `par_alerts` (renouvellements de certifs) ne porte aucun champ destinataire (ni managerUid ni am) — d'où
+  le choix d'un digest DIRECTION pour les renouvellements, et par-manager pour les assignations (qui, elles,
+  portent managerUid). Router les renouvellements par manager demanderait d'enrichir par_alerts au recompute
+  (consultantId → consultants/{id}.managerUid) : candidat pour un lot ultérieur si le besoin se confirme.
+- Le module sœur `maintenance` n'expose pas son trigger email dans l'UI (backend-only, défaut true). On
+  reproduit ce choix pour rester indiscernable plutôt que d'introduire une 2ᵉ convention.
+
+**Échoué / en attente**
+- Aucun anti-spam (dédup « déjà envoyé ») : comme `emailRelancesDigest` et `mntSlaSweep`, on envoie la photo
+  quotidienne. Choix aligné sur l'existant, pas une dette propre au module. À revoir globalement si l'ERP
+  se dote un jour d'un mécanisme « déjà notifié » (aucun précédent à copier aujourd'hui).

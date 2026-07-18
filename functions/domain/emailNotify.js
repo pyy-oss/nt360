@@ -9,7 +9,7 @@ const cleanEmails = (arr) => Array.from(new Set((Array.isArray(arr) ? arr : []).
 // Les déclencheurs pris en charge. `maintenance` (Lot 5) est ADDITIF : les configs existantes n'ont
 // pas la clé → défaut `true` (comme les autres), mais le cron mntSlaSweep est de toute façon verrouillé
 // par le drapeau config/mntFeature → aucun email tant que le module est éteint.
-const TRIGGERS = ["approvals", "relances", "alerts", "codir", "maintenance"];
+const TRIGGERS = ["approvals", "relances", "alerts", "codir", "maintenance", "partenariats"];
 
 /** Normalise/valide la config email (config/emailNotify). Ne stocke JAMAIS le secret client (Secret Manager). */
 function normalizeEmailConfig(raw) {
@@ -128,8 +128,66 @@ function buildMntRisqueEmail(items, audience) {
   };
 }
 
+// --- PARTENARIATS (par_) — digest de relances de certification (Lot P1). Deux audiences comme mntSlaSweep :
+// (1) par MANAGER, ses assignations de certif à relancer (par_relances porte managerUid) ; (2) DIRECTION,
+// vue d'ensemble relances + renouvellements (par_alerts n'a pas de destinataire → digest global). ADR-P08.
+
+// Libellé FR d'un palier d'urgence par_ : "retard"/"expired" ou "j<offset>" → "≤ N j" (miroir parLabels front).
+function parBucketLabel(bucket) {
+  if (bucket === "retard" || bucket === "expired") return bucket === "expired" ? "Expirée" : "En retard";
+  const m = /^j(\d+)$/.exec(String(bucket || ""));
+  return m ? `≤ ${m[1]} j` : (bucket || "—");
+}
+
+// Regroupe les items de par_relances par managerUid (destinataire). Ignore ceux sans managerUid (pas de
+// destinataire résoluble). Retourne [{ managerUid, items }], ordre stable (première apparition). PUR.
+function groupParRelancesByManager(items) {
+  const map = new Map();
+  for (const it of Array.isArray(items) ? items : []) {
+    const uid = it && it.managerUid;
+    if (!uid) continue;
+    if (!map.has(uid)) map.set(uid, []);
+    map.get(uid).push(it);
+  }
+  return Array.from(map, ([managerUid, list]) => ({ managerUid, items: list }));
+}
+
+/** Email « certifications à relancer » (à un manager). `items` = assignations par_relances de CE manager. */
+function buildParManagerEmail(managerName, items) {
+  const list = Array.isArray(items) ? items : [];
+  const rows = list.slice(0, 30).map((it) =>
+    `<b>${esc(it.consultantName || it.consultantId || "—")}</b> — ${esc(it.cert || "certification")} · échéance ${esc(it.targetDate || "—")} <span style="color:#9ca3af">(${esc(parBucketLabel(it.bucket))})</span>`);
+  return {
+    subject: `nt360 — Certifications à relancer${managerName ? ` (${managerName})` : ""} : ${list.length}`,
+    html: shell("Certifications à relancer", `<p>Bonjour ${esc(managerName || "")}, assignations de certification à suivre pour vos collaborateurs :</p>`,
+      rows.length ? listRows(rows) : "<p style=\"color:#9ca3af\">Aucune assignation à relancer.</p>",
+      "Ouvrez « Partenariats & Certifications » dans nt360 pour le détail et les décisions."),
+  };
+}
+
+/** Email « digest partenariats » (direction) : relances d'assignation + renouvellements de certifs à venir. */
+function buildParDirectionEmail(relItems, alertItems) {
+  const rel = Array.isArray(relItems) ? relItems : [];
+  const al = Array.isArray(alertItems) ? alertItems : [];
+  const late = rel.filter((r) => r && r.bucket === "retard").length;
+  const expired = al.filter((a) => a && a.bucket === "expired").length;
+  const sections = [];
+  if (rel.length) sections.push(`<b>${rel.length}</b> assignation(s) de certification à relancer${late ? ` · dont <b>${late}</b> en retard` : ""}`);
+  if (al.length) sections.push(`<b>${al.length}</b> certification(s) à renouveler (≤ 90 j)${expired ? ` · dont <b>${expired}</b> expirée(s)` : ""}`);
+  const sample = al.slice(0, 12).map((a) =>
+    `<b>${esc(a.consultantName || a.consultantId || "—")}</b> — ${esc(a.certName || "certification")} · échéance ${esc(a.expiryDate || "—")} <span style="color:#9ca3af">(${esc(parBucketLabel(a.bucket))})</span>`);
+  return {
+    subject: `nt360 — Partenariats : ${rel.length} relance(s) · ${al.length} renouvellement(s)`,
+    html: shell("Partenariats · relances & renouvellements",
+      "<p>Vue d'ensemble des certifications à suivre (dernier recalcul) :</p>",
+      listRows(sections.length ? sections : ["Aucun élément à suivre."]) + (sample.length ? `<p style="margin-top:12px;color:#4b5563">Renouvellements imminents :</p>${listRows(sample)}` : ""),
+      "Ouvrez « Partenariats & Certifications » dans nt360 pour la vue complète."),
+  };
+}
+
 module.exports = {
   TRIGGERS, isEmail, cleanEmails, normalizeEmailConfig, canSend, emailForName,
   buildAlertsEmail, buildApprovalEmail, buildRelancesEmail, buildCodirEmail, buildMntRisqueEmail,
   MNT_NIVEAU_LABEL, MNT_SIGNAL_LABEL,
+  parBucketLabel, groupParRelancesByManager, buildParManagerEmail, buildParDirectionEmail,
 };
