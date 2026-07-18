@@ -1305,3 +1305,16 @@ classique de divergence. La règle qui a rendu ce lot sûr : **ne jamais re-scor
 Chaque KPI filtré est le décompte exact des lignes filtrées affichées (le risque reste celui du recompute
 serveur, on ne fait que retenir les lignes du périmètre). La parité tient donc **par construction**, pas par
 vérification a posteriori. Le filtre PM est volontairement ignoré (un contrat n'a pas de PM).
+
+## Fusions de vues (CT3 — revenu dédup, risque & rétention) — 2026-07-18
+
+**Fait.** Retour d'usage : « il y a peut-être des vues qu'on peut fusionner ». Deux fusions à forte valeur
+(ADR-039) : (1) l'ARR n'apparaît plus deux fois — retiré de la carte « Revenu récurrent » (déjà KPI de tête
+du tableau de bord), la carte se recentre sur MRR + clients + ventilation ; (2) le churn IA (rétention) est
+rapatrié en Pilotage juste après « Risque des contrats » (même population), fini l'aller-retour vers
+Surveillance. Présentationnel, aucun calcul modifié. Build vert, ESLint clean, bundle ≤120 KB.
+
+**Appris.** Toutes les « fusions » ne se valent pas : dédupliquer un chiffre affiché deux fois (ARR) ou
+réunir deux vues d'une même population (risque/churn) est clair et à forte valeur ; réunir deux outils IA
+souvent vides (lignées, statut auto) apporte peu et complexifie — mieux vaut l'assumer en ADR (« restant
+optionnel ») que le forcer. On distingue la fusion qui SERT la lecture de celle qui ne fait que déplacer.
