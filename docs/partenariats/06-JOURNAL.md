@@ -616,3 +616,18 @@ sur la carte « Conformité des quotas » du tableau de bord (+ export). 5 tests
 mêmes chiffres que la carte de conformité (invariant de parité respecté). Front seul, additif, aucun backend
 touché. Un niveau sans exigence est « couvert » (rien à satisfaire), cohérent avec le backend. Bundle
 d'entrée inchangé (118,3 KB). Pas d'ADR : additif, aucune nouvelle donnée ni convention.
+
+---
+
+## PA3 — Supprimer un partenaire + garde d'intégrité (orphelins) — 2026-07-18
+
+**Fait.** Bouton **« Suppr. »** (DangerBtn) par ligne du référentiel des partenaires (Paramétrage), câblé sur
+le callable **déjà existant** `deleteParPartner`. **Garde d'intégrité** : la confirmation compte les
+certifications/assignations rattachées (par `partnerId`) et prévient qu'elles deviendront **orphelines** (à
+supprimer séparément) — `deleteParPartner` ne cascade pas. Colonne « Rattachés » ajoutée au tableau pour voir
+le lien avant d'agir. Front seul (certifs/assigns déjà chargées en temps réel), aucun backend touché,
+`deployed-functions.txt` intouché.
+
+**Conception.** Réutilise `DangerBtn` (confirmation + toast) comme le reste de l'ERP. On **prévient** plutôt
+que de bloquer (le backend autorise la suppression) : cohérent avec l'esprit additif et laisse la décision à
+l'utilisateur, tout en rendant le risque visible. Pas d'ADR : additif, aucune nouvelle donnée ni convention.
