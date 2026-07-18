@@ -50,4 +50,19 @@ function coverageAll(partners, certsByPartner) {
   });
 }
 
-module.exports = { PARTNERSHIP_STATUSES, coverageForPartner, partnershipQuotaStatus, coverageAll, matchesTarget };
+/**
+ * Point d'historisation quotidienne de la couverture des quotas (tendance, Lot P3). PUR.
+ * quotas = sortie de coverageAll ; renouvellements = { counts:{expired}, total }.
+ * @returns { conformes, aRisque, nonConformes, nonEvalue, total, aRenouveler, expirees }
+ */
+function parQuotaHistoryPoint({ quotas, renouvellements } = {}) {
+  const qp = Array.isArray(quotas) ? quotas : (quotas && quotas.partners) || [];
+  const by = (s) => qp.filter((p) => p && p.status === s).length;
+  const rc = (renouvellements && renouvellements.counts) || {};
+  return {
+    conformes: by("on_track"), aRisque: by("at_risk"), nonConformes: by("non_compliant"), nonEvalue: by("non_evalue"),
+    total: qp.length, aRenouveler: Number((renouvellements && renouvellements.total) || 0), expirees: Number(rc.expired || 0),
+  };
+}
+
+module.exports = { PARTNERSHIP_STATUSES, coverageForPartner, partnershipQuotaStatus, coverageAll, matchesTarget, parQuotaHistoryPoint };

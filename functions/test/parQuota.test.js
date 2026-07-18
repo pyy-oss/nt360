@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { coverageForPartner, partnershipQuotaStatus, coverageAll } = require("../domain/parQuota");
+const { coverageForPartner, partnershipQuotaStatus, coverageAll, parQuotaHistoryPoint } = require("../domain/parQuota");
 
 describe("parQuota — couverture des quotas", () => {
   const partner = {
@@ -47,5 +47,16 @@ describe("parQuota — couverture des quotas", () => {
     const all = coverageAll([partner], { fortinet: certs });
     expect(all[0]).toMatchObject({ partnerId: "fortinet", status: "on_track" });
     expect(all[0].gaps).toEqual([]);
+  });
+
+  it("parQuotaHistoryPoint : compte les statuts + renouvellements/expirées (Lot P3)", () => {
+    const quotas = [
+      { status: "on_track" }, { status: "on_track" }, { status: "at_risk" }, { status: "non_compliant" }, { status: "non_evalue" },
+    ];
+    const p = parQuotaHistoryPoint({ quotas, renouvellements: { counts: { expired: 2 }, total: 5 } });
+    expect(p).toEqual({ conformes: 2, aRisque: 1, nonConformes: 1, nonEvalue: 1, total: 5, aRenouveler: 5, expirees: 2 });
+    // tolère quotas sous forme { partners } et arguments absents
+    expect(parQuotaHistoryPoint({ quotas: { partners: [{ status: "on_track" }] } }).conformes).toBe(1);
+    expect(parQuotaHistoryPoint()).toEqual({ conformes: 0, aRisque: 0, nonConformes: 0, nonEvalue: 0, total: 0, aRenouveler: 0, expirees: 0 });
   });
 });

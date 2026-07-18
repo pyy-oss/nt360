@@ -783,8 +783,19 @@ async function recomputeCore(db, only) {
       // drapeau + droit `partenariats` par les mêmes rules ; aucun montant confidentiel). Le front l'agrège
       // au fil Actualité (comme newsFacturation/…). Contrairement à maintenance, le module CONTRIBUE au fil.
       const { parNews } = require("../domain/parNews");
-      const news = parNews({ quotas: { partners: quotas }, renouvellements: { counts: watchCounts(watch), total: watch.length }, relances: { counts: relanceCounts } });
+      const renouv = { counts: watchCounts(watch), total: watch.length };
+      const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts } });
       w.push({ path: "summaries/par_news", data: { asOf, ...news, ...stamp } });
+
+      // Historisation quotidienne de la couverture des quotas (tendance, Lot P3) — patron qualityHistory :
+      // un point par jour (clé = asOf), idempotent (remplace le point du jour), fenêtre glissante 90 j.
+      const { parQuotaHistoryPoint } = require("../domain/parQuota");
+      const point = parQuotaHistoryPoint({ quotas, renouvellements: renouv });
+      const prevHist = (await db.doc("summaries/par_quotasHistory").get()).data() || {};
+      const histDays = (Array.isArray(prevHist.days) ? prevHist.days : []).filter((d) => d && d.date !== asOf);
+      histDays.push({ date: asOf, ...point });
+      histDays.sort((a, b) => (a.date < b.date ? -1 : 1));
+      w.push({ path: "summaries/par_quotasHistory", data: { days: histDays.slice(-90), ...stamp } });
     }
   }
 
