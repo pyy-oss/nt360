@@ -4,6 +4,35 @@
 
 ---
 
+## Lot 6 — Front gaté (onglet + UI temps réel)
+
+**Fait**
+- Généralisation de `moduleFlagOn(flag, enabledByFlag)` (différée du Lot 0) + table de drapeaux dans
+  `App.tsx` (mntFeature + parFeature). Enregistrement de l'onglet dans `modules/index.tsx` (lazy, clé RBAC
+  `partenariats`, drapeau `parFeature`, groupe « Partenariats »). Miroir front de moduleFlagOn testé.
+- Module LAZY `web/src/modules/partenariats.tsx` (chunk séparé 13,7 KB) : 4 onglets (Tableau de bord,
+  Certifications, Assignations, Paramétrage) — KPIs + tables lues en TEMPS RÉEL des summaries
+  (`par_ca`/`par_quotas`/`par_alerts`/`par_relances`) et des collections (`par_partners`/
+  `par_certifications`/`par_assignments`), formulaires câblés sur les callables (certif, assignation,
+  mapping fournisseur→constructeur). Primitives design réutilisées, formats FCFA/JJ-MM-AAAA, tons via
+  `lib/parLabels.ts`. Écritures gatées `canWrite`.
+- Consultants (callable-only) chargés via `listConsultants` pour les sélecteurs.
+
+**Appris / budget bundle**
+- L'enregistrement d'un 7ᵉ onglet gaté (nav + 2ᵉ abonnement drapeau) poussait le chunk d'entrée à
+  120,9 KB (> 120). Reclamés : réutilisation d'une icône déjà importée (au lieu d'un nouvel import lucide)
+  + inline de la table de drapeaux (−0,5 KB), puis **Login passé en LAZY** (écran pré-auth autoportant,
+  patron sanctionné « import → React.lazy », App-local) → **chunk d'entrée 118,1 KB** (marge 1,9 KB).
+- Le module n'entre PAS dans le chunk d'entrée (lazy) : à drapeau éteint, l'onglet est masqué et aucun
+  code par_* n'est chargé — l'ERP reste celui d'avant.
+
+**Échoué / en attente**
+- Édition du référentiel partenaire (tiers/catalogue imbriqués) non exposée au front en Lot 6 : le
+  référentiel s'initialise côté direction via `upsertParPartner` (seed fourni). Un éditeur guidé pourra
+  venir plus tard.
+
+---
+
 ## Lot 5 — Assignations de certification + relances (ADR-P03/P04)
 
 **Fait**

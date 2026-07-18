@@ -7,6 +7,8 @@ export type MntFeature = { enabled?: boolean } | null | undefined;
 export const isMntEnabled = (cfg: MntFeature): boolean => cfg?.enabled === true;
 
 /** Un module portant un `flag` n'est visible que si ce drapeau est allumé ; sans `flag`, toujours
- *  visible (comportement inchangé des modules existants). Pur → testable sans React. */
-export const moduleFlagOn = (flag: string | undefined, mntFeature: MntFeature): boolean =>
-  flag !== "mntFeature" || isMntEnabled(mntFeature);
+ *  visible (comportement inchangé des modules existants). Générique : `enabledByFlag` mappe chaque
+ *  identifiant de drapeau (`"mntFeature"`, `"parFeature"`, …) à son état résolu ; un flag absent de la
+ *  table est éteint. Chaque nouveau module gaté ajoute une entrée à la table (App.tsx). Pur → testable. */
+export const moduleFlagOn = (flag: string | undefined, enabledByFlag?: Record<string, boolean>): boolean =>
+  !flag || enabledByFlag?.[flag] === true;

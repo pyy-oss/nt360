@@ -56,6 +56,8 @@ const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
 // Module Contrats de maintenance (mnt_) — chargé en lazy comme les autres ; masqué tant que le
 // drapeau config/mntFeature est éteint (voir champ `flag` ci-dessous et App.tsx).
 const Maintenance = from(() => import("./maintenance"), "Maintenance");
+// Module Partenariats & Certifications (par_) — lazy, masqué tant que le drapeau parFeature est éteint.
+const Partenariats = from(() => import("./partenariats"), "Partenariats");
 
 const Clients: FC<Props> = (p) => <EntityView {...p} kind="clients" />;
 const Domaines: FC<Props> = (p) => <EntityView {...p} kind="domaines" />;
@@ -102,6 +104,9 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   // Contrats de maintenance : clé RBAC dédiée `maintenance` (absente de la matrice → `none` par
   // défaut) ET drapeau `mntFeature` (éteint par défaut). Doublement masqué tant que non activé.
   { id: "maintenance", key: "maintenance", label: "Contrats de maintenance", icon: Wrench, Component: Maintenance, flag: "mntFeature" },
+  // Partenariats & Certifications : clé RBAC dédiée `partenariats` ET drapeau `parFeature` (éteint par
+  // défaut). Doublement masqué tant que non activé (ADR-P01). Même patron que maintenance.
+  { id: "partenariats", key: "partenariats", label: "Partenariats & Certifications", icon: UsersRound, Component: Partenariats, flag: "parFeature" },
 ];
 
 // Regroupement des onglets par domaine (navigation à 2 niveaux). Ordre = ordre d'affichage.
@@ -115,6 +120,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "domaines"] },
   { label: "Contrats", ids: ["maintenance"] },
+  { label: "Partenariats", ids: ["partenariats"] },
   { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },
 ];
 

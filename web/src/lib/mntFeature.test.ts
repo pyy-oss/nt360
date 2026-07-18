@@ -14,12 +14,18 @@ describe("mntFeature — drapeau front (miroir back)", () => {
 
   it("moduleFlagOn : un module SANS flag est toujours visible (comportement historique inchangé)", () => {
     expect(moduleFlagOn(undefined, undefined)).toBe(true);
-    expect(moduleFlagOn(undefined, { enabled: false })).toBe(true);
+    expect(moduleFlagOn(undefined, { mntFeature: false })).toBe(true);
   });
 
   it("moduleFlagOn : le module 'mntFeature' est masqué tant que le drapeau est éteint", () => {
-    expect(moduleFlagOn("mntFeature", undefined)).toBe(false); // doc absent ⇒ masqué
-    expect(moduleFlagOn("mntFeature", { enabled: false })).toBe(false);
-    expect(moduleFlagOn("mntFeature", { enabled: true })).toBe(true); // allumé ⇒ visible (si droit)
+    expect(moduleFlagOn("mntFeature", undefined)).toBe(false); // table absente ⇒ masqué
+    expect(moduleFlagOn("mntFeature", {})).toBe(false); // flag absent de la table ⇒ masqué
+    expect(moduleFlagOn("mntFeature", { mntFeature: false })).toBe(false);
+    expect(moduleFlagOn("mntFeature", { mntFeature: true })).toBe(true); // allumé ⇒ visible (si droit)
+  });
+
+  it("moduleFlagOn : générique — chaque drapeau résolu indépendamment via la table", () => {
+    expect(moduleFlagOn("parFeature", { mntFeature: true })).toBe(false);
+    expect(moduleFlagOn("parFeature", { mntFeature: true, parFeature: true })).toBe(true);
   });
 });
