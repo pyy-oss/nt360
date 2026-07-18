@@ -406,3 +406,38 @@ describe("Module Contrats de maintenance — double verrou (drapeau config/mntFe
     await assertFails(getDoc(doc(as("commercial"), "summaries/mnt_risque")));    // drapeau mais pas le droit
   });
 });
+
+describe("Module Partenariats & Certifications — drapeau + cloisonnement CA (rentabilite, ADR-P07)", () => {
+  // Allume le drapeau + sème un référentiel et les summaries par_* via contexte privilégié (Admin SDK).
+  const enablePar = () => testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "config/parFeature"), { enabled: true });
+    await setDoc(doc(db, "par_partners/dell"), { name: "Dell" });
+    await setDoc(doc(db, "summaries/par_ca"), { totalXof: 1 });
+    await setDoc(doc(db, "summaries/par_quotas"), { partners: [] });
+  });
+  // Accorde au rôle `commercial` le droit `partenariats` (absent de la matrice → none par défaut) avec un
+  // niveau `rentabilite` PARAMÉTRABLE : prouve que le CA exige le SECOND verrou, pas seulement partenariats.
+  const grantPartenariats = (rentabilite) => testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const m = JSON.parse(JSON.stringify(matrix));
+    m.commercial = { ...m.commercial, partenariats: "read", rentabilite };
+    await setDoc(doc(ctx.firestore(), "config/permissions"), { matrix: m });
+  });
+
+  it("drapeau ÉTEINT : même la direction ne lit PAS par_partners (ERP strictement d'avant)", async () => {
+    await assertFails(getDoc(doc(as("direction"), "par_partners/dell")));
+  });
+  it("partenariats SANS rentabilite : référentiel + quotas OK, mais CA (par_ca) REFUSÉ (confidentiel)", async () => {
+    await enablePar();
+    await grantPartenariats("none");
+    await assertSucceeds(getDoc(doc(as("commercial"), "par_partners/dell")));    // non confidentiel
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_quotas"))); // non confidentiel
+    await assertFails(getDoc(doc(as("commercial"), "summaries/par_ca")));        // CA confidentiel → second verrou
+  });
+  it("partenariats AVEC rentabilite : CA (par_ca) lisible", async () => {
+    await enablePar();
+    await grantPartenariats("read");
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_ca")));
+    await assertSucceeds(getDoc(doc(as("direction"), "summaries/par_ca"))); // direction = write partout
+  });
+});

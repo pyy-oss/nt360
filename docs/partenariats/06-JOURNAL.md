@@ -230,3 +230,36 @@
 **Échoué / en attente**
 - Rien à ce stade. Décisions structurantes (ADR-P02/P03/P04) actées sur preuve de code ; à confirmer par
   l'utilisateur avant d'attaquer les lots de données (1-3).
+
+---
+
+## Remédiation post-Lot 7 — audit gardien (2 findings MAJEUR)
+
+**Fait**
+- **M1 (statut de certif figé)** : `lib/aggregate.js`, bloc `want("partenariats")`, re-dérive
+  `c.status = computeCertStatus(c.expiryDate, asOf)` pour toutes les certifs AVANT de construire
+  `certsByPartner` → quotas/couverture reflètent le temps écoulé (le sweep quotidien promis par
+  `domain/parCertification`). Source unique du statut « à date » = le recompute (ADR/GARDIEN-M1).
+- **M2 (CA confidentiel exposé)** : `summaries/par_ca` gaté par un SECOND verrou `rentabilite` (ADR-P07),
+  aligné sur les summaries `*Margin` et les astreintes. Trois surfaces cohérentes :
+  - `firestore.rules` : `match /summaries/{id}` ajoute `&& (id != 'par_ca' || canRead('rentabilite'))`
+    (condition bon marché, `canRead` évalué pour le seul `par_ca` — pas de dépassement des 1000 éval).
+  - `handlers/partenariats.js` : `parCanSeeCa(req)` (droit `rentabilite` ou direction) ; `generateParActionPlan`
+    et `generateParQbr` passent `ca: {}` au snapshot sans ce droit → le CA n'est ni transmis au modèle
+    ni renvoyé au client. L'IA reste disponible sur certifs/quotas/relances.
+  - `web/src/modules/partenariats.tsx` : `useCanSeeMargin()` conditionne l'abonnement à `par_ca`
+    (null sinon → pas de permission-denied) et masque le KPI + la carte CA.
+- Tests : `test-rules/rules.test.js` +3 (par_partners gaté drapeau ; par_ca refusé sans `rentabilite`,
+  autorisé avec) → 73/73. Suite functions 1098/1098. Lint web propre. Bundle 118.1 KB (≤ 120).
+
+**Appris**
+- Le champ `status` persisté sur une certif est un cache d'affichage, pas une vérité : toute vérité « à
+  date » (dépendant du temps qui passe) doit se re-dériver au recompute, sinon deux vues divergent.
+- « CA » côté partenariats = volume d'achat fournisseur = donnée confidentielle au même titre que la
+  marge. Le cloisonnement doit être identique (rules + serveur + front), pas seulement côté UI.
+
+**Échoué / en attente**
+- Régression UX assumée : un data-steward `partenariats` SANS `rentabilite` perd la liste des
+  fournisseurs BC non rattachés (annotée du CA) dans Paramétrage — il mappe alors à la saisie manuelle.
+  Choix conservateur (le montant EST le CA confidentiel) ; à revoir si le besoin d'un libellé
+  fournisseur sans montant se confirme (nécessiterait un summary non confidentiel dédié).

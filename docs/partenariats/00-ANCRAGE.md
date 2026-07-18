@@ -173,3 +173,30 @@ référence pilotée par la direction/steward. Statut : **acté (Lot 1)**.
 `stop_reason==="refusal"`, secret `ANTHROPIC_API_KEY`, sortie re-validée par un domaine pur, `logOps`
 sur l'usage seul (jamais le contenu). Le `fetch` brut + `sonnet-4-6` + `ANTHROPIC_KEY` du kit sont
 abandonnés. Statut : **acté (Lot 7)**.
+
+### ADR-P07 — Le CA constructeur (`summaries/par_ca`) est confidentiel : second verrou `rentabilite`
+**Contexte** : l'audit gardien (post-Lot 7) relève que le CA par constructeur — un **volume d'achat
+fournisseur** dérivé des BC — était lisible sous le seul droit `partenariats`, alors que le §6 de ce
+document et l'ERP gardent les montants confidentiels (CA achat, marge, CJM) derrière `rentabilite` /
+`direction` (summaries `*Margin`, astreintes). **Décision** : `summaries/par_ca` porte un **SECOND
+verrou** `canRead('rentabilite')` en plus de `partenariats` + drapeau, aligné sur les summaries
+`*Margin` — côté rules ET côté handlers IA (le snapshot transmis au modèle et renvoyé au client MASQUE
+le CA sans ce droit ; l'IA raisonne alors sur certifs/quotas/relances seuls). Le front ne s'abonne pas
+à `par_ca` sans le droit (sinon permission-denied) et masque KPI + carte CA, exactement comme MB/%MB
+via `useCanSeeMargin`. Le reste du module (référentiel, certifs, quotas, alertes, relances) demeure
+**non confidentiel** sous `partenariats`. **Conséquence** : un data-steward `partenariats` sans
+`rentabilite` pilote quotas/certifs/relances/mapping (saisie manuelle) mais ne voit aucun montant ;
+zéro fuite de CA via l'UI, l'onSnapshot, le plan d'action ou la QBR. Vérif mécanique :
+`test-rules/rules.test.js` (par_ca refusé sans rentabilite, autorisé avec). Statut : **acté
+(remédiation post-Lot 7)**.
+
+### GARDIEN-M1 — Le statut des certifications est re-dérivé à chaque recompute (jamais figé)
+**Contexte** : le statut d'une certif (`active`/`expiring_soon`/`expired`) était calculé **une seule
+fois** à l'écriture (handler `upsertParCertification`, `computeCertStatus(expiryDate, today)`) puis
+persisté — donc figé : une certif écrite « active » il y a deux ans restait « active » et faussait la
+couverture des quotas (`coverageForPartner` filtre `status==="active"`). **Décision** : `lib/aggregate.js`
+**re-dérive** `c.status = computeCertStatus(c.expiryDate, asOf)` pour toutes les certifs **avant** de
+construire `certsByPartner`, à chaque recompute (le sweep quotidien annoncé par `domain/parCertification`).
+Le statut « à date » a une **source unique** : le recompute (jamais le champ persisté, qui reste un cache
+d'affichage). **Conséquence** : quotas et couverture reflètent le temps écoulé sans réécriture des
+certifs. Statut : **acté (remédiation post-Lot 7)**.

@@ -752,6 +752,13 @@ async function recomputeCore(db, only) {
       const partnerMap = ((await db.doc("config/parPartnerMap").get()).data() || {}).map || {};
       const nameById = {}; for (const p of parPartners) nameById[p.id] = p.name;
 
+      // Le statut d'une certif est FIGÉ à l'écriture (handler upsertParCertification) ; on le RE-DÉRIVE
+      // ici à chaque recompute (asOf = aujourd'hui) pour que quotas/couverture reflètent le temps écoulé :
+      // une certif écrite « active » il y a deux ans peut être expirée aujourd'hui. C'est le sweep quotidien
+      // annoncé par domain/parCertification — source UNIQUE du statut « à date » (jamais le champ persisté).
+      const { computeCertStatus } = require("../domain/parCertification");
+      for (const c of parCertifs) c.status = computeCertStatus(c.expiryDate, asOf);
+
       // CA par constructeur dérivé des BC (ADR-P02).
       const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
       const byPartner = caPartners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));

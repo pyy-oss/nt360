@@ -186,6 +186,18 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, id };
   });
 
+  // Le CA constructeur (volume d'achat fournisseur, summaries/par_ca) est CONFIDENTIEL — même cloisonnement
+  // que la marge : droit `rentabilite` requis (ADR-P07), aligné sur le second verrou des rules. Sans ce
+  // droit, l'IA raisonne quand même sur les certifs/quotas/relances mais le CA est MASQUÉ du snapshot
+  // (jamais transmis au modèle ni renvoyé au client) → aucune fuite via le plan d'action ou la QBR.
+  async function parCanSeeCa(req) {
+    const role = req.auth && req.auth.token && req.auth.token.nt360Role;
+    if (role === "direction") return true;
+    const { canRead } = require("../domain/authz");
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    return canRead(matrix, role, "rentabilite");
+  }
+
   // Garde-fou IA commun : droit lecture + drapeau + rate-limit + clé présente. Renvoie la clé.
   async function assertAiReady(req) {
     await requireRead(req, "partenariats");
@@ -200,11 +212,12 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   // donnée confidentielle : statuts, quotas, CA agrégé par constructeur). Sortie re-validée (domain/parAi).
   const generateParActionPlan = onCallG("generateParActionPlan", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     const apiKey = await assertAiReady(req);
+    const seeCa = await parCanSeeCa(req); // CA masqué sans droit `rentabilite` (ADR-P07)
     const { actionPlanSnapshot } = require("../domain/parAi");
     const [caSnap, quotaSnap, relSnap] = await Promise.all([
       db.doc("summaries/par_ca").get(), db.doc("summaries/par_quotas").get(), db.doc("summaries/par_relances").get(),
     ]);
-    const snapshot = actionPlanSnapshot({ dateIso: new Date().toISOString().slice(0, 10), ca: caSnap.data() || {}, quotas: quotaSnap.data() || {}, relances: relSnap.data() || {} });
+    const snapshot = actionPlanSnapshot({ dateIso: new Date().toISOString().slice(0, 10), ca: seeCa ? (caSnap.data() || {}) : {}, quotas: quotaSnap.data() || {}, relances: relSnap.data() || {} });
     if (!snapshot.partners.length) throw new HttpsError("failed-precondition", "aucune donnée partenaire à analyser (initialisez le référentiel).");
     const { generateActionPlan } = require("../lib/parAi");
     let out;
@@ -217,6 +230,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   // SYNTHÈSE QBR par partenaire (IA). Snapshot construit côté serveur (référentiel + summaries + certifs).
   const generateParQbr = onCallG("generateParQbr", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     const apiKey = await assertAiReady(req);
+    const seeCa = await parCanSeeCa(req); // CA masqué sans droit `rentabilite` (ADR-P07)
     const partnerId = slug(req.data && req.data.partnerId);
     if (!partnerId) throw new HttpsError("invalid-argument", "partenaire invalide");
     const periode = String((req.data && req.data.periode) || "").trim().slice(0, 40);
