@@ -4,6 +4,36 @@
 
 ---
 
+## Lot 1 — Référentiel partenaire (par_partners, données)
+
+**Fait**
+- Domaine PUR `functions/domain/parPartner.js` : validateurs tier/compétence/entrée-catalogue/exigence +
+  `validatePartner` (intégrité référentielle : exigence→niveau+cible connus, certif→compétence connue) +
+  `computeExpiry`. Tests `functions/test/parPartner.test.js` (8 cas). Modèle EMBARQUÉ, exigences aplaties
+  (ADR-P06).
+- Handler `functions/handlers/partenariats.js` (factory injectée) : `upsertParPartner` / `deleteParPartner`,
+  double garde `requireWrite("partenariats")` + `assertParEnabled()`, audit. Câblés + exportés dans
+  `index.js` ; ajoutés à `deployed-functions.txt`.
+- Rules : `parEnabled()` (fail-closed) + `match /par_partners/{id}` (read gaté drapeau+droit
+  `partenariats`, write:false). Référentiel sans montant → lecture directe temps réel autorisée.
+- Seed exemple `docs/partenariats/exemple-par-partners.json` (données de départ du kit portées au schéma
+  embarqué, 4 constructeurs) — validé par `validatePartner` (intégrité comprise).
+
+**Appris**
+- Le contrat `computeCoverage` du kit était incohérent avec la forme réelle des données (champs
+  `cert`/`min` vs `certIdOrCompetencyId`/`minCount`). En posant l'intégrité référentielle à la frontière
+  d'écriture, la couverture (Lot 2/4) lira des cibles garanties existantes.
+- Nouvelle clé de module `partenariats` : gérée par la matrice `config/permissions` (donnée), pas par un
+  nouveau rôle (ADR : socle RBAC intouché). `direction` écrit déjà ; les autres rôles quand la matrice
+  est complétée (ou au Lot 6 avec l'onglet).
+
+**Échoué / en attente**
+- `computeExpiry` : arithmétique de mois naïve (débordement fin de mois, comme le kit) — documenté, jugé
+  immatériel pour l'alerte J-90/60/30. Miroir front de `parPartner` différé au Lot 6 (aucun consommateur
+  front avant l'UI).
+
+---
+
 ## Lot 0 — Drapeau de fonctionnalité + socle d'ancrage
 
 **Fait**

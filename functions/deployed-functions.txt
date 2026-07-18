@@ -139,6 +139,8 @@ setInvoiceFp
 setManager
 setMntFeature
 setParFeature
+upsertParPartner
+deleteParPartner
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig

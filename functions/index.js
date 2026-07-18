@@ -1417,6 +1417,14 @@ exports.submitMntDecision = _maintenance.submitMntDecision;
 exports.submitAstreinte = _maintenance.submitAstreinte;
 exports.listAstreintes = _maintenance.listAstreintes;
 
+// PARTENARIATS & CERTIFICATIONS (par_) — Lot 1 : référentiel partenaire (par_partners). Même patron
+// d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
+// config/parFeature). Exports déclarés ici (déploiement par nom).
+const { createPartenariats } = require("./handlers/partenariats");
+const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite });
+exports.upsertParPartner = _partenariats.upsertParPartner;
+exports.deleteParPartner = _partenariats.deleteParPartner;
+
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
 // domain/activityKpi). Le COÛT/MARGE ne sont exposés qu'avec le droit « rentabilite » (confidentialité).

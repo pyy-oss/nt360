@@ -23,6 +23,11 @@ service cloud.firestore {
       return exists(/databases/$(db)/documents/config/mntFeature)
         && get(/databases/$(db)/documents/config/mntFeature).data.enabled == true;
     }
+    // Drapeau du module Partenariats & Certifications (ADR-P01), même patron fail-closed que mntEnabled.
+    function parEnabled() {
+      return exists(/databases/$(db)/documents/config/parFeature)
+        && get(/databases/$(db)/documents/config/parFeature).data.enabled == true;
+    }
 
     // --- Sécurité par ENREGISTREMENT (Lot 2 « niveau Salesforce ») : PROPRIÉTAIRE + HIÉRARCHIE ---
     // OWD (Org-Wide Default) par objet, édité par setRecordAccess (config/recordAccess). Défaut = « public »
@@ -243,6 +248,12 @@ service cloud.firestore {
     // (droit `maintenance` seul) exposerait le montant brut → fuite RBAC (même logique qu'ADR-034). Écriture
     // via submitAstreinte / trigger onMntApprovalDecided (Admin SDK).
     match /mnt_astreintes/{id}     { allow read: if false; allow write: if false; }
+
+    // PARTENARIATS & CERTIFICATIONS (par_) — mêmes profils que mnt_* : lecture gatée drapeau parEnabled()
+    // + droit `partenariats`, écriture callable-only (write:false). parEnabled() faux ⇒ aucune lecture,
+    // quel que soit le rôle : l'ERP reste celui d'avant (ADR-P01). Le référentiel partenaire (par_partners)
+    // ne porte AUCUN montant confidentiel → lecture directe (temps réel onSnapshot) autorisée.
+    match /par_partners/{id}       { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour
