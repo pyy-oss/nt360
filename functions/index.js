@@ -3064,6 +3064,18 @@ exports.setMntFeature = onCallG("setMntFeature", { memoryMiB: 256, timeoutSecond
   return { ok: true, enabled };
 });
 
+// DRAPEAU du module « Partenariats & Certifications » (ADR-P01) : même maître-interrupteur que
+// setMntFeature. ÉTEINT (défaut) ⇒ l'ERP est STRICTEMENT celui d'avant (aucune surface par_*). Édité en
+// Habilitations, DIRECTION uniquement. Écriture Admin SDK (les rules gardent config/parFeature en
+// write:false). Audité. Le module s'allume/s'éteint sans redéploiement.
+exports.setParFeature = onCallG("setParFeature", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const enabled = req.data?.enabled === true;
+  await db.doc("config/parFeature").set({ enabled, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_feature", module: "habilitations", entity: "config", entityId: "parFeature", detail: { enabled }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, enabled };
+});
+
 // pushOrderToClickup : crée (ou met à jour, idempotent) une tâche ClickUp pour une commande, assignée
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).

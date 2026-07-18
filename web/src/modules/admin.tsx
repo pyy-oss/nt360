@@ -5,6 +5,8 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useClaims, useCanImport } from "../lib/rbac";
 import { Card, Table, ListView, Badge, Tip, Busy, DangerBtn, Toggle, Eyebrow, colText, colNum, cx, useToast, useConfirm } from "../design/components";
 import { trackWrite } from "../lib/activity";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../lib/firebase";
 import { Select } from "../design/inputs";
 import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
@@ -65,6 +67,7 @@ export const Habilitations: FC<Props> = () => {
 
       {isDirection && <Rubrique>Sécurité &amp; accès</Rubrique>}
       {isDirection && <MntFeatureCard />}
+      {isDirection && <ParFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
 
       {/* Tous les paramètres d'intégration API dans un seul bloc : ClickUp (bidirectionnel), Odoo (webhook
@@ -744,6 +747,33 @@ function MntFeatureCard() {
       <Tip>Maître-interrupteur du module. <b>Éteint</b>, l'ERP est strictement celui d'avant (aucune donnée, aucun calcul, onglet masqué). <b>Allumé</b>, l'onglet « Contrats de maintenance » apparaît pour les rôles ayant le droit <code>maintenance</code> (la direction l'a déjà). Réversible à tout moment, sans redéploiement.</Tip>
       <div className="flex items-center gap-3 mt-1">
         <Toggle checked={enabled} onChange={toggle} disabled={busy} ariaLabel="Activer le module Contrats de maintenance" />
+        <span className={cx("text-[13px]", enabled ? "text-emerald" : "text-muted")}>{enabled ? "Activé" : "Désactivé"}</span>
+      </div>
+    </Card>
+  );
+}
+
+// Maître-interrupteur du module « Partenariats & Certifications » (drapeau config/parFeature, ADR-P01),
+// même patron que MntFeatureCard. ÉTEINT (défaut) ⇒ ERP strictement d'avant. Réservé direction.
+function ParFeatureCard() {
+  const { data } = useDocData<{ enabled?: boolean }>("config/parFeature");
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const enabled = data?.enabled === true;
+  const toggle = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    // Callable défini inline (module lazy) plutôt que dans writes.ts : évite d'alourdir le chunk
+    // d'entrée (au plafond de 120 KB) pour un interrupteur d'admin rarement appelé. Patron maintenance.tsx.
+    try { await httpsCallable(functions, "setParFeature")({ enabled: v }); toast(v ? "Module Partenariats & Certifications ACTIVÉ" : "Module Partenariats & Certifications désactivé", "ok"); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Partenariats & Certifications — activation">
+      <Tip>Maître-interrupteur du module. <b>Éteint</b>, l'ERP est strictement celui d'avant (aucune donnée, aucun calcul, onglet masqué). <b>Allumé</b>, l'onglet « Partenariats » apparaît pour les rôles ayant le droit <code>partenariats</code>. Réversible à tout moment, sans redéploiement.</Tip>
+      <div className="flex items-center gap-3 mt-1">
+        <Toggle checked={enabled} onChange={toggle} disabled={busy} ariaLabel="Activer le module Partenariats & Certifications" />
         <span className={cx("text-[13px]", enabled ? "text-emerald" : "text-muted")}>{enabled ? "Activé" : "Désactivé"}</span>
       </div>
     </Card>

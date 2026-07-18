@@ -273,6 +273,8 @@ service cloud.firestore {
     // Drapeau du module Contrats de maintenance : booléen NON sensible, lu par tout utilisateur
     // provisionné (App décide la visibilité de l'onglet). Écrit via callable (jamais en direct).
     match /config/mntFeature     { allow read: if isNt360(); allow write: if false; }
+    // Drapeau du module Partenariats & Certifications (ADR-P01) : même patron que config/mntFeature.
+    match /config/parFeature     { allow read: if isNt360(); allow write: if false; }
     // Repli config/* : ALLOWLIST fail-closed (les docs sensibles ont leur propre règle ci-dessus ;
     // un futur doc config/* non listé n'est PAS lisible par défaut). Inclut les référentiels éditables
     // (projectManagers, businessUnits), les taux de change (fxRates) et la config ClickUp NON sensible
