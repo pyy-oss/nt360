@@ -82,6 +82,8 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     const doc = {
       ...v.value, expiryDate, status,
       consultantName: String(cons.name || "").slice(0, 120), consultantBu: String(cons.bu || "").slice(0, 40), consultantGrade: String(cons.grade || "").slice(0, 40),
+      // Manager du consultant dénormalisé (destinataire des relances de RENOUVELLEMENT, PA4) — jamais le CJM.
+      managerUid: cons.managerUid ? String(cons.managerUid).slice(0, 128) : null,
       competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
       updatedAt: FieldValue.serverTimestamp(),
     };

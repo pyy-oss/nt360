@@ -84,6 +84,19 @@ describe("emailNotify — config & résolution", () => {
     expect(m.html).toContain("En retard");
     expect(em.buildParManagerEmail("X", []).html).toContain("Aucune assignation");
   });
+  it("partenariats — buildParManagerEmail : section renouvellements de certif (PA4)", () => {
+    const m = em.buildParManagerEmail("Awa", [], [
+      { consultantName: "Koffi", certName: "NSE 4", expiryDate: "2026-09-30", bucket: "j30" },
+    ]);
+    expect(m.subject).toContain("1 renouvellement");
+    expect(m.html).toContain("Certifications à renouveler");
+    expect(m.html).toContain("expire le 2026-09-30");
+    expect(m.html).toContain("≤ 30 j");
+    // Grouping des alertes par manager = même logique que les relances.
+    const groups = em.groupParAlertsByManager([{ managerUid: "u1" }, { managerUid: null }, { managerUid: "u1" }]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items).toHaveLength(2);
+  });
   it("partenariats — buildParDirectionEmail : compteurs relances + renouvellements (dont expirées)", () => {
     const rel = [{ bucket: "retard" }, { bucket: "j30" }, { bucket: "retard" }];
     const al = [{ bucket: "expired", consultantName: "Awa", certName: "NSE4", expiryDate: "2026-01-01" }, { bucket: "j60", consultantName: "Koffi", certName: "CCNA", expiryDate: "2026-08-01" }];

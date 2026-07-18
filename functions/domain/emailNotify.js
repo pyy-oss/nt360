@@ -128,9 +128,9 @@ function buildMntRisqueEmail(items, audience) {
   };
 }
 
-// --- PARTENARIATS (par_) — digest de relances de certification (Lot P1). Deux audiences comme mntSlaSweep :
-// (1) par MANAGER, ses assignations de certif à relancer (par_relances porte managerUid) ; (2) DIRECTION,
-// vue d'ensemble relances + renouvellements (par_alerts n'a pas de destinataire → digest global). ADR-P08.
+// --- PARTENARIATS (par_) — digest de relances de certification (Lot P1, PA4). Deux audiences comme
+// mntSlaSweep : (1) par MANAGER, ses assignations à relancer (par_relances) ET ses renouvellements de certif
+// à venir (par_alerts porte désormais managerUid, PA4) ; (2) DIRECTION, vue d'ensemble. ADR-P08.
 
 // Libellé FR d'un palier d'urgence par_ : "retard"/"expired" ou "j<offset>" → "≤ N j" (miroir parLabels front).
 function parBucketLabel(bucket) {
@@ -139,9 +139,9 @@ function parBucketLabel(bucket) {
   return m ? `≤ ${m[1]} j` : (bucket || "—");
 }
 
-// Regroupe les items de par_relances par managerUid (destinataire). Ignore ceux sans managerUid (pas de
-// destinataire résoluble). Retourne [{ managerUid, items }], ordre stable (première apparition). PUR.
-function groupParRelancesByManager(items) {
+// Regroupe des items (par_relances OU par_alerts) par managerUid (destinataire). Ignore ceux sans managerUid
+// (pas de destinataire résoluble). Retourne [{ managerUid, items }], ordre stable (première apparition). PUR.
+function groupByManagerUid(items) {
   const map = new Map();
   for (const it of Array.isArray(items) ? items : []) {
     const uid = it && it.managerUid;
@@ -151,17 +151,31 @@ function groupParRelancesByManager(items) {
   }
   return Array.from(map, ([managerUid, list]) => ({ managerUid, items: list }));
 }
+// Alias sémantiques (une seule logique, deux sources) — assignations à relancer / renouvellements de certif.
+const groupParRelancesByManager = groupByManagerUid;
+const groupParAlertsByManager = groupByManagerUid;
 
-/** Email « certifications à relancer » (à un manager). `items` = assignations par_relances de CE manager. */
-function buildParManagerEmail(managerName, items) {
-  const list = Array.isArray(items) ? items : [];
-  const rows = list.slice(0, 30).map((it) =>
+/**
+ * Email « certifications à suivre » (à un manager). `relItems` = assignations par_relances de CE manager ;
+ * `alertItems` = renouvellements de certif (par_alerts) de CE manager (PA4). Deux sections distinctes.
+ */
+function buildParManagerEmail(managerName, relItems, alertItems) {
+  const rel = Array.isArray(relItems) ? relItems : [];
+  const al = Array.isArray(alertItems) ? alertItems : [];
+  const relRows = rel.slice(0, 30).map((it) =>
     `<b>${esc(it.consultantName || it.consultantId || "—")}</b> — ${esc(it.cert || "certification")} · échéance ${esc(it.targetDate || "—")} <span style="color:#9ca3af">(${esc(parBucketLabel(it.bucket))})</span>`);
+  const alRows = al.slice(0, 30).map((it) =>
+    `<b>${esc(it.consultantName || it.consultantId || "—")}</b> — ${esc(it.certName || "certification")} · expire le ${esc(it.expiryDate || "—")} <span style="color:#9ca3af">(${esc(parBucketLabel(it.bucket))})</span>`);
+  const body = [
+    "<p style=\"color:#4b5563;margin:0 0 6px\">Assignations de certification à relancer :</p>",
+    relRows.length ? listRows(relRows) : "<p style=\"color:#9ca3af\">Aucune assignation à relancer.</p>",
+    "<p style=\"color:#4b5563;margin:12px 0 6px\">Certifications à renouveler (≤ 90 j) :</p>",
+    alRows.length ? listRows(alRows) : "<p style=\"color:#9ca3af\">Aucune certification à renouveler.</p>",
+  ].join("");
   return {
-    subject: `nt360 — Certifications à relancer${managerName ? ` (${managerName})` : ""} : ${list.length}`,
-    html: shell("Certifications à relancer", `<p>Bonjour ${esc(managerName || "")}, assignations de certification à suivre pour vos collaborateurs :</p>`,
-      rows.length ? listRows(rows) : "<p style=\"color:#9ca3af\">Aucune assignation à relancer.</p>",
-      "Ouvrez « Partenariats & Certifications » dans nt360 pour le détail et les décisions."),
+    subject: `nt360 — Certifications à suivre${managerName ? ` (${managerName})` : ""} : ${rel.length} relance(s) · ${al.length} renouvellement(s)`,
+    html: shell("Certifications à suivre", `<p>Bonjour ${esc(managerName || "")}, à suivre pour vos collaborateurs :</p>`,
+      body, "Ouvrez « Partenariats & Certifications » dans nt360 pour le détail et les décisions."),
   };
 }
 
@@ -189,5 +203,5 @@ module.exports = {
   TRIGGERS, isEmail, cleanEmails, normalizeEmailConfig, canSend, emailForName,
   buildAlertsEmail, buildApprovalEmail, buildRelancesEmail, buildCodirEmail, buildMntRisqueEmail,
   MNT_NIVEAU_LABEL, MNT_SIGNAL_LABEL,
-  parBucketLabel, groupParRelancesByManager, buildParManagerEmail, buildParDirectionEmail,
+  parBucketLabel, groupByManagerUid, groupParRelancesByManager, groupParAlertsByManager, buildParManagerEmail, buildParDirectionEmail,
 };

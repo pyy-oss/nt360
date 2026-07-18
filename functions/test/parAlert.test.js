@@ -33,6 +33,12 @@ describe("parAlert — cycle de vie des certifications", () => {
     expect(certRenewalWatch([{ id: "x", expiryDate: null }], "2026-07-18")).toEqual([]);
   });
 
+  it("certRenewalWatch : remonte le managerUid dénormalisé (PA4 — relance au manager)", () => {
+    const items = certRenewalWatch([{ id: "1", consultantId: "a", expiryDate: "2026-08-01", managerUid: "mgr-1" }, { id: "2", consultantId: "b", expiryDate: "2026-08-02" }], "2026-07-18");
+    expect(items.find((i) => i.id === "1").managerUid).toBe("mgr-1");
+    expect(items.find((i) => i.id === "2").managerUid).toBe(null); // pas de manager → null (digest direction)
+  });
+
   it("watchCounts : compte par palier", () => {
     const items = [{ bucket: "expired" }, { bucket: "j7" }, { bucket: "j7" }, { bucket: "j90" }];
     expect(watchCounts(items)).toEqual({ expired: 1, j7: 2, j30: 0, j60: 0, j90: 1 });

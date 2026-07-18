@@ -831,7 +831,7 @@ exports.parRelancesSweep = onSchedule({ schedule: "every day 07:45", secrets: [G
   const alerts = (await db.doc("summaries/par_alerts").get()).data() || {};
   const relItems = rel.items || [], alertItems = alerts.items || [];
   if (!relItems.length && !alertItems.length) return;
-  const { buildParManagerEmail, buildParDirectionEmail, groupParRelancesByManager } = require("./domain/emailNotify");
+  const { buildParManagerEmail, buildParDirectionEmail, groupParRelancesByManager, groupParAlertsByManager } = require("./domain/emailNotify");
   // Digest DIRECTION — vue d'ensemble (relances + renouvellements), réutilise la liste « codir ».
   let sentDir = 0;
   if (cfg.recipients.codir.length) {
@@ -839,14 +839,18 @@ exports.parRelancesSweep = onSchedule({ schedule: "every day 07:45", secrets: [G
     const r = await sendEmail(cfg, { to: cfg.recipients.codir, subject: mail.subject, html: mail.html });
     if (r.ok) sentDir += 1;
   }
-  // Digest par MANAGER — chacun reçoit SES assignations à relancer (résolution uid→email, patron approbations).
+  // Digest par MANAGER — chacun reçoit SES assignations à relancer ET SES renouvellements de certif à venir
+  // (PA4 : par_alerts porte désormais managerUid). Résolution uid→email (patron approbations). Union des
+  // managers concernés par l'une OU l'autre liste → un seul email par manager.
   const byUid = {};
   (await db.collection("users").select("email", "name").get()).forEach((d) => { const e = d.data().email; if (e) byUid[d.id] = { email: e, name: d.data().name || "" }; });
+  const relByMgr = new Map(groupParRelancesByManager(relItems).map((g) => [g.managerUid, g.items]));
+  const alByMgr = new Map(groupParAlertsByManager(alertItems).map((g) => [g.managerUid, g.items]));
   let sentMgr = 0, skipped = 0;
-  for (const { managerUid, items } of groupParRelancesByManager(relItems)) {
+  for (const managerUid of new Set([...relByMgr.keys(), ...alByMgr.keys()])) {
     const u = byUid[managerUid];
     if (!u || !u.email) { skipped += 1; continue; }
-    const mail = buildParManagerEmail(u.name, items);
+    const mail = buildParManagerEmail(u.name, relByMgr.get(managerUid) || [], alByMgr.get(managerUid) || []);
     const r = await sendEmail(cfg, { to: u.email, subject: mail.subject, html: mail.html });
     if (r.ok) sentMgr += 1; else skipped += 1;
   }
