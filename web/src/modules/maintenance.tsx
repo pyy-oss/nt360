@@ -8,6 +8,8 @@ import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
 import { useCan, useClaims } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
+import { useFilters } from "../lib/filters";
+import { useClientKey } from "../lib/clientName";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, useConfirm, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { fmt, pct } from "../design/tokens";
@@ -33,7 +35,7 @@ import {
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
-import { FpLink, useCommandesRows } from "./_shared";
+import { FpLink, FilterNote, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
@@ -161,6 +163,19 @@ export const Maintenance: FC<Props> = () => {
   // stocke PAS l'affaire (ADR-001 « 1 contrat = 1 affaire » : elle vit sur la commande, rapprochée par fpKey).
   // Sert aussi de source de date de commande / CAS pour pré-remplir un contrat depuis une suggestion.
   const { rows: commandes } = useCommandesRows(gate);
+  // FILTRE GLOBAL BU/AM/Client (ADR-038) — le module respecte enfin la barre de filtre commune de l'ERP,
+  // jusqu'ici affichée mais inerte ici. Principe : TOUT se rattache à un contrat ; on restreint donc au
+  // SOUS-ENSEMBLE de contrats visibles, et chaque vue (dérivée client OU lignes de summary backend) est
+  // sous-filtrée sur ce même ensemble. On ne RE-CALCULE aucun score (le risque reste celui du recompute) :
+  // on ne fait que COMPTER les lignes retenues → parité garantie par construction. `match` compare le client
+  // BRUT → on canonicalise via useClientKey (parité alias, miroir config/clientAliases).
+  const { match: fMatch, active: filterActive } = useFilters();
+  const clientKey = useClientKey();
+  const vContrats = useMemo(() => (filterActive ? contrats.filter((c) => fMatch({ bu: c.bu, am: c.am, client: clientKey(c.client) }, ["bu", "am", "client"])) : contrats), [contrats, filterActive, fMatch, clientKey]);
+  const visibleIds = useMemo(() => new Set(vContrats.map((c) => c.id).filter(Boolean)), [vContrats]);
+  const visibleFps = useMemo(() => new Set(vContrats.map((c) => fpKey(c.fp)).filter(Boolean)), [vContrats]);
+  const vTickets = useMemo(() => (filterActive ? tickets.filter((t) => (t.contratId ? visibleIds.has(t.contratId) : t.fp ? visibleFps.has(fpKey(t.fp)) : false)) : tickets), [tickets, filterActive, visibleIds, visibleFps]);
+  const vInterventions = useMemo(() => (filterActive ? interventions.filter((iv) => (iv.contratId ? visibleIds.has(iv.contratId) : iv.fp ? visibleFps.has(fpKey(iv.fp)) : false)) : interventions), [interventions, filterActive, visibleIds, visibleFps]);
   const orderByFp = useMemo(() => {
     const m = new Map<string, Order>();
     for (const o of commandes) { const k = fpKey(o.fp); if (k && !m.has(k)) m.set(k, o); }
@@ -192,7 +207,7 @@ export const Maintenance: FC<Props> = () => {
   const [cId, setCId] = useState(""); // id du contrat édité (pour les décisions renouvellement/résiliation)
   const [viewC, setViewC] = useState<MntContrat | null>(null); // fiche contrat en CONSULTATION (lecture seule)
   const setC = <K extends keyof CForm>(k: K, v: CForm[K]) => setCForm((f) => ({ ...f, [k]: v }));
-  const contratsSorted = useMemo(() => [...contrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [contrats]);
+  const contratsSorted = useMemo(() => [...vContrats].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [vContrats]);
   // Action EN MASSE « Passer au statut » — même patron que les BC (operations.tsx). Appels séquentiels
   // (chaque écriture déclenche un recompute coalescé) ; réutilise setMntContratStatut (ne touche que le statut).
   // Statut automatique (Lot 6, ADR-027 révisé ADR-028) : le callable PROPOSE le statut juste (règles + IA) —
@@ -247,19 +262,19 @@ export const Maintenance: FC<Props> = () => {
   const [tOpen, setTOpen] = useState(false);
   const [tForm, setTForm] = useState<MntTicket>({ statut: "ouvert", priorite: "moyenne" });
   const setT = <K extends keyof MntTicket>(k: K, v: MntTicket[K]) => setTForm((f) => ({ ...f, [k]: v }));
-  const ticketsSorted = useMemo(() => [...tickets].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [tickets]);
+  const ticketsSorted = useMemo(() => [...vTickets].sort((a, b) => String(a.client || "").localeCompare(String(b.client || ""))), [vTickets]);
   const contratById = useMemo(() => Object.fromEntries(contrats.map((c) => [c.id!, c])), [contrats]);
   const nowMs = Date.now();
   // Calendrier SLA (Lot 2/7) : échéances SLA en attente des tickets ouverts, live. Horodatages convertis en
   // millis (tsMillis) avant l'appel → la vue PURE slaAgenda reste testable ; même moteur slaState que la fiche.
   const agenda = useMemo(() => slaAgenda(
-    tickets.map((t) => ({
+    vTickets.map((t) => ({
       id: t.id, contratId: t.contratId, client: t.client, titre: t.titre, priorite: t.priorite, statut: t.statut,
       ouvertMs: t.ouvertLe ? tsMillis(t.ouvertLe) : null,
       priseEnCompteMs: t.priseEnCompteLe ? tsMillis(t.priseEnCompteLe) : null,
       resoluMs: t.resoluLe ? tsMillis(t.resoluLe) : null,
     })),
-    contrats, nowMs), [tickets, contrats, nowMs]);
+    vContrats, nowMs), [vTickets, vContrats, nowMs]);
   // Restant lisible : « 2 j 3 h » ou « En retard de … » (rompu). Zéro dépendance externe (arrondi h).
   const fmtRemaining = (ms: number) => {
     const h = Math.floor(Math.abs(ms) / 3_600_000), d = Math.floor(h / 24);
@@ -347,9 +362,19 @@ export const Maintenance: FC<Props> = () => {
   ];
 
   // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
-  const risqueItems = risque?.items || [];
+  // Lignes de risque (summary backend) : chaque item porte bu/am/client → on SOUS-FILTRE sur le même
+  // périmètre, et on RE-COMPTE les niveaux à partir des lignes retenues (aucun re-scoring → parité).
+  const risqueItems = useMemo(() => {
+    const all = risque?.items || [];
+    return filterActive ? all.filter((i) => fMatch({ bu: i.bu, am: i.am, client: clientKey(i.client) }, ["bu", "am", "client"])) : all;
+  }, [risque, filterActive, fMatch, clientKey]);
   const atRisk = risqueItems.filter((r) => r.niveau !== "vert");
-  const counts = risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0 };
+  const counts = useMemo(() => {
+    if (!filterActive) return risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0 };
+    const c = { vert: 0, ambre: 0, rouge: 0, critique: 0 } as Record<string, number>;
+    for (const i of risqueItems) c[i.niveau] = (c[i.niveau] || 0) + 1;
+    return c;
+  }, [risqueItems, risque, filterActive]);
   const risqueCols = [
     colText("Client", (r: RisqueItem) => r.client || "—", (r: RisqueItem) => r.client || ""),
     colText("N° FP", (r: RisqueItem) => <FpLink fp={r.fp || undefined} />),
@@ -374,10 +399,10 @@ export const Maintenance: FC<Props> = () => {
   // Tableau de bord (Lot 6) — cockpit consolidé en tête du module, dérivé des collections déjà
   // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
   const asOfIso = new Date().toISOString().slice(0, 10);
-  const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
+  const dash = useMemo(() => computeMntDashboard(vContrats, vTickets, asOfIso), [vContrats, vTickets, asOfIso]);
   // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
   // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
-  const recurring = useMemo(() => recurringRevenue(contrats), [contrats]);
+  const recurring = useMemo(() => recurringRevenue(vContrats), [vContrats]);
   // NB : pas de colonne MRR par groupe — l'ARR (entier) somme juste, mais round(ARR/12) par ligne dériverait
   // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
@@ -388,17 +413,27 @@ export const Maintenance: FC<Props> = () => {
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
   // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
   // Conformité STRUCTURELLE (Lot 3/7) : défauts de saisie des contrats actifs — indépendante de la date.
-  const compliance = useMemo(() => mntCompliance(contrats), [contrats]);
+  const compliance = useMemo(() => mntCompliance(vContrats), [vContrats]);
   // Renouvellements & échéances à revoir (Lot 5/7) : contrats actifs dont la fin est dépassée (statut à
   // revoir) ou approche (≤ 90 j), plus urgent d'abord.
-  const renouvellements = useMemo(() => mntRenouvellements(contrats, asOfIso), [contrats, asOfIso]);
+  const renouvellements = useMemo(() => mntRenouvellements(vContrats, asOfIso), [vContrats, asOfIso]);
   // Maintenance par TYPE vs objectifs (ADR-025) : nombre de tickets ET d'interventions par type, par
   // contrat + total agrégé. Vue pure (mntTypeStats), dérivée des collections déjà chargées.
-  const typeStats = useMemo(() => mntTypeStats(contrats, tickets, interventions), [contrats, tickets, interventions]);
+  const typeStats = useMemo(() => mntTypeStats(vContrats, vTickets, vInterventions), [vContrats, vTickets, vInterventions]);
   // --- Centre de surveillance (ADR-026) : flux d'événements + abonnements ciblés ---
   const [survScope, setSurvScope] = useState<"tout" | "abonnements">("tout");
-  const survEvents = useMemo<MntSurveillanceEvent[]>(() => surv?.events || [], [surv]);
-  const survCounts = surv?.counts || { high: 0, medium: 0, low: 0 };
+  // Événements de surveillance : chaque événement porte bu/am/client → sous-filtré comme le reste (le churn
+  // du même onglet l'est aussi ; on évite l'état mixte « carte filtrée à côté d'une carte parc entier »).
+  const survEvents = useMemo<MntSurveillanceEvent[]>(() => {
+    const all = surv?.events || [];
+    return filterActive ? all.filter((e) => fMatch({ bu: e.bu, am: e.am, client: clientKey(e.client) }, ["bu", "am", "client"])) : all;
+  }, [surv, filterActive, fMatch, clientKey]);
+  const survCounts = useMemo(() => {
+    if (!filterActive) return surv?.counts || { high: 0, medium: 0, low: 0 };
+    const c = { high: 0, medium: 0, low: 0 } as Record<string, number>;
+    for (const e of survEvents) c[e.severity] = (c[e.severity] || 0) + 1;
+    return c;
+  }, [surv, survEvents, filterActive]);
   const watched = hasAnyWatch(watch);
   // « Mes abonnements » filtre le flux aux événements couverts par l'abonnement (miroir de watchMatchesEvent back).
   const survRows = useMemo(() => (survScope === "abonnements" ? survEvents.filter((e) => watchMatchesEvent(watch, e)) : survEvents), [survEvents, survScope, watch]);
@@ -448,6 +483,9 @@ export const Maintenance: FC<Props> = () => {
   // Rentabilité par contrat (Lot 4/7) : callable gouverné (coût CJM serveur, masqué sans droit rentabilité).
   // Chargé à l'ouverture du module ; « Recalculer » rafraîchit après édition.
   const [pnl, setPnl] = useState<{ rows: MntContratPnlRow[]; hasCost: boolean } | null>(null);
+  // Rentabilité + propositions de statut (lignes par contrat, clé N° FP) : sous-filtrées sur le périmètre visible.
+  const pnlRows = useMemo(() => { const all = pnl?.rows || []; return filterActive ? all.filter((r) => visibleFps.has(fpKey(r.fp))) : all; }, [pnl, filterActive, visibleFps]);
+  const statutProposals = useMemo(() => { const all = statutRun?.proposals || []; return filterActive ? all.filter((p) => visibleFps.has(fpKey(p.fp))) : all; }, [statutRun, filterActive, visibleFps]);
   useEffect(() => { if (!gate) return; mntContratPnl().then((r) => setPnl({ rows: r.rows, hasCost: r.hasCost })).catch(() => setPnl(null)); }, [gate]);
   const pnlCols = pnl ? [
     colText("Client", (r: MntContratPnlRow) => r.client || "—", (r: MntContratPnlRow) => r.client || ""),
@@ -635,10 +673,11 @@ export const Maintenance: FC<Props> = () => {
   const [tab, setTab] = useState<"pilotage" | "contrats" | "tickets" | "surveillance">("pilotage");
   return (
     <div className="flex flex-col gap-4">
+      <FilterNote dims="BU / AM / client" />
       <Segmented value={tab} onChange={setTab} ariaLabel="Vue du module contrats" options={[
         { value: "pilotage", label: "Pilotage" },
-        { value: "contrats", label: "Contrats", count: contrats.length || undefined },
-        { value: "tickets", label: "Tickets & SLA", count: tickets.length || undefined },
+        { value: "contrats", label: "Contrats", count: vContrats.length || undefined },
+        { value: "tickets", label: "Tickets & SLA", count: vTickets.length || undefined },
         { value: "surveillance", label: "Surveillance" },
       ]} />
       {tab === "pilotage" && gate && (contrats.length > 0 || tickets.length > 0) && (
@@ -804,11 +843,11 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {tab === "pilotage" && gate && pnl && pnl.rows.length > 0 && (
+      {tab === "pilotage" && gate && pnl && pnlRows.length > 0 && (
         <Card title="Rentabilité des contrats"
           actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
           <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût total</b> de l'affaire = <b>interventions</b> (jours CRA × coût journalier) <b>+ P&L de l'affaire</b> (achats + provisions du carnet, par N° FP) <b>+ astreintes validées</b>. {pnl.hasCost ? <>Survolez le coût pour le détail. Pires marges d'abord. La marge est <b>prudente</b> (revenu engagé qui croît, coût affaire figé) tant que le contrat n'est pas à terme.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
-          <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
+          <Table columns={pnlCols} rows={pnlRows} colsKey="mnt_pnl" />
         </Card>
       )}
 
@@ -817,14 +856,14 @@ export const Maintenance: FC<Props> = () => {
           l'application est un geste humain (« Appliquer » à l'unité, « Appliquer les recommandés » en masse).
           « Rétablir » annule des statuts auto-appliqués par l'ancienne version (rétablissement d'incident). */}
       {tab === "contrats" && canWrite && (contrats.length > 0 || !!statutRun) && (
-        <Card title={statutRun ? `Statut automatique (IA) · ${statutRun.proposals.length} proposition(s)` : "Statut automatique (IA)"}
+        <Card title={statutRun ? `Statut automatique (IA) · ${statutProposals.length} proposition(s)` : "Statut automatique (IA)"}
           actions={(
             <div className="flex flex-wrap items-center gap-2">
-              {statutRun && statutRun.proposals.some((p) => p.recommended) && (
+              {statutRun && statutProposals.some((p) => p.recommended) && (
                 <Busy variant="gold" label="Appliquer les recommandés"
                   okMsg={(n: number) => `${n} statut(s) appliqué(s)`} errMsg="Application refusée"
                   fn={async () => {
-                    const rec = (statutRun.proposals || []).filter((p) => p.recommended);
+                    const rec = statutProposals.filter((p) => p.recommended);
                     // Garde-fou : application de MASSE → confirmation avec décompte (les propositions à réviser,
                     // dont « échéance dépassée → échu », ne sont PAS recommandées et restent à l'unité).
                     const ok = await askConfirm(`Appliquer ${rec.length} changement(s) de statut recommandé(s) ?`, { title: "Appliquer les recommandés", confirmLabel: "Appliquer" });
@@ -839,9 +878,9 @@ export const Maintenance: FC<Props> = () => {
             </div>
           )}>
           <Tip>Propose le statut juste de chaque contrat : transitions <b>mécaniques</b> (date de début atteinte → <b>actif</b>…) par règles, cas de <b>jugement</b> (dormant, réactivation) par l'<b>IA</b>. <b>Rien n'est appliqué automatiquement</b> — vous validez chaque proposition (« Appliquer »), ou en bloc les <b>recommandées</b> (confiance élevée). La transition <b>« échéance dépassée → échu » reste à réviser à l'unité</b> (jamais recommandée en masse) : un contrat reconduit peut garder une date de fin passée tout en restant actif.</Tip>
-          {statutRun && (statutRun.proposals.length === 0
-            ? <EmptyState label="Aucun changement de statut — le parc est cohérent." />
-            : <Table columns={statutCols} rows={statutRun.proposals} colsKey="mnt_statut_ia" rowKey={(p) => p.id} />)}
+          {statutRun && (statutProposals.length === 0
+            ? <EmptyState label={filterActive ? "Aucune proposition sur le périmètre filtré." : "Aucun changement de statut — le parc est cohérent."} />
+            : <Table columns={statutCols} rows={statutProposals} colsKey="mnt_statut_ia" rowKey={(p) => p.id} />)}
         </Card>
       )}
 
@@ -909,7 +948,7 @@ export const Maintenance: FC<Props> = () => {
 
       {tab === "surveillance" && gate && canAudit && audit.length > 0 && (
         <Card title={`Registre d'audit · ${audit.length}${audit.length >= 500 ? "+" : ""}`}>
-          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
+          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. <b>Non filtré</b> (registre de conformité = tout le parc, quel que soit le filtre BU/AM/client). Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
           <Table columns={auditCols} rows={audit} colsKey="mnt_audit" />
         </Card>
       )}
