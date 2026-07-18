@@ -816,6 +816,43 @@ exports.mntSlaSweep = onSchedule({ schedule: "every day 07:30", secrets: [GRAPH_
   await logOps({ kind: "email", trigger: "maintenance", status: "ok", detail: { direction: sentDir, am: sentAm, skipped, contrats: items.length } });
 });
 
+// --- RELANCES PARTENARIATS (par_) — digest quotidien : assignations de certification à relancer (par
+// MANAGER, résolution managerUid→email) + renouvellements de certifs à venir (digest DIRECTION). DOUBLE
+// gate d'extinction comme mntSlaSweep : drapeau config/parFeature ALLUMÉ, puis config/emailNotify activée
+// + trigger `partenariats`. Éteint = no-op strict. Lit summaries/par_relances + par_alerts (produits au
+// recompute 05:00 ; planifié après pour lire des summaries frais). Best-effort (sendEmail soft). ADR-P08.
+exports.parRelancesSweep = onSchedule({ schedule: "every day 07:45", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
+  const { isParEnabled } = require("./domain/parFeature");
+  const parCfg = (await db.doc("config/parFeature").get()).data();
+  if (!isParEnabled(parCfg)) return; // module éteint → rien (aucune lecture par_*)
+  const cfg = await loadEmailCfg();
+  if (!cfg.enabled || !cfg.triggers.partenariats) return;
+  const rel = (await db.doc("summaries/par_relances").get()).data() || {};
+  const alerts = (await db.doc("summaries/par_alerts").get()).data() || {};
+  const relItems = rel.items || [], alertItems = alerts.items || [];
+  if (!relItems.length && !alertItems.length) return;
+  const { buildParManagerEmail, buildParDirectionEmail, groupParRelancesByManager } = require("./domain/emailNotify");
+  // Digest DIRECTION — vue d'ensemble (relances + renouvellements), réutilise la liste « codir ».
+  let sentDir = 0;
+  if (cfg.recipients.codir.length) {
+    const mail = buildParDirectionEmail(relItems, alertItems);
+    const r = await sendEmail(cfg, { to: cfg.recipients.codir, subject: mail.subject, html: mail.html });
+    if (r.ok) sentDir += 1;
+  }
+  // Digest par MANAGER — chacun reçoit SES assignations à relancer (résolution uid→email, patron approbations).
+  const byUid = {};
+  (await db.collection("users").select("email", "name").get()).forEach((d) => { const e = d.data().email; if (e) byUid[d.id] = { email: e, name: d.data().name || "" }; });
+  let sentMgr = 0, skipped = 0;
+  for (const { managerUid, items } of groupParRelancesByManager(relItems)) {
+    const u = byUid[managerUid];
+    if (!u || !u.email) { skipped += 1; continue; }
+    const mail = buildParManagerEmail(u.name, items);
+    const r = await sendEmail(cfg, { to: u.email, subject: mail.subject, html: mail.html });
+    if (r.ok) sentMgr += 1; else skipped += 1;
+  }
+  await logOps({ kind: "email", trigger: "partenariats", status: "ok", detail: { direction: sentDir, managers: sentMgr, skipped, relances: relItems.length, renouvellements: alertItems.length } });
+});
+
 // --- CURATION DE LA VEILLE (agent LLM) — score la PERTINENCE de chaque TYPE de bulletin d'actualité
 // pour filtrer le bruit « avant publication ». Confidentialité par CONSTRUCTION : on n'envoie à l'API
 // QUE des signaux dé-identifiés (clé + libellé générique du catalogue + domaine + sévérité), jamais le

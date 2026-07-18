@@ -200,3 +200,17 @@ construire `certsByPartner`, à chaque recompute (le sweep quotidien annoncé pa
 Le statut « à date » a une **source unique** : le recompute (jamais le champ persisté, qui reste un cache
 d'affichage). **Conséquence** : quotas et couverture reflètent le temps écoulé sans réécriture des
 certifs. Statut : **acté (remédiation post-Lot 7)**.
+
+### ADR-P08 — Relances actives par email (scheduler `parRelancesSweep`, trigger `partenariats`)
+**Contexte** : le module *calcule* les relances (`summaries/par_relances`) et alertes de renouvellement
+(`summaries/par_alerts`) au recompute mais ne les *envoyait pas*. **Décision** : un scheduler quotidien
+`parRelancesSweep` (07:45, après le recompute 05:00) envoie deux digests sur le **patron exact de
+`mntSlaSweep`** : (1) par MANAGER, ses assignations de certif à relancer — résolution `managerUid` (porté
+par `par_relances`) → `users/{uid}.email` (patron `submitForApproval`) ; (2) DIRECTION, vue d'ensemble
+relances + renouvellements → liste `recipients.codir` (car `par_alerts` ne porte aucun destinataire). On
+**réutilise l'infra email existante** (`sendEmail`, gabarits `domain/emailNotify.js`, secret
+`GRAPH_CLIENT_SECRET`) — rien recréé. Un trigger `partenariats` est ajouté à `TRIGGERS` (additif, défaut
+`true` comme `maintenance`) ; comme pour maintenance il n'est **pas exposé dans l'UI Habilitations**
+(symétrie stricte avec le module sœur). **Double gate d'extinction** : drapeau `config/parFeature` ALLUMÉ,
+puis `emailNotify.enabled && triggers.partenariats` — éteint = no-op strict. Regroupement + gabarits
+**PURS et testés** (`domain/emailNotify.js`, `test/emailNotify.test.js`). Statut : **acté (Lot P1)**.

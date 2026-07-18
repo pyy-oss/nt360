@@ -8,11 +8,11 @@ describe("emailNotify — config & résolution", () => {
     expect(c.enabled).toBe(true);
     expect(c.recipients.alerts).toEqual(["a@x.com"]); // dédup + minuscule + email invalide retiré
     expect(c.recipients.codir).toEqual(["dir@x.com"]);
-    expect(c.triggers).toEqual({ approvals: true, relances: true, alerts: true, codir: true, maintenance: true });
+    expect(c.triggers).toEqual({ approvals: true, relances: true, alerts: true, codir: true, maintenance: true, partenariats: true });
   });
-  it("triggers désactivables individuellement (maintenance additif = défaut true)", () => {
+  it("triggers désactivables individuellement (maintenance/partenariats additifs = défaut true)", () => {
     const c = em.normalizeEmailConfig({ triggers: { relances: false, alerts: false } });
-    expect(c.triggers).toEqual({ approvals: true, relances: false, alerts: false, codir: true, maintenance: true });
+    expect(c.triggers).toEqual({ approvals: true, relances: false, alerts: false, codir: true, maintenance: true, partenariats: true });
   });
   it("canSend exige enabled + tenant + client + sender", () => {
     expect(em.canSend(em.normalizeEmailConfig({ enabled: true, tenantId: "t", clientId: "c", sender: "s@x.com" }))).toBe(true);
@@ -53,6 +53,46 @@ describe("emailNotify — config & résolution", () => {
     expect(am.subject).toContain("Awa Dupont");
     expect(am.html).toContain("Bonjour Awa Dupont");
     expect(em.buildMntRisqueEmail([], "direction").html).toContain("Aucun contrat à risque");
+  });
+  it("partenariats — groupParRelancesByManager regroupe par managerUid, ignore les sans-manager", () => {
+    const items = [
+      { managerUid: "u1", cert: "NSE4", consultantName: "Awa" },
+      { managerUid: "u2", cert: "CCNA", consultantName: "Koffi" },
+      { managerUid: "u1", cert: "NSE7", consultantName: "Binta" },
+      { managerUid: null, cert: "orpheline", consultantName: "Sans manager" },
+    ];
+    const groups = em.groupParRelancesByManager(items);
+    expect(groups).toHaveLength(2); // u1, u2 ; l'item sans managerUid est ignoré
+    expect(groups.find((g) => g.managerUid === "u1").items).toHaveLength(2);
+    expect(em.groupParRelancesByManager([])).toEqual([]);
+    expect(em.groupParRelancesByManager(undefined)).toEqual([]);
+  });
+  it("partenariats — parBucketLabel : retard/expired + j<offset>", () => {
+    expect(em.parBucketLabel("retard")).toBe("En retard");
+    expect(em.parBucketLabel("expired")).toBe("Expirée");
+    expect(em.parBucketLabel("j30")).toBe("≤ 30 j");
+    expect(em.parBucketLabel("j7")).toBe("≤ 7 j");
+  });
+  it("partenariats — buildParManagerEmail : sujet + lignes échappées, vide géré", () => {
+    const m = em.buildParManagerEmail("Awa Dupont", [
+      { consultantName: "Koffi <b>", cert: "NSE7", targetDate: "2026-09-30", bucket: "retard" },
+    ]);
+    expect(m.subject).toContain("Awa Dupont");
+    expect(m.subject).toContain("1");
+    expect(m.html).toContain("Bonjour Awa Dupont");
+    expect(m.html).toContain("&lt;b&gt;"); // consultant échappé
+    expect(m.html).toContain("En retard");
+    expect(em.buildParManagerEmail("X", []).html).toContain("Aucune assignation");
+  });
+  it("partenariats — buildParDirectionEmail : compteurs relances + renouvellements (dont expirées)", () => {
+    const rel = [{ bucket: "retard" }, { bucket: "j30" }, { bucket: "retard" }];
+    const al = [{ bucket: "expired", consultantName: "Awa", certName: "NSE4", expiryDate: "2026-01-01" }, { bucket: "j60", consultantName: "Koffi", certName: "CCNA", expiryDate: "2026-08-01" }];
+    const d = em.buildParDirectionEmail(rel, al);
+    expect(d.subject).toContain("3 relance");
+    expect(d.subject).toContain("2 renouvellement");
+    expect(d.html).toContain(">2</b> en retard"); // 2 relances en retard
+    expect(d.html).toContain(">1</b> expirée"); // 1 renouvellement expiré
+    expect(d.html).toContain("Awa"); // échantillon renouvellements
   });
 });
 
