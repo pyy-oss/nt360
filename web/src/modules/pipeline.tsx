@@ -931,7 +931,42 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
           )}
         </Card>
       </div>
-      <Tip>Cockpit de pilotage commercial — pondéré, prévision, conversion, couverture, top AM, <b>glissement</b> (risque prévision) et <b>point de fuite</b> du funnel. Chaque tuile ouvre la vue détaillée. Rafraîchi à chaque recalcul.</Tip>
+      {/* Top affaires + conversion par commercial (période) : deux agrégats DÉJÀ calculés au recompute
+          (pipeline_.topOpps / .byAmConv) mais qui n'étaient affichés nulle part — surfacés ici, sans back.
+          Distincts du « Top commerciaux » ci-dessus (classement pondéré TOUS millésimes, doc summaries/ams) :
+          « Conversion » est la vue TRANSFO. de la période (gagné/perdu) — même métrique, deux lectures. */}
+      <div className={cols2}>
+        <Card title="Top opportunités (pondéré projeté)" actions={canGo("opplist") ? <button onClick={() => jump("opplist")} className="text-gold text-xs underline">Liste</button> : undefined}>
+          {(data.topOpps || []).length ? <Table columns={[
+            colText("Client", (o) => o.client || "—", (o) => o.client || ""),
+            colText("Commercial", (o) => o.am || "—", (o) => o.am || ""),
+            colText("Étape", (o) => (o.stage ? `${o.stage}·${STAGE_SHORT[o.stage] || o.stage}` : "—"), (o) => o.stage || 0),
+            colNum("Brut", (o) => money(o.amount || 0), (o) => o.amount || 0),
+            colNum("Pondéré", (o) => money(o.weighted || 0), (o) => o.weighted || 0),
+          ]} rows={(data.topOpps || []).slice(0, 8)} /> : <EmptyState label="Aucune opportunité projetée." />}
+        </Card>
+        <Card title="Conversion par commercial (période)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
+          {(data.byAmConv || []).length ? <Table columns={[
+            colText("Commercial", (r) => r.am, (r) => r.am),
+            colNum("Gagné", (r) => r.won, (r) => r.won),
+            colNum("Perdu", (r) => r.lost, (r) => r.lost),
+            colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
+            colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
+          ]} rows={(data.byAmConv || []).slice(0, 8)} /> : <EmptyState label="Aucune conversion sur la période." />}
+        </Card>
+      </div>
+      {/* Le glissement (bandeau ci-dessus) VENTILÉ par commercial — même doc summaries/oppSlippage.byAm,
+          juste sa décomposition, affichée seulement quand il y a du glissement à montrer. */}
+      {slip && (slip.byAm || []).length > 0 && (slip.slipAmount ?? 0) > 0 && (
+        <Card title="Glissement par commercial" actions={canGo("salesforecast") ? <button onClick={() => jump("salesforecast")} className="text-gold text-xs underline">Prévision</button> : undefined}>
+          <Table columns={[
+            colText("Commercial", (r) => r.am, (r) => r.am),
+            colNum("Opp.", (r) => r.count, (r) => r.count),
+            colNum("Montant glissé", (r) => money(r.amount), (r) => r.amount),
+          ]} rows={(slip.byAm || []).slice(0, 8)} />
+        </Card>
+      )}
+      <Tip>Cockpit de pilotage commercial — pondéré, prévision, conversion, couverture, top AM, <b>top opportunités</b>, <b>glissement</b> (risque prévision, ventilé par commercial) et <b>point de fuite</b> du funnel. Chaque tuile ouvre la vue détaillée. Rafraîchi à chaque recalcul.</Tip>
     </div>
   );
 };
