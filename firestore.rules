@@ -232,7 +232,10 @@ service cloud.firestore {
     // Le verrou DRAPEAU utilise le PRÉFIXE d'id (regex bon marché) plutôt qu'un 2ᵉ/3ᵉ appel de
     // summaryModule() (grand ternaire coûteux) : un summary de module gaté porte toujours son préfixe
     // (mnt_* / par_*). Évite de dépasser la limite Firestore de 1000 évaluations d'expression par requête.
-    match /summaries/{id}     { allow read: if canRead(summaryModule(id)) && (!id.matches('mnt_.*') || mntEnabled()) && (!id.matches('par_.*') || parEnabled()); allow write: if false; }
+    // par_ca porte le CA constructeur (volume d'achat fournisseur) — donnée CONFIDENTIELLE : SECOND verrou
+    // `rentabilite` (comme les summaries *Margin), en plus du droit `partenariats` + drapeau (ADR-P07). La
+    // condition est bon marché (comparaison d'id ; canRead('rentabilite') n'est évalué que pour par_ca).
+    match /summaries/{id}     { allow read: if canRead(summaryModule(id)) && (!id.matches('mnt_.*') || mntEnabled()) && (!id.matches('par_.*') || parEnabled()) && (id != 'par_ca' || canRead('rentabilite')); allow write: if false; }
     // Chunks des commandes matérialisées (module « overview », comme summaries/commandes).
     match /commandesRows/{id} { allow read: if canRead('overview');       allow write: if false; }
     // Chunks de MARGE par ligne → accès « Rentabilité » requis (confidentialité).

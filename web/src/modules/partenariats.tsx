@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
-import { useCan } from "../lib/rbac";
+import { useCan, useCanSeeMargin } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
@@ -39,13 +39,17 @@ const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) 
 
 export const Partenariats: FC<Props> = () => {
   const canWrite = useCan("partenariats") === "write";
+  // Le CA constructeur (par_ca) est CONFIDENTIEL — même cloisonnement que la marge (droit `rentabilite`,
+  // ADR-P07). Sans ce droit on NE S'ABONNE PAS à summaries/par_ca (sinon permission-denied par les rules)
+  // et le KPI + la carte CA sont masqués — comme MB/%MB ailleurs (useCanSeeMargin).
+  const canSeeCa = useCanSeeMargin();
   const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "config" | "ia">("dash");
 
   // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
   const { rows: partners } = useCollectionData<Partner>("par_partners");
   const { rows: certifs } = useCollectionData<Certif>("par_certifications");
   const { rows: assigns } = useCollectionData<Assign>("par_assignments");
-  const { data: ca } = useDocData<CaSummary>("summaries/par_ca");
+  const { data: ca } = useDocData<CaSummary>(canSeeCa ? "summaries/par_ca" : null);
   const { data: quotas } = useDocData<QuotaSummary>("summaries/par_quotas");
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
@@ -67,7 +71,7 @@ export const Partenariats: FC<Props> = () => {
         ]}
       />
 
-      {tab === "dash" && <Dashboard ca={ca} quotas={quotas} alerts={alerts} relances={relances} partners={partners || []} partnerName={partnerName} />}
+      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} partners={partners || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "config" && <ConfigTab partners={partners || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
@@ -163,7 +167,7 @@ const QbrList: FC<{ title: string; tone: string; items?: string[] }> = ({ title,
 );
 
 // ─────────────────────────────────────────────────────────────────────── Tableau de bord
-const Dashboard: FC<{ ca: CaSummary; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, quotas, alerts, relances, partners, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, quotas, alerts, relances, partners, partnerName }) => {
   const alertItems = alerts?.items || [];
   const relanceItems = relances?.items || [];
   const quotaPartners = quotas?.partners || [];
@@ -172,11 +176,13 @@ const Dashboard: FC<{ ca: CaSummary; quotas: QuotaSummary; alerts: AlertSummary;
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label="Partenaires" value={String(partners.length)} sub="référentiel" />
-        <Kpi label="CA constructeurs (dérivé BC)" value={fmt(ca?.totalXof || 0)} sub={`${(ca?.byPartner || []).length} partenaire(s)`} tone="emerald" />
+        {/* CA constructeur = donnée confidentielle (droit `rentabilite`) — masquée sinon (ADR-P07). */}
+        {canSeeCa && <Kpi label="CA constructeurs (dérivé BC)" value={fmt(ca?.totalXof || 0)} sub={`${(ca?.byPartner || []).length} partenaire(s)`} tone="emerald" />}
         <Kpi label="Certifs à renouveler" value={String(alerts?.total || 0)} sub={`${alerts?.counts?.expired || 0} expirée(s)`} tone={(alerts?.total || 0) > 0 ? "gold" : "ink"} />
         <Kpi label="Partenariats à risque" value={String(nonConf)} sub={`${relances?.counts?.late || 0} relance(s) en retard`} tone={nonConf > 0 ? "clay" : "ink"} />
       </div>
 
+      {canSeeCa && (
       <Card title="CA par constructeur — dérivé des BC fournisseurs">
         <Tip>Le chiffre d'affaires par partenaire est <b>dérivé des bons de commande fournisseurs</b> (aucune saisie), en rapprochant le fournisseur du constructeur (Paramétrage). Montants en FCFA.</Tip>
         <Table
@@ -189,6 +195,7 @@ const Dashboard: FC<{ ca: CaSummary; quotas: QuotaSummary; alerts: AlertSummary;
           </div>
         )}
       </Card>
+      )}
 
       <Card title="Conformité des quotas de certification">
         <Table
