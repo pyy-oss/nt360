@@ -1258,3 +1258,21 @@ crée le document au lieu d'échouer, et contourne les rules `write:false`. Le g
 d'entrée mais la **lecture préalable** (`getAll` → filtre `exists`). Côté conformité, le signal le plus fort
 n'était pas la règle ERP externe mais l'**auto-incohérence** : le module s'appelait « Affaire » à un endroit et
 « Objet » à l'autre pour la même donnée — un module doit d'abord être cohérent avec lui-même.
+
+## Navigation en 4 sous-onglets (CT1) — 2026-07-18
+
+**Fait.** Le module rendait ~18 cartes sur une seule page ; retour d'usage direction : « on se perd ». Un
+audit navigation a confirmé la cause racine (aucune sous-nav, contrairement à Partenariats/Pipeline). Le
+rendu est désormais enveloppé dans un `Segmented` de 4 onglets (Pilotage / Contrats / Tickets & SLA /
+Surveillance, ADR-036). Regroupement **purement présentationnel** : chaque carte est déplacée sous un onglet
+sans toucher son contenu ; les hooks restent tous appelés au-dessus du `return` (aucune violation des règles
+de hooks, même patron que `partenariats.tsx`). Build vert, bundle d'entrée sous budget, aucun calcul modifié.
+
+**Appris.** Un module riche en fonctionnalités peut devenir **inutilisable par simple accumulation** : ce
+n'est pas un manque de fonctions mais un défaut d'**architecture de l'information**. La divergence avec le
+patron maison (sous-onglets) était le signal — un module doit d'abord se naviguer comme le reste de l'ERP.
+
+**Suite (décidé, non inclus dans ce lot).** Câbler les filtres globaux BU/AM/Client au module (aujourd'hui
+affichés mais inertes) ; fusionner les surfaces qui se répètent (Revenu KPI + carte ; Risque + churn IA ;
+Renouvellements + lignées IA ; Statut dashboard + statut auto IA) — chacune un ADR ; déplacer les **Astreintes**
+dans le module **Exécution** (elles pèsent sur les affaires ET les contrats — ADR-037 à venir).
