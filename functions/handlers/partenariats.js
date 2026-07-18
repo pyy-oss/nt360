@@ -3,7 +3,8 @@
 // Même patron que le module maintenance (extraction hors index.js, injection). Collections par_*
 // callable-only (rules read = drapeau + droit `partenariats`, write:false). DOUBLE garde à l'écriture :
 // requireWrite + drapeau config/parFeature ALLUMÉ (ADR-P01). Exports déclarés dans index.js.
-const { slug, validatePartner } = require("../domain/parPartner");
+const { slug, validatePartner, computeExpiry } = require("../domain/parPartner");
+const { validateCertification, computeCertStatus } = require("../domain/parCertification");
 const { isParEnabled } = require("../domain/parFeature");
 
 function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite }) {
@@ -44,7 +45,61 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite 
     return { ok: true, id };
   });
 
-  return { upsertParPartner, deleteParPartner };
+  // Crée/met à jour une certification d'un ingénieur. Idempotent : id = <consultantId>_<catalogId>
+  // (une certif par consultant × entrée de catalogue). ADR-P03 : le consultant DOIT exister (sinon on
+  // créerait une personne fantôme) — on lit sa fiche pour dénormaliser NOM/BU/GRADE (jamais le CJM
+  // confidentiel), afin d'afficher la certif sous le seul droit `partenariats`. La date d'expiration et
+  // le statut sont DÉRIVÉS du catalogue du partenaire (validityMonths) — jamais saisis à la main.
+  const upsertParCertification = onCallG("upsertParCertification", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const v = validateCertification(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    const { consultantId, partnerId, certificationCatalogId, obtainedDate } = v.value;
+
+    // Le consultant doit exister (annuaire ESN existant = seule vérité des personnes).
+    const consSnap = await db.doc(`consultants/${consultantId}`).get();
+    if (!consSnap.exists) throw new HttpsError("failed-precondition", "consultant inconnu (annuaire ESN)");
+    const cons = consSnap.data() || {};
+
+    // Le partenaire + l'entrée de catalogue doivent exister (référentiel Lot 1) → validité de la certif.
+    const partSnap = await db.doc(`par_partners/${partnerId}`).get();
+    if (!partSnap.exists) throw new HttpsError("failed-precondition", "partenaire inconnu (référentiel)");
+    const entry = ((partSnap.data() || {}).certificationCatalog || []).find((e) => e.id === certificationCatalogId);
+    if (!entry) throw new HttpsError("failed-precondition", "certification absente du catalogue du partenaire");
+
+    const expiryDate = computeExpiry(obtainedDate, entry.validityMonths);
+    const today = new Date().toISOString().slice(0, 10);
+    const status = computeCertStatus(expiryDate, today);
+
+    const id = `${slug(consultantId) || consultantId}_${certificationCatalogId}`;
+    const ref = db.doc(`par_certifications/${id}`);
+    const exists = (await ref.get()).exists;
+    // Dénormalisation NON confidentielle du consultant (affichage sans exposer le CJM) + du catalogue.
+    const doc = {
+      ...v.value, expiryDate, status,
+      consultantName: String(cons.name || "").slice(0, 120), consultantBu: String(cons.bu || "").slice(0, 40), consultantGrade: String(cons.grade || "").slice(0, 40),
+      competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (exists) await ref.set(doc, { merge: true });
+    else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_certification" : "create_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, id, status, expiryDate };
+  });
+
+  // Supprime une certification. Réservé écriture `partenariats` + drapeau. Idempotent.
+  const deleteParCertification = onCallG("deleteParCertification", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = String(req.data && req.data.id || "").trim().slice(0, 200);
+    if (!id) throw new HttpsError("invalid-argument", "id de certification invalide");
+    await db.doc(`par_certifications/${id}`).delete().catch(() => {});
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    return { ok: true, id };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification };
 }
 
 module.exports = { createPartenariats };

@@ -4,6 +4,34 @@
 
 ---
 
+## Lot 2 — Certifications rattachées aux consultants (ADR-P03)
+
+**Fait**
+- Domaine PUR `functions/domain/parCertification.js` : `validateCertification` (consultantId/partnerId/
+  catalogId + date plausible), `computeCertStatus` (expired / expiring_soon ≤ 90 j / active, today
+  INJECTÉ → recalculable par le sweep Lot 4), `engineerRhStatus`. Tests (6 cas).
+- Handler `upsertParCertification` / `deleteParCertification` : VALIDE l'existence du consultant
+  (annuaire ESN = seule vérité des personnes) ET du partenaire+entrée de catalogue (Lot 1) ; DÉRIVE
+  expiration (validityMonths du catalogue) + statut ; dénormalise NOM/BU/GRADE du consultant **sans**
+  le CJM. Idempotent (id = `<consultantId>_<catalogId>`). Exportés + `deployed-functions.txt`.
+- Rules : `match /par_certifications/{id}` — lecture directe gatée drapeau+droit `partenariats`
+  (donnée non confidentielle), écriture callable-only.
+
+**Appris**
+- Stocker les certifs en sous-collection de `consultants` aurait hérité de son accès callable-only
+  (CJM confidentiel) → gate RBAC faux pour une donnée non sensible. Le top-level `par_certifications`
+  RÉFÉRENÇANT `consultantId` respecte ADR-P03 (pas de second annuaire) tout en gardant le RBAC propre.
+- La validité (mois) n'est jamais saisie : dérivée du catalogue du partenaire à l'écriture — cohérent
+  avec le point d'attention Fortinet (24 mois porté par le catalogue).
+
+**Échoué / en attente**
+- `requiredRole` (ex. « SE ») du kit n'a pas d'équivalent direct dans les rôles ESN (`grade`) : le
+  matching de quota par rôle est reporté au Lot 4 (couverture) ; on dénormalise `grade` dès maintenant.
+- Aucun recompute déclenché en Lot 2 (le scope `partenariats` d'agrégat n'existe pas encore ; il arrive
+  avec le summary Lot 3/4).
+
+---
+
 ## Lot 1 — Référentiel partenaire (par_partners, données)
 
 **Fait**

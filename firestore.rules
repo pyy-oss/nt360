@@ -254,6 +254,11 @@ service cloud.firestore {
     // quel que soit le rôle : l'ERP reste celui d'avant (ADR-P01). Le référentiel partenaire (par_partners)
     // ne porte AUCUN montant confidentiel → lecture directe (temps réel onSnapshot) autorisée.
     match /par_partners/{id}       { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
+    // Certifications des ingénieurs (ADR-P03) : RÉFÉRENCENT un consultant (consultantId) sans exposer son
+    // CJM (seuls nom/BU/grade dénormalisés). Donnée NON confidentielle → lecture directe gatée
+    // drapeau+droit `partenariats`. Écriture callable-only (upsertParCertification valide l'existence du
+    // consultant et du catalogue, dérive expiration + statut).
+    match /par_certifications/{id} { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour

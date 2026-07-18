@@ -141,6 +141,8 @@ setMntFeature
 setParFeature
 upsertParPartner
 deleteParPartner
+upsertParCertification
+deleteParCertification
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig
