@@ -17,7 +17,7 @@ const { receivables } = require("../domain/receivables");
 const { cashflow, decaissements } = require("../domain/cashflow");
 const { cashScenario } = require("../domain/cashScenario");
 const { am360 } = require("../domain/am360");
-const { oppFunnel, stageConversion } = require("../domain/oppFunnel");
+const { oppFunnel, stageConversion, stageDwell } = require("../domain/oppFunnel");
 const { slippageFromHistory } = require("../domain/oppSlippage");
 const { dataQuality } = require("../domain/dataQuality");
 const { isAgedLost, isDormantClosing } = require("../domain/oppLifecycle");
@@ -445,7 +445,9 @@ async function recomputeCore(db, only) {
     const histSnap = await db.collection("oppHistory").orderBy("at", "desc").limit(OPP_HISTORY_WINDOW).get();
     const truncated = histSnap.size >= OPP_HISTORY_WINDOW; // borne atteinte → funnel = fenêtre glissante
     const hist = histSnap.docs.map((d) => d.data());
-    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(hist), byStage: stageConversion(hist), truncated, windowSize: histSnap.size, ...stamp } });
+    // Temps par étape : reconstitue les séjours par opp → besoin de l'horodatage résolu (ms), comme slippage.
+    const histTs = hist.map((x) => ({ ...x, atMs: x.at && typeof x.at.toMillis === "function" ? x.at.toMillis() : 0 }));
+    w.push({ path: "summaries/oppFunnel", data: { ...oppFunnel(hist), byStage: stageConversion(hist), dwell: stageDwell(histTs), truncated, windowSize: histSnap.size, ...stamp } });
     // Glissement des deals : journal des changements de D Prev (oppDateHistory), même fenêtre glissante.
     const slipSnap = await db.collection("oppDateHistory").orderBy("at", "desc").limit(OPP_HISTORY_WINDOW).get();
     const slipEvents = slipSnap.docs.map((d) => { const x = d.data() || {}; return { ...x, atMs: x.at && typeof x.at.toMillis === "function" ? x.at.toMillis() : 0 }; });
