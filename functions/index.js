@@ -1421,11 +1421,12 @@ exports.listAstreintes = _maintenance.listAstreintes;
 // d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
 // config/parFeature). Exports déclarés ici (déploiement par nom).
 const { createPartenariats } = require("./handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite });
+const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requestRecompute });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
 exports.upsertParCertification = _partenariats.upsertParCertification;
 exports.deleteParCertification = _partenariats.deleteParCertification;
+exports.setParPartnerMap = _partenariats.setParPartnerMap;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique

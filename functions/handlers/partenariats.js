@@ -7,7 +7,7 @@ const { slug, validatePartner, computeExpiry } = require("../domain/parPartner")
 const { validateCertification, computeCertStatus } = require("../domain/parCertification");
 const { isParEnabled } = require("../domain/parFeature");
 
-function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite }) {
+function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requestRecompute }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -31,6 +31,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite 
     if (exists) await ref.set(doc, { merge: false }); // remplace le référentiel (tableaux non fusionnés)
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_partner" : "create_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: { name: v.value.name, tiers: v.value.tiers.length, certifs: v.value.certificationCatalog.length }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nom du partenaire affiché)
     return { ok: true, id };
   });
 
@@ -42,6 +43,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite 
     if (!id) throw new HttpsError("invalid-argument", "id de partenaire invalide");
     await db.doc(`par_partners/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]);
     return { ok: true, id };
   });
 
@@ -99,7 +101,27 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite 
     return { ok: true, id };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification };
+  // Édite l'overlay de rapprochement fournisseur → partenaire (config/parPartnerMap, patron
+  // config/clientAliases). Clés NORMALISÉES en MAJUSCULES (comme la résolution de CA), valeurs = partnerId
+  // en slug. Écriture Admin SDK (rules write:false). Déclenche un recompute scopé pour rafraîchir le CA.
+  const setParPartnerMap = onCallG("setParPartnerMap", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const raw = (req.data && req.data.map) || {};
+    if (typeof raw !== "object" || Array.isArray(raw)) throw new HttpsError("invalid-argument", "table de correspondance invalide");
+    const map = {};
+    for (const [k, val] of Object.entries(raw)) {
+      const key = String(k || "").trim().toUpperCase();
+      const partnerId = slug(val);
+      if (key && partnerId) map[key] = partnerId; // paires incomplètes ignorées (pas de coercion silencieuse d'erreur)
+    }
+    await db.doc("config/parPartnerMap").set({ map, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nouveau mapping)
+    return { ok: true, entries: Object.keys(map).length };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap };
 }
 
 module.exports = { createPartenariats };

@@ -132,7 +132,7 @@ Créer `purchaseOrders` serait une **deuxième vérité** des achats fournisseur
 **Décision** : dériver le CA par partenaire de `bcLines`, en résolvant `supplier → partnerId` via un
 overlay `config/parPartnerMap` (patron `config/clientAliases`/`config/fpAliases`). **Conséquence** :
 zéro double saisie, cohérence garantie avec le module Fournisseurs. Le CA du kit devient un agrégat
-dérivé (summary), recalculé par l'orchestrateur. Statut : **acté (à implémenter Lot 3)**.
+dérivé (summary), recalculé par l'orchestrateur. Statut : **acté (Lot 3)**.
 
 ### ADR-P03 — Les certifications s'attachent aux consultants existants, pas à un annuaire `certEngineers`
 **Contexte** : le kit crée `certEngineers` (annuaire d'ingénieurs) ; or nt360 a déjà `consultants`
@@ -153,7 +153,7 @@ triggers (`onCertificationWrite`/`onPurchaseOrderWrite`), avec un bug de clé de
 ces états **dérivés** deviennent des summaries (`summaries/par_*`) recalculés par `lib/aggregate.js`
 sous le verrou de recompute existant, comme `summaries/mnt_risque`. **Conséquence** : réutilise
 l'autorité de recompute sérialisée, évite le bug de clé, et respecte l'invariant « même métrique = même
-nombre » (le front re-dérive du même summary). Statut : **acté (à implémenter Lots 3-4)**.
+nombre » (le front re-dérive du même summary). Statut : **acté ; par_ca en Lot 3, par_quotas/par_alerts en Lot 4)**.
 
 ### ADR-P06 — Référentiel partenaire EMBARQUÉ (par_partners), exigences aplaties
 **Contexte** : le kit éclate le référentiel partenaire en sous-collections (`tiers`, `competencies`,

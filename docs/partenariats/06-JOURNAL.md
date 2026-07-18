@@ -4,6 +4,35 @@
 
 ---
 
+## Lot 3 — Lien CA : dérivation depuis les BC fournisseurs (ADR-P02/P04)
+
+**Fait**
+- Domaine PUR `functions/domain/parRevenue.js` : `resolvePartner` (fournisseur normalisé → partnerId via
+  overlay), `revenueByPartner` (somme XOF entier par constructeur + fournisseurs NON mappés remontés à
+  part) , `revenueProgress`. Tests (5 cas).
+- Overlay `config/parPartnerMap` + callable `setParPartnerMap` (clés MAJUSCULES, valeurs slug ; audit ;
+  `requestRecompute(["partenariats"])`). Recompute aussi déclenché par upsert/delete partenaire.
+- Bloc recompute `want("partenariats")` dans `lib/aggregate.js` (ADR-P04) : doublement gaté
+  (scope + drapeau), lit `par_partners` + `config/parPartnerMap` + `bcLines` (déjà en mémoire ;
+  `partenariats` ajouté à `needBc`), pousse `summaries/par_ca` `{asOf, byPartner[], unmapped[], totalXof}`.
+  À drapeau éteint : zéro lecture par_*, zéro écriture → recompute strictement identique à avant.
+- Rules : `summaryModule` `par_.*` → `partenariats` + double-verrou drapeau `parEnabled()` sur
+  `/summaries`, lecture `config/parPartnerMap` gatée. Exports + `deployed-functions.txt`.
+
+**Appris**
+- Le CA « dérivé des BC » du kit EST le module Fournisseurs de nt360 (`bcLines`) : la dérivation réutilise
+  cette source unique (autorité `domain/fournisseurs.js`), aucune collection `purchaseOrders`. Le montant
+  est en XOF entier (FCFA sans subdivision), pas en euros comme le kit.
+- `want`/`need` de l'agrégat ne sont que des filtres `only.includes(...)` — un nouveau scope
+  `partenariats` est accepté sans allowlist (crainte de la cartographie levée).
+- Les fournisseurs non mappés sont remontés (jamais ignorés) → la table `parPartnerMap` se complète à vue.
+
+**Échoué / en attente**
+- Pas de fenêtre annuelle (exercice) sur le CA en Lot 3 : somme cumulée par constructeur. Le scoping par
+  année + les objectifs (`revenueTarget`) et le statut de partenariat (quota+revenu) arrivent au Lot 4.
+
+---
+
 ## Lot 2 — Certifications rattachées aux consultants (ADR-P03)
 
 **Fait**
