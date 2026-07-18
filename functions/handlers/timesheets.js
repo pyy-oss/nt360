@@ -249,7 +249,38 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     return { ok: true, months, ...result };
   });
 
-  return { upsertTimesheet, deleteTimesheet, timesheetKpis, taceHistory, importTimesheets, syncClickupTimesheets, resourcePnl, preBillingFromCra };
+  // MARGE DE LIVRAISON PAR AFFAIRE (DO Lot 2) : confronte la marge « papier » du carnet à la main-d'œuvre
+  // réellement consommée sur l'affaire (labor imputé, keystone Lot 1). Gouverné « rentabilite » comme
+  // resourcePnl (expose coûts/marges). Le coût carnet vient du carnet ISOLÉ marge (commandesRowsMargin).
+  const deliveryMarginByAffaire = onCallG("deliveryMarginByAffaire", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+    await requireRead(req, "rentabilite");
+    const { imputeLaborByFp } = require("../domain/laborImpute");
+    const { deliveryMargin } = require("../domain/deliveryMargin");
+    const readChunks = async (coll) => {
+      const snap = await db.collection(coll).limit(MAX_SCAN + 1).get();
+      const out = [];
+      for (const d of sliceCapped(snap.docs).docs) for (const r of ((d.data() || {}).rows || [])) out.push(r);
+      return out;
+    };
+    const [cSnap, tSnap, aSnap, carnetRows, marginRows] = await Promise.all([
+      db.collection("consultants").select("cjm").limit(MAX_SCAN + 1).get(),
+      db.collection("timesheets").limit(MAX_SCAN + 1).get(),
+      db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct", "projectFp").limit(MAX_SCAN + 1).get(),
+      readChunks("commandesRows"),        // carnet (vente/facturé par affaire)
+      readChunks("commandesRowsMargin"),  // marge isolée (mb/costTotal) — même droit rentabilite
+    ]);
+    const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Labor : contribution « mnt » écartée par imputeLaborByFp (forfait, ADR-005) ; imputée sur TOUS les mois
+    // présents dans les CRA (la marge de livraison couvre la VIE ENTIÈRE de l'affaire, pas une fenêtre).
+    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const months = [...new Set(timesheets.map((t) => t && t.month).filter(Boolean))];
+    const labor = imputeLaborByFp(assignments, timesheets, consultants, months);
+    const rows = deliveryMargin(carnetRows, marginRows, labor.byFp, true);
+    return { ok: true, rows, unassignedDays: labor.unassignedDays, missingCjm: labor.missingCjm };
+  });
+
+  return { upsertTimesheet, deleteTimesheet, timesheetKpis, taceHistory, importTimesheets, syncClickupTimesheets, resourcePnl, preBillingFromCra, deliveryMarginByAffaire };
 }
 
 module.exports = { createTimesheets };

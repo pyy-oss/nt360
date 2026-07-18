@@ -1486,6 +1486,7 @@ exports.importTimesheets = _timesheets.importTimesheets;
 exports.syncClickupTimesheets = _timesheets.syncClickupTimesheets;
 exports.resourcePnl = _timesheets.resourcePnl;
 exports.preBillingFromCra = _timesheets.preBillingFromCra;
+exports.deliveryMarginByAffaire = _timesheets.deliveryMarginByAffaire;
 
 // === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
 // (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». EXTRAIT dans
