@@ -5,6 +5,18 @@
 //
 // Fonctions PURES (aucun I/O, aucune horloge → mois fournis par l'appelant) → testables.
 
+const { fpKey } = require("../lib/ids");
+
+// Rattachement projet : canonicalise un VRAI N° FP (fpKey → forme « FP/AAAA/N ») pour qu'une affectation
+// JOIGNE le carnet (mêmes clés que mergeCommandes). Un libellé libre ou une forme courte (« FP/26/1 »,
+// non canonicalisable) est conservé tel quel — on ne réécrit jamais un rattachement qu'on ne sait pas
+// interpréter comme FP. Clé du keystone « exécution ↔ affaire » (DO Lot 1).
+function canonFp(v) {
+  const raw = String(v || "").trim().toUpperCase().slice(0, 60);
+  if (!raw) return null;
+  return fpKey(raw) || raw;
+}
+
 function num(v, lo, hi) {
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -24,7 +36,7 @@ function validateAssignment(d) {
   if (allocationPct == null) return { ok: false, error: "allocation (%) invalide" };
   const value = {
     consultantId,
-    projectFp: String(o.projectFp || "").trim().toUpperCase().slice(0, 60) || null, // rattachement projet (N° FP)
+    projectFp: canonFp(o.projectFp), // rattachement projet (N° FP canonicalisé → joint le carnet)
     label: String(o.label || "").trim().slice(0, 160),                                // libellé mission / client
     startMonth: start,
     endMonth: end,
@@ -74,4 +86,4 @@ function buildLoad(assignments, months, activeIds) {
   return { byConsultant, flags: { over, idle } };
 }
 
-module.exports = { validateAssignment, monthsRange, coversMonth, buildLoad };
+module.exports = { validateAssignment, canonFp, monthsRange, coversMonth, buildLoad };
