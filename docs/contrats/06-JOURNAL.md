@@ -31,6 +31,36 @@
 
 ---
 
+## 2026-07-18 — Remédiation d'audit revenu (retrait Reconnaissance incohérente + fix arrondi MRR)
+
+**Fait** — audit adverse (gardien) des lots revenu #453/#454 sous la barre « zéro incohérence ». 2 constats
+certains, corrigés.
+
+- **Blocage 1 — Reconnaissance du revenu RETIRÉE.** Le KPI « Facturé » de la carte confrontait un
+  `reconnu` **maintenance par contrat** (`sousFacturation.engage`) à un `facturé` **de l'affaire entière**
+  (`sousFacturation.facture` = Σ factures HT du FP, sans filtre maintenance). Double périmètre → (a)
+  **double-compte** quand deux contrats scorés partagent un `fpKey` (chacun reçoit le même facturé affaire),
+  (b) inclusion des factures projet non-maintenance. L'écart (à-facturer / facturé-d'avance) comparait donc
+  deux natures différentes. **Aucune correction cohérente sans allocation facture↔contrat** (donnée absente)
+  → la carte + `revenueRecognition` + tests sont **retirés** plutôt que de servir un chiffre faux. La
+  réconciliation reconnu/facturé demandera un vrai périmètre maintenance (lot dédié).
+- **Blocage 2 — arrondi MRR.** MRR par groupe = `round(ARR/12)` pouvait faire Σ(lignes) ≠ MRR consolidé. La
+  **colonne MRR par groupe est retirée** (l'ARR entier somme juste) ; le MRR n'est plus affiché que consolidé
+  (KPI). `risqueItems` remémoïsé retiré (n'avait de sens que pour la reconnaissance).
+- Axes audités PROPRES : `recurringRevenue.totalArr` = `arrActifs` (même assiette/annualise), sémantique
+  reconnu back correcte, aucune régression, confidentialité, « éteint = ERP d'avant ».
+- 149 tests web verts, lint exit 0, bundle 119,9 KB.
+
+**Décidé**
+- Ne pas livrer un KPI dont la définition n'est pas stable (« Facturé » variait avec le nb de contrats par FP
+  et le facturé projet). La reconnaissance consolidée fiable nécessite une allocation des factures au
+  périmètre maintenance — hors de ce lot, à arbitrer.
+
+**Échoué / abandonné**
+- La carte « Reconnaissance du revenu » (livrée #454) : retirée en remédiation, définition non fiable.
+
+---
+
 ## 2026-07-18 — Reconnaissance du revenu (reconnu vs facturé) — DO Lot 4 (reconnaissance)
 
 **Fait**
