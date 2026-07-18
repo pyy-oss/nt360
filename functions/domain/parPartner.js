@@ -20,6 +20,49 @@ function slug(v) {
 }
 function str(v, max) { const s = String(v == null ? "" : v).trim(); return max ? s.slice(0, max) : s; }
 function intNonNeg(v) { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= 0 ? n : null; }
+// Montant/quantité ≥ 0 EN FLOTTANT (comme les montants de l'ERP — piège FCFA : on ne force pas l'entier).
+function numNonNeg(v) { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : null; }
+// Date ISO stricte AAAA-MM-JJ (le formulaire saisit via DateField ISO ; l'affichage passe par frDate JJ/MM/AAAA).
+function isoDate(v) { const s = str(v); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; }
+
+// Statut de VALIDATION du plan d'affaires (miroir du fichier direction Partners_Status_Tracking) : le plan
+// est validé, presque validé, ou non validé. Code applicatif ; libellés FR à l'affichage (front).
+const VALIDATION_STATUSES = ["valide", "presque_valide", "non_valide"];
+// Les quatre axes du plan d'affaires partenaire (objectif BP vs réalisé YTD). Ordre = ordre d'affichage.
+const BP_AXES = ["pipeline", "booking", "cert", "growth"];
+
+// Normalise le plan d'affaires : pour chaque axe, un objectif `<axe>Bp` et un réalisé `<axe>Ytd` (≥ 0,
+// flottant). Renvoie null si AUCUN champ fourni (plan absent → on ne stocke rien). Additif, jamais imposé.
+function validateBusinessPlan(bp) {
+  const o = bp || {};
+  const value = {};
+  let any = false;
+  for (const ax of BP_AXES) {
+    for (const suffix of ["Bp", "Ytd"]) {
+      const key = ax + suffix;
+      const n = numNonNeg(o[key]);
+      if (n != null) { value[key] = n; any = true; }
+    }
+  }
+  return any ? value : null;
+}
+
+// Taux d'atteinte du plan d'affaires : ratio réalisé/objectif par axe (null si objectif ≤ 0 — pas de
+// division), et % GLOBAL = moyenne des ratios des axes évaluables (reproduit exactement la colonne
+// « % Global » du fichier direction : moyenne simple des quatre ratios). PUR, réutilisé front + back.
+function bpAchievement(bp) {
+  const o = bp || {};
+  const ratio = (ytd, target) => { const b = numNonNeg(target); const y = numNonNeg(ytd); return b != null && b > 0 && y != null ? y / b : null; };
+  const per = {};
+  const vals = [];
+  for (const ax of BP_AXES) {
+    const r = ratio(o[ax + "Ytd"], o[ax + "Bp"]);
+    per[ax] = r;
+    if (r != null) vals.push(r);
+  }
+  const global = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : null;
+  return { ...per, global };
+}
 
 // Un niveau de partenariat : id slug, libellé, rang entier ≥ 0 (ordonne Authorized < Gold < Platinum…).
 function validateTier(t) {
@@ -147,6 +190,20 @@ function validatePartner(d) {
   if (accountManagerName) value.accountManagerName = accountManagerName;
   const accountManagerEmail = str(o.accountManagerEmail, 160);
   if (accountManagerEmail) value.accountManagerEmail = accountManagerEmail;
+
+  // Statut COURANT du partenaire = libellé du niveau atteint à date (Platinum, Expert, Silver, Innovator,
+  // Authorized…). Distinct de `tiers` (le catalogue des niveaux possibles) : c'est « où en est le partenaire ».
+  const status = str(o.status, 80);
+  if (status) value.status = status;
+  // Échéance de renouvellement du statut/plan (miroir colonne « Échéance » du fichier direction).
+  const renewalDate = isoDate(o.renewalDate);
+  if (renewalDate) value.renewalDate = renewalDate;
+  // Statut de validation du plan d'affaires (validé / presque validé / non validé).
+  const validationStatus = str(o.validationStatus).toLowerCase();
+  if (VALIDATION_STATUSES.includes(validationStatus)) value.validationStatus = validationStatus;
+  // Plan d'affaires : objectifs (BP) et réalisé (YTD) par axe Pipeline/Booking/Certifications/Growth.
+  const businessPlan = validateBusinessPlan(o.businessPlan);
+  if (businessPlan) value.businessPlan = businessPlan;
   return { ok: true, value };
 }
 
@@ -161,7 +218,7 @@ function computeExpiry(obtainedDateIso, validityMonths) {
 }
 
 module.exports = {
-  LEVELS, DEFAULT_VALIDITY_MONTHS, slug,
+  LEVELS, DEFAULT_VALIDITY_MONTHS, VALIDATION_STATUSES, BP_AXES, slug,
   validateTier, validateCompetency, validateCatalogEntry, validateRequirement, validatePartner,
-  computeExpiry,
+  validateBusinessPlan, bpAchievement, computeExpiry,
 };

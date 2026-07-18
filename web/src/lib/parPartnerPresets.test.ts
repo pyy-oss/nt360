@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { PARTNER_PRESETS, buildPartnerPreset, type PresetId } from "./parPartnerPresets";
-import { buildPartnerPayload } from "./parPartnerForm";
+import { buildPartnerPayload, bpAchievement } from "./parPartnerForm";
 
 // Générateur de clés locales déterministe (miroir du compteur du formulaire).
 const mkNk = () => { let n = 0; return () => "k" + (++n); };
 
 describe("parPartnerPresets", () => {
-  it("expose exactement les quatre programmes constructeurs", () => {
-    expect(PARTNER_PRESETS.map((p) => p.id).sort()).toEqual(["f5", "fortinet", "huawei", "paloalto"]);
+  it("expose les dix partenaires clés NT (données réelles des fichiers de référence)", () => {
+    expect(PARTNER_PRESETS.map((p) => p.id).sort()).toEqual(
+      ["checkpoint", "cisco", "dell", "f5", "fortinet", "hpe-aruba", "huawei", "kaspersky", "microsoft", "paloalto"],
+    );
   });
 
   for (const { id, label } of PARTNER_PRESETS) {
@@ -20,6 +22,16 @@ describe("parPartnerPresets", () => {
         expect(form.comps.length).toBeGreaterThan(0);
         expect(form.certs.length).toBeGreaterThan(0);
         expect(form.reqs.length).toBeGreaterThan(0);
+      });
+
+      it("porte le statut et le plan d'affaires réels (miroir fichier direction)", () => {
+        expect(form.status).toBeTruthy();
+        expect(form.renewalDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(["valide", "presque_valide", "non_valide"]).toContain(form.validationStatus);
+        // Les quatre axes du plan d'affaires sont renseignés → % global calculable.
+        const bpNums: Record<string, number> = {};
+        for (const [k, v] of Object.entries(form.bp)) bpNums[k] = Number(v);
+        expect(bpAchievement(bpNums as any).global).not.toBeNull();
       });
 
       it("relie chaque certif à une compétence existante (clé locale valide)", () => {

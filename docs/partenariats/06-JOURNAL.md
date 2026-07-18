@@ -549,3 +549,30 @@ départ éditables** (codes de certif publics : NSE/FCP/FCSS, F5-CA/CTS/CSE, PCN
 niveaux et validités indicatifs) — l'utilisateur ajuste avant d'enregistrer, et le backend
 `validatePartner` reste seul juge. Pas d'ADR : additif, front seul, callable `upsertParPartner` inchangé ;
 les modèles sont des données d'amorçage éditables, pas une convention ni une vérité persistée.
+
+---
+
+## PA-DATA — Plan d'affaires partenaire + statut + amorçage données réelles — 2026-07-18
+
+**Fait.** Intégration des deux fichiers de référence direction (`Partners_Status_Tracking`,
+`CERTIFICATIONS_TOP_PARTENAIRES`). Élément **structurel** ajouté au module (ADR-P11) : le **plan d'affaires
+partenaire**, absent jusqu'ici. Backend `domain/parPartner` (additif) : champs optionnels `status`,
+`renewalDate`, `validationStatus`, `businessPlan` (objectif BP / réalisé YTD sur Pipeline/Booking/
+Certifications/Croissance) + helper PUR `bpAchievement` (ratio par axe + % global = moyenne, reproduit la
+colonne du fichier). Formulaire : bloc « Statut & plan d'affaires ». Tableau de bord : carte **« Plan
+d'affaires par partenaire »** (% par axe + global, échéance, validation) — miroir du tableau direction, triée
+les moins avancés en tête. Modèles constructeurs (`lib/parPartnerPresets`) refaits avec les **dix partenaires
+clés réels** (statut, plan d'affaires, catalogue de certifs des fichiers).
+
+**Appris.** Le vrai pilotage des partenariats à NT n'est pas la couverture des quotas (ce que le module
+gérait) mais un **scorecard de plan d'affaires** à échéance de renouvellement — le fichier Excel que la
+direction tient à la main. Un module « complet » côté certifications restait à côté de l'usage réel tant
+qu'il n'exposait pas ce scorecard. Les fichiers ont aussi révélé le vrai vocabulaire (statuts Platinum/Expert/
+Silver/Innovator…, axes BP/YTD, Validé/Presque validé/Non validé) — encodé tel quel.
+
+**Conception.** Réalisé (YTD) **saisi à la main** = reproduire le fichier, pas dériver de l'ERP (pas de 2ᵉ
+vérité ; dérivation = ADR distinct plus tard). Montants en **flottant** (comme l'ERP ; décimales compta du
+fichier conservées — piège FCFA assumé). `bpAchievement` à **double miroir** back/front (invariant de parité).
+Tout additif : aucun champ existant touché, `upsertParPartner`/`deployed-functions.txt` inchangés, bundle
+118.3 KB. Tests : 12 (back parPartner) + 8 (parPartnerForm) + 51 (parPartnerPresets). Modèles = données
+d'amorçage éditables (validités indicatives) ; le backend `validatePartner` tranche.

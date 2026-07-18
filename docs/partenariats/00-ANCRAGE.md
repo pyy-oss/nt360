@@ -240,3 +240,30 @@ aucun montant). **Idempotent** : le taskId/url est stocké sur l'assignation →
 doublon (patron `pushOrderToClickup`). Gouverné par écriture `partenariats` + drapeau + rate-limit `clickup`.
 Front : bouton « Pousser / Resynchroniser » + lien tâche dans l'onglet Assignations ; champ `parListId` dans
 Habilitations → ClickUp. Vérif : `test/parClickup.test.js`. Statut : **acté (Lot P4)**.
+
+### ADR-P11 — Plan d'affaires partenaire (scorecard direction) EMBARQUÉ dans le référentiel, réalisé saisi à la main
+**Contexte** : le vrai pilotage des partenariats à NT est un **tableau de bord de plan d'affaires** (fichier
+direction `Partners_Status_Tracking`) : par partenaire, un objectif (BP) et un réalisé (YTD) sur quatre axes
+**Pipeline / Booking / Certifications / Croissance**, un **% d'atteinte** par axe et global, une **échéance
+de renouvellement**, une **urgence** et un **statut de validation** (Validé / Presque validé / Non validé).
+Le module ne modélisait que la couverture des quotas de certification — il lui manquait ce scorecard, pourtant
+l'artefact que la direction utilise réellement. **Décision (validée par l'humain, « go » explicite)** : on
+ajoute au référentiel `par_partners` (structure EMBARQUÉE, cohérent avec ADR-P06) quatre champs **ADDITIFS
+optionnels** — `status` (libellé du niveau atteint à date, distinct des `tiers`), `renewalDate` (ISO),
+`validationStatus` (énum), `businessPlan` (huit nombres `<axe>Bp`/`<axe>Ytd`). Aucun champ existant modifié.
+- **Le réalisé (YTD) est SAISI À LA MAIN**, pas dérivé de l'ERP. Raison : le module doit *reproduire* le
+  fichier direction (règle « l'ERP/l'existant gagne »), sans introduire une seconde vérité ni un chantier de
+  rattachement affaire↔constructeur. Une dérivation ultérieure (pipeline/booking depuis les opportunités
+  rattachées) reste possible mais fera l'objet d'un ADR distinct — elle n'est PAS faite ici.
+- **Type des montants : flottant** (comme les montants de l'ERP), pas d'entier forcé malgré la règle FCFA —
+  le fichier source porte des décimales issues de la compta ; on ne les corrige pas (piège FCFA assumé).
+- **`bpAchievement` est PUR et à double implémentation miroir** (back `domain/parPartner`, front
+  `lib/parPartnerForm`) : ratio réalisé/objectif par axe (null si objectif ≤ 0), **% global = moyenne des axes
+  évaluables** — reproduit *exactement* la colonne « % Global » du fichier (invariant de parité).
+- **Amorçage** : les dix partenaires clés (Fortinet, Palo Alto, Cisco, Huawei, F5, HPE Aruba, Check Point,
+  Kaspersky, Dell, Microsoft) deviennent des **modèles éditables** (`lib/parPartnerPresets`) portant statut,
+  plan d'affaires réel et catalogue de certifications tiré des fichiers de référence. Points de départ
+  *indicatifs* (validités en mois non portées par les fichiers → défauts) ; le backend `validatePartner`
+  reste seul juge. Aucun seed prod, aucun nouvel export/callable.
+Vérif : `test/parPartner.test.js`, `web/src/lib/parPartnerForm.test.ts`, `web/src/lib/parPartnerPresets.test.ts`.
+Statut : **acté (Lot PA-DATA)**.

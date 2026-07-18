@@ -10,8 +10,14 @@ export type TierRow = { k: string; id?: string; name: string; rank: string };
 export type CompRow = { k: string; id?: string; name: string };
 export type CertRow = { k: string; id?: string; name: string; code: string; compK: string; level: string; validityMonths: string };
 export type ReqRow = { k: string; tierK: string; targetK: string; minCount: string }; // targetK = "comp:<k>" | "cert:<k>"
+// Plan d'affaires (objectif BP / réalisé YTD par axe) — champs texte dans le formulaire, nombres au payload.
+export const BP_AXES = ["pipeline", "booking", "cert", "growth"] as const;
+export type BpAxis = typeof BP_AXES[number];
+export type BpForm = Record<`${BpAxis}Bp` | `${BpAxis}Ytd`, string>;
+export const EMPTY_BP: BpForm = { pipelineBp: "", pipelineYtd: "", bookingBp: "", bookingYtd: "", certBp: "", certYtd: "", growthBp: "", growthYtd: "" };
 export type PartnerFormState = {
   id?: string; name: string; programName: string;
+  status: string; renewalDate: string; validationStatus: string; bp: BpForm;
   tiers: TierRow[]; comps: CompRow[]; certs: CertRow[]; reqs: ReqRow[];
 };
 
@@ -64,13 +70,41 @@ export function buildPartnerPayload(f: PartnerFormState): BuildResult {
 
   const value: Record<string, unknown> = { id, name, tiers, competencies, certificationCatalog, requirements };
   if (f.programName.trim()) value.programName = f.programName.trim();
+  if (f.status.trim()) value.status = f.status.trim();
+  if (f.renewalDate.trim()) value.renewalDate = f.renewalDate.trim();
+  if (f.validationStatus.trim()) value.validationStatus = f.validationStatus.trim();
+  // Plan d'affaires : ne transmet que les champs numériques renseignés (le backend revalide ≥ 0).
+  const bp: Record<string, number> = {};
+  for (const ax of BP_AXES) for (const suffix of ["Bp", "Ytd"] as const) {
+    const raw = f.bp[`${ax}${suffix}` as keyof BpForm];
+    if (raw != null && String(raw).trim() !== "") { const n = Number(raw); if (Number.isFinite(n)) bp[`${ax}${suffix}`] = n; }
+  }
+  if (Object.keys(bp).length) value.businessPlan = bp;
   return { ok: true, value };
+}
+
+// Taux d'atteinte du plan d'affaires — MIROIR EXACT de domain/parPartner.bpAchievement (invariant de parité).
+// Ratio réalisé/objectif par axe (null si objectif ≤ 0) ; % global = moyenne des axes évaluables.
+export function bpAchievement(bp?: Partial<Record<`${BpAxis}Bp` | `${BpAxis}Ytd`, number>> | null): Record<BpAxis, number | null> & { global: number | null } {
+  const o = bp || {};
+  const per = {} as Record<BpAxis, number | null>;
+  const vals: number[] = [];
+  for (const ax of BP_AXES) {
+    const b = Number(o[`${ax}Bp`]); const y = Number(o[`${ax}Ytd`]);
+    const r = Number.isFinite(b) && b > 0 && Number.isFinite(y) ? y / b : null;
+    per[ax] = r;
+    if (r != null) vals.push(r);
+  }
+  const global = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : null;
+  return { ...per, global };
 }
 
 // Reconstruit l'état du formulaire depuis un partenaire stocké (édition). La clé locale = l'id stocké, si
 // bien que les références (exigences → niveau/cible) se relient directement par leur slug d'origine.
 type StoredPartner = {
   id: string; name: string; programName?: string;
+  status?: string; renewalDate?: string; validationStatus?: string;
+  businessPlan?: Partial<Record<`${BpAxis}Bp` | `${BpAxis}Ytd`, number>>;
   tiers?: { id: string; name: string; rank: number }[];
   competencies?: { id: string; name: string }[];
   certificationCatalog?: { id: string; competencyId: string; code?: string; name: string; level: string; validityMonths: number }[];
@@ -78,8 +112,14 @@ type StoredPartner = {
 };
 export function partnerToForm(p: StoredPartner): PartnerFormState {
   const certIds = new Set((p.certificationCatalog || []).map((e) => e.id));
+  const bp = { ...EMPTY_BP };
+  for (const ax of BP_AXES) for (const suffix of ["Bp", "Ytd"] as const) {
+    const v = p.businessPlan?.[`${ax}${suffix}` as keyof typeof p.businessPlan];
+    if (v != null) bp[`${ax}${suffix}` as keyof BpForm] = String(v);
+  }
   return {
     id: p.id, name: p.name || "", programName: p.programName || "",
+    status: p.status || "", renewalDate: p.renewalDate || "", validationStatus: p.validationStatus || "", bp,
     tiers: (p.tiers || []).map((t) => ({ k: t.id, id: t.id, name: t.name, rank: String(t.rank ?? 0) })),
     comps: (p.competencies || []).map((c) => ({ k: c.id, id: c.id, name: c.name })),
     certs: (p.certificationCatalog || []).map((e) => ({ k: e.id, id: e.id, name: e.name, code: e.code || "", compK: e.competencyId, level: e.level, validityMonths: String(e.validityMonths ?? "") })),

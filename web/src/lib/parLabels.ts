@@ -46,4 +46,16 @@ export function relanceBucketTone(b?: string): Tone {
   if (b === "retard") return "clay"; const m = /^j(\d+)$/.exec(b || ""); return m && Number(m[1]) <= 7 ? "gold" : "steel";
 }
 
+// Statut de VALIDATION du plan d'affaires (miroir fichier direction : Validé / Presque validé / Non validé).
+export const VALIDATION_STATUS_LABEL: Record<string, string> = {
+  valide: "Validé", presque_valide: "Presque validé", non_valide: "Non validé",
+};
+export function validationTone(s?: string): Tone {
+  switch (s) { case "valide": return "emerald"; case "presque_valide": return "gold"; case "non_valide": return "clay"; default: return "neutral"; }
+}
+// Libellés des quatre axes du plan d'affaires (objectif BP vs réalisé YTD).
+export const BP_AXIS_LABEL: Record<string, string> = {
+  pipeline: "Pipeline", booking: "Booking", cert: "Certifications", growth: "Croissance",
+};
+
 export const label = (map: Record<string, string>, v?: string): string => (v ? map[v] || v : "—");

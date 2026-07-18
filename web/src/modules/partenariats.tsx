@@ -13,14 +13,14 @@ import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, 
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
-import { buildPartnerPayload, partnerToForm, PAR_LEVELS, type PartnerFormState } from "../lib/parPartnerForm";
+import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
 import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
-import { fmt, T } from "../design/tokens";
+import { fmt, pct, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
   PARTNERSHIP_STATUS_LABEL, partnershipTone, CERT_STATUS_LABEL, certStatusTone,
   ALERT_BUCKET_LABEL, alertBucketTone, ASSIGNMENT_STATUS_LABEL, assignmentTone,
-  relanceBucketLabel, relanceBucketTone, label,
+  relanceBucketLabel, relanceBucketTone, VALIDATION_STATUS_LABEL, validationTone, BP_AXIS_LABEL, label,
 } from "../lib/parLabels";
 import type { Props } from "./_shared";
 
@@ -28,7 +28,8 @@ import type { Props } from "./_shared";
 const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
-type Partner = { id: string; name: string; programName?: string; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
+type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | "bookingYtd" | "certBp" | "certYtd" | "growthBp" | "growthYtd", number>>;
+type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
 type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcCount: number }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
@@ -181,6 +182,14 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
   const nonConf = quotaPartners.filter((p) => p.status === "non_compliant" || p.status === "at_risk").length;
   // Tendance de conformité (Lot P3) : historique quotidien de la couverture des quotas (30 derniers jours).
   const trend = (history?.days || []).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Conformes: d.conformes, "À risque": d.aRisque, "Non conformes": d.nonConformes }));
+  // Plan d'affaires : partenaires portant un BP saisi, avec taux d'atteinte par axe + global (miroir du
+  // tableau direction). On ne re-calcule rien d'autre : bpAchievement est le miroir exact du backend.
+  const bpRows = partners
+    .filter((p) => p.businessPlan && Object.keys(p.businessPlan).length)
+    .map((p) => ({ p, a: bpAchievement(p.businessPlan) }))
+    .sort((x, y) => (x.a.global ?? -1) - (y.a.global ?? -1)); // les moins avancés en tête (à traiter)
+  const bpTone = (r: number | null) => (r == null ? "neutral" : r >= 1 ? "emerald" : r >= 0.8 ? "gold" : "clay");
+  const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => pct(r.a[ax]), (r: typeof bpRows[number]) => r.a[ax] ?? -1);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -190,6 +199,30 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
         <Kpi label="Certifs à renouveler" value={String(alerts?.total || 0)} sub={`${alerts?.counts?.expired || 0} expirée(s)`} tone={(alerts?.total || 0) > 0 ? "gold" : "ink"} />
         <Kpi label="Partenariats à risque" value={String(nonConf)} sub={`${relances?.counts?.late || 0} relance(s) en retard`} tone={nonConf > 0 ? "clay" : "ink"} />
       </div>
+
+      {!!bpRows.length && (
+        <Card title="Plan d'affaires par partenaire" actions={<ExportBtn name="plan-affaires-partenaires" cols={[
+          { header: "Partenaire", render: (r: typeof bpRows[number]) => r.p.name },
+          { header: "Statut", render: (r: typeof bpRows[number]) => r.p.status || "" },
+          ...BP_AXES.map((ax) => ({ header: BP_AXIS_LABEL[ax], render: (r: typeof bpRows[number]) => pct(r.a[ax]) })),
+          { header: "% global", render: (r: typeof bpRows[number]) => pct(r.a.global) },
+          { header: "Échéance", render: (r: typeof bpRows[number]) => r.p.renewalDate ? frDate(r.p.renewalDate) : "" },
+          { header: "Validation", render: (r: typeof bpRows[number]) => label(VALIDATION_STATUS_LABEL, r.p.validationStatus) },
+        ]} rows={bpRows} />}>
+          <Tip>Objectif (BP) vs réalisé (YTD) par axe — <b>% d'atteinte</b> (100 % = objectif tenu). Miroir du tableau de pilotage direction : reflète ce qui est saisi sur chaque partenaire (Paramétrage → Éditer).</Tip>
+          <Table
+            columns={[
+              colText("Partenaire", (r) => r.p.name),
+              colText("Statut", (r) => r.p.status || "—"),
+              bpCol("pipeline"), bpCol("booking"), bpCol("cert"), bpCol("growth"),
+              colNum("% global", (r) => <Badge tone={bpTone(r.a.global)}>{pct(r.a.global)}</Badge>, (r) => r.a.global ?? -1),
+              colText("Échéance", (r) => r.p.renewalDate ? frDate(r.p.renewalDate) : "—"),
+              colText("Validation", (r) => <Badge tone={validationTone(r.p.validationStatus)}>{label(VALIDATION_STATUS_LABEL, r.p.validationStatus)}</Badge>, (r) => r.p.validationStatus || ""),
+            ]}
+            rows={bpRows} rowKey={(r) => r.p.id} empty="Aucun plan d'affaires saisi."
+          />
+        </Card>
+      )}
 
       {canSeeCa && (
       <Card title="CA par constructeur — dérivé des BC fournisseurs">
@@ -501,8 +534,9 @@ const nk = () => "k" + (++_pk);
 const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ initial, onClose }) => {
   const [f, setF] = useState<PartnerFormState>(() => initial
     ? partnerToForm(initial)
-    : { name: "", programName: "", tiers: [], comps: [], certs: [], reqs: [] });
+    : { name: "", programName: "", status: "", renewalDate: "", validationStatus: "", bp: { ...EMPTY_BP }, tiers: [], comps: [], certs: [], reqs: [] });
   const set = (patch: Partial<PartnerFormState>) => setF((s) => ({ ...s, ...patch }));
+  const setBp = (k: keyof BpForm, v: string) => setF((s) => ({ ...s, bp: { ...s.bp, [k]: v } }));
   const compOpts = f.comps.filter((c) => c.name.trim()).map((c) => ({ value: c.k, label: c.name }));
   const tierOpts = f.tiers.filter((t) => t.name.trim()).map((t) => ({ value: t.k, label: t.name }));
   // Cibles d'une exigence : une compétence (couverture agrégée) OU une certification précise du catalogue.
@@ -533,6 +567,28 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Constructeur (nom)"><input className="field" value={f.name} placeholder="Ex. Fortinet" onChange={(e) => set({ name: e.target.value })} /></Field>
           <Field label="Programme"><input className="field" value={f.programName} placeholder="Ex. Engage (optionnel)" onChange={(e) => set({ programName: e.target.value })} /></Field>
+        </div>
+
+        {/* Statut courant + plan d'affaires (objectif BP vs réalisé YTD par axe) — miroir du tableau de bord
+            direction Partners_Status_Tracking. Montants en FCFA entiers via le champ numérique (pas de décimale). */}
+        <div className="space-y-2 rounded-lg border border-line p-3">
+          <span className="text-[11px] font-semibold text-muted">Statut & plan d'affaires</span>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Statut actuel"><input className="field" value={f.status} placeholder="Ex. Platinum, Silver…" onChange={(e) => set({ status: e.target.value })} /></Field>
+            <Field label="Échéance de renouvellement"><DateField value={f.renewalDate} onChange={(v) => set({ renewalDate: v })} /></Field>
+            <Field label="Validation du plan"><Select value={f.validationStatus} onChange={(v) => set({ validationStatus: v })} options={[{ value: "", label: "—" }, ...Object.entries(VALIDATION_STATUS_LABEL).map(([value, l]) => ({ value, label: l }))]} placeholder="—" /></Field>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+            {BP_AXES.map((ax) => (
+              <div key={ax} className="flex items-center gap-2">
+                <span className="w-28 text-[12px] text-muted">{BP_AXIS_LABEL[ax]}</span>
+                <input className="field tabnum flex-1" type="number" value={f.bp[`${ax}Bp`]} placeholder="Objectif" aria-label={`Objectif ${BP_AXIS_LABEL[ax]}`} onChange={(e) => setBp(`${ax}Bp`, e.target.value)} />
+                <span className="text-faint text-[11px]">vs</span>
+                <input className="field tabnum flex-1" type="number" value={f.bp[`${ax}Ytd`]} placeholder="Réalisé" aria-label={`Réalisé ${BP_AXIS_LABEL[ax]}`} onChange={(e) => setBp(`${ax}Ytd`, e.target.value)} />
+              </div>
+            ))}
+          </div>
+          <Tip>Objectif (BP) vs réalisé (YTD) par axe. Pipeline &amp; Booking en <b>FCFA</b> ; Certifications en nombre ; Croissance en %. Le <b>% d'atteinte</b> par axe et global apparaît au Tableau de bord.</Tip>
         </div>
 
         <FormBlock title="Niveaux" onAdd={() => set({ tiers: [...f.tiers, { k: nk(), name: "", rank: "" }] })}>
