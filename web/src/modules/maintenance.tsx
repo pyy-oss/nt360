@@ -32,7 +32,7 @@ import {
   TICKET_STATUTS, PRIORITES, TICKET_STATUT_LABEL, PRIORITE_LABEL, statutTone, ticketStatutTone, prioriteTone, label,
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
-import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, revenueRecognition, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
+import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
@@ -397,11 +397,8 @@ export const Maintenance: FC<Props> = () => {
   ];
 
   // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
-  const risqueItems = useMemo(() => risque?.items || [], [risque]); // identité stable → mémos dérivés fiables
+  const risqueItems = risque?.items || [];
   const atRisk = risqueItems.filter((r) => r.niveau !== "vert");
-  // Reconnaissance du revenu (DO Lot 4) — reconnu (échéancier) vs facturé, dérivé des items de risque
-  // (même sousFacturation → mêmes nombres). Vue direction du CA couru à facturer / facturé d'avance.
-  const recognition = useMemo(() => revenueRecognition(risqueItems), [risqueItems]);
   const counts = risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0 };
   const risqueCols = [
     colText("Client", (r: RisqueItem) => r.client || "—", (r: RisqueItem) => r.client || ""),
@@ -431,10 +428,11 @@ export const Maintenance: FC<Props> = () => {
   // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
   // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
   const recurring = useMemo(() => recurringRevenue(contrats), [contrats]);
+  // NB : pas de colonne MRR par groupe — l'ARR (entier) somme juste, mais round(ARR/12) par ligne dériverait
+  // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
     colText(keyHeader, (g: MntRecurringGroup) => (keyLabel ? keyLabel(g.key) : g.key || "—"), (g: MntRecurringGroup) => g.key),
     colNum("Contrats", (g: MntRecurringGroup) => String(g.contrats), (g: MntRecurringGroup) => g.contrats),
-    colNum("MRR", (g: MntRecurringGroup) => money(g.mrr), (g: MntRecurringGroup) => g.mrr),
     colNum("ARR", (g: MntRecurringGroup) => money(g.arr), (g: MntRecurringGroup) => g.arr),
   ];
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
@@ -754,20 +752,6 @@ export const Maintenance: FC<Props> = () => {
                 <Badge key={g.key} tone="steel">{label(ECHEANCE_LABEL, g.key)} · {money(g.arr)}/an · {g.contrats}</Badge>
               ))}
             </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Reconnaissance du revenu (DO Lot 4) — le CA RECONNU à ce jour (échéancier) vs FACTURÉ : le « CA qui
-          dort » (couru à facturer) et le facturé d'avance, dérivés de la même source que la sous-facturation. */}
-      {(recognition.reconnu > 0 || recognition.facture > 0) && (
-        <Card title="Reconnaissance du revenu">
-          <Tip>Revenu <b>reconnu à ce jour</b> (échéancier engagé) confronté au <b>facturé</b> réel (par N° FP) — même source que le signal de sous-facturation. <b>À facturer</b> = CA reconnu pas encore émis (« CA qui dort ») ; <b>facturé d'avance</b> = émis au-delà du reconnu. Comptés séparément.</Tip>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Kpi label="Reconnu à ce jour" value={fmt(recognition.reconnu)} tone="ink" sub="échéancier engagé" />
-            <Kpi label="Facturé" value={fmt(recognition.facture)} tone="ink" sub="par N° FP" />
-            <Kpi label="À facturer (couru)" value={fmt(recognition.aFacturer)} tone={recognition.aFacturer > 0 ? "gold" : "emerald"} sub="CA reconnu non émis" />
-            <Kpi label="Facturé d'avance" value={fmt(recognition.factureAvance)} tone={recognition.factureAvance > 0 ? "steel" : "emerald"} sub="émis > reconnu" />
           </div>
         </Card>
       )}
