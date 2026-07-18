@@ -576,3 +576,28 @@ fichier conservées — piège FCFA assumé). `bpAchievement` à **double miroir
 Tout additif : aucun champ existant touché, `upsertParPartner`/`deployed-functions.txt` inchangés, bundle
 118.3 KB. Tests : 12 (back parPartner) + 8 (parPartnerForm) + 51 (parPartnerPresets). Modèles = données
 d'amorçage éditables (validités indicatives) ; le backend `validatePartner` tranche.
+
+---
+
+## PA-DATA2 — Top 20 partenaires : modèles réels + exigences de programme — 2026-07-18
+
+**Fait.** Extension des modèles constructeurs de **10 à 20** (tous les partenaires du fichier
+`Partners_Status_Tracking`) : ajout de **Sophos, Nutanix, Wallix, Jabra, Veritas, APC — Schneider, Tufin,
+Rapid7, Allot, Juniper**. Chacun porte son **statut** courant, son **plan d'affaires** réel (BP/YTD par axe),
+son **échéance** et son **statut de validation** issus du fichier, plus des **niveaux / compétences /
+catalogue de certifications / exigences de quota** inspirés du programme constructeur réel (JNCIA→JNCIP pour
+Juniper, NCA→NCM pour Nutanix, SCE/SCA pour Sophos, TCSA/TCSE pour Tufin, WBA/WCE pour Wallix, VCS-NetBackup
+pour Veritas, InsightVM/IDR pour Rapid7, APC Secure Power / DCPI pour Schneider…). Exigences des 10 modèles
+existants enrichies (2-3 par partenaire). Front seul (`lib/parPartnerPresets`), aucun backend touché.
+
+**Appris.** Le fichier direction est un **classeur tenu à la main, aux formules incohérentes** entre colonnes
+(le % Booking se blanchit à YTD=0, le % Cert affiche 0) — la reproduction exacte cellule-à-cellule est illusoire.
+On garde la règle PROPRE et documentée de `bpAchievement` (ratio dès que l'objectif > 0, % global = moyenne des
+axes évaluables) ; le % global peut donc différer très légèrement d'une ligne où une cellule était laissée
+vide. C'est un choix assumé (calcul cohérent > mimétisme d'une incohérence de tableur).
+
+**Conception.** Toujours des **données d'amorçage éditables** : validités (mois) et exigences INDICATIVES
+(les fichiers ne les portent pas ; les programmes évoluent) — le backend `validatePartner` tranche à
+l'enregistrement. Les modèles vivent dans le chunk LAZY du module (bundle d'entrée inchangé, 118,3 KB).
+Tests : `parPartnerPresets.test.ts` couvre les 20 (intégrité référentielle + plan d'affaires calculable) —
+101 cas.
