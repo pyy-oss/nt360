@@ -721,6 +721,32 @@ async function recomputeCore(db, only) {
     w.push({ path: "summaries/preBilling", data: { asOf, months: pbMonths, global: pb.global, byMonth: pb.byMonth, byBu: pb.byBu, byConsultant: pb.byConsultant, ...stamp } });
   }
 
+  // ── RECONNAISSANCE DE REVENU (DO Lot 4b) — deux taux d'avancement par affaire (fpKey), MATÉRIALISÉS dans
+  // summaries/recognition. FINANCIER = facturé/montant (jalon de facturation) ; OPÉRATIONNEL = avancement
+  // ClickUp (progression checklist réelle, sinon statut ordinal, sinon null). Écart → FAE/PCA. Bloc ADDITIF
+  // gaté want("recognition") : recompute complet le régénère, un recompute ciblé ne l'écrase pas. Ne lit que
+  // `orders` (déjà en mémoire) + l'overlay clickupSync (déjà lu) + les fpKey des contrats de maintenance
+  // (UNIQUEMENT si le module mnt est allumé — sinon aucune collision possible ET on préserve l'invariant
+  // « éteint = aucune lecture mnt_* »). ANTI DOUBLE-COMPTE : les affaires sous contrat de maintenance sont
+  // exclues (leur facturation est déjà pilotée par l'échéancier mnt — ADR-005).
+  if (want("recognition")) {
+    const { recognitionByFp } = require("../domain/recognition");
+    const mntFpSet = new Set();
+    const { isMntEnabled } = require("../domain/mntFeature");
+    const recMntCfg = (await db.doc("config/mntFeature").get()).data();
+    if (isMntEnabled(recMntCfg)) {
+      const cs = await db.collection("mnt_contrats").select("fp").get();
+      cs.forEach((d) => { const k = fpKey((d.data() || {}).fp); if (k) mntFpSet.add(k); });
+    }
+    const recRows = orders.map((o) => {
+      const cu = clickupSyncMap[safeId(o.fp)] || null; // même source que les chunks du carnet (base)
+      return { fp: o.fp, client: o.client || "", bu: o.bu || "AUTRE", am: o.am || "", cas: o.cas || 0, facture: o.facture || 0, clickupStatus: cu ? (cu.status || null) : null, clickupProgress: cu && cu.progress != null ? cu.progress : null };
+    });
+    const rec = recognitionByFp(recRows, mntFpSet);
+    // rows plafonnées (top 200 par exposition FAE/PCA) pour rester loin de la limite 1 Mio ; global sur TOUT.
+    w.push({ path: "summaries/recognition", data: { asOf, global: rec.global, rows: rec.rows.slice(0, 200), ...stamp } });
+  }
+
   // ── CONTRATS DE MAINTENANCE (module gaté) — scores de risque MATÉRIALISÉS dans summaries/mnt_risque
   // (ADR-003, point de contact C3). DOUBLEMENT gaté : want("maintenance") ET drapeau config/mntFeature
   // ALLUMÉ. Éteint (défaut) ⇒ aucune lecture mnt_*, aucun summary mnt_risque écrit → le recompute est

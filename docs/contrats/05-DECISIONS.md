@@ -3,6 +3,45 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-040 — Reconnaissance de revenu à DEUX taux d'avancement (financier + opérationnel) → FAE/PCA, contrats de maintenance exclus
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (« deux taux d'avancement : un financier — jalon de facturation — et un opérationnel — avancement ClickUp »)
+
+### Contexte
+La reconnaissance à l'avancement avait été **retirée** d'un lot précédent (double-compte : un « reconnu »
+en euros calculé sur le périmètre maintenance se confrontait au « facturé » de l'affaire entière, quand
+deux contrats partagent un `fpKey`). Refaire un **unique montant reconnu** rejouerait ce piège. La Direction
+tranche pour **deux taux d'avancement** distincts plutôt qu'un chiffre reconnu.
+
+### Décision
+- **Deux taux par affaire (`fpKey`)**, jamais un « reconnu » agrégé :
+  - **Financier** = `facturé / montant commande` (le jalon de facturation réalisé), lu du carnet existant.
+  - **Opérationnel** = avancement ClickUp : progression **checklist réelle** (`cu.progress` 0..100, résolu/
+    total) prioritaire ; à défaut, dérivée du **statut ordinal** de l'ERP (`4-/5-/9-…` livré → 1 ; `0-affecté`
+    → 0 ; `1-/3-` en cours → **null**). `null` = **indéterminé** : on **n'invente aucun palier** (CLAUDE.md).
+- **Écart op − fin, appliqué au montant** : op > fin → **FAE** (produit livré non facturé) ; fin > op →
+  **PCA** (facturé d'avance). Calculé **uniquement** quand les deux taux sont connus.
+- **Garde-fou double-compte (le cœur de l'ADR)** : une affaire portée par un **contrat de maintenance**
+  (même `fpKey` — ADR-001) est **EXCLUE** de la reconnaissance projet ; sa facturation est déjà pilotée par
+  l'échéancier du module maintenance (ADR-005). La liste des `fpKey` mnt n'est lue **que si le module
+  maintenance est allumé** (sinon aucune collision possible ; invariant « éteint = aucune lecture mnt_* »).
+- Matérialisé en **summary** (`summaries/recognition`, gaté `want("recognition")`, additif), gaté `rentabilite`
+  dans les rules. Consommé au Bilan CODIR (chips FAE / PCA, gaté droit Rentabilité). **Encaissé : reste
+  booléen** (décision Direction — aucun encaissé daté, pas de donnée de règlement ; cohérent ADR-037/A1).
+
+### Conséquences
+- Aucun euro « reconnu » unique n'est produit → le double-compte historique est structurellement impossible.
+- La valeur décisionnelle est l'**écart** (FAE/PCA), pas un chiffre absolu contestable.
+- Là où ClickUp ne donne aucun avancement (ni checklist ni statut exploitable), l'affaire est comptée en
+  `nbOpUnknown` et **n'invente pas** de FAE/PCA — l'honnêteté prime sur la complétude.
+
+### Ce qu'on saura dans six mois
+Si trop d'affaires tombent en `nbOpUnknown` (avancement ClickUp indéterminé faute de checklist), envisager un
+mapping **statut → % déclaré par la Direction** en config (comme `config/projection`) — décision explicite, pas
+une invention silencieuse. Nouvel ADR le cas échéant.
+
 ## ADR-039 — Fusion de vues redondantes (revenu dédupliqué, risque & rétention réunis)
 
 - **Date :** 2026-07-18

@@ -1343,3 +1343,32 @@ facturer (pré-fact. CRA) » + chip « Lignes sans TJM », gaté droit Rentabili
   périmètre maintenance ↔ facturé affaire entière). La refaire proprement demande une DÉCISION (source
   d'avancement : jours consommés / avancement ClickUp / jalons) + une allocation facture↔périmètre — laissée
   à l'arbitrage humain, pas de changement silencieux.
+
+---
+
+## DO Lot 4b — Reconnaissance de revenu à deux taux (financier + opérationnel) → FAE/PCA — 2026-07-18
+
+**Fait (ADR-040).** Suite au reste de DO Lot 4, la Direction tranche : **deux taux d'avancement** plutôt qu'un
+« reconnu » unique (qui rejouerait le double-compte du lot retiré). Fonction PURE `domain/recognition.js`
+(`recognitionByFp`, `operationalRate`) : par affaire (`fpKey`), **financier** = `facturé / montant` (carnet),
+**opérationnel** = avancement ClickUp — **progression checklist réelle** (`cu.progress` 0..100, résolu/total,
+déjà persistée par la synchro inverse Lot 4) prioritaire, sinon **statut ordinal** de l'ERP (`4-/5-/9-…`→1 ;
+`0-affecté`→0 ; `1-/3-` en cours→**null**). `null` = indéterminé — **aucun palier inventé** (CLAUDE.md).
+Écart op − fin × montant → **FAE** (livré non facturé) / **PCA** (facturé d'avance), calculé seulement quand
+les deux taux sont connus.
+
+**Garde-fou double-compte (le cœur du lot, sur alerte utilisateur « les contrats ont aussi des fpKey,
+vérifie »).** Vérifié dans le code : les contrats de maintenance portent bien un `fpKey` (ADR-001) et le module
+mnt dérive DÉJÀ leur facturé des mêmes factures d'affaire par `fpKey` (`mntRisque` §Sous-facturation, ADR-005).
+La reconnaissance projet **exclut** donc tout `fpKey` présent dans `mnt_contrats` — lecture des contrats
+**uniquement si le module maintenance est allumé** (sinon aucune collision + invariant « éteint = aucune
+lecture mnt_* »). Test `recognition.test.js` fige : une affaire sous contrat mnt n'apparaît PAS dans le summary.
+
+**Câblage.** Bloc ADDITIF `aggregate.js` gaté `want("recognition")` (lit `orders` + overlay `clickupSync`
+déjà en mémoire + fpKey mnt gatés) → `summaries/recognition` (`global` + top 200 rows par exposition). Rule
+`recognition.* → rentabilite`. Bilan CODIR : chips « FAE — livré non facturé » / « PCA — facturé d'avance »
+(gaté Rentabilité), avec compte des affaires sans avancement ClickUp. **Encaissé : reste booléen** (décision
+Direction — aucune donnée de règlement daté).
+
+**Vérifs.** `recognition` (7) + `recognitionGate` (2) ; 1138 functions + 271 web ; bundle 118.3 KB (≤ 120) ;
+check-deploy-targets (178, aucun nouvel export) + check-no-undef OK.

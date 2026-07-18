@@ -398,6 +398,13 @@ export const Codir: FC<Props> = () => {
   const canMargin = useCanSeeMargin();
   const { data: preBill } = useDocData<{ global?: { amountHt?: number; billedDays?: number; missingTjm?: number } }>(canMargin ? "summaries/preBilling" : null);
   const preBillAmount = preBill?.global?.amountHt || 0;
+  // Reconnaissance de revenu (DO Lot 4b) : écart avancement opérationnel (ClickUp) vs financier (facturé)
+  // → FAE (produit livré non facturé) / PCA (facturé d'avance). Gaté « Rentabilité ». Contrats de
+  // maintenance EXCLUS côté serveur (anti double-compte). nbOpUnknown = affaires sans avancement ClickUp.
+  const { data: recog } = useDocData<{ global?: { fae?: number; pca?: number; nbOpKnown?: number; nbOpUnknown?: number } }>(canMargin ? "summaries/recognition" : null);
+  const recFae = recog?.global?.fae || 0;
+  const recPca = recog?.global?.pca || 0;
+  const recOpUnknown = recog?.global?.nbOpUnknown || 0;
   // Volet Partenariats (module gaté, ADR-P09) : lu seulement drapeau parFeature ALLUMÉ + droit `partenariats`.
   const canPar = useCan("partenariats") !== "none";
   const { data: parFeature } = useDocData<{ enabled?: boolean }>("config/parFeature");
@@ -523,6 +530,20 @@ export const Codir: FC<Props> = () => {
                 <InsightChip label="À facturer (pré-fact. CRA)" value={`${fmt(preBillAmount)}`} hint={`${preBill?.global?.billedDays || 0} j facturés au CRA, à transmettre à la facturation`} color={T.gold} />
                 {(preBill?.global?.missingTjm || 0) > 0 && (
                   <InsightChip label="Lignes sans TJM" value={String(preBill?.global?.missingTjm)} hint="jours facturés sans TJM — à tarifer avant facturation" color={T.clay} />
+                )}
+              </div>
+            )}
+
+            {/* Reconnaissance de revenu (DO Lot 4b) — écart avancement livraison (ClickUp) vs facturation.
+                FAE = livré non facturé (revenu à rattraper) ; PCA = facturé d'avance. Contrats de maintenance
+                exclus (anti double-compte). N'apparaît que si un écart est mesuré. */}
+            {canMargin && (recFae > 0 || recPca > 0) && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {recFae > 0 && (
+                  <InsightChip label="FAE — livré non facturé" value={`${fmt(recFae)}`} hint={`avancement livraison > facturation${recOpUnknown ? ` · ${recOpUnknown} affaire(s) sans avancement ClickUp` : ""}`} color={T.gold} />
+                )}
+                {recPca > 0 && (
+                  <InsightChip label="PCA — facturé d'avance" value={`${fmt(recPca)}`} hint="facturation > avancement livraison — produit constaté d'avance" color={T.steel} />
                 )}
               </div>
             )}
