@@ -1,11 +1,18 @@
 // Domain PUR — Rentabilité par contrat de maintenance (mnt_), Lot 4/7 « valeur ajoutée » (contrôle).
-// Rapproche le REVENU engagé à ce jour (échéancier : montant par échéance × échéances dues) au COÛT des
-// interventions (jours CRA × CJM du consultant). Le CJM est CONFIDENTIEL : quand `hasCost` est faux, le
-// coût/marge sont MASQUÉS (null) — seuls le revenu et les jours (non confidentiels) restent. Aucun I/O.
-// Montants ENTIERS XOF. Réutilise craDaysFromHours (ADR-013) et echeancier (source unique du « dû »).
+// Rapproche le REVENU engagé à ce jour (échéancier : montant par échéance × échéances dues) au COÛT
+// TOTAL de l'affaire, en DEUX composantes (ADR-033) :
+//   1. coût des INTERVENTIONS de maintenance (jours CRA × CJM du consultant) — la main-d'œuvre TMA ;
+//   2. coût du P&L de l'AFFAIRE porté par le carnet (achats BC + provisions), rapproché par N° FP.
+// Sans la composante P&L, un contrat sans intervention saisie affichait coût 0 → marge 100 % (anomalie
+// signalée en prod). Le CJM et les coûts sont CONFIDENTIELS : quand `hasCost` est faux, coût/marge sont
+// MASQUÉS (null). Aucun I/O. Montants ENTIERS XOF. Réutilise craDaysFromHours (ADR-013), echeancier
+// (source unique du « dû ») et fpKey (rapprochement carnet, jamais un FP brut).
+// LIMITE ASSUMÉE (ADR-033) : revenu = engagé À CE JOUR (croît avec le temps) ; coût P&L = coût TOTAL de
+// l'affaire (figé). La marge est donc PRUDENTE (plancher) tant que le contrat n'est pas à terme.
 const { craDaysFromHours } = require("./mntTicket");
 const { echeancier } = require("./mntEcheancier");
 const { RISK_STATUTS } = require("./mntRisque");
+const { fpKey } = require("../lib/ids");
 
 /**
  * @param {object[]} contrats      contrats (id, fp, client, statut, echeanceType, montantEngage, dateDebut, dateFin)
@@ -13,10 +20,12 @@ const { RISK_STATUTS } = require("./mntRisque");
  * @param {Object<string,number>} cjmById  CJM (coût journalier) par consultantId
  * @param {string} asOfIso         date d'observation (AAAA-MM-JJ) pour le revenu engagé à ce jour
  * @param {boolean} hasCost        droit « rentabilite » : sinon coût/marge masqués (null)
- * @returns {{id,fp,client,statut,revenue,jours,cout,marge,margePct}[]}
+ * @param {Object<string,number>} pnlCostByFp  coût carnet (costTotal) par N° FP canonique (achats + provisions)
+ * @returns {{id,fp,client,statut,revenue,jours,coutInterventions,coutPnl,cout,marge,margePct}[]}
  */
-function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost) {
+function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, pnlCostByFp) {
   const cjm = cjmById || {};
+  const pnlByFp = pnlCostByFp || {};
   // Coût + jours agrégés par contrat (jours CRA × CJM du consultant de l'intervention).
   const agg = {};
   for (const iv of interventions || []) {
@@ -40,12 +49,17 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost) {
     if (!c || !RISK_STATUTS.has(String(c.statut))) continue;
     const a = agg[c.id] || { jours: 0, cout: 0, joursSansCjm: 0 };
     const revenue = echeancier(c, 0, asOfIso).engage; // engagé à ce jour (indépendant du facturé)
-    if (!(revenue > 0) && a.jours <= 0) continue;      // ni revenu ni activité → hors P&L
-    const cout = Math.round(a.cout);
+    const fk = fpKey(c.fp);                            // rapprochement carnet par clé canonique (jamais FP brut)
+    const coutPnl = fk ? Math.round(Number(pnlByFp[fk]) || 0) : 0; // coût affaire (achats + provisions)
+    const coutInterventions = Math.round(a.cout);      // main-d'œuvre TMA (jours CRA × CJM)
+    if (!(revenue > 0) && a.jours <= 0 && coutPnl <= 0) continue; // ni revenu, ni activité, ni coût → hors P&L
+    const cout = coutInterventions + coutPnl;
     const marge = revenue - cout;
     rows.push({
       id: c.id || "", fp: c.fp || null, client: c.client || "", statut: c.statut || "brouillon",
       revenue, jours: Math.round(a.jours * 100) / 100,
+      coutInterventions: hasCost ? coutInterventions : null,
+      coutPnl: hasCost ? coutPnl : null,
       cout: hasCost ? cout : null,
       marge: hasCost ? marge : null,
       margePct: hasCost && revenue > 0 ? Math.round((marge / revenue) * 1000) / 1000 : null,

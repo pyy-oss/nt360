@@ -3,6 +3,36 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-033 — Rentabilité contrat : le coût inclut le P&L de l'affaire (carnet), pas seulement les interventions
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté (corrige un comportement signalé en production)
+- **Décideur :** Direction des Opérations (retour terrain)
+
+### Contexte
+En production, **tous** les contrats affichaient une **marge de 100 %** (Coût 0, Jours 0). Cause : `computeContratPnl`
+(Lot 4/7) ne dérivait le coût **que** des interventions de maintenance (jours CRA × CJM). Or les interventions
+sont rarement saisies au fil de l'eau → coût 0 → marge = revenu → 100 % mécanique, un chiffre trompeur qui
+décrédibilise la vue. Le retour terrain : *« il faut puiser dans le P&L également, pas seulement en jour-homme ».*
+
+### Décision
+- Le coût d'un contrat = **coût des interventions** (main-d'œuvre TMA, jours CRA × CJM) **+ coût du P&L de
+  l'affaire** porté par le carnet (achats BC + provisions), rapproché **par `fpKey`** (jamais un FP brut) depuis
+  la collection isolée `commandesRowsMargin` (marge — même droit `rentabilite`).
+- Les deux composantes sont **exposées séparément** (`coutInterventions`, `coutPnl`) et masquées sans le droit
+  `rentabilite` (comme le reste). Confidentialité du CJM/coût préservée.
+- **Additif, pas de double-compte** : on ADDITIONNE deux natures de coût distinctes (main-d'œuvre TMA vs
+  achats/provisions du carnet) — on ne re-somme pas un coût déjà compté. Les interventions de maintenance
+  (`source:"mnt"`) sont couvertes par le forfait et exclues de la valorisation TJM ailleurs (ADR-005/013),
+  donc elles n'apparaissent pas dans le coût carnet : pas de recoupement.
+
+### Conséquences / limite assumée
+- **Marge prudente (plancher)** tant que le contrat n'est pas à terme : le revenu est *engagé à ce jour*
+  (croît avec les échéances dues) alors que le coût P&L est le coût *total* de l'affaire (figé). Un contrat en
+  début de vie peut donc afficher une marge basse/négative qui se redresse à mesure que le revenu s'engage.
+  Signalé dans le Tip de la vue. Une reconnaissance du coût *à l'avancement* serait un ADR ultérieur.
+- Un contrat dont le FP n'a **pas** de coût carnet retombe sur les seules interventions (comportement d'avant).
+
 ## ADR-032 — Détection de lignées : le signal « affaire » vient des commandes brutes, pas du carnet fusionné
 
 - **Date :** 2026-07-17

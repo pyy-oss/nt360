@@ -417,7 +417,9 @@ export const Maintenance: FC<Props> = () => {
     colNum("Revenu engagé", (r: MntContratPnlRow) => money(r.revenue), (r: MntContratPnlRow) => r.revenue),
     colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
     ...(pnl.hasCost ? [
-      colNum("Coût", (r: MntContratPnlRow) => money(r.cout || 0), (r: MntContratPnlRow) => r.cout || 0),
+      colNum("Coût", (r: MntContratPnlRow) => (
+        <span className="tabnum" title={`Interventions (TMA) ${money(r.coutInterventions || 0)} + P&L affaire ${money(r.coutPnl || 0)}`}>{money(r.cout || 0)}</span>
+      ), (r: MntContratPnlRow) => r.cout || 0),
       colNum("Marge", (r: MntContratPnlRow) => (
         <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>
           {money(r.marge || 0)}
@@ -713,7 +715,7 @@ export const Maintenance: FC<Props> = () => {
       {gate && pnl && pnl.rows.length > 0 && (
         <Card title="Rentabilité des contrats"
           actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
-          <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût des interventions</b> (jours CRA × coût journalier du consultant). {pnl.hasCost ? <>Pires marges d'abord.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
+          <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût total</b> de l'affaire = <b>interventions</b> (jours CRA × coût journalier) <b>+ P&L de l'affaire</b> (achats + provisions du carnet, par N° FP). {pnl.hasCost ? <>Survolez le coût pour le détail. Pires marges d'abord. La marge est <b>prudente</b> (revenu engagé qui croît, coût affaire figé) tant que le contrat n'est pas à terme.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
           <Table columns={pnlCols} rows={pnl.rows} colsKey="mnt_pnl" />
         </Card>
       )}

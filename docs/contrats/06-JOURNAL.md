@@ -31,6 +31,30 @@
 
 ---
 
+## 2026-07-18 — Rentabilité contrat : coût = interventions + P&L affaire (ADR-033)
+
+**Fait**
+- Retour terrain : **tous** les contrats affichaient une marge de **100 %** (Coût 0). Cause confirmée :
+  `computeContratPnl` ne comptait le coût que des interventions (jours CRA × CJM), rarement saisies → coût 0.
+- `computeContratPnl` reçoit désormais `pnlCostByFp` et ajoute le **coût P&L de l'affaire** (achats +
+  provisions du carnet), rapproché **par fpKey**, exposé en deux composantes (`coutInterventions`, `coutPnl`),
+  masquées sans droit `rentabilite`. Le handler lit `commandesRowsMargin` (isolé marge, même droit).
+- Front : type + colonne « Coût » avec détail au survol + Tip recadré (coût total, marge prudente). ADR-033.
+- Tests : composition P&L + interventions, rapprochement fpKey (zéros de tête), masquage sans droit.
+
+**Appris sur l'existant**
+- Le coût carnet par affaire vit dans `commandesRowsMargin` (chunks `{i, rows:[{fp,costTotal}]}`) — la marge
+  isolée des `orders` de base par le recompute (rules), lisible sous le droit `rentabilite`. Source à réutiliser
+  pour tout rapprochement coût↔affaire côté contrats.
+
+**Décidé**
+- ADR-033 (coût contrat = interventions + P&L affaire ; limite « marge prudente » assumée).
+
+**Échoué / abandonné**
+- (rien — correctif ciblé)
+
+---
+
 ## 2026-07-15 — Audit de vérification de la remédiation (#381/#382) — 3 axes
 
 **Fait** — audit adverse du diff de remédiation (`015702d..f0a5be1`), focalisé sur le code PARTAGÉ

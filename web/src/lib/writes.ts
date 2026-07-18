@@ -1081,7 +1081,7 @@ export const aiSuggestMntContrats = (candidates: MntCandidate[]) => mntCallLong<
 
 // Rentabilité par contrat (Lot 4/7) — revenu engagé vs coût interventions (jours × CJM). Coût/marge MASQUÉS
 // (null) sans droit `rentabilite` (calcul serveur, le CJM ne sort jamais). Lecture gouvernée `maintenance`.
-export type MntContratPnlRow = { id: string; fp: string | null; client: string; statut: string; revenue: number; jours: number; cout: number | null; marge: number | null; margePct: number | null; missingCjm: number | null };
+export type MntContratPnlRow = { id: string; fp: string | null; client: string; statut: string; revenue: number; jours: number; coutInterventions: number | null; coutPnl: number | null; cout: number | null; marge: number | null; margePct: number | null; missingCjm: number | null };
 export const mntContratPnl = () => mntCallLong<{ ok: boolean; rows: MntContratPnlRow[]; hasCost: boolean }>("mntContratPnl", {});
 
 // Analyse de rétention IA (Lot 6/7) — l'IA lit les contrats à risque + stats tickets et rend, par contrat,
