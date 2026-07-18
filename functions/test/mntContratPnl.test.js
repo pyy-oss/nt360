@@ -50,6 +50,28 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     expect(c1.cout).toBeNull();
   });
 
+  it("le coût inclut la CHARGE d'astreinte validée (par FP), EN PLUS des interventions et du P&L (ADR-035)", () => {
+    // C1 : interventions 250 000 + P&L 300 000 + astreintes 150 000 = 700 000.
+    const rows = computeContratPnl(contrats, interventions, cjmById, asOf, true, { "FP/2026/1": 300_000 }, { "FP/2026/1": 150_000 });
+    const c1 = rows.find((r) => r.id === "C1");
+    expect(c1.coutAstreintes).toBe(150_000);
+    expect(c1.cout).toBe(700_000);            // 250k + 300k + 150k
+    expect(c1.marge).toBe(300_000);           // 1 000 000 − 700 000
+    // Une astreinte sur une affaire SANS revenu ni intervention entre quand même dans la vue (coût > 0).
+    const solo = computeContratPnl(
+      [{ id: "S", fp: "FP/2026/9", client: "X", statut: "actif", echeanceType: "annuel", montantEngage: 0, dateDebut: "2026-01-01", dateFin: "2027-01-01" }],
+      [], {}, asOf, true, {}, { "FP/2026/9": 80_000 },
+    );
+    expect(solo).toHaveLength(1);
+    expect(solo[0].coutAstreintes).toBe(80_000);
+    expect(solo[0].marge).toBe(-80_000);
+  });
+
+  it("la charge d'astreinte est masquée SANS droit rentabilité", () => {
+    const rows = computeContratPnl(contrats, interventions, cjmById, asOf, false, {}, { "FP/2026/1": 150_000 });
+    expect(rows.find((r) => r.id === "C1").coutAstreintes).toBeNull();
+  });
+
   it("signale missingCjm : jours d'intervention sans CJM connu (marge non fiable, audit m6)", () => {
     // K2 n'est pas dans cjmById → ses jours comptent en coût 0 mais sont drapeautés.
     const iv = [{ contratId: "C1", consultantId: "K1", heures: 8 }, { contratId: "C1", consultantId: "K2", heures: 16 }];

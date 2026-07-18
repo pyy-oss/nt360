@@ -238,6 +238,11 @@ service cloud.firestore {
     // Abonnements de surveillance PAR UTILISATEUR (Lot 5, ADR-026) : chaque utilisateur ne lit QUE son
     // propre doc (id = uid). Écriture via le callable setMntWatch (Admin SDK). Double verrou drapeau+droit.
     match /mnt_watches/{uid}       { allow read: if mntEnabled() && canRead('maintenance') && request.auth.uid == uid; allow write: if false; }
+    // Astreintes (ADR-035) : lecture CALLABLE-ONLY (allow read: false). Le `montant` est une CHARGE
+    // CONFIDENTIELLE ; le callable listAstreintes le MASQUE sans le droit `rentabilite`. Une lecture directe
+    // (droit `maintenance` seul) exposerait le montant brut → fuite RBAC (même logique qu'ADR-034). Écriture
+    // via submitAstreinte / trigger onMntApprovalDecided (Admin SDK).
+    match /mnt_astreintes/{id}     { allow read: if false; allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour

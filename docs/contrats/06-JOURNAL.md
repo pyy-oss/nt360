@@ -31,6 +31,41 @@
 
 ---
 
+## 2026-07-18 — Astreintes : demande + validation + comptabilité en charge (ADR-035)
+
+**Fait**
+- Nouvel objet `mnt_astreintes` (domaine pur `mntAstreinte.js` : `validateAstreinte` + `astreinteCostByFp`).
+  Une astreinte porte un N° FP obligatoire (affaire), un contrat optionnel, une période et un `montant`
+  (charge saisie, XOF) — **première ligne de coût saisissable de l'ERP**.
+- **Demande + validation** : réutilisation du workflow d'approbation (enum `astreinte` ajouté à
+  `domain/approval.js`). `submitAstreinte` crée l'objet + la demande ; `decideApproval` existant décide ;
+  le trigger `onMntApprovalDecided` porte l'effet (statut → `validee`/`rejetee`). Zéro mécanisme dupliqué.
+- **Comptabilisation** : `astreinteCostByFp` (astreintes validées, par fpKey) — SOURCE UNIQUE — alimente
+  `computeContratPnl` (composante `coutAstreintes`) ET `deliveryMargin` (retranchée du labor). Injecté aussi
+  dans le recompute (score de risque via le palier ADR-034) et les callables mntContratPnl /
+  deliveryMarginByAffaire. Front : carte « Astreintes » (demande via modale « form », liste + statut),
+  charge ajoutée au tooltip de coût de la rentabilité.
+- Confidentialité : `mnt_astreintes` callable-only en lecture (`allow read: if false`) ; `listAstreintes`
+  et `coutAstreintes` masqués sans droit `rentabilite`. Callables inline (module lazy) → budget bundle tenu.
+- Tests : `mntAstreinte.test.js` (+8), `mntContratPnl.test.js` (+2), `deliveryMargin.test.js` (+1),
+  parité approbations OK. 1057 tests back + 147 web verts, gardes CI vertes, bundle 119,9 KB.
+
+**Appris sur l'existant**
+- Le workflow d'approbation est **générique** (`kind`/`entityType`/`entityId`/`amount`) et déjà étendu
+  additivement par le module (mnt_contrat) : l'effet d'une décision passe par le trigger unique sur
+  `approvals/{id}`, qui filtre par `entityType`. L'astreinte s'y insère sans nouveau trigger.
+- L'ERP n'avait **aucune** ligne de coût saisissable (constat cartographie) : l'astreinte est un rail neuf,
+  mais purement additif (ni dans le P&L importé ni dans le CRA labor) → pas de double-compte.
+
+**Décidé**
+- ADR-035 : montant confidentiel (callable-only + masquage), imputation par fpKey (source unique),
+  comptabilisée à la validation. Limite assumée : astreinte hors carnet ET hors contrat non comptabilisée.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — La rentabilité entre dans le score de risque des contrats (ADR-034)
 
 **Fait**

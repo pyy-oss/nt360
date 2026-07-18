@@ -21,11 +21,13 @@ const { fpKey } = require("../lib/ids");
  * @param {string} asOfIso         date d'observation (AAAA-MM-JJ) pour le revenu engagé à ce jour
  * @param {boolean} hasCost        droit « rentabilite » : sinon coût/marge masqués (null)
  * @param {Object<string,number>} pnlCostByFp  coût carnet (costTotal) par N° FP canonique (achats + provisions)
- * @returns {{id,fp,client,statut,revenue,jours,coutInterventions,coutPnl,cout,marge,margePct}[]}
+ * @param {Object<string,number>} astreinteCostByFp  charge des astreintes VALIDÉES par N° FP (ADR-035)
+ * @returns {{id,fp,client,statut,revenue,jours,coutInterventions,coutPnl,coutAstreintes,cout,marge,margePct}[]}
  */
-function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, pnlCostByFp) {
+function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, pnlCostByFp, astreinteCostByFp) {
   const cjm = cjmById || {};
   const pnlByFp = pnlCostByFp || {};
+  const astByFp = astreinteCostByFp || {};
   // Coût + jours agrégés par contrat (jours CRA × CJM du consultant de l'intervention).
   const agg = {};
   for (const iv of interventions || []) {
@@ -51,15 +53,17 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, p
     const revenue = echeancier(c, 0, asOfIso).engage; // engagé à ce jour (indépendant du facturé)
     const fk = fpKey(c.fp);                            // rapprochement carnet par clé canonique (jamais FP brut)
     const coutPnl = fk ? Math.round(Number(pnlByFp[fk]) || 0) : 0; // coût affaire (achats + provisions)
+    const coutAstreintes = fk ? Math.round(Number(astByFp[fk]) || 0) : 0; // charge astreintes validées (ADR-035)
     const coutInterventions = Math.round(a.cout);      // main-d'œuvre TMA (jours CRA × CJM)
-    if (!(revenue > 0) && a.jours <= 0 && coutPnl <= 0) continue; // ni revenu, ni activité, ni coût → hors P&L
-    const cout = coutInterventions + coutPnl;
+    if (!(revenue > 0) && a.jours <= 0 && coutPnl <= 0 && coutAstreintes <= 0) continue; // ni revenu, ni activité, ni coût → hors P&L
+    const cout = coutInterventions + coutPnl + coutAstreintes;
     const marge = revenue - cout;
     rows.push({
       id: c.id || "", fp: c.fp || null, client: c.client || "", statut: c.statut || "brouillon",
       revenue, jours: Math.round(a.jours * 100) / 100,
       coutInterventions: hasCost ? coutInterventions : null,
       coutPnl: hasCost ? coutPnl : null,
+      coutAstreintes: hasCost ? coutAstreintes : null,
       cout: hasCost ? cout : null,
       marge: hasCost ? marge : null,
       margePct: hasCost && revenue > 0 ? Math.round((marge / revenue) * 1000) / 1000 : null,

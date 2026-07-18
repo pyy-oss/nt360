@@ -143,6 +143,26 @@ if (process.env.RECOMPUTE_REGION) {
       const before = event.data && event.data.before && event.data.before.data();
       const after = event.data && event.data.after && event.data.after.data();
       if (!after) return; // suppression du doc → rien à faire
+      // ASTREINTES (ADR-035) — comptabilisation à la décision : approuvée → l'astreinte devient « validee »
+      // (elle pèse alors en charge dans la rentabilité), rejetée → « rejetee ». On agit à la TRANSITION vers
+      // un état DÉCIDÉ (idempotence : les ré-écritures ultérieures — note, etc. — ne re-mutent pas).
+      if (after.entityType === "astreinte") {
+        const decided = after.status === "approved" || after.status === "rejected";
+        const wasDecided = before && (before.status === "approved" || before.status === "rejected");
+        if (decided && !wasDecided && after.entityId) {
+          try {
+            const statut = after.status === "approved" ? "validee" : "rejetee";
+            const ref = db.doc(`mnt_astreintes/${after.entityId}`);
+            const snap = await ref.get();
+            if (snap.exists) {
+              await ref.set({ statut, decidedBy: after.decidedBy || null, decidedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+              await db.collection("auditLog").add({ uid: after.decidedBy || null, action: "astreinte_decide", module: "maintenance", entity: "astreinte", entityId: after.entityId, detail: { statut, approvalId: event.params.id }, ts: FieldValue.serverTimestamp() });
+              if (statut === "validee") await requestRecompute(["maintenance"]); // la charge validée modifie le score de risque / la marge
+            }
+          } catch (e) { logger.error("onMntApprovalDecided (astreinte) a échoué", { message: e && e.message, stack: e && e.stack }); }
+        }
+        return; // astreinte traitée — ce n'est pas une décision de contrat
+      }
       // On n'agit QU'À LA TRANSITION vers `approved` (idempotence : les ré-écritures ultérieures — note, etc.
       // — ne re-mutent pas le contrat). Seules les décisions de contrat de maintenance sont concernées.
       if (after.status !== "approved" || (before && before.status === "approved")) return;
@@ -1394,6 +1414,8 @@ exports.deleteMntTicket = _maintenance.deleteMntTicket;
 exports.upsertMntIntervention = _maintenance.upsertMntIntervention;
 exports.deleteMntIntervention = _maintenance.deleteMntIntervention;
 exports.submitMntDecision = _maintenance.submitMntDecision;
+exports.submitAstreinte = _maintenance.submitAstreinte;
+exports.listAstreintes = _maintenance.listAstreintes;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
