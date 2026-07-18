@@ -6,8 +6,6 @@
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { where, orderBy, limit } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../lib/firebase";
 import { useCan, useClaims } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, useConfirm, type BulkAction } from "../design/components";
@@ -48,58 +46,10 @@ const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) 
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
 
-// Appel callable INLINE (hors chunk d'entrée : ce module est lazy) — évite d'alourdir writes.ts (budget bundle).
-const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
-
-// ASTREINTES (ADR-035) — demande + validation + comptabilisation en charge. Une astreinte (on-call) est
-// imputée EN CHARGE sur une affaire (N° FP) et éventuellement un contrat ; validée par approbation
-// hiérarchique (réutilise le workflow d'approbation), elle pèse alors dans la rentabilité (contrat + livraison).
-// Le montant (charge) est CONFIDENTIEL : masqué sans le droit « Rentabilité » (le callable listAstreintes le
-// masque côté serveur). Callables inline (module lazy). Réutilise les primitives, formats et la modale « form ».
-type AstreinteRow = { id: string; fp: string | null; contratId: string | null; consultantId: string | null; dateDebut: string | null; dateFin: string | null; motif: string; statut: string; requestedByName: string | null; approvalId: string | null; montant: number | null };
-const ASTREINTE_STATUT_LABEL: Record<string, string> = { en_attente: "En attente", validee: "Validée", rejetee: "Rejetée" };
-const astreinteTone = (s?: string): "emerald" | "clay" | "gold" => (s === "validee" ? "emerald" : s === "rejetee" ? "clay" : "gold");
-
-const AstreintesCard: FC<{ gate: boolean; canWrite: boolean; contrats: MntContrat[] }> = ({ gate, canWrite, contrats }) => {
-  const [rows, setRows] = useState<AstreinteRow[] | null>(null);
-  const [hasCost, setHasCost] = useState(false);
-  const [open, setOpen] = useState(false);
-  const empty = { fp: "", contratId: "", dateDebut: "", dateFin: "", montant: "", motif: "" };
-  const [form, setForm] = useState(empty);
-  const setF = (k: keyof typeof empty, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const load = () => callFn<{ rows: AstreinteRow[]; hasCost: boolean }>("listAstreintes", {}).then((r) => { setRows(r.rows || []); setHasCost(!!r.hasCost); }).catch(() => setRows([]));
-  useEffect(() => { if (gate) load(); }, [gate]);
-  const cols = [
-    colText("N° FP", (r: AstreinteRow) => <FpLink fp={r.fp || undefined} />),
-    colText("Période", (r: AstreinteRow) => (r.dateDebut ? `${frDate(r.dateDebut)} → ${frDate(r.dateFin || "")}` : "—")),
-    colText("Motif", (r: AstreinteRow) => r.motif || "—", (r: AstreinteRow) => r.motif || ""),
-    ...(hasCost ? [colNum("Charge", (r: AstreinteRow) => money(r.montant || 0), (r: AstreinteRow) => r.montant || 0)] : []),
-    colText("Statut", (r: AstreinteRow) => <Badge tone={astreinteTone(r.statut)}>{ASTREINTE_STATUT_LABEL[r.statut] || r.statut}</Badge>, (r: AstreinteRow) => r.statut),
-  ];
-  return (
-    <Card title={`Astreintes${rows && rows.length ? ` · ${rows.length}` : ""}`}
-      actions={canWrite ? <button type="button" className="btn-gold !px-2.5 !py-1.5 text-xs inline-flex items-center gap-1" onClick={() => { setForm(empty); setOpen(true); }}><Plus size={14} /> Demander une astreinte</button> : undefined}>
-      <Tip>Astreinte (on-call) imputée <b>en charge</b> sur une affaire (N° FP) et éventuellement un contrat. Cycle : <b>demande → validation</b> (approbation hiérarchique) → <b>comptabilisation</b>. Seules les astreintes <b>validées</b> pèsent dans la rentabilité (contrat & livraison). {hasCost ? null : <b>Montant masqué — droit « Rentabilité » requis.</b>}</Tip>
-      {rows == null ? <div className="text-[13px] text-muted py-3">Chargement…</div>
-        : rows.length === 0 ? <EmptyState label="Aucune astreinte — « Demander une astreinte » pour en enregistrer une." />
-          : <Table columns={cols} rows={rows} colsKey="mnt_astreintes" />}
-      {canWrite && (
-        <Modal open={open} onClose={() => setOpen(false)} title="Demander une astreinte" size="form"
-          actions={<Busy label="Soumettre" okMsg="Astreinte soumise à approbation" errMsg="Soumission refusée"
-            fn={async () => { await callFn("submitAstreinte", { fp: form.fp, contratId: form.contratId || undefined, dateDebut: form.dateDebut, dateFin: form.dateFin, montant: Number(form.montant) || 0, motif: form.motif }); setOpen(false); load(); }} />}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="N° FP (affaire)"><input className="field" data-autofocus value={form.fp} placeholder="FP/2026/123" onChange={(e) => setF("fp", e.target.value)} /></Field>
-            <Field label="Contrat (optionnel)"><Select value={form.contratId} onChange={(v) => setF("contratId", v)} options={[{ value: "", label: "— aucun —" }, ...contrats.filter((c) => c.id).map((c) => ({ value: c.id!, label: `${c.client || ""} · ${c.fp || ""}`.trim() }))]} ariaLabel="Contrat rattaché" placeholder="— aucun —" /></Field>
-            <Field label="Début"><DateField value={form.dateDebut} onChange={(v) => setF("dateDebut", v)} ariaLabel="Date de début" /></Field>
-            <Field label="Fin"><DateField value={form.dateFin} onChange={(v) => setF("dateFin", v)} ariaLabel="Date de fin" /></Field>
-            <Field label="Montant (charge, FCFA)"><input className="field tabnum" inputMode="numeric" value={form.montant} placeholder="0" onChange={(e) => setF("montant", digits(e.target.value))} /></Field>
-            <Field label="Motif"><input className="field" value={form.motif} placeholder="Astreinte week-end…" onChange={(e) => setF("motif", e.target.value)} /></Field>
-          </div>
-        </Modal>
-      )}
-    </Card>
-  );
-};
+// NB : les ASTREINTES (on-call) ont été déplacées dans la section EXÉCUTION (module `astreintes.tsx`,
+// ADR-037) — imputées par affaire (N° FP), elles sont transverses aux projets ET aux contrats. Même
+// gouvernance (droit `maintenance` + drapeau mntFeature) ; les callables listAstreintes/submitAstreinte
+// et la comptabilisation (coutAstreintes dans la rentabilité) sont inchangés.
 
 // Import EN MASSE des contrats (Lot 8) : « Aperçu » (dry-run) puis « Importer ». Rapprochement par N° FP
 // (ré-import = mise à jour). Rendu seulement en écriture ; le callable est doublement gaté (droit + drapeau).
@@ -862,8 +812,6 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {/* Astreintes (ADR-035) — demande + validation + comptabilisation en charge (affaire & contrat). */}
-      {tab === "tickets" && <AstreintesCard gate={gate} canWrite={canWrite} contrats={contratsSorted} />}
 
       {/* Statut automatique (ADR-027, révisé ADR-028) — PROPOSE seulement : « Analyser le parc » n'écrit rien,
           l'application est un geste humain (« Appliquer » à l'unité, « Appliquer les recommandés » en masse).

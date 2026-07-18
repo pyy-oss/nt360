@@ -3,6 +3,35 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-037 — Les Astreintes vivent dans EXÉCUTION (écran dédié), pas dans Contrats
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction (retour d'usage : « déplacer astreinte dans exécution, ça impacte à la fois les projets et les contrats »)
+
+### Contexte
+Les astreintes ont été livrées **dans le module Contrats** (ADR-035, carte sous l'onglet Tickets après CT1).
+Or une astreinte est **imputée en charge par N° FP** (affaire) et **éventuellement** rattachée à un contrat :
+elle pèse dans la rentabilité de **livraison** *et* de **contrat**. La ranger dans le seul module Contrats la
+rendait invisible du pilotage de livraison et suggérait à tort qu'elle relève des contrats.
+
+### Décision
+- **Écran dédié « Astreintes »** dans la **section EXÉCUTION** (`web/src/modules/astreintes.tsx`, entrée de nav
+  `id: "astreintes"`, groupe Exécution). Retiré du module Contrats.
+- **Relocalisation présentationnelle uniquement** : mêmes callables `listAstreintes` / `submitAstreinte`,
+  **inchangés**, toujours gouvernés côté backend par le **droit `maintenance` + le drapeau `mntFeature`**
+  (`requireRead/requireWrite(req,"maintenance")` + `assertMntEnabled`). L'entrée de nav porte donc
+  `key: "maintenance"` + `flag: "mntFeature"` : on change **où** l'écran apparaît, **pas qui** y accède.
+- **Comptabilisation inchangée** : `astreinteCostByFp` alimente toujours `coutAstreintes` de la rentabilité
+  contrat ET de la marge de livraison (ADR-035). Aucun backend, aucune règle, aucun `deployed-functions.txt` touché.
+
+### Conséquences
+- Les astreintes sont pilotées là où se pilote la livraison (Exécution), cohérent avec leur double portée.
+- **Non décidé ici (dette assumée)** : un vrai **découplage RBAC** (droit `astreintes` propre, indépendance vis-à-vis
+  de `mntFeature`) reste possible si les astreintes doivent survivre à un module Contrats éteint — ce serait un
+  changement backend (rules + matrice + flag) à trancher par un ADR ultérieur. En l'état, la dépendance au droit
+  `maintenance` est conservée (les gestionnaires concernés le portent déjà).
+
 ## ADR-036 — Navigation du module en 4 sous-onglets (Pilotage / Contrats / Tickets & SLA / Surveillance)
 
 - **Date :** 2026-07-18

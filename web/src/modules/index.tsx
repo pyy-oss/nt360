@@ -56,6 +56,7 @@ const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
 // Module Contrats de maintenance (mnt_) — chargé en lazy comme les autres ; masqué tant que le
 // drapeau config/mntFeature est éteint (voir champ `flag` ci-dessous et App.tsx).
 const Maintenance = from(() => import("./maintenance"), "Maintenance");
+const Astreintes = from(() => import("./astreintes"), "Astreintes");
 // Module Partenariats & Certifications (par_) — lazy, masqué tant que le drapeau parFeature est éteint.
 const Partenariats = from(() => import("./partenariats"), "Partenariats");
 
@@ -97,6 +98,9 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "clientnorm", key: "import", label: "Normalisation clients", icon: Users, Component: ClientNorm },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
+  // Astreintes : transverse affaires + contrats (imputées en charge par N° FP), rangées en Exécution.
+  // Même gouvernance que Contrats (droit `maintenance` + drapeau mntFeature) — relocalisation présentationnelle.
+  { id: "astreintes", key: "maintenance", label: "Astreintes", icon: BellRing, Component: Astreintes, flag: "mntFeature" },
   { id: "cleanup", key: "import", label: "Qualité & correction", icon: Eraser, Component: Cleanup },
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
   { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
@@ -116,7 +120,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   // → Opportunités (saisie/édition en modale) → Board (Kanban par étape) → Pipeline (analyse) → AM 360°.
   { label: "Commercial", ids: ["commercial", "opplist", "board", "pipeline", "am360", "salesforecast", "scoring", "reports", "activites", "approvals"] },
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
-  { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360"] },
+  { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360", "astreintes"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
   { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "domaines"] },
   { label: "Contrats", ids: ["maintenance"] },
