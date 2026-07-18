@@ -31,6 +31,11 @@ ne pouvait pas restreindre le parc à une BU ou un client — il subissait tout 
 ### Conséquences
 - Un directeur peut piloter le parc contrat par BU / AM / client, cohérent avec le reste de l'ERP.
 - Le filtre **PM** n'est pas appliqué (un contrat n'a pas de PM ; dimension non pertinente ici) — assumé.
+- Le **Centre de surveillance** suit le filtre (ses événements portent bu/am/client ; comptes re-comptés) —
+  cohérent avec le churn du même onglet. Les **badges d'onglet** reflètent le décompte filtré.
+- Le **Registre d'audit** est **volontairement NON filtré** : c'est une trace de conformité opposable
+  (inventaire de TOUTES les actions du module) — le filtrer par une dimension d'UI le trahirait ; il porte
+  d'ailleurs un `entityId` sans BU/AM/N° FP, donc non filtrable proprement. Signalé à l'écran.
 
 ## ADR-037 — Les Astreintes vivent dans EXÉCUTION (écran dédié), pas dans Contrats
 

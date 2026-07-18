@@ -422,8 +422,18 @@ export const Maintenance: FC<Props> = () => {
   const typeStats = useMemo(() => mntTypeStats(vContrats, vTickets, vInterventions), [vContrats, vTickets, vInterventions]);
   // --- Centre de surveillance (ADR-026) : flux d'événements + abonnements ciblés ---
   const [survScope, setSurvScope] = useState<"tout" | "abonnements">("tout");
-  const survEvents = useMemo<MntSurveillanceEvent[]>(() => surv?.events || [], [surv]);
-  const survCounts = surv?.counts || { high: 0, medium: 0, low: 0 };
+  // Événements de surveillance : chaque événement porte bu/am/client → sous-filtré comme le reste (le churn
+  // du même onglet l'est aussi ; on évite l'état mixte « carte filtrée à côté d'une carte parc entier »).
+  const survEvents = useMemo<MntSurveillanceEvent[]>(() => {
+    const all = surv?.events || [];
+    return filterActive ? all.filter((e) => fMatch({ bu: e.bu, am: e.am, client: clientKey(e.client) }, ["bu", "am", "client"])) : all;
+  }, [surv, filterActive, fMatch, clientKey]);
+  const survCounts = useMemo(() => {
+    if (!filterActive) return surv?.counts || { high: 0, medium: 0, low: 0 };
+    const c = { high: 0, medium: 0, low: 0 } as Record<string, number>;
+    for (const e of survEvents) c[e.severity] = (c[e.severity] || 0) + 1;
+    return c;
+  }, [surv, survEvents, filterActive]);
   const watched = hasAnyWatch(watch);
   // « Mes abonnements » filtre le flux aux événements couverts par l'abonnement (miroir de watchMatchesEvent back).
   const survRows = useMemo(() => (survScope === "abonnements" ? survEvents.filter((e) => watchMatchesEvent(watch, e)) : survEvents), [survEvents, survScope, watch]);
@@ -666,8 +676,8 @@ export const Maintenance: FC<Props> = () => {
       <FilterNote dims="BU / AM / client" />
       <Segmented value={tab} onChange={setTab} ariaLabel="Vue du module contrats" options={[
         { value: "pilotage", label: "Pilotage" },
-        { value: "contrats", label: "Contrats", count: contrats.length || undefined },
-        { value: "tickets", label: "Tickets & SLA", count: tickets.length || undefined },
+        { value: "contrats", label: "Contrats", count: vContrats.length || undefined },
+        { value: "tickets", label: "Tickets & SLA", count: vTickets.length || undefined },
         { value: "surveillance", label: "Surveillance" },
       ]} />
       {tab === "pilotage" && gate && (contrats.length > 0 || tickets.length > 0) && (
@@ -938,7 +948,7 @@ export const Maintenance: FC<Props> = () => {
 
       {tab === "surveillance" && gate && canAudit && audit.length > 0 && (
         <Card title={`Registre d'audit · ${audit.length}${audit.length >= 500 ? "+" : ""}`}>
-          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
+          <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. <b>Non filtré</b> (registre de conformité = tout le parc, quel que soit le filtre BU/AM/client). Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
           <Table columns={auditCols} rows={audit} colsKey="mnt_audit" />
         </Card>
       )}
