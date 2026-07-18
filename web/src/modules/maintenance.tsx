@@ -80,19 +80,19 @@ const AstreintesCard: FC<{ gate: boolean; canWrite: boolean; contrats: MntContra
     <Card title={`Astreintes${rows && rows.length ? ` · ${rows.length}` : ""}`}
       actions={canWrite ? <button type="button" className="btn-gold !px-2.5 !py-1.5 text-xs inline-flex items-center gap-1" onClick={() => { setForm(empty); setOpen(true); }}><Plus size={14} /> Demander une astreinte</button> : undefined}>
       <Tip>Astreinte (on-call) imputée <b>en charge</b> sur une affaire (N° FP) et éventuellement un contrat. Cycle : <b>demande → validation</b> (approbation hiérarchique) → <b>comptabilisation</b>. Seules les astreintes <b>validées</b> pèsent dans la rentabilité (contrat & livraison). {hasCost ? null : <b>Montant masqué — droit « Rentabilité » requis.</b>}</Tip>
-      {rows == null ? <div className="text-faint text-sm py-4">Chargement…</div>
+      {rows == null ? <div className="text-[13px] text-muted py-3">Chargement…</div>
         : rows.length === 0 ? <EmptyState label="Aucune astreinte — « Demander une astreinte » pour en enregistrer une." />
           : <Table columns={cols} rows={rows} colsKey="mnt_astreintes" />}
       {canWrite && (
         <Modal open={open} onClose={() => setOpen(false)} title="Demander une astreinte" size="form"
           actions={<Busy label="Soumettre" okMsg="Astreinte soumise à approbation" errMsg="Soumission refusée"
-            fn={async () => { await callFn("submitAstreinte", { fp: form.fp, contratId: form.contratId || undefined, dateDebut: form.dateDebut, dateFin: form.dateFin, montant: Number(decimals(form.montant)) || 0, motif: form.motif }); setOpen(false); load(); }} />}>
+            fn={async () => { await callFn("submitAstreinte", { fp: form.fp, contratId: form.contratId || undefined, dateDebut: form.dateDebut, dateFin: form.dateFin, montant: Number(form.montant) || 0, motif: form.motif }); setOpen(false); load(); }} />}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="N° FP (affaire)"><input className="field" data-autofocus value={form.fp} placeholder="FP/2026/123" onChange={(e) => setF("fp", e.target.value)} /></Field>
             <Field label="Contrat (optionnel)"><Select value={form.contratId} onChange={(v) => setF("contratId", v)} options={[{ value: "", label: "— aucun —" }, ...contrats.filter((c) => c.id).map((c) => ({ value: c.id!, label: `${c.client || ""} · ${c.fp || ""}`.trim() }))]} ariaLabel="Contrat rattaché" placeholder="— aucun —" /></Field>
             <Field label="Début"><DateField value={form.dateDebut} onChange={(v) => setF("dateDebut", v)} ariaLabel="Date de début" /></Field>
             <Field label="Fin"><DateField value={form.dateFin} onChange={(v) => setF("dateFin", v)} ariaLabel="Date de fin" /></Field>
-            <Field label="Montant (charge, FCFA)"><input className="field tabnum" inputMode="numeric" value={form.montant} placeholder="0" onChange={(e) => setF("montant", decimals(e.target.value))} /></Field>
+            <Field label="Montant (charge, FCFA)"><input className="field tabnum" inputMode="numeric" value={form.montant} placeholder="0" onChange={(e) => setF("montant", digits(e.target.value))} /></Field>
             <Field label="Motif"><input className="field" value={form.motif} placeholder="Astreinte week-end…" onChange={(e) => setF("motif", e.target.value)} /></Field>
           </div>
         </Modal>
@@ -1023,7 +1023,7 @@ export const Maintenance: FC<Props> = () => {
         // aux objectifs (max) embarqués. Affiché si le contrat a une activité classée OU des objectifs posés.
         const vcType = typeStats.parContrat.find((p) => p.contratId === vc.id);
         return (
-          <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="form"
+          <Modal open onClose={() => setViewC(null)} title="Contrat de maintenance — consultation" size="md"
             actions={canWrite ? <button type="button" className="btn-ghost !px-3 !py-1.5 text-sm" onClick={() => { setCId(vc.id || ""); setCEdit(true); setViewC(null); setCOpen(true); }}>Éditer</button> : undefined}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

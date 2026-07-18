@@ -1983,7 +1983,19 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
   if (box === "toDecide") q = q.where("approverUid", "==", req.auth.uid).where("status", "==", "pending");
   else if (box === "mine") q = q.where("requestedBy", "==", req.auth.uid);
   const snap = await q.limit(500).get();
-  const rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
+  // Le montant d'une astreinte est une CHARGE confidentielle (ADR-035, révisé) : masqué (null) pour un
+  // approbateur/lecteur SANS droit `rentabilite`. L'approbation reste possible sur le libellé + le motif ;
+  // le chiffre exact exige le droit coût. Les autres natures (remise/DR/BC) portent un montant non
+  // confidentiel (pipeline) — inchangées.
+  const { canRead } = require("./domain/authz");
+  const role = req.auth.token?.nt360Role;
+  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+  const hasCost = role === "direction" || canRead(matrix, role, "rentabilite");
+  const rows = snap.docs.map((s) => {
+    const d = { id: s.id, ...s.data() };
+    if (d.entityType === "astreinte" && !hasCost) d.amount = null; // charge confidentielle masquée
+    return d;
+  });
   // Tri : en attente d'abord, puis par date décroissante.
   rows.sort((a, b) => {
     const ap = a.status === "pending", bp = b.status === "pending";

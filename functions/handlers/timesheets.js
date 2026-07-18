@@ -262,11 +262,15 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       for (const d of sliceCapped(snap.docs).docs) for (const r of ((d.data() || {}).rows || [])) out.push(r);
       return out;
     };
+    // Astreintes (ADR-035) : chargées SEULEMENT si le module maintenance est ALLUMÉ. Éteint ⇒ aucune lecture
+    // mnt_astreintes, aucune soustraction → marge de livraison STRICTEMENT celle d'avant le module (invariant
+    // « éteint = ERP d'avant », comme les KPI d'activité de ce fichier).
+    const mntOn = await mntEnabled();
     const [cSnap, tSnap, aSnap, astSnap, carnetRows, marginRows] = await Promise.all([
       db.collection("consultants").select("cjm").limit(MAX_SCAN + 1).get(),
       db.collection("timesheets").limit(MAX_SCAN + 1).get(),
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct", "projectFp").limit(MAX_SCAN + 1).get(),
-      db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get(), // charges d'astreinte à imputer par affaire (ADR-035)
+      mntOn ? db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get() : Promise.resolve({ docs: [] }), // charges d'astreinte (ADR-035), gaté drapeau
       readChunks("commandesRows"),        // carnet (vente/facturé par affaire)
       readChunks("commandesRowsMargin"),  // marge isolée (mb/costTotal) — même droit rentabilite
     ]);
