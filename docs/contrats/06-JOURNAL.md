@@ -31,6 +31,33 @@
 
 ---
 
+## 2026-07-18 — Reconnaissance du revenu (reconnu vs facturé) — DO Lot 4 (reconnaissance)
+
+**Fait**
+- `revenueRecognition(items)` (pur, `mntRisque.ts` front) : réconcilie le revenu **reconnu à ce jour**
+  (échéancier engagé) au **facturé** réel, dérivé des items du moteur de risque (`sousFacturation` =
+  MÊME source que le signal de sous-facturation → mêmes nombres). Rend `reconnu`, `facture`,
+  `aFacturer` (couru = Σ max(0, reconnu−facturé), « CA qui dort »), `factureAvance` (constaté d'avance =
+  Σ max(0, facturé−reconnu)) — sommés **séparément** (ne se compensent pas).
+- Carte « Reconnaissance du revenu » : 4 KPIs (reconnu / facturé / à facturer / facturé d'avance).
+- Perf : `risqueItems` mémoïsé (identité stable → mémos dérivés fiables, corrige un avert. react-hooks).
+- Tests `mntRisque.test.ts` (+2). 151 tests web verts, lint OK, bundle 119,9 KB.
+
+**Appris sur l'existant**
+- Le moteur de risque calcule DÉJÀ, par contrat actif, `sousFacturation {engage, facture, ecart}` (échéancier
+  reconnu vs facturé par fpKey). La reconnaissance consolidée en dérive **sans backend** ni chargement de
+  factures côté front, avec cohérence garantie (source unique = summaries/mnt_risque).
+
+**Décidé**
+- Scopé au **module maintenance** (pas au niveau overview) pour rester additif et **ne pas toucher
+  l'invariant `overviewCalc`/`chaine.js`** (P0). La reconnaissance consolidée toute-entreprise (projets +
+  contrats), plus structurante, reste un lot dédié à arbitrer. Pas d'ADR (dérivé, même source, additif).
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Revenu récurrent CONSOLIDÉ (MRR/ARR) — DO Lot 4 (récurrent)
 
 **Fait**

@@ -51,3 +51,25 @@ export function signalText(s: RisqueSignal): string {
 }
 
 export const label = (map: Record<string, string>, v?: string): string => (v ? map[v] || v : "—");
+
+// RECONNAISSANCE DU REVENU des contrats de maintenance (DO Lot 4). Réconcilie le revenu RECONNU à ce jour
+// (échéancier engagé — `sousFacturation.engage`) au revenu FACTURÉ réel (`sousFacturation.facture`, par
+// fpKey), depuis les items du moteur de risque : MÊME source que le signal de sous-facturation, donc mêmes
+// nombres (invariant « même métrique = même nombre »).
+//   - « à facturer » (revenu couru / accrued) = Σ max(0, reconnu − facturé) : du CA reconnu pas encore émis.
+//   - « facturé d'avance » (produit constaté d'avance / deferred) = Σ max(0, facturé − reconnu).
+// Sommés SÉPARÉMENT : sur-facturer un contrat n'annule pas le revenu couru d'un autre.
+export interface MntRevenueRecognition { reconnu: number; facture: number; aFacturer: number; factureAvance: number; contrats: number }
+export function revenueRecognition(items: RisqueItem[]): MntRevenueRecognition {
+  let reconnu = 0, facture = 0, aFacturer = 0, factureAvance = 0, contrats = 0;
+  for (const it of items || []) {
+    const sf = it && it.sousFacturation;
+    if (!sf) continue;
+    const eng = Number(sf.engage) || 0, fac = Number(sf.facture) || 0;
+    reconnu += eng; facture += fac;
+    const ecart = eng - fac;
+    if (ecart > 0) { aFacturer += ecart; contrats++; }
+    else if (ecart < 0) { factureAvance += -ecart; contrats++; }
+  }
+  return { reconnu: Math.round(reconnu), facture: Math.round(facture), aFacturer: Math.round(aFacturer), factureAvance: Math.round(factureAvance), contrats };
+}
