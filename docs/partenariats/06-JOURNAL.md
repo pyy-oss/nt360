@@ -648,3 +648,23 @@ Grouping factorisé en `groupByManagerUid` (une logique, deux sources). Tests : 
 + `emailNotify` (section renouvellements + grouping alertes). **Migration douce** : une certif écrite AVANT ce
 lot n'a pas de managerUid tant qu'elle n'est pas ré-enregistrée → elle reste au digest direction (filet), pas
 d'orphelin. Pas d'ADR (extension d'ADR-P08 : relances email par manager).
+
+---
+
+## PA5 — Vue par ingénieur + export référentiel + onboarding — 2026-07-18
+
+**Fait.** Trois conforts (front seul, additif) :
+1. **Vue par ingénieur** — nouvel onglet « Ingénieurs » pivotant certifs (détenues, dont valides) +
+   assignations (à obtenir) par consultant. Helper PUR `web/src/lib/parEngineer.ts` (`byEngineer`, 3 tests) ;
+   aucun re-calcul (mêmes lignes que les onglets Certifications/Assignations). Export dédié.
+2. **Export du référentiel** — `ExportBtn` sur la carte « Référentiel des partenaires » (Paramétrage) :
+   nom, programme, statut, échéance, validation, #niveaux/#certifs/#exigences.
+3. **Onboarding** — encart « Démarrer le module » quand le module est activé mais **vide** (aucun
+   partenaire) et en écriture : guide vers « Nouveau partenaire » / « Partir d'un modèle », avec un bouton
+   qui bascule sur Paramétrage. Disparaît dès le premier partenaire créé.
+
+**Conception.** Réutilise `ExportBtn`, `Card`, `Table`, `Tip`, `Segmented` — aucun composant recréé.
+Regroupement PUR et testé ; onboarding piloté par `partners.length === 0`. Pas d'ADR : additif, aucune
+nouvelle donnée ni convention. Bundle d'entrée inchangé (118,3 KB) ; 271 tests web au vert.
+
+**Backlog Partenariats (PA1-PA5) : terminé.**
