@@ -1427,6 +1427,9 @@ exports.deleteParPartner = _partenariats.deleteParPartner;
 exports.upsertParCertification = _partenariats.upsertParCertification;
 exports.deleteParCertification = _partenariats.deleteParCertification;
 exports.setParPartnerMap = _partenariats.setParPartnerMap;
+exports.upsertParAssignment = _partenariats.upsertParAssignment;
+exports.setParAssignmentStatus = _partenariats.setParAssignmentStatus;
+exports.deleteParAssignment = _partenariats.deleteParAssignment;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique

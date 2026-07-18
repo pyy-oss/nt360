@@ -4,6 +4,33 @@
 
 ---
 
+## Lot 5 — Assignations de certification + relances (ADR-P03/P04)
+
+**Fait**
+- Domaine PUR `functions/domain/parAssignment.js` : `validateAssignment` (targetDate plausible, offsets
+  triés/dédoublonnés, défaut [30,14,7]), `effectiveStatus` (en_retard DÉRIVÉ, pas réécrit), `assignmentWatch`
+  (liste de relance : en retard OU dans une fenêtre d'offset, palier le plus serré), `watchCounts`.
+  Tests (5 cas).
+- Collection `par_assignments` + callables `upsertParAssignment` / `setParAssignmentStatus` /
+  `deleteParAssignment` : valident l'existence du consultant + de l'entrée de catalogue ; dénormalisent
+  NOM/BU du consultant + son manager (destinataire des relances) + libellé de certif — jamais le CJM.
+  Idempotent (id = `<consultantId>_<catalogId>`). Exports + `deployed-functions.txt`.
+- Rules : `match /par_assignments` (read gaté drapeau+droit, write:false). Summary `summaries/par_relances`
+  (watchlist J-30/14/7 + retards) poussé par le bloc recompute `partenariats`. Recompute déclenché par
+  les callables. `test:rules` 70/70 (émulateur).
+
+**Appris**
+- Comme le kit relançait via un cron écrivant des `partnerAlerts`, on préfère une liste MATÉRIALISÉE
+  (summary recomputé) : pas de nouveau planificateur, cohérent avec par_alerts, et le statut « en retard »
+  reste DÉRIVÉ (aucun effet de bord sur le doc). L'envoi effectif (email) n'était pas implémenté par le
+  kit non plus — à brancher plus tard sur l'infra email existante si souhaité.
+
+**Échoué / en attente**
+- Envoi effectif des relances (email/notification) : non branché (comme le kit) — la liste `par_relances`
+  est prête à alimenter un digest via l'infra email existante (`sendEmail`/`loadEmailCfg`), lot ultérieur.
+
+---
+
 ## Lot 4 — Quotas de couverture + alertes cycle de vie (ADR-P04)
 
 **Fait**
