@@ -1318,3 +1318,28 @@ Surveillance. Présentationnel, aucun calcul modifié. Build vert, ESLint clean,
 réunir deux vues d'une même population (risque/churn) est clair et à forte valeur ; réunir deux outils IA
 souvent vides (lignées, statut auto) apporte peu et complexifie — mieux vaut l'assumer en ADR (« restant
 optionnel ») que le forcer. On distingue la fusion qui SERT la lecture de celle qui ne fait que déplacer.
+
+---
+
+## DO Lot 4a — Pré-facturation consolidée en summary + alerte — 2026-07-18
+
+**Fait.** La pré-facturation (jours FACTURÉS au CRA × TJM, Lot 21) n'existait qu'en **callable à la demande**
+(`preBillingFromCra`) : le pilotage (DO/CODIR) ne pouvait pas la lire sans déclencher un calcul. Matérialisée
+en **summary** (`summaries/preBilling`) via un bloc ADDITIF d'`aggregate.js`, gaté `want("prebilling")` :
+lecture BORNÉE aux 3 derniers mois (`timesheets where month ≥ fromYm`, contribution mnt écartée comme le
+callable), calcul par la fonction PURE `computePreBilling` **déjà existante** (aucune 2ᵉ vérité). Gaté
+`rentabilite` dans les rules (préfixe `preBilling` → rentabilite : expose TJM/CA par ressource). **Alerte**
+consolidée : `global.missingTjm` (jours facturés sans TJM, à tarifer). Consommé au **Bilan CODIR** (chip « À
+facturer (pré-fact. CRA) » + chip « Lignes sans TJM », gaté droit Rentabilité). Tests : `preBillingGate`
+(recompute complet → summary écrit ; recompute ciblé → non réécrit, jamais à vide). 1129 functions + 271 web.
+
+**Appris / à arbitrer (reste de DO Lot 4).** L'audit de la chaîne de revenu confirme :
+- **Récurrent (MRR/ARR)** : DÉJÀ livré et conservé (`mntDashboard.recurringRevenue`, isolé du projet).
+- **Encaissé (4ᵉ maillon)** : DÉJÀ en place en version booléenne (`chaine.js` `encaisse = Σ factures payées`).
+  Un encaissé DATÉ (dates/montants de règlement, DSO réel) = sous-chantier séparé (aucune donnée de règlement
+  aujourd'hui — pas de lettrage).
+- **Reconnaissance à l'avancement** : NON refaite ici. La tentative précédente (`revenueRecognition` dans
+  `mntRisque`) a été RETIRÉE (double-compte quand deux contrats partagent un `fpKey` ; confrontation reconnu
+  périmètre maintenance ↔ facturé affaire entière). La refaire proprement demande une DÉCISION (source
+  d'avancement : jours consommés / avancement ClickUp / jalons) + une allocation facture↔périmètre — laissée
+  à l'arbitrage humain, pas de changement silencieux.
