@@ -33,7 +33,7 @@ import {
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement } from "../lib/mntDashboard";
+import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -425,6 +425,15 @@ export const Maintenance: FC<Props> = () => {
   // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
   const asOfIso = new Date().toISOString().slice(0, 10);
   const dash = useMemo(() => computeMntDashboard(contrats, tickets, asOfIso), [contrats, tickets, asOfIso]);
+  // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
+  // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
+  const recurring = useMemo(() => recurringRevenue(contrats), [contrats]);
+  const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
+    colText(keyHeader, (g: MntRecurringGroup) => (keyLabel ? keyLabel(g.key) : g.key || "—"), (g: MntRecurringGroup) => g.key),
+    colNum("Contrats", (g: MntRecurringGroup) => String(g.contrats), (g: MntRecurringGroup) => g.contrats),
+    colNum("MRR", (g: MntRecurringGroup) => money(g.mrr), (g: MntRecurringGroup) => g.mrr),
+    colNum("ARR", (g: MntRecurringGroup) => money(g.arr), (g: MntRecurringGroup) => g.arr),
+  ];
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
   // dépassée, montant nul). Vue pure, dérivée des contrats déjà chargés. « Corriger » ouvre la fiche.
   // Conformité STRUCTURELLE (Lot 3/7) : défauts de saisie des contrats actifs — indépendante de la date.
@@ -710,6 +719,37 @@ export const Maintenance: FC<Props> = () => {
                   {dash.echeancesProches.length > 5 && <span className="text-muted">+{dash.echeancesProches.length - 5} autre(s)</span>}
                 </div>
               )}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Revenu récurrent CONSOLIDÉ (DO Lot 4) — la BASE récurrente engagée (prévisible), distincte du revenu
+          one-shot des projets, ventilée par BU / client / périodicité pour le pilotage direction. */}
+      {recurring.contratsActifs > 0 && (
+        <Card title="Revenu récurrent (consolidé)">
+          <Tip>Base de revenu <b>récurrent engagé</b> des contrats actifs, distincte du revenu one-shot des projets. <b>ARR</b> = montant par échéance annualisé (même calcul que le KPI ARR du tableau de bord) ; <b>MRR</b> = ARR ÷ 12. Ventilé par BU, client et périodicité.</Tip>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub="revenu mensuel récurrent" />
+            <Kpi label="ARR consolidé" value={fmt(recurring.totalArr)} tone="emerald" sub={`${recurring.contratsActifs} contrat(s) actif(s)`} />
+            <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
+          </div>
+          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
+            <div>
+              <div className="text-[11px] text-muted mb-1.5">Par BU</div>
+              <Table columns={rrCols("BU")} rows={recurring.byBu} colsKey="mnt_rr_bu" />
+            </div>
+            <div>
+              <div className="text-[11px] text-muted mb-1.5">Top clients (ARR)</div>
+              <Table columns={rrCols("Client")} rows={recurring.byClient.slice(0, 8)} colsKey="mnt_rr_client" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="text-[11px] text-muted mb-1.5">Par périodicité</div>
+            <div className="flex flex-wrap gap-1.5">
+              {recurring.byPeriodicite.map((g) => (
+                <Badge key={g.key} tone="steel">{label(ECHEANCE_LABEL, g.key)} · {money(g.arr)}/an · {g.contrats}</Badge>
+              ))}
             </div>
           </div>
         </Card>

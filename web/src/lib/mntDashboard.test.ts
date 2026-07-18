@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -55,6 +55,37 @@ describe("computeMntDashboard", () => {
     expect(d.ticketsTotal).toBe(5);
     expect(d.ticketsOuverts).toBe(3);
     expect(d.parPriorite).toEqual({ haute: 2, basse: 1 });
+  });
+});
+
+describe("recurringRevenue — revenu récurrent consolidé (MRR/ARR, DO Lot 4)", () => {
+  it("consolide l'ARR (= annualise) des contrats ACTIFS, MRR = ARR/12, ventilé par BU/client/périodicité", () => {
+    const r = recurringRevenue([
+      { statut: "actif", bu: "ICT", client: "ACME", echeanceType: "mensuel", montantEngage: 1_000_000 },    // ARR 12M
+      { statut: "actif", bu: "ICT", client: "BETA", echeanceType: "annuel", montantEngage: 3_000_000 },      // ARR 3M
+      { statut: "actif", bu: "CLOUD", client: "ACME", echeanceType: "trimestriel", montantEngage: 500_000 }, // ARR 2M
+      { statut: "brouillon", bu: "ICT", client: "X", echeanceType: "annuel", montantEngage: 9_000_000 },     // exclu
+      { statut: "resilie", bu: "ICT", client: "Y", echeanceType: "annuel", montantEngage: 9_000_000 },       // exclu
+    ]);
+    expect(r.contratsActifs).toBe(3);
+    expect(r.totalArr).toBe(17_000_000);           // 12M + 3M + 2M — identique à arrActifs du tableau de bord
+    expect(r.totalMrr).toBe(Math.round(17_000_000 / 12)); // 1 416 667
+    // Par BU : ICT (12M+3M=15M) devant CLOUD (2M).
+    expect(r.byBu.map((g) => [g.key, g.arr])).toEqual([["ICT", 15_000_000], ["CLOUD", 2_000_000]]);
+    expect(r.byBu[0].contrats).toBe(2);
+    // Par client : ACME (12M+2M=14M) devant BETA (3M).
+    expect(r.byClient.map((g) => g.key)).toEqual(["ACME", "BETA"]);
+    expect(r.byClient[0].arr).toBe(14_000_000);
+    // Par périodicité : mensuel 12M, annuel 3M, trimestriel 2M.
+    expect(r.byPeriodicite.map((g) => [g.key, g.arr])).toEqual([["mensuel", 12_000_000], ["annuel", 3_000_000], ["trimestriel", 2_000_000]]);
+    expect(r.byBu[0].mrr).toBe(Math.round(15_000_000 / 12));
+  });
+  it("aucun contrat actif → tout à zéro, listes vides", () => {
+    const r = recurringRevenue([{ statut: "brouillon", montantEngage: 1_000_000, echeanceType: "annuel" }]);
+    expect(r.contratsActifs).toBe(0);
+    expect(r.totalArr).toBe(0);
+    expect(r.totalMrr).toBe(0);
+    expect(r.byBu).toEqual([]);
   });
 });
 

@@ -31,6 +31,33 @@
 
 ---
 
+## 2026-07-18 — Revenu récurrent CONSOLIDÉ (MRR/ARR) — DO Lot 4 (récurrent)
+
+**Fait**
+- `recurringRevenue(contrats)` (domaine pur `mntDashboard.ts`) : consolide le revenu récurrent des contrats
+  ACTIFS — **ARR** (montant par échéance annualisé, **même `annualise()`** que le KPI ARR → mêmes nombres),
+  **MRR = ARR ÷ 12** — ventilé par **BU**, **client** et **périodicité** (ARR décroissant). MRR dérivé de
+  l'ARR au niveau groupe (pas par contrat) → pas de dérive d'arrondi.
+- Carte « Revenu récurrent (consolidé) » dans le module maintenance : KPIs MRR/ARR consolidés + nb clients,
+  tables Par BU / Top clients (ARR), badges par périodicité. Vue direction de la **base récurrente engagée**
+  (prévisible), distincte du revenu one-shot des projets.
+- Tests `mntDashboard.test.ts` (+2). 149 tests web verts, lint OK, bundle 119,9 KB.
+
+**Appris sur l'existant**
+- Le KPI `arrActifs` du tableau de bord donne déjà l'ARR total ; il manquait la **ventilation** (BU/client/
+  périodicité) et le **MRR**. Réutilisation stricte de `annualise()` (source unique) → `totalArr` =
+  `arrActifs`, invariant « même métrique = même nombre » tenu.
+
+**Décidé**
+- Additif, front pur (pas de callable, pas de summary), pas d'ADR : dérivé des contrats déjà chargés, même
+  assiette (contrats actifs) et même annualisation que le KPI existant. Aucune donnée confidentielle
+  (montant engagé = revenu, pas coût). Gaté `maintenance` + drapeau via le module.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Audit du programme (astreintes + overlay) + remédiation
 
 **Fait** — audit adverse en parallèle (gardien back + conformiste UI) des lots #450 (overlay) et #451
