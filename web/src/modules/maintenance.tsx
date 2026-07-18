@@ -265,6 +265,11 @@ export const Maintenance: FC<Props> = () => {
   const openEditTicket = (t: MntTicket) => { setTForm({ ...t }); setTOpen(true); };
   // Sélection d'un contrat : renseigne contratId + reporte fp/client (rattachement).
   const pickContrat = (id: string) => { const c = contrats.find((x) => x.id === id); setTForm((f) => ({ ...f, contratId: id, fp: c?.fp, client: c?.client })); };
+  // Action opérationnelle transverse : ouvre le modal ticket PRÉ-REMPLI pour un contrat (depuis Rentabilité,
+  // Risque, Churn…). Une intervention — qui impute le coût — se saisit DANS ce ticket. Même modal, zéro doublon.
+  const openTicketFor = (id?: string) => { if (!id) return; const c = contratById[id]; setTForm({ statut: "ouvert", priorite: "moyenne", contratId: id, fp: c?.fp, client: c?.client }); setTOpen(true); };
+  // Résolution N° FP → id contrat (par fpKey) pour les tables clé-FP (churn), afin d'y brancher les actions.
+  const contratIdByFp = useMemo(() => { const m = new Map<string, string>(); for (const c of contrats) { const k = fpKey(c.fp || ""); if (k && c.id) m.set(k, c.id); } return m; }, [contrats]);
   const tValid = tForm.contratId && (tForm.titre || "").trim();
   const ticketInterventions = useMemo(() => interventions.filter((i) => i.ticketId === tForm.id).sort((a, b) => String(b.date).localeCompare(String(a.date))), [interventions, tForm.id]);
 
@@ -328,6 +333,12 @@ export const Maintenance: FC<Props> = () => {
     colText("Ticket", (a: SlaAgendaItem) => <span className="truncate max-w-[220px] inline-block align-bottom" title={a.titre}>{a.titre || "—"}</span>),
     colText("SLA", (a: SlaAgendaItem) => label(SLA_TYPE_LABEL, a.slaType)),
     colText("Priorité", (a: SlaAgendaItem) => <Badge tone={prioriteTone(a.priorite)}>{label(PRIORITE_LABEL, a.priorite)}</Badge>),
+    // Action : ouvrir le ticket concerné (le clore / y saisir une intervention se fait dans la fiche ticket).
+    colText("", (a: SlaAgendaItem) => (canWrite ? (
+      <div className="flex items-center justify-end">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { const t = tickets.find((x) => x.id === a.ticketId); if (t) openEditTicket(t); }}>Traiter</button>
+      </div>
+    ) : null)),
   ];
 
   // Contrats à risque (Ambre et plus), les plus critiques d'abord — le summary est DÉJÀ trié.
@@ -346,6 +357,13 @@ export const Maintenance: FC<Props> = () => {
       </div>
     )),
     colText("AM", (r: RisqueItem) => r.am || "—"),
+    // Actions : agir sur le risque plutôt que le contempler — ouvrir un ticket + s'abonner au contrat.
+    colText("", (r: RisqueItem) => (canWrite ? (
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => openTicketFor(r.id)}>Ticket</button>
+        <Busy variant="ghost" label={isWatchedContrat(r.id) ? "Abonné" : "S'abonner"} okMsg="Abonnement mis à jour" errMsg="Échec de l'abonnement" fn={() => toggleWatchContrat(r.id)} />
+      </div>
+    ) : null)),
   ];
 
   // Tableau de bord (Lot 6) — cockpit consolidé en tête du module, dérivé des collections déjà
@@ -405,7 +423,12 @@ export const Maintenance: FC<Props> = () => {
     colText("Affaire", (r: MntRenouvellement) => affaireCell(r.fp), (r: MntRenouvellement) => affaireOf(r.fp)),
     colText("Fin", (r: MntRenouvellement) => frDate(r.dateFin)),
     colNum("Jours restants", (r: MntRenouvellement) => String(r.jours), (r: MntRenouvellement) => r.jours),
-    colText("", (r: MntRenouvellement) => (canWrite ? <Busy variant="ghost" label="Demander le renouvellement" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} /> : null)),
+    colText("", (r: MntRenouvellement) => (canWrite ? (
+      <div className="flex items-center justify-end gap-1.5">
+        <Busy variant="ghost" label="Renouveler" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} />
+        <Busy variant="ghost" label="Résilier" okMsg="Résiliation soumise à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "resiliation_contrat")} />
+      </div>
+    ) : null)),
   ];
   // Rentabilité par contrat (Lot 4/7) : callable gouverné (coût CJM serveur, masqué sans droit rentabilité).
   // Chargé à l'ouverture du module ; « Recalculer » rafraîchit après édition.
@@ -428,6 +451,12 @@ export const Maintenance: FC<Props> = () => {
       ), (r: MntContratPnlRow) => r.marge || 0),
       colNum("Marge %", (r: MntContratPnlRow) => (r.margePct == null ? "—" : pct(r.margePct)), (r: MntContratPnlRow) => r.margePct || 0),
     ] : []),
+    // Action : saisir un temps (intervention) sur le contrat → impute enfin un coût aux affaires à 0 j.
+    colText("", (r: MntContratPnlRow) => (canWrite ? (
+      <div className="flex items-center justify-end">
+        <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => openTicketFor(r.id)}>Saisir un temps</button>
+      </div>
+    ) : null)),
   ] : [];
   // Analyse de rétention IA (Lot 6/7) : contrats à risque (moteur existant) enrichis de stats tickets +
   // proximité d'échéance → l'IA rend motifs de churn + reco. Parité : on part de ce que l'écran affiche.
@@ -459,6 +488,12 @@ export const Maintenance: FC<Props> = () => {
     colText("N° FP", (a: ChurnAnalysis) => <FpLink fp={a.fp} />),
     colText("Motifs", (a: ChurnAnalysis) => <div className="flex flex-wrap gap-1">{a.drivers.map((d, i) => <Badge key={i} tone="steel">{d}</Badge>)}</div>),
     colText("Reco de rétention", (a: ChurnAnalysis) => <span className="text-[12px]">{a.recommendation || "—"}</span>),
+    // Action : transformer la reco en geste — lancer le renouvellement du contrat (soumis à approbation).
+    colText("", (a: ChurnAnalysis) => { const id = contratIdByFp.get(fpKey(a.fp || "") || ""); return (canWrite && id) ? (
+      <div className="flex items-center justify-end">
+        <Busy variant="ghost" label="Renouveler" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(id, "renouvellement_contrat")} />
+      </div>
+    ) : null; }),
   ];
 
   // Registre d'audit (Lot 7/7 — conformité) : la piste opposable auditLog filtrée sur le module. Lecture
