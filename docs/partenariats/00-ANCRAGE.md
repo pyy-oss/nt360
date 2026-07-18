@@ -228,3 +228,15 @@ les bulletins (le CA reste hors `par_news`). Le front (`news.tsx`) n'abonne `par
 allumé ET le droit accordé (sinon `null` → pas de permission-denied). En parallèle, le **Bilan CODIR** reçoit
 une carte partenariats (conformité + certifs à renouveler, sans montant), même gate. Vérif : `test/parNews.test.js`,
 `test-rules/rules.test.js` (par_news lisible sous `partenariats` seul). Statut : **acté (Lot P2)**.
+
+### ADR-P10 — Push d'une assignation de certification en tâche ClickUp (liste DÉDIÉE)
+**Contexte** : l'intégration ClickUp est centrée commande/livraison (champs custom, statuts, N° FP, liste
+« Côte d'Ivoire »). Pousser une assignation de certification dans cette liste mélangerait deux entités dans
+le board opérationnel. **Décision (validée par l'humain)** : le push va dans une **liste ClickUp DÉDIÉE**
+`config/clickup.parListId` (VIDE par défaut ⇒ push INACTIF, aucun mélange). Le callable
+`pushParAssignmentToClickup` réutilise le client `lib/clickup` + le secret `CLICKUP_TOKEN` existants ;
+payload construit par un domaine PUR (`domain/parClickup.parAssignmentTaskPayload` — nom/description/due_date,
+aucun montant). **Idempotent** : le taskId/url est stocké sur l'assignation → ré-appui = mise à jour, pas de
+doublon (patron `pushOrderToClickup`). Gouverné par écriture `partenariats` + drapeau + rate-limit `clickup`.
+Front : bouton « Pousser / Resynchroniser » + lien tâche dans l'onglet Assignations ; champ `parListId` dans
+Habilitations → ClickUp. Vérif : `test/parClickup.test.js`. Statut : **acté (Lot P4)**.

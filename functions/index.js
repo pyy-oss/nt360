@@ -1458,7 +1458,7 @@ exports.listAstreintes = _maintenance.listAstreintes;
 // d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
 // config/parFeature). Exports déclarés ici (déploiement par nom).
 const { createPartenariats } = require("./handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, rateLimit, logOps });
+const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
 exports.upsertParCertification = _partenariats.upsertParCertification;
@@ -1467,6 +1467,7 @@ exports.setParPartnerMap = _partenariats.setParPartnerMap;
 exports.upsertParAssignment = _partenariats.upsertParAssignment;
 exports.setParAssignmentStatus = _partenariats.setParAssignmentStatus;
 exports.deleteParAssignment = _partenariats.deleteParAssignment;
+exports.pushParAssignmentToClickup = _partenariats.pushParAssignmentToClickup;
 exports.generateParActionPlan = _partenariats.generateParActionPlan;
 exports.generateParQbr = _partenariats.generateParQbr;
 
@@ -3098,6 +3099,9 @@ exports.setClickupConfig = onCallG("setClickupConfig", { memoryMiB: 256, timeout
     teamId: String(d.teamId || CLICKUP_TEAM),
     defaultListId: String(d.defaultListId || CLICKUP_LIST_CI),
     bcListId: String(d.bcListId || CLICKUP_LIST_BC),
+    // Liste DÉDIÉE aux tâches de certification (module Partenariats, ADR-P10). VIDE par défaut → le push
+    // par_ reste INACTIF (pas de mélange avec le board commandes). Renseignée = P4 actif.
+    parListId: String(d.parListId || ""),
     updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp(),
   };
   await db.doc("config/clickup").set(cfg, { merge: true });

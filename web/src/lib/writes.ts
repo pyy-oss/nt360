@@ -602,7 +602,7 @@ export async function callSetUserTeam(uid: string, team: string | null) {
 }
 
 /** Config intégration ClickUp (activation + liste cible) — admin. */
-export async function setClickupConfig(cfg: { enabled?: boolean; teamId?: string; defaultListId?: string }) {
+export async function setClickupConfig(cfg: { enabled?: boolean; teamId?: string; defaultListId?: string; parListId?: string }) {
   const res = await httpsCallable(functions, "setClickupConfig")(cfg);
   return res.data as { ok: boolean; config: any };
 }

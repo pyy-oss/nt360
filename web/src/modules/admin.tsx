@@ -794,9 +794,10 @@ function ClickupActionRow({ label, hint, children }: { label: string; hint?: str
 }
 
 function ClickupCard() {
-  const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
+  const { data } = useDocData<{ enabled?: boolean; defaultListId?: string; parListId?: string; teamId?: string; webhookActive?: boolean; webhookEndpoint?: string }>("config/clickup");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [listId, setListId] = useState<string | null>(null);
+  const [parList, setParList] = useState<string | null>(null);
   const [ask, confirmNode] = useConfirm();
   const [cafBusy, setCafBusy] = useState(false);
   const [pullBusy, setPullBusy] = useState(false);
@@ -816,7 +817,8 @@ function ClickupCard() {
   const toast = useToast();
   const on = enabled ?? (data?.enabled !== false);
   const list = listId ?? (data?.defaultListId || "901215917683");
-  const save = async () => { await setClickupConfig({ enabled: on, defaultListId: list }); setEnabled(null); setListId(null); };
+  const parCertList = parList ?? (data?.parListId || "");
+  const save = async () => { await setClickupConfig({ enabled: on, defaultListId: list, parListId: parCertList.trim() }); setEnabled(null); setListId(null); setParList(null); };
   const forceCaf = async () => {
     if (cafBusy) return;
     setCafBusy(true);
@@ -986,6 +988,9 @@ function ClickupCard() {
         </span>
         <label className="inline-flex items-center gap-2">Liste cible (Gestion de Projets)
           <Select ariaLabel="Liste ClickUp cible" className="!py-1" value={list} onChange={setListId} options={CLICKUP_LISTS.map((l) => ({ value: l.id, label: l.label }))} />
+        </label>
+        <label className="inline-flex items-center gap-2" title="Liste ClickUp DÉDIÉE aux tâches de certification (module Partenariats). Vide = push certifications inactif.">Liste certifications (Partenariats)
+          <input className="field !py-1 w-40" value={parCertList} onChange={(e) => setParList(e.target.value)} placeholder="listId dédié (optionnel)" aria-label="Liste ClickUp des certifications" />
         </label>
       </div>
       <div className="mt-3 flex flex-col gap-2.5">
