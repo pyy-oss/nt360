@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-const { oppFunnel, stageConversion } = require("../domain/oppFunnel");
+const { oppFunnel, stageConversion, stageDwell } = require("../domain/oppFunnel");
+
+const DAY = 86400000;
 
 describe("oppFunnel — funnel de conversion depuis l'historique des transitions", () => {
   it("agrège les transitions (from→to) avec count + montant", () => {
@@ -77,5 +79,45 @@ describe("stageConversion — progression par étape (où meurent les deals)", (
     expect(s3.lost).toBe(0);      // 8/9 ne sont pas des « Perdu » (=7)
     expect(s3.regressed).toBe(0);
     expect(s3.advanceRate).toBeCloseTo(1 / 3, 6);
+  });
+});
+
+describe("stageDwell — temps moyen par étape (séjours clos)", () => {
+  it("reconstitue la durée entre deux transitions consécutives d'une même opp", () => {
+    // Opp A : entre en étape 2 à t0, passe en 3 à t0+10j, puis en 6 (gagné) à t0+10j+4j.
+    // Séjours clos : étape 2 = 10 j, étape 3 = 4 j. (Le séjour en 6 n'a pas de sortie → non compté.)
+    const t0 = 1000 * DAY;
+    const r = stageDwell([
+      { oppId: "A", from: 1, to: 2, atMs: t0 },
+      { oppId: "A", from: 2, to: 3, atMs: t0 + 10 * DAY },
+      { oppId: "A", from: 3, to: 6, atMs: t0 + 14 * DAY },
+    ]);
+    const s2 = r.find((x) => x.stage === 2);
+    const s3 = r.find((x) => x.stage === 3);
+    expect(s2).toMatchObject({ stage: 2, count: 1, avgDays: 10 });
+    expect(s3).toMatchObject({ stage: 3, count: 1, avgDays: 4 });
+    expect(r.find((x) => x.stage === 6)).toBeUndefined(); // étape terminale, séjour non clos
+  });
+
+  it("moyenne sur plusieurs opps et ignore les étapes hors funnel actif", () => {
+    const t0 = 500 * DAY;
+    const r = stageDwell([
+      { oppId: "A", from: 1, to: 2, atMs: t0 },
+      { oppId: "A", from: 2, to: 3, atMs: t0 + 20 * DAY }, // étape 2 : 20 j
+      { oppId: "B", from: 1, to: 2, atMs: t0 },
+      { oppId: "B", from: 2, to: 3, atMs: t0 + 10 * DAY }, // étape 2 : 10 j
+    ]);
+    const s2 = r.find((x) => x.stage === 2);
+    expect(s2).toMatchObject({ stage: 2, count: 2, avgDays: 15 }); // (20+10)/2
+  });
+
+  it("ignore les événements sans oppId et les séjours de durée nulle (mêmes horodatages)", () => {
+    const t0 = 100 * DAY;
+    const r = stageDwell([
+      { from: 1, to: 2, atMs: t0 }, // sans oppId → ignoré
+      { oppId: "C", from: 2, to: 3, atMs: t0 }, // deux transitions au même instant (import en masse)
+      { oppId: "C", from: 3, to: 4, atMs: t0 }, // → dt = 0, séjour non mesurable, ignoré
+    ]);
+    expect(r).toHaveLength(0);
   });
 });

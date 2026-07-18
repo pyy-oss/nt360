@@ -55,4 +55,37 @@ function stageConversion(history) {
     .sort((a, b) => a.stage - b.stage);
 }
 
-module.exports = { oppFunnel, stageConversion };
+// TEMPS PAR ÉTAPE (« time-in-stage ») dérivé du MÊME journal des transitions (oppHistory). Pour une opp,
+// deux transitions consécutives e_i → e_{i+1} (triées par horodatage) encadrent un SÉJOUR : entre e_i.at
+// (l'opp est entrée en étape e_i.to) et e_{i+1}.at (elle en sort), elle a passé (e_{i+1}.at − e_i.at) dans
+// l'étape e_i.to. On agrège la DURÉE MOYENNE de séjour par étape ACTIVE (1-5). On ne compte QUE les séjours
+// CLOS (entrée ET sortie journalisées) : l'étape courante d'une opp (entrée sans sortie) n'a pas de fin, donc
+// pas de durée inventée. Comme le funnel, la mesure se construit à partir de MAINTENANT et sur la même
+// fenêtre glissante. Attend des événements avec `atMs` (ms epoch) déjà résolu (parité slippage). PUR.
+const DAY_MS = 86400000;
+function stageDwell(events) {
+  const byOpp = new Map();
+  for (const e of Array.isArray(events) ? events : []) {
+    const id = String((e && e.oppId) || "");
+    if (!id) continue; // sans oppId, impossible de reconstituer une trajectoire
+    let g = byOpp.get(id); if (!g) { g = []; byOpp.set(id, g); }
+    g.push(e);
+  }
+  const acc = new Map(); // stage → { stage, totalMs, count }
+  for (const evs of byOpp.values()) {
+    evs.sort((a, b) => (Number(a.atMs) || 0) - (Number(b.atMs) || 0));
+    for (let i = 0; i < evs.length - 1; i++) {
+      const stage = Number(evs[i].to) || 0; // étape occupée APRÈS la transition e_i
+      if (stage < 1 || stage > 5) continue;  // durée de séjour n'a de sens que dans le funnel actif
+      const dtMs = (Number(evs[i + 1].atMs) || 0) - (Number(evs[i].atMs) || 0);
+      if (!(dtMs > 0)) continue; // horodatages manquants/incohérents → séjour ignoré
+      const a = acc.get(stage) || { stage, totalMs: 0, count: 0 };
+      a.totalMs += dtMs; a.count++; acc.set(stage, a);
+    }
+  }
+  return [...acc.values()]
+    .map((a) => ({ stage: a.stage, count: a.count, avgDays: Math.round(a.totalMs / a.count / DAY_MS) }))
+    .sort((a, b) => a.stage - b.stage);
+}
+
+module.exports = { oppFunnel, stageConversion, stageDwell };
