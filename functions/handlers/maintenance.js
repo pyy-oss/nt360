@@ -494,6 +494,68 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, id: ref.id, approverUid };
   });
 
+  // ASTREINTES (ADR-035) — DEMANDE d'une astreinte imputée en charge sur une affaire (FP) et éventuellement
+  // un contrat. Crée l'objet `mnt_astreintes` (statut « en_attente ») ET soumet une demande d'approbation
+  // GÉNÉRIQUE (entityType "astreinte") — réutilise le workflow d'approbation (Lot 4), aucun mécanisme dupliqué.
+  // Le montant (charge, XOF) est saisi. La comptabilisation (statut → « validee ») est portée par le trigger
+  // onMntApprovalDecided à l'approbation. Double garde mnt_ (requireWrite maintenance + drapeau).
+  const submitAstreinte = onCallG("submitAstreinte", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "maintenance");
+    await assertMntEnabled();
+    const { validateAstreinte } = require("../domain/mntAstreinte");
+    const v = validateAstreinte(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    // Si un contratId est fourni : id PLAT (anti-injection de chemin) ET il doit exister (rattachement honnête).
+    if (v.value.contratId) {
+      const cid = assertPlainId(v.value.contratId, "id contrat");
+      v.value.contratId = cid;
+      if (!(await db.doc(`mnt_contrats/${cid}`).get()).exists) throw new HttpsError("not-found", "contrat rattaché introuvable");
+    }
+    const { validateApprovalRequest, approverFor } = require("../domain/approval");
+    const { ownerChain } = require("../domain/hierarchy");
+    const requester = req.auth.uid;
+    const usersMap = await loadUsersMap();
+    const approverUid = approverFor(usersMap, requester, await anyDirectionUid(requester));
+    if (!approverUid) throw new HttpsError("failed-precondition", "aucun approbateur disponible (définir un manager ou un compte direction)");
+    // 1) L'objet astreinte (statut en_attente) — id auto ; porte la charge et le rattachement.
+    const aRef = await db.collection("mnt_astreintes").add({
+      ...v.value, statut: "en_attente", requestedBy: requester,
+      requestedByName: (usersMap[requester] && usersMap[requester].name) || null,
+      createdBy: requester, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    // 2) La demande d'approbation générique, rattachée à l'astreinte (entityId = son id).
+    const label = `Astreinte ${v.value.fp}${v.value.contratId ? "" : " (hors contrat)"}`;
+    const va = validateApprovalRequest({ kind: "astreinte", entityType: "astreinte", entityId: aRef.id, entityLabel: label, amount: v.value.montant, note: v.value.motif });
+    if (!va.ok) throw new HttpsError("invalid-argument", va.error);
+    const visibleTo = Array.from(new Set([...ownerChain(usersMap, requester), approverUid]));
+    const apRef = await db.collection("approvals").add({ ...va.value, status: "pending", requestedBy: requester, requestedByName: (usersMap[requester] && usersMap[requester].name) || null, approverUid, visibleTo, at: new Date().toISOString().slice(0, 10), createdAt: FieldValue.serverTimestamp() });
+    await aRef.set({ approvalId: apRef.id }, { merge: true });
+    await db.collection("auditLog").add({ uid: requester, action: "astreinte_submit", module: "maintenance", entity: "astreinte", entityId: aRef.id, detail: { fp: v.value.fp, montant: v.value.montant, approvalId: apRef.id, approverUid }, ts: FieldValue.serverTimestamp() });
+    return { ok: true, id: aRef.id, approvalId: apRef.id, approverUid };
+  });
+
+  // ASTREINTES — LISTE (lecture gouvernée `maintenance` + drapeau). Le montant (charge) est CONFIDENTIEL :
+  // masqué (null) sans le droit `rentabilite`, comme le reste des coûts. Borné MAX_SCAN.
+  const listAstreintes = onCallG("listAstreintes", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireRead(req, "maintenance");
+    await assertMntEnabled();
+    const { canRead } = require("../domain/authz");
+    const role = req.auth.token?.nt360Role;
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    const hasCost = role === "direction" || canRead(matrix, role, "rentabilite");
+    const snap = await db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get();
+    const rows = sliceCapped(snap.docs).docs.map((d) => {
+      const x = d.data() || {};
+      return {
+        id: d.id, fp: x.fp || null, contratId: x.contratId || null, consultantId: x.consultantId || null,
+        dateDebut: x.dateDebut || null, dateFin: x.dateFin || null, motif: x.motif || "",
+        statut: x.statut || "en_attente", requestedByName: x.requestedByName || null, approvalId: x.approvalId || null,
+        montant: hasCost ? (Math.round(Number(x.montant)) || 0) : null, // CHARGE confidentielle
+      };
+    });
+    return { ok: true, rows, hasCost };
+  });
+
   // ANALYSE DE RÉTENTION IA (Lot 6/7 « valeur ajoutée » — anticipation) — l'IA lit les contrats DÉJÀ repérés
   // à risque (moteur interne) + stats tickets et rend, par contrat, les MOTIFS de churn + une reco de
   // rétention. ADDITIF (ne re-score pas). « L'IA propose » : aucune écriture. Double garde + limite anti-coût.
@@ -561,12 +623,20 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
         }
       }
     }
+    // Charge des astreintes VALIDÉES par FP (ADR-035) — coût manuel, CONFIDENTIEL comme le P&L (lu sous
+    // `rentabilite`). Source unique `astreinteCostByFp` (mêmes chiffres que la marge de livraison).
+    const astreinteCostByFp = {};
+    if (hasCost) {
+      const { astreinteCostByFp: aggAst } = require("../domain/mntAstreinte");
+      const aSnap = await db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get();
+      Object.assign(astreinteCostByFp, aggAst(sliceCapped(aSnap.docs).docs.map((d) => d.data())));
+    }
     const { computeContratPnl } = require("../domain/mntContratPnl");
     const asOf = new Date().toISOString().slice(0, 10);
-    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost, pnlCostByFp), hasCost };
+    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost, pnlCostByFp, astreinteCostByFp), hasCost };
   });
 
-  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiMntLignees, applyMntLignee, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision };
+  return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiMntLignees, applyMntLignee, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision, submitAstreinte, listAstreintes };
 }
 
 module.exports = { createMaintenance };

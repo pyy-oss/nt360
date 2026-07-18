@@ -29,6 +29,18 @@ describe("deliveryMargin — marge de livraison par affaire (marge carnet − la
     expect(rows.map((r) => r.fp)).toEqual(["FP/2026/1", "FP/2026/2"]);
   });
 
+  it("retranche AUSSI la charge d'astreinte validée (par FP) de la marge de livraison (ADR-035)", () => {
+    // FP/2026/1 : marge carnet 3M − labor 2M − astreinte 500k = 500k.
+    const rows = deliveryMargin(carnet, margin, labor, true, { "FP/2026/1": 500_000 });
+    const a = rows.find((r) => r.fp === "FP/2026/1");
+    expect(a.coutAstreintes).toBe(500_000);
+    expect(a.margeLivraison).toBe(500_000);            // 3M − 2M − 500k
+    expect(a.margeLivraisonPct).toBe(0.05);            // 500k / 10M
+    // Sans droit rentabilité, la charge est masquée.
+    const masked = deliveryMargin(carnet, margin, labor, false, { "FP/2026/1": 500_000 });
+    expect(masked.find((r) => r.fp === "FP/2026/1").coutAstreintes).toBeNull();
+  });
+
   it("rapproche par fpKey (zéros de tête / casse) — un labor FP/2026/001 joint FP/2026/1", () => {
     const rows = deliveryMargin(carnet, margin, [{ fp: "fp/2026/001", laborDays: 5, laborCost: 500_000 }], true);
     expect(rows.find((r) => r.fp === "FP/2026/1").coutLabor).toBe(500_000);

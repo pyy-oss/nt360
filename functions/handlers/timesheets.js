@@ -262,10 +262,11 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       for (const d of sliceCapped(snap.docs).docs) for (const r of ((d.data() || {}).rows || [])) out.push(r);
       return out;
     };
-    const [cSnap, tSnap, aSnap, carnetRows, marginRows] = await Promise.all([
+    const [cSnap, tSnap, aSnap, astSnap, carnetRows, marginRows] = await Promise.all([
       db.collection("consultants").select("cjm").limit(MAX_SCAN + 1).get(),
       db.collection("timesheets").limit(MAX_SCAN + 1).get(),
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "allocationPct", "projectFp").limit(MAX_SCAN + 1).get(),
+      db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get(), // charges d'astreinte à imputer par affaire (ADR-035)
       readChunks("commandesRows"),        // carnet (vente/facturé par affaire)
       readChunks("commandesRowsMargin"),  // marge isolée (mb/costTotal) — même droit rentabilite
     ]);
@@ -276,7 +277,10 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     const months = [...new Set(timesheets.map((t) => t && t.month).filter(Boolean))];
     const labor = imputeLaborByFp(assignments, timesheets, consultants, months);
-    const rows = deliveryMargin(carnetRows, marginRows, labor.byFp, true);
+    // Charge des astreintes VALIDÉES par FP (ADR-035) — retranchée EN PLUS du labor dans la marge de livraison.
+    const { astreinteCostByFp } = require("../domain/mntAstreinte");
+    const astreinteByFp = astreinteCostByFp(sliceCapped(astSnap.docs).docs.map((d) => d.data()));
+    const rows = deliveryMargin(carnetRows, marginRows, labor.byFp, true, astreinteByFp);
     return { ok: true, rows, unassignedDays: labor.unassignedDays, missingCjm: labor.missingCjm };
   });
 

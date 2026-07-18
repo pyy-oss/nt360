@@ -20,9 +20,11 @@ const { fpKey } = require("../lib/ids");
  * @param {object[]} marginRows  marge isolée (commandesRowsMargin) : {fp, mb, costTotal}
  * @param {{fp:string,laborDays:number,laborCost:number}[]} laborByFp  sortie de imputeLaborByFp (.byFp)
  * @param {boolean} hasCost      droit `rentabilite` : sinon coûts/marges masqués (null)
- * @returns {{fp,client,bu,am,vente,facture,margeCarnet,coutLabor,joursLabor,margeLivraison,margeLivraisonPct,laborInconnu}[]}
+ * @param {Object<string,number>} astreinteCostByFp  charge des astreintes VALIDÉES par N° FP (ADR-035)
+ * @returns {{fp,client,bu,am,vente,facture,margeCarnet,coutLabor,coutAstreintes,joursLabor,margeLivraison,margeLivraisonPct}[]}
  */
-function deliveryMargin(carnetRows, marginRows, laborByFp, hasCost) {
+function deliveryMargin(carnetRows, marginRows, laborByFp, hasCost, astreinteCostByFp) {
+  const astByFp = astreinteCostByFp || {};
   const byFp = new Map();
   const ensure = (k) => { let e = byFp.get(k); if (!e) { e = { fp: k, client: "", bu: "", am: "", vente: 0, facture: 0, mb: 0, costTotal: 0, laborDays: 0, laborCost: 0, hasLabor: false }; byFp.set(k, e); } return e; };
   for (const o of carnetRows || []) {
@@ -52,12 +54,14 @@ function deliveryMargin(carnetRows, marginRows, laborByFp, hasCost) {
     if (!(e.vente > 0) && !(e.facture > 0)) continue; // affaire sans montant → hors P&L de livraison
     const margeCarnet = Math.round(e.mb);
     const coutLabor = Math.round(e.laborCost);
-    const margeLivraison = margeCarnet - coutLabor;
+    const coutAstreintes = Math.round(Number(astByFp[e.fp]) || 0); // charge astreintes validées (ADR-035)
+    const margeLivraison = margeCarnet - coutLabor - coutAstreintes;
     rows.push({
       fp: e.fp, client: e.client, bu: e.bu, am: e.am,
       vente: Math.round(e.vente), facture: Math.round(e.facture),
       margeCarnet: hasCost ? margeCarnet : null,
       coutLabor: hasCost ? coutLabor : null,
+      coutAstreintes: hasCost ? coutAstreintes : null,
       joursLabor: Math.round(e.laborDays * 10) / 10, // les JOURS ne sont pas confidentiels (comme mntContratPnl)
       margeLivraison: hasCost ? margeLivraison : null,
       margeLivraisonPct: hasCost && e.vente > 0 ? Math.round((margeLivraison / e.vente) * 1000) / 1000 : null,

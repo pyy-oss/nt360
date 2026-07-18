@@ -698,10 +698,11 @@ async function recomputeCore(db, only) {
     if (isMntEnabled(mntCfg)) {
       const { mntRisque } = require("../domain/mntRisque");
       const { computeContratPnl, margeRisqueNiveau } = require("../domain/mntContratPnl");
+      const { astreinteCostByFp: aggAstreinte } = require("../domain/mntAstreinte");
       const tsMs = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : (Number(t) || 0));
-      const [mntContrats, mntTickets, mntInterv, consultantsSnap] = await Promise.all([
+      const [mntContrats, mntTickets, mntInterv, mntAstreintes, consultantsSnap] = await Promise.all([
         readAll(db, "mnt_contrats", true), readAll(db, "mnt_tickets", true),
-        readAll(db, "mnt_interventions", true), db.collection("consultants").select("cjm").get(),
+        readAll(db, "mnt_interventions", true), readAll(db, "mnt_astreintes", true), db.collection("consultants").select("cjm").get(),
       ]);
       // Horodatages Firestore → millisecondes à la FRONTIÈRE I/O (le domaine reste pur). Le mois
       // d'ouverture (quota) se dérive de ouvertLe.
@@ -715,8 +716,9 @@ async function recomputeCore(db, only) {
       consultantsSnap.forEach((d) => { const x = d.data() || {}; if (x.cjm != null) cjmById[d.id] = Number(x.cjm); });
       const pnlCostByFp = {};
       for (const o of orders) { const k = fpKey(o.fp); if (k && o.costTotal != null) pnlCostByFp[k] = (pnlCostByFp[k] || 0) + (Number(o.costTotal) || 0); }
+      const astreinteByFp = aggAstreinte(mntAstreintes); // charge des astreintes VALIDÉES par FP (ADR-035)
       const margeByContrat = {};
-      for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp)) {
+      for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp, astreinteByFp)) {
         const lvl = margeRisqueNiveau(row); if (lvl) margeByContrat[row.id] = lvl;
       }
       const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now(), margeByContrat });

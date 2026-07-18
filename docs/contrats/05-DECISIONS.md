@@ -3,6 +3,48 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-035 — Astreintes : première ligne de coût SAISISSABLE, imputée par FP, comptabilisée à la validation
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction des Opérations (demande d'ajout : demande + validation + comptabilité des astreintes)
+
+### Contexte
+Le besoin : enregistrer des **astreintes** (on-call) et les **comptabiliser en charge** sur les **projets
+(affaires) ET les contrats**, avec un cycle **demande → validation → comptabilisation**. Or l'ERP n'avait
+**aucune ligne de coût saisissable à la main** : les coûts existants sont soit dérivés (jours CRA × CJM),
+soit importés (P&L), soit portés par la fiche affaire. Il fallait donc introduire un coût *saisi*, sans
+créer de deuxième vérité ni de fuite de confidentialité.
+
+### Décision
+- **Objet `mnt_astreintes`** (préfixe mnt_, additif, sous drapeau `config/mntFeature`). Une astreinte porte
+  un **N° FP obligatoire** (l'affaire qui reçoit la charge), un `contratId` **optionnel**, une **période**,
+  un **`montant`** (charge saisie, XOF entier) et un `statut` (`en_attente` / `validee` / `rejetee`).
+- **Demande + validation = réutilisation du workflow d'approbation générique** (Lot 4) : nouvelles valeurs
+  d'enum `kind:"astreinte"` / `entityType:"astreinte"` (extension additive de `domain/approval.js`).
+  `submitAstreinte` crée l'objet **et** la demande d'approbation ; la décision passe par le `decideApproval`
+  existant ; l'**effet** (statut → `validee`/`rejetee`) est porté par le trigger `onMntApprovalDecided`
+  (même patron que les décisions de contrat). Aucun mécanisme d'approbation dupliqué.
+- **Comptabilisation = SOURCE UNIQUE `astreinteCostByFp`** (`domain/mntAstreinte.js`) : agrège le `montant`
+  des astreintes **validées** par `fpKey`. Ce même agrégat alimente **deux** vues sans recalcul :
+  la **rentabilité contrat** (`computeContratPnl` → composante `coutAstreintes`) et la **marge de livraison**
+  (`deliveryMargin` → retranchée en plus du labor). Couvre « projets ET contrats » avec un seul agrégat.
+- **Pas de double-compte** : une astreinte n'est ni dans le P&L importé ni dans le CRA labor → charge
+  **purement additive**, comme le sont déjà les deux rails de coût affaire (choix analogue à ADR-033).
+
+### Conséquences / confidentialité
+- Le `montant` est un **coût confidentiel** : `mnt_astreintes` est **callable-only en lecture**
+  (`allow read: if false` — firestore.rules) ; `listAstreintes` **masque** le montant (null) sans le droit
+  `rentabilite` ; `computeContratPnl`/`deliveryMargin` masquent `coutAstreintes` de la même façon. Aucune
+  lecture directe ne peut exposer le montant brut (même logique qu'ADR-034).
+- Le score de risque intègre la charge d'astreinte via le **palier** de marge (ADR-034) : une astreinte
+  validée qui fait plonger la marge d'un contrat le fait remonter en risque, **sans exposer le montant**.
+- **Limite assumée** : une astreinte sur une affaire **absente du carnet et sans contrat** n'apparaît dans
+  aucune des deux vues de marge (elle reste visible dans la liste des astreintes). Rattachée à un contrat ou
+  à une affaire du carnet, elle est comptabilisée. À élargir si un besoin d'affaires hors-carnet émerge.
+- **Éteint = ERP d'avant** : tout le bloc est sous `want("maintenance")` + drapeau ; aucune collection
+  `mnt_astreintes` n'existe drapeau éteint.
+
 ## ADR-034 — La rentabilité entre dans le score de risque, sous forme de PALIER (jamais le montant)
 
 - **Date :** 2026-07-18

@@ -63,6 +63,8 @@ timesheetKpis
 upsertAssignment
 upsertCandidate
 submitMntDecision
+submitAstreinte
+listAstreintes
 upsertConsultant
 upsertMntContrat
 importMntContrats
