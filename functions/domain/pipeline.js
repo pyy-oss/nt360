@@ -90,6 +90,47 @@ function closingAnalysis(active, asOf, pw) {
   return { buckets: B, staleCount: stale.length, staleBrut: stale.reduce((s, o) => s + (o.amount || 0), 0), staleTop, overdueAge, avgOverdueDays };
 }
 
+// ÂGE & CYCLE des opportunités actives — fondé sur la SEULE date de création RÉELLE présente en source :
+// `dateCreation` (Odoo `create_date`), ABSENTE des opps Excel salesData (d'où les gardes « pas de date de
+// création » ailleurs dans ce fichier). On ne calcule donc l'âge QUE sur les opps qui la portent, et on
+// expose la COUVERTURE (`withDate` / `total`) pour que le front dise honnêtement « mesuré sur X opps datées »
+// — jamais d'âge inventé pour une opp sans date. PURE (asOf explicite, aucune horloge).
+const DAY_MS = 86400000;
+function daysBetweenIso(fromIso, toIso) {
+  const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fromIso || ""));
+  const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(toIso || ""));
+  if (!a || !b) return null;
+  return Math.round((Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3])) / DAY_MS);
+}
+function agingAnalysis(active, asOf) {
+  const today = String(asOf || "").slice(0, 10);
+  const mk = () => ({ brut: 0, count: 0 });
+  const buckets = { d30: mk(), d90: mk(), d180: mk(), dPlus: mk() }; // ≤30 · 31-90 · 91-180 · >180 j
+  let withDate = 0, ageSum = 0, cycleSum = 0, cycleCount = 0;
+  const aged = [];
+  for (const o of active) {
+    const dc = o.dateCreation ? String(o.dateCreation).slice(0, 10) : "";
+    const age = daysBetweenIso(dc, today);
+    if (age == null || age < 0) continue; // pas de date de création (opp Excel) ou incohérente → ignorée
+    withDate++; ageSum += age;
+    const k = age <= 30 ? "d30" : age <= 90 ? "d90" : age <= 180 ? "d180" : "dPlus";
+    buckets[k].brut += o.amount || 0; buckets[k].count++;
+    aged.push({ oppId: o.oppId, client: o.client, am: o.am, amount: o.amount, stage: o.stage, dateCreation: dc, ageDays: age });
+    // Cycle PRÉVISIONNEL : création → clôture PRÉVUE (D Prev). Les deux dates sont réelles (l'une prévue) :
+    // combien de temps une opp met, de sa création à sa clôture attendue. Jamais un « cycle réalisé » (il
+    // faudrait une date de gain, absente en source).
+    const cyc = o.closingDate ? daysBetweenIso(dc, String(o.closingDate).slice(0, 10)) : null;
+    if (cyc != null && cyc >= 0) { cycleSum += cyc; cycleCount++; }
+  }
+  aged.sort((a, b) => b.ageDays - a.ageDays);
+  return {
+    total: active.length, withDate, // couverture : opps datées vs total actives (honnêteté du périmètre)
+    avgAge: withDate ? Math.round(ageSum / withDate) : 0,
+    avgProjectedCycle: cycleCount ? Math.round(cycleSum / cycleCount) : 0,
+    buckets, top: aged.slice(0, 10),
+  };
+}
+
 // Opportunités DORMANTES (isDormantClosing) : ouvertes dont la D Prev est d'un millésime révolu.
 // Renvoie le VOLUME (count), la VALEUR brute (Σ montant) et l'ANCIENNETÉ en jours depuis la D Prev
 // passée (min / max / moyen). Base de la tuile « Opportunité dormante » ET du montant exclu de la
@@ -189,7 +230,10 @@ function pipeline(opps, asOf, tiers, orders, geleMonths = 6) {
     topOpps,
     // Analyse du closing (D Prev) sur les opps projetables (hors carnet, parité atterrissage.pipelineRetard).
     closing: asOf ? closingAnalysis(proj, asOf, pw) : null,
+    // ÂGE des opps actives (périmètre daté : opps portant dateCreation, càd issues d'Odoo). Population
+    // `active` (toutes 1-5, comme byStage) : l'âge est une propriété de l'opp, indépendante du carnet.
+    aging: asOf ? agingAnalysis(active, asOf) : null,
   };
 }
 
-module.exports = { pipeline, closingAnalysis, dormantSummary, isActive, isEligible, isoWeek, classifyPhase0, CONFIANCE_MIN };
+module.exports = { pipeline, closingAnalysis, agingAnalysis, dormantSummary, isActive, isEligible, isoWeek, classifyPhase0, CONFIANCE_MIN };

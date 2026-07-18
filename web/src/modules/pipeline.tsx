@@ -176,6 +176,38 @@ export const Pipeline: FC<Props> = ({ period }) => {
           <Tip>Analyse fondée uniquement sur la <b>D Prev</b> (date de clôture prévue) — aucune date de création ou d'étape n'existe en source, donc pas de vélocité/âge inventés. L'<b>ancienneté du retard</b> priorise les affaires les plus enlisées (les <b>&gt; 90 j</b> sont les plus à risque, souvent à passer en perdu). Les opportunités <b>en retard de closing</b> (D Prev déjà dépassée mais toujours actives) sont à <b>requalifier</b> (re-dater ou passer en perdu). La <b>couverture</b> indique combien de fois le pipeline pondéré couvre l'écart à l'objectif : &lt; 1× = objectif non couvert par le seul pipeline certain.</Tip>
         </>
       )}
+      {/* ÂGE des opportunités actives — mesuré sur les SEULES opps portant une date de création (dateCreation,
+          alimentée par la synchro Odoo ; absente des opps Excel). Périmètre affiché honnêtement (couverture). */}
+      {data.aging && (data.aging.withDate ?? 0) > 0 && (
+        <Card title="Âge des opportunités actives (périmètre daté)">
+          <div className={grid4}>
+            <Kpi label="Âge moyen" value={`${data.aging.avgAge ?? 0} j`} tone={(data.aging.avgAge ?? 0) > 180 ? "clay" : "steel"} sub="depuis la date de création (opps datées)" />
+            <Kpi label="Cycle prévisionnel moyen" value={`${data.aging.avgProjectedCycle ?? 0} j`} tone="gold" sub="création → clôture prévue" />
+            <Kpi label="Opps datées" value={`${data.aging.withDate ?? 0} / ${data.aging.total ?? 0}`} sub="couverture (source Odoo)" />
+            <Kpi label="> 180 j" value={`${data.aging.buckets?.dPlus?.count ?? 0} opp.`} tone="clay" sub={`${fmt(data.aging.buckets?.dPlus?.brut || 0)} brut · à requalifier`} />
+          </div>
+          <div className={cols2}>
+            <Card title="Répartition par âge (brut)">
+              <HBars rows={[
+                { name: "≤ 30 j", v: data.aging.buckets?.d30?.brut || 0, sub: `${data.aging.buckets?.d30?.count || 0} opp.` },
+                { name: "31–90 j", v: data.aging.buckets?.d90?.brut || 0, sub: `${data.aging.buckets?.d90?.count || 0} opp.` },
+                { name: "91–180 j", v: data.aging.buckets?.d180?.brut || 0, sub: `${data.aging.buckets?.d180?.count || 0} opp.` },
+                { name: "> 180 j", v: data.aging.buckets?.dPlus?.brut || 0, sub: `${data.aging.buckets?.dPlus?.count || 0} opp.` },
+              ]} colorFn={(r) => (r.name === "> 180 j" ? T.clay : r.name === "91–180 j" ? T.gold : T.steel)} />
+            </Card>
+            <Card title="Opportunités les plus âgées">
+              {(data.aging.top || []).length ? <Table columns={[
+                colText("Client", (o) => o.client || "—", (o) => o.client || ""),
+                colText("Commercial", (o) => o.am || "—", (o) => o.am || ""),
+                colText("Créée le", (o) => o.dateCreation || "—", (o) => o.dateCreation || ""),
+                colNum("Âge", (o) => `${o.ageDays ?? 0} j`, (o) => o.ageDays ?? 0),
+                colNum("Brut", (o) => money(o.amount || 0), (o) => o.amount || 0),
+              ]} rows={data.aging.top || []} /> : <EmptyState label="Aucune opportunité datée." />}
+            </Card>
+          </div>
+          <Tip>L'<b>âge</b> = jours depuis la <b>date de création</b> réelle (Odoo <i>create_date</i>). Mesuré <b>uniquement</b> sur les opportunités qui la portent (les opps importées d'Excel n'en ont pas) — d'où la <b>couverture</b> affichée : les chiffres portent sur <b>{data.aging.withDate ?? 0}</b> opp. datées sur <b>{data.aging.total ?? 0}</b> actives. Le <b>cycle prévisionnel</b> mesure le délai création → <b>clôture prévue</b> (D Prev) ; ce n'est pas un cycle <i>réalisé</i> (il faudrait une date de gain, absente en source). Les opps de <b>&gt; 180 j</b> sont les plus enlisées, à requalifier.</Tip>
+        </Card>
+      )}
       <Card title="Funnel de conversion — transitions d'étape (réel)">
         {(funnelC?.total ?? 0) > 0 ? (
           <>
