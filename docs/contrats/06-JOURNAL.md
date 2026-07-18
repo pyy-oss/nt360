@@ -1276,3 +1276,18 @@ patron maison (sous-onglets) était le signal — un module doit d'abord se navi
 affichés mais inertes) ; fusionner les surfaces qui se répètent (Revenu KPI + carte ; Risque + churn IA ;
 Renouvellements + lignées IA ; Statut dashboard + statut auto IA) — chacune un ADR ; déplacer les **Astreintes**
 dans le module **Exécution** (elles pèsent sur les affaires ET les contrats — ADR-037 à venir).
+
+## Astreintes déplacées dans Exécution (CT-EX) — 2026-07-18
+
+**Fait.** Retour d'usage : « déplacer astreinte dans exécution, ça impacte à la fois les projets et les
+contrats ». Juste — une astreinte est imputée par N° FP (affaire) et éventuellement un contrat ; elle pèse
+dans la rentabilité de livraison ET de contrat. La carte a été extraite du module Contrats vers un écran
+DÉDIÉ « Astreintes » dans la section Exécution (`web/src/modules/astreintes.tsx`, ADR-037). Front seul :
+mêmes callables (listAstreintes/submitAstreinte, gouvernés droit `maintenance` + drapeau mntFeature),
+comptabilisation `astreinteCostByFp` inchangée, aucun backend ni `deployed-functions.txt` touché. Nettoyage
+des imports devenus inutiles dans maintenance.tsx (callFn/httpsCallable/functions). Build vert, 160 tests web.
+
+**Appris.** L'emplacement d'une fonctionnalité est un choix d'architecture de l'information, pas un détail :
+une donnée transverse (charge par affaire) rangée dans un seul module suggère une portée fausse. On a
+distingué la **relocalisation présentationnelle** (bougé, sans risque, ce lot) du **découplage RBAC** (droit
+propre, changement backend, dette assumée et documentée) — ne pas confondre les deux évite un sur-engineering.
