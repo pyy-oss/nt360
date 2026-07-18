@@ -689,6 +689,38 @@ async function recomputeCore(db, only) {
     }
   }
 
+  // ── PRÉ-FACTURATION CONSOLIDÉE (DO Lot 4) — matérialise la proposition de facturation (jours FACTURÉS au
+  // CRA × TJM, Lot 21) dans summaries/preBilling, au lieu du seul callable à la demande preBillingFromCra :
+  // le pilotage (DO/CODIR) dispose d'une pré-facturation VIVANTE + une alerte « à facturer en attente ».
+  // Gaté rentabilite via les rules (préfixe preBilling → rentabilite : expose TJM/CA par ressource). Bloc
+  // ADDITIF : lit consultants/timesheets(3 derniers mois)/assignments et ne pousse qu'un chemin NOUVEAU.
+  // Réutilise la fonction PURE computePreBilling — aucune 2e vérité avec le callable (mêmes entrées). Gate
+  // want("prebilling") : recompute complet le régénère ; un recompute ciblé ne l'écrase pas à vide.
+  if (want("prebilling")) {
+    const { excludeMaintenance } = require("../domain/timesheet");
+    const { monthsRange } = require("../domain/assignment");
+    const { computePreBilling } = require("../domain/preBilling");
+    // Fenêtre : 3 derniers mois (cadrage du passé proche à transmettre à la compta), depuis asOf.
+    const [ay, am] = asOf.slice(0, 7).split("-").map(Number);
+    let sm = am - 2, sy = ay; while (sm < 1) { sm += 12; sy -= 1; }
+    const fromYm = `${sy}-${String(sm).padStart(2, "0")}`;
+    const pbMonths = monthsRange(fromYm, asOf.slice(0, 7));
+    // Lecture BORNÉE à la fenêtre (month ≥ fromYm) — pas de scan de tout l'historique CRA à chaque recompute.
+    const [cSnap, tSnap, aSnap] = await Promise.all([
+      db.collection("consultants").select("name", "bu", "tjmTarget").get(),
+      db.collection("timesheets").where("month", ">=", fromYm).get(),
+      db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "projectFp", "label", "status").get(),
+    ]);
+    const pbConsultants = cSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Contribution mnt ÉCARTÉE (forfait, ADR-005) — cohérent avec le callable preBillingFromCra.
+    const pbTimesheets = excludeMaintenance(tSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const pbAssignments = aSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const pb = computePreBilling(pbConsultants, pbTimesheets, pbAssignments, pbMonths);
+    // Sans `lines` (détail réservé au callable) : summary consolidé compact (cap 1 Mio). `global.missingTjm`
+    // = alerte « lignes à facturer sans TJM » (donnée d'annuaire manquante), lisible côté front.
+    w.push({ path: "summaries/preBilling", data: { asOf, months: pbMonths, global: pb.global, byMonth: pb.byMonth, byBu: pb.byBu, byConsultant: pb.byConsultant, ...stamp } });
+  }
+
   // ── CONTRATS DE MAINTENANCE (module gaté) — scores de risque MATÉRIALISÉS dans summaries/mnt_risque
   // (ADR-003, point de contact C3). DOUBLEMENT gaté : want("maintenance") ET drapeau config/mntFeature
   // ALLUMÉ. Éteint (défaut) ⇒ aucune lecture mnt_*, aucun summary mnt_risque écrit → le recompute est

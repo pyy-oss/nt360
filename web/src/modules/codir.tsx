@@ -10,7 +10,7 @@ import { FreshnessGuard, type Props } from "./_shared";
 import { T, fmt } from "../design/tokens";
 import { relTime } from "../lib/format";
 import { useDocData } from "../lib/hooks";
-import { useCan, useCanExport, useClaims } from "../lib/rbac";
+import { useCan, useCanExport, useClaims, useCanSeeMargin } from "../lib/rbac";
 import { callExportReport, upsertOpsBulletin, type OpsBulletin, type BulletinSection } from "../lib/writes";
 import type { AtterrissageSummary, EntitySummary, BacklogSummary, BillingTrendSummary, PeriodsConfig } from "../types";
 
@@ -393,6 +393,11 @@ export const Codir: FC<Props> = () => {
   const week = isoWeek(new Date());
   const { data: bulletin } = useDocData<OpsBulletin>(fy ? `opsBulletins/${fy}_W${String(week).padStart(2, "0")}` : null);
   const canExport = useCanExport();
+  // Pré-facturation consolidée (DO Lot 4) : à facturer depuis le CRA (jours facturés × TJM), confidentiel
+  // (TJM/CA par ressource) → lu seulement avec le droit « Rentabilité ». Summary materialisé au recompute.
+  const canMargin = useCanSeeMargin();
+  const { data: preBill } = useDocData<{ global?: { amountHt?: number; billedDays?: number; missingTjm?: number } }>(canMargin ? "summaries/preBilling" : null);
+  const preBillAmount = preBill?.global?.amountHt || 0;
   // Volet Partenariats (module gaté, ADR-P09) : lu seulement drapeau parFeature ALLUMÉ + droit `partenariats`.
   const canPar = useCan("partenariats") !== "none";
   const { data: parFeature } = useDocData<{ enabled?: boolean }>("config/parFeature");
@@ -510,6 +515,17 @@ export const Codir: FC<Props> = () => {
               <InsightChip label="Concentration top 3" value={pctR(top3Share)} hint="des commandes clients" color={top3Share >= 0.6 ? T.clay : T.steel} />
               <InsightChip label="Rythme facturation requis" value={`${fmt(rythmeRequis)}/mois`} hint={`pour l'objectif · ${monthsRemaining} mois · actuel ${fmt(rythmeActuel)}/mois`} color={rythmeRequis > rythmeActuel ? T.clay : T.emerald} />
             </div>
+
+            {/* Pré-facturation consolidée (DO Lot 4) — à facturer depuis le CRA, non encore facturé en compta.
+                Gaté « Rentabilité » (TJM/CA par ressource). N'apparaît que s'il y a des jours facturés à cadrer. */}
+            {canMargin && preBillAmount > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <InsightChip label="À facturer (pré-fact. CRA)" value={`${fmt(preBillAmount)}`} hint={`${preBill?.global?.billedDays || 0} j facturés au CRA, à transmettre à la facturation`} color={T.gold} />
+                {(preBill?.global?.missingTjm || 0) > 0 && (
+                  <InsightChip label="Lignes sans TJM" value={String(preBill?.global?.missingTjm)} hint="jours facturés sans TJM — à tarifer avant facturation" color={T.clay} />
+                )}
+              </div>
+            )}
 
             {/* Deux jauges circulaires cohérentes : CA RÉEL (facturé YTD) et CAF PRÉVISIONNEL (projeté), vs objectif */}
             <div className="grid gap-3 md:grid-cols-2 items-stretch">
