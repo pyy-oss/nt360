@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { computeContratPnl } = require("../domain/mntContratPnl");
+const { computeContratPnl, margeRisqueNiveau, MARGE_FAIBLE_PCT } = require("../domain/mntContratPnl");
 
 describe("computeContratPnl — rentabilité par contrat", () => {
   const asOf = "2026-07-15";
@@ -92,5 +92,25 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     ];
     const rows = computeContratPnl(pop, [], {}, asOf, true);
     expect(rows.map((r) => r.id)).toEqual(["S"]); // seul le suspendu (vivant) subsiste
+  });
+});
+
+describe("margeRisqueNiveau — palier de risque de marge (jamais de montant, DO Lot 5)", () => {
+  it("marge < 0 → « negative »", () => {
+    expect(margeRisqueNiveau({ margePct: -0.2 })).toBe("negative");
+    expect(margeRisqueNiveau({ margePct: -0.001 })).toBe("negative");
+  });
+  it("0 ≤ marge < seuil → « faible »", () => {
+    expect(margeRisqueNiveau({ margePct: 0 })).toBe("faible");
+    expect(margeRisqueNiveau({ margePct: MARGE_FAIBLE_PCT - 0.001 })).toBe("faible");
+  });
+  it("marge ≥ seuil → null (saine)", () => {
+    expect(margeRisqueNiveau({ margePct: MARGE_FAIBLE_PCT })).toBe(null);
+    expect(margeRisqueNiveau({ margePct: 0.4 })).toBe(null);
+  });
+  it("marge inconnue (margePct null : droit coût absent ou revenu nul) → null (pas de signal)", () => {
+    expect(margeRisqueNiveau({ margePct: null })).toBe(null);
+    expect(margeRisqueNiveau({})).toBe(null);
+    expect(margeRisqueNiveau(null)).toBe(null);
   });
 });

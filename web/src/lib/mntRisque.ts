@@ -4,7 +4,7 @@
 // Pur → testable sans React.
 
 export type Niveau = "vert" | "ambre" | "rouge" | "critique";
-export type SignalType = "sla_rompu" | "echeance_proche" | "quota_depasse" | "sous_facturation";
+export type SignalType = "sla_rompu" | "echeance_proche" | "quota_depasse" | "sous_facturation" | "marge_faible";
 
 export const NIVEAU_LABEL: Record<string, string> = {
   vert: "Vert", ambre: "Ambre", rouge: "Rouge", critique: "Critique",
@@ -27,13 +27,15 @@ export const SIGNAL_LABEL: Record<string, string> = {
   echeance_proche: "Échéance proche",
   quota_depasse: "Quota dépassé",
   sous_facturation: "Sous-facturation",
+  marge_faible: "Marge faible",
 };
 
-export interface RisqueSignal { type: SignalType; count?: number; jours?: number; depassement?: number; quota?: number; ecart?: number; engage?: number; facture?: number; pct?: number }
+export interface RisqueSignal { type: SignalType; count?: number; jours?: number; depassement?: number; quota?: number; ecart?: number; engage?: number; facture?: number; pct?: number; severite?: "negative" | "faible" }
 export interface RisqueItem {
   id: string; fp: string | null; client: string; am: string; bu: string; statut: string;
   score: number; niveau: Niveau; signals: RisqueSignal[];
   slaRompus: number; joursAvantFin: number | null; quotaDepasse: number;
+  margeNiveau?: "negative" | "faible" | null; // palier de marge (jamais le montant — confidentiel, ADR-034)
   sousFacturation: { engage: number; facture: number; ecart: number };
 }
 export interface RisqueSummary { items: RisqueItem[]; counts: Record<Niveau, number>; total: number; atRisk: number; asOf: string | null }
@@ -44,6 +46,7 @@ export function signalText(s: RisqueSignal): string {
   if (s.type === "sla_rompu" && s.count) return `${base} (${s.count})`;
   if (s.type === "echeance_proche" && s.jours != null) return s.jours <= 0 ? `${base} (dépassée)` : `${base} (${s.jours} j)`;
   if (s.type === "quota_depasse" && s.depassement) return `${base} (+${s.depassement})`;
+  if (s.type === "marge_faible") return s.severite === "negative" ? "Marge négative" : "Marge faible";
   return base;
 }
 

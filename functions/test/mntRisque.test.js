@@ -130,6 +130,30 @@ describe("mntRisque — sous-facturation", () => {
   });
 });
 
+describe("mntRisque — rentabilité (palier de marge, DO Lot 5)", () => {
+  const mk = (id) => ({ id, fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", echeanceType: "annuel", montantEngage: 0, engagements: [] });
+  it("palier « negative » → signal marge_faible(severite=negative) + score 30 (Rouge) + margeNiveau exposé", () => {
+    const r = mntRisque({ contrats: [mk("c1")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW, margeByContrat: { c1: "negative" } });
+    const s = r.items[0].signals.find((x) => x.type === "marge_faible");
+    expect(s).toBeTruthy();
+    expect(s.severite).toBe("negative");
+    expect(r.items[0].margeNiveau).toBe("negative");
+    expect(r.items[0].score).toBe(30);
+    expect(r.items[0].niveau).toBe("rouge");
+  });
+  it("palier « faible » pèse moins (score 15, Ambre) que « negative »", () => {
+    const r = mntRisque({ contrats: [mk("c1")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW, margeByContrat: { c1: "faible" } });
+    expect(r.items[0].signals.find((x) => x.type === "marge_faible").severite).toBe("faible");
+    expect(r.items[0].score).toBe(15);
+    expect(r.items[0].niveau).toBe("ambre");
+  });
+  it("sans palier fourni (marge saine/inconnue) → aucun signal marge, margeNiveau null", () => {
+    const r = mntRisque({ contrats: [mk("c1")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW });
+    expect(r.items[0].signals.some((x) => x.type === "marge_faible")).toBe(false);
+    expect(r.items[0].margeNiveau).toBe(null);
+  });
+});
+
 describe("mntRisque — score cumulé & palier critique", () => {
   it("plusieurs signaux → Critique (score ≥ 60) + comptage cohérent", () => {
     const contrat = { id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", dateFin: "2026-07-20", echeanceType: "mensuel", montantEngage: 100000, engagements: [{ type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: 8, quota: null }] };

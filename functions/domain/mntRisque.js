@@ -1,14 +1,17 @@
-// Domain PUR — Moteur de risque des contrats de maintenance (mnt_), Lot 5 (DERNIER). Aucun I/O.
-// Agrège, PAR CONTRAT ACTIF, quatre signaux décidés par la direction et en dérive un score [0..100]
+// Domain PUR — Moteur de risque des contrats de maintenance (mnt_), Lot 5. Aucun I/O.
+// Agrège, PAR CONTRAT ACTIF, cinq signaux décidés par la direction et en dérive un score [0..100]
 // et un niveau à quatre paliers (Vert/Ambre/Rouge/Critique = emerald/gold/clay/plum, ADR-008/014).
 // Matérialisé dans summaries/mnt_risque par le recompute (ADR-003). Les horodatages arrivent DÉJÀ
 // convertis en millisecondes par l'appelant (frontière I/O) → le calcul reste pur et testable.
 //
-// Les 4 signaux (décision direction, Lot 5) :
+// Les 5 signaux (décision direction, Lot 5 + DO Lot 5) :
 //   1. SLA rompus       — tickets du contrat dont un engagement SLA est en état « rompu » (slaState).
 //   2. Échéance proche  — dateFin du contrat à ≤ 60 jours (ou déjà dépassée) → renouvellement à traiter.
 //   3. Quota dépassé    — tickets ouverts ce mois-ci au-delà du quota d'un engagement.
 //   4. Sous-facturation — engagé (échéancier) > facturé (factures de l'affaire par fpKey), écart > 0.
+//   5. Rentabilité      — marge prudente (revenu engagé − coût total affaire) sous son palier sain (ADR-034).
+//                         L'appelant fournit un PALIER (negative/faible), JAMAIS le montant : le coût est
+//                         confidentiel et ne doit pas transiter par le summary lu sous droit `maintenance`.
 const { fpKey, cleanName, cleanBu, cleanPerson } = require("../lib/ids");
 const { slaState } = require("./mntSla");
 const { echeancier } = require("./mntEcheancier");
@@ -27,13 +30,16 @@ const round2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
  *  - contrats: [{ id, fp, client, am, bu, statut, dateDebut, dateFin, echeanceType, montantEngage, engagements[] }]
  *  - tickets:  [{ id, contratId, ouvertMs, priseEnCompteMs|null, resoluMs|null, dateJour('AAAA-MM-JJ') }]
  *  - invoices: [{ fp, amountHt }]  (source unique de facturation, rapprochée par fpKey — ADR-005)
+ *  - margeByContrat: { [contratId]: "negative"|"faible" }  PALIER de marge (jamais le montant — ADR-034),
+ *      dérivé côté appelant par margeRisqueNiveau(computeContratPnl). Absent = marge saine/inconnue.
  *  - asOf: 'AAAA-MM-JJ' (aujourd'hui) ; nowMs: millisecondes (horloge SLA « maintenant »)
  * → { items[], counts{vert,ambre,rouge,critique}, total, atRisk, asOf }
  */
-function mntRisque({ contrats, tickets, invoices, asOf, nowMs } = {}) {
+function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } = {}) {
   const conts = Array.isArray(contrats) ? contrats : [];
   const ticks = Array.isArray(tickets) ? tickets : [];
   const invs = Array.isArray(invoices) ? invoices : [];
+  const margeBy = (margeByContrat && typeof margeByContrat === "object") ? margeByContrat : {};
   const today = parseDay(asOf);
   const now = Number(nowMs) || 0;
   const mois = String(asOf || "").slice(0, 7); // 'AAAA-MM' du mois courant (quota)
@@ -106,13 +112,19 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs } = {}) {
       score += Math.min(25, Math.round(sousFactPct * 50));
     }
 
+    // 5. Rentabilité — palier de marge FOURNI par l'appelant (jamais recalculé ici : le coût est
+    // confidentiel et ne transite pas par le domaine du risque). « negative » (le contrat ne couvre pas
+    // son coût) pèse plus que « faible » (marge trop mince). Le montant reste dans le callable gaté.
+    const margeNiveau = margeBy[c.id] === "negative" || margeBy[c.id] === "faible" ? margeBy[c.id] : null;
+    if (margeNiveau) { signals.push({ type: "marge_faible", severite: margeNiveau }); score += margeNiveau === "negative" ? 30 : 15; }
+
     score = Math.min(100, Math.round(score));
     const niveau = score === 0 ? "vert" : score < 30 ? "ambre" : score < 60 ? "rouge" : "critique";
     counts[niveau] += 1;
     items.push({
       id: c.id, fp: c.fp || null, client: cleanName(c.client) || "", am: cleanPerson(c.am) || "", bu: cleanBu(c.bu) || "",
       statut: String(c.statut), score, niveau, signals,
-      slaRompus, joursAvantFin, quotaDepasse,
+      slaRompus, joursAvantFin, quotaDepasse, margeNiveau,
       sousFacturation: { engage: ech.engage, facture: ech.facture, ecart: ech.ecart },
     });
   }
