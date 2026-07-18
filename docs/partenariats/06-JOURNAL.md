@@ -365,3 +365,29 @@
 - Les nouveaux ids de bulletins (`par_*`) ne sont pas dans le catalogue de la curation IA (`newsCuration`)
   → toujours affichés (jamais démotés), dégradation gracieuse documentée. À intégrer au catalogue de
   curation si le besoin de filtrage fin de ces bulletins se confirme.
+
+---
+
+## Lot P3 — Historisation de la couverture des quotas (tendance)
+
+**Fait**
+- Nouveau summary `summaries/par_quotasHistory` : un point par jour (statuts conformes/à risque/non
+  conformes + certifs à renouveler/expirées), patron EXACT de `summaries/qualityHistory` (lecture du
+  doc précédent, remplacement idempotent du point du jour, fenêtre glissante 90 j). Écrit dans le bloc
+  `want("partenariats")` de `aggregate.js`. Couvert par ADR-P04 (états dérivés au recompute) — pas de
+  nouvel ADR.
+- Point PUR + testé : `domain/parQuota.parQuotaHistoryPoint` (+ `test/parQuota.test.js`).
+- Front : carte « Tendance de conformité (30 j) » dans le tableau de bord Partenariats, via le composant
+  `MultiLine` réutilisé de `design/charts` (recharts, chunk lazy — budget d'entrée inchangé à 118.1 KB).
+- Préfixe `par_` ⇒ gaté par les rules existantes (drapeau + droit `partenariats`, pas de `rentabilite`).
+  Vérif : `test-rules/rules.test.js` (par_quotasHistory lisible sous partenariats). functions 1107/1107,
+  rules 73/73, web lint/build OK, no-undef OK.
+
+**Appris**
+- Le patron « snapshot quotidien » (qualityHistory / TACE history) est réutilisable tel quel pour toute
+  nouvelle tendance : lire le doc, filtrer le jour courant, pousser, trier, `slice(-90)`. Idempotent au
+  sein d'un recompute (coalescing sûr).
+
+**Échoué / en attente**
+- L'historique se construit à partir de zéro (aucun rétro-remplissage possible) : la courbe n'a de valeur
+  qu'après plusieurs jours de recompute. Attendu, documenté (comme qualityHistory).

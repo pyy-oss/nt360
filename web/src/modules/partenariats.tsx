@@ -12,7 +12,8 @@ import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
-import { fmt } from "../design/tokens";
+import { fmt, T } from "../design/tokens";
+import { MultiLine } from "../design/charts";
 import {
   PARTNERSHIP_STATUS_LABEL, partnershipTone, CERT_STATUS_LABEL, certStatusTone,
   ALERT_BUCKET_LABEL, alertBucketTone, ASSIGNMENT_STATUS_LABEL, assignmentTone,
@@ -31,6 +32,7 @@ type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: nu
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[] } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
+type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
 type ConsultantLite = { id: string; name: string; bu?: string };
 
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
@@ -53,6 +55,7 @@ export const Partenariats: FC<Props> = () => {
   const { data: quotas } = useDocData<QuotaSummary>("summaries/par_quotas");
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
+  const { data: history } = useDocData<QuotaHistory>("summaries/par_quotasHistory");
   const { data: mapDoc } = useDocData<{ map?: Record<string, string> }>("config/parPartnerMap");
 
   const partnerName = useMemo(() => { const m: Record<string, string> = {}; for (const p of partners || []) m[p.id] = p.name; return m; }, [partners]);
@@ -71,7 +74,7 @@ export const Partenariats: FC<Props> = () => {
         ]}
       />
 
-      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} partners={partners || []} partnerName={partnerName} />}
+      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "config" && <ConfigTab partners={partners || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
@@ -167,11 +170,13 @@ const QbrList: FC<{ title: string; tone: string; items?: string[] }> = ({ title,
 );
 
 // ─────────────────────────────────────────────────────────────────────── Tableau de bord
-const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, quotas, alerts, relances, partners, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, quotas, alerts, relances, history, partners, partnerName }) => {
   const alertItems = alerts?.items || [];
   const relanceItems = relances?.items || [];
   const quotaPartners = quotas?.partners || [];
   const nonConf = quotaPartners.filter((p) => p.status === "non_compliant" || p.status === "at_risk").length;
+  // Tendance de conformité (Lot P3) : historique quotidien de la couverture des quotas (30 derniers jours).
+  const trend = (history?.days || []).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Conformes: d.conformes, "À risque": d.aRisque, "Non conformes": d.nonConformes }));
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -208,6 +213,16 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
         />
       </Card>
+
+      {trend.length >= 2 && (
+        <Card title="Tendance de conformité des partenariats (30 j)">
+          <Tip>Évolution quotidienne du nombre de partenariats conformes, à risque et non conformes (historisé à chaque recalcul).</Tip>
+          <MultiLine
+            data={trend}
+            series={[{ key: "Conformes", color: T.emerald, name: "Conformes" }, { key: "À risque", color: T.gold, name: "À risque" }, { key: "Non conformes", color: T.clay, name: "Non conformes" }]}
+          />
+        </Card>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card title="Renouvellements de certifications (≤ 90 j)">

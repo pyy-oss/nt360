@@ -416,6 +416,7 @@ describe("Module Partenariats & Certifications — drapeau + cloisonnement CA (r
     await setDoc(doc(db, "summaries/par_ca"), { totalXof: 1 });
     await setDoc(doc(db, "summaries/par_quotas"), { partners: [] });
     await setDoc(doc(db, "summaries/par_news"), { bulletins: [] });
+    await setDoc(doc(db, "summaries/par_quotasHistory"), { days: [] });
   });
   // Accorde au rôle `commercial` le droit `partenariats` (absent de la matrice → none par défaut) avec un
   // niveau `rentabilite` PARAMÉTRABLE : prouve que le CA exige le SECOND verrou, pas seulement partenariats.
@@ -434,6 +435,7 @@ describe("Module Partenariats & Certifications — drapeau + cloisonnement CA (r
     await assertSucceeds(getDoc(doc(as("commercial"), "par_partners/dell")));    // non confidentiel
     await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_quotas"))); // non confidentiel
     await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_news")));   // Actualité par_ (ADR-P09) non confidentielle
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_quotasHistory"))); // tendance quotas (Lot P3) non confidentielle
     await assertFails(getDoc(doc(as("commercial"), "summaries/par_ca")));        // CA confidentiel → second verrou
   });
   it("partenariats AVEC rentabilite : CA (par_ca) lisible", async () => {
