@@ -13,11 +13,17 @@ describe("parAi — snapshots + validation des sorties IA", () => {
     expect(s.assignations_en_retard[0]).toMatch(/Awa/);
   });
 
-  it("qbrSnapshot : CA FCFA + couverture + certifs actives", () => {
-    const certifs = [{ partnerId: "fortinet", status: "active", certName: "NSE 4" }];
+  it("qbrSnapshot : CA FCFA + couverture + certifs actives (statut re-dérivé en amont ⇒ expirées exclues)", () => {
+    // Le handler re-dérive le statut (computeCertStatus) AVANT d'appeler qbrSnapshot ; qbrSnapshot ne garde
+    // que les `active`. Une certif expirée (statut re-dérivé) ne doit donc jamais figurer dans la liste QBR.
+    const certifs = [
+      { partnerId: "fortinet", status: "active", certName: "NSE 4" },
+      { partnerId: "fortinet", status: "expired", certName: "NSE 7 (périmée)" },
+    ];
     const s = qbrSnapshot({ partnerId: "fortinet", partner: { name: "Fortinet" }, periode: "T3 2026", ca, quotas, certifs, relances });
     expect(s).toMatchObject({ partenaire: "Fortinet", statut_conformite: "at_risk", ca_realise_ytd_fcfa: 1200000 });
     expect(s.certifications_actives).toContain("NSE 4");
+    expect(s.certifications_actives).not.toContain("NSE 7 (périmée)");
   });
 
   it("masquage CA (ADR-P07) : ca={} ⇒ montant 0 dans les deux snapshots (contrat du handler sans droit rentabilite)", () => {

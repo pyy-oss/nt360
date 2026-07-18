@@ -242,6 +242,11 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
       db.collection("par_certifications").where("partnerId", "==", partnerId).limit(MAX_SCAN + 1).get(),
     ]);
     const certifs = sliceCapped(certSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Le statut persisté d'une certif est un cache figé à l'écriture ; on le RE-DÉRIVE ici (même fonction
+    // pure que le recompute, cf. aggregate.js) avant de bâtir la QBR, pour que « certifications actives »
+    // reflète le temps écoulé — une certif écrite « active » a pu expirer depuis. Statut « à date » cohérent.
+    const qbrToday = new Date().toISOString().slice(0, 10);
+    for (const c of certifs) c.status = computeCertStatus(c.expiryDate, qbrToday);
     const { qbrSnapshot } = require("../domain/parAi");
     const snapshot = qbrSnapshot({ partnerId, partner: partSnap.data() || {}, periode, ca: seeCa ? (caSnap.data() || {}) : {}, quotas: quotaSnap.data() || {}, certifs, relances: relSnap.data() || {} });
     const { generateQbr } = require("../lib/parAi");
