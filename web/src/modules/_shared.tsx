@@ -142,6 +142,7 @@ const ALERT_TARGET: Record<string, string> = {
   concentration_client: "clients", bc_en_attente: "bc:open", bc_en_retard: "bc:late",
   opp_dormante: "opplist", opp_active_carnet: "opplist",
   ecart_valorisation: "orderlist",
+  livraison_en_retard: "backlog", // retard de livraison → cockpit Backlog (délais & échéances ClickUp)
 };
 
 // Cellule N° FP cliquable → ouvre FP 360° pré-renseigné (maillage transverse). Repli en texte

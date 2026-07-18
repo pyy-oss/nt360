@@ -453,6 +453,11 @@ async function recomputeCore(db, only) {
   // les alertes et le cockpit Qualité partagent des métriques identiques (surfacturation, factures non
   // rattachées) sur les MÊMES entrées. Des gates divergents laissaient un recalcul partiel rafraîchir
   // l'un sans l'autre → comptes incohérents entre les deux panneaux (ex. 61 vs 65 surfacturées).
+  // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) — calculés AVANT les alertes pour
+  // alimenter le Centre d'alertes (retard de livraison → pilotage par exception, DO Lot 3) ; réutilisés
+  // ensuite par Qualité (issues), Actualité (buildNews) et l'analytique délais.
+  const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
+  const cuSignals = clickupSignals(orders, clickupSyncMap, safeId, asOf);
   if (want("alerts") || want("dataQuality")) {
     // CLOISONNEMENT PAR MODULE (confidentialité opposable côté serveur, cf. audit P0-C) : une alerte
     // porte des données du module dont elle relève (noms fournisseurs saturés, montant de créances
@@ -468,8 +473,10 @@ async function recomputeCore(db, only) {
       opp_dormante: "pipeline", opp_active_carnet: "pipeline",
       // Écart de valorisation amont : concerne les Commandes (droit `overview`) — défaut explicite.
       ecart_valorisation: "overview",
+      // Retard de LIVRAISON → module backlog (comme clickupDelays) : signal d'exécution du carnet.
+      livraison_en_retard: "backlog",
     };
-    const allAlerts = alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr);
+    const allAlerts = alerts(orders, invoices, sup, bcLines, currentFy, asOf, opps, alertThr, cuSignals.overdue);
     const bucket = { overview: [], facturation: [], backlog: [], fournisseurs: [], bc: [], pipeline: [] };
     for (const a of allAlerts) { if (a.margin) continue; (bucket[ALERT_MOD[a.type] || "overview"]).push(a); }
     const meta = { fy: currentFy, ...stamp };
@@ -483,10 +490,8 @@ async function recomputeCore(db, only) {
   }
   // Cockpit qualité des données : hygiène d'ingestion (champs manquants, rattachements, incohérences).
   const dqSummary = dataQuality(orders, invoices, opps, bcLines, projectSheets, alertThr, staleOpps, agedOpps, pnlOrders);
-  // Signaux ClickUp (retard de LIVRAISON + incohérences statut↔données) : les incohérences enrichissent
-  // le cockpit Qualité ; le retard de livraison alimente un bulletin d'Actualité (voir buildNews).
-  const { clickupSignals, clickupDelays } = require("../domain/clickupSignals");
-  const cuSignals = clickupSignals(orders, clickupSyncMap, safeId, asOf);
+  // Incohérences statut↔données ClickUp → enrichissent le cockpit Qualité (cuSignals calculé plus haut,
+  // avant les alertes, pour aussi alimenter le retard de livraison au Centre d'alertes — DO Lot 3).
   if (cuSignals.issues.length) dqSummary.issues = [...(dqSummary.issues || []), ...cuSignals.issues];
   // Enrichissement inverse (Lot 4) : commandes BLOQUÉES ou en priorité URGENTE côté ClickUp → bulletin
   // d'Actualité (projets à débloquer / à traiter en priorité). Priorité/blocage remontés par readTaskSync.
