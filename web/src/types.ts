@@ -33,6 +33,7 @@ export interface AtterrissageSummary {
 }
 
 export type StageBucket = { amount?: number; weighted?: number; count?: number };
+export type AgingBucket = { brut?: number; count?: number };
 export type ClosingBucket = { brut?: number; pond?: number; count?: number };
 export type StaleOpp = { oppId?: string; client?: string; am?: string; amount?: number; weighted?: number; closingDate?: string; stageLabel?: string };
 export interface ClosingAnalysis {
@@ -55,6 +56,13 @@ export interface PipelineSummary {
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
   closing?: ClosingAnalysis | null;
+  // ÂGE des opps actives — périmètre DATÉ (opps portant dateCreation, càd issues d'Odoo). `withDate`/`total`
+  // = couverture (le front dit honnêtement « mesuré sur X opps datées »). Tranches ≤30 / 31-90 / 91-180 / >180 j.
+  aging?: {
+    total?: number; withDate?: number; avgAge?: number; avgProjectedCycle?: number;
+    buckets?: { d30?: AgingBucket; d90?: AgingBucket; d180?: AgingBucket; dPlus?: AgingBucket };
+    top?: { oppId?: string; client?: string; am?: string; amount?: number; stage?: number; dateCreation?: string; ageDays?: number }[];
+  } | null;
   // Opportunités DORMANTES (année de closing < exercice) : volume/valeur/ancienneté. Global (indépendant
   // de la période) ; `excludeDormant` = drapeau appliqué (exclues du pondéré cumulé vs simple signal).
   dormant?: { count?: number; brut?: number; ageMin?: number; ageMax?: number; ageAvg?: number };
