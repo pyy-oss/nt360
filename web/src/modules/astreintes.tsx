@@ -20,7 +20,7 @@ import { FpLink, type Props } from "./_shared";
 const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
 const digits = (s: string) => s.replace(/[^\d]/g, "");
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
-  <label className="flex flex-col gap-1"><span className="text-[12px] text-muted">{label}</span>{children}</label>
+  <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
 
 type AstreinteRow = { id: string; fp: string | null; contratId: string | null; consultantId: string | null; dateDebut: string | null; dateFin: string | null; motif: string; statut: string; requestedByName: string | null; approvalId: string | null; montant: number | null };
