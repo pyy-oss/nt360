@@ -13,6 +13,7 @@ import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState,
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
+import { buildPartnerPayload, partnerToForm, PAR_LEVELS, type PartnerFormState } from "../lib/parPartnerForm";
 import { fmt, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
@@ -26,7 +27,7 @@ import type { Props } from "./_shared";
 const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
-type Partner = { id: string; name: string; programName?: string; tiers?: { id: string; name: string; rank: number }[]; certificationCatalog?: CatalogEntry[]; requirements?: unknown[] };
+type Partner = { id: string; name: string; programName?: string; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
 type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcCount: number }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
@@ -391,6 +392,8 @@ const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label:
 // ─────────────────────────────────────────────────────────────────────── Paramétrage (mapping fournisseur → constructeur)
 const ConfigTab: FC<{ partners: Partner[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean }> = ({ partners, partnerOpts, mapDoc, ca, canWrite }) => {
   const [rows, setRows] = useState<{ supplier: string; partnerId: string }[]>([]);
+  // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
+  const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
   useEffect(() => { setRows(Object.entries(mapDoc?.map || {}).map(([supplier, partnerId]) => ({ supplier, partnerId }))); }, [mapDoc]);
   const unmapped = ca?.unmapped || [];
   const save = async () => {
@@ -429,7 +432,8 @@ const ConfigTab: FC<{ partners: Partner[]; partnerOpts: { value: string; label: 
         )}
       </Card>
 
-      <Card title="Référentiel des partenaires">
+      <Card title="Référentiel des partenaires" actions={canWrite ? <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button> : undefined}>
+        <Tip>Un <b>partenaire</b> = un constructeur (Dell, Cisco, Fortinet…) avec ses <b>niveaux</b>, ses <b>compétences</b>, son <b>catalogue de certifications</b> et ses <b>exigences de quota</b> (les objectifs : par niveau, combien d'ingénieurs certifiés sur quelle cible). Ces exigences alimentent la conformité des quotas et les partenariats à risque du tableau de bord.</Tip>
         <Table
           columns={[
             colText("Constructeur", (r) => r.name),
@@ -437,11 +441,114 @@ const ConfigTab: FC<{ partners: Partner[]; partnerOpts: { value: string; label: 
             colNum("Niveaux", (r) => String((r.tiers || []).length)),
             colNum("Certifs au catalogue", (r) => String((r.certificationCatalog || []).length)),
             colNum("Exigences", (r) => String((r.requirements || []).length)),
+            ...(canWrite ? [colText("", (r) => <button className="btn-ghost text-[11px]" onClick={() => setEdit(r)}>Éditer</button>)] : []),
           ]}
           rows={partners} rowKey={(r) => r.id}
-          empty="Aucun partenaire — le référentiel des constructeurs est initialisé côté direction (callable upsertParPartner)."
+          empty="Aucun partenaire — créez le premier constructeur avec « Nouveau partenaire »."
         />
       </Card>
+      {edit !== undefined && <PartnerForm initial={edit} onClose={() => setEdit(undefined)} />}
     </div>
   );
 };
+
+// Clé locale stable pour relier les lignes du formulaire (niveau/compétence/certif) à leurs références
+// (catalogue → compétence, exigence → niveau + cible) indépendamment des libellés saisis. Compteur simple
+// (côté navigateur, hors rendu) — jamais persisté : au submit, buildPartnerPayload remappe vers les slugs.
+let _pk = 0;
+const nk = () => "k" + (++_pk);
+
+// Formulaire de RÉFÉRENTIEL partenaire (création + édition). Réutilise les primitives du module (Modal,
+// Field, Select, Busy) ; ne fait AUCUN calcul métier — il prépare l'entrée (buildPartnerPayload, pur/testé)
+// et laisse le backend upsertParPartner valider et trancher (intégrité référentielle, slugs, validité).
+const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ initial, onClose }) => {
+  const [f, setF] = useState<PartnerFormState>(() => initial
+    ? partnerToForm(initial)
+    : { name: "", programName: "", tiers: [], comps: [], certs: [], reqs: [] });
+  const set = (patch: Partial<PartnerFormState>) => setF((s) => ({ ...s, ...patch }));
+  const compOpts = f.comps.filter((c) => c.name.trim()).map((c) => ({ value: c.k, label: c.name }));
+  const tierOpts = f.tiers.filter((t) => t.name.trim()).map((t) => ({ value: t.k, label: t.name }));
+  // Cibles d'une exigence : une compétence (couverture agrégée) OU une certification précise du catalogue.
+  const targetOpts = [
+    ...f.comps.filter((c) => c.name.trim()).map((c) => ({ value: "comp:" + c.k, label: "Compétence · " + c.name })),
+    ...f.certs.filter((c) => c.name.trim()).map((c) => ({ value: "cert:" + c.k, label: "Certif · " + c.name })),
+  ];
+  const submit = async () => {
+    const built = buildPartnerPayload(f);
+    if (!built.ok) throw new Error(built.error); // remonté par Busy (toast)
+    await callFn("upsertParPartner", built.value);
+    onClose();
+  };
+  return (
+    <Modal open title={initial ? `Éditer ${initial.name}` : "Nouveau partenaire"} size="form" onClose={onClose}
+      actions={<Busy label="Enregistrer" fn={submit} okMsg="Partenaire enregistré" />}>
+      <div className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Constructeur (nom)"><input className="field" value={f.name} placeholder="Ex. Fortinet" onChange={(e) => set({ name: e.target.value })} /></Field>
+          <Field label="Programme"><input className="field" value={f.programName} placeholder="Ex. Engage (optionnel)" onChange={(e) => set({ programName: e.target.value })} /></Field>
+        </div>
+
+        <FormBlock title="Niveaux" onAdd={() => set({ tiers: [...f.tiers, { k: nk(), name: "", rank: "" }] })}>
+          {f.tiers.map((t, i) => (
+            <div key={t.k} className="flex items-center gap-2">
+              <input className="field flex-1" value={t.name} placeholder="Libellé (ex. Gold)" onChange={(e) => set({ tiers: f.tiers.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} />
+              <input className="field w-24" type="number" value={t.rank} placeholder="Rang" onChange={(e) => set({ tiers: f.tiers.map((x, j) => j === i ? { ...x, rank: e.target.value } : x) })} />
+              <button className="btn-ghost text-clay text-[11px]" onClick={() => set({ tiers: f.tiers.filter((_, j) => j !== i) })}>Retirer</button>
+            </div>
+          ))}
+        </FormBlock>
+
+        <FormBlock title="Compétences" onAdd={() => set({ comps: [...f.comps, { k: nk(), name: "" }] })}>
+          {f.comps.map((c, i) => (
+            <div key={c.k} className="flex items-center gap-2">
+              <input className="field flex-1" value={c.name} placeholder="Libellé (ex. Sécurité réseau)" onChange={(e) => set({ comps: f.comps.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} />
+              <button className="btn-ghost text-clay text-[11px]" onClick={() => set({ comps: f.comps.filter((_, j) => j !== i) })}>Retirer</button>
+            </div>
+          ))}
+        </FormBlock>
+
+        <FormBlock title="Catalogue de certifications" onAdd={() => set({ certs: [...f.certs, { k: nk(), name: "", code: "", compK: "", level: "professional", validityMonths: "" }] })}>
+          {f.certs.map((c, i) => (
+            <div key={c.k} className="grid sm:grid-cols-5 gap-2 items-center rounded-lg border border-line p-2">
+              <input className="field" value={c.code} placeholder="Code (NSE7)" onChange={(e) => set({ certs: f.certs.map((x, j) => j === i ? { ...x, code: e.target.value } : x) })} />
+              <input className="field sm:col-span-2" value={c.name} placeholder="Libellé (NSE 7)" onChange={(e) => set({ certs: f.certs.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} />
+              <Select value={c.compK} onChange={(v) => set({ certs: f.certs.map((x, j) => j === i ? { ...x, compK: v } : x) })} options={compOpts} placeholder="Compétence…" />
+              <div className="flex items-center gap-2">
+                <Select value={c.level} onChange={(v) => set({ certs: f.certs.map((x, j) => j === i ? { ...x, level: v } : x) })} options={PAR_LEVELS} />
+                <input className="field w-20" type="number" value={c.validityMonths} placeholder="mois" onChange={(e) => set({ certs: f.certs.map((x, j) => j === i ? { ...x, validityMonths: e.target.value } : x) })} />
+                <button className="btn-ghost text-clay text-[11px]" onClick={() => set({ certs: f.certs.filter((_, j) => j !== i) })}>Retirer</button>
+              </div>
+            </div>
+          ))}
+        </FormBlock>
+
+        <FormBlock title="Exigences de quota (objectifs)" onAdd={() => set({ reqs: [...f.reqs, { k: nk(), tierK: "", targetK: "", minCount: "" }] })}>
+          {f.reqs.map((r, i) => (
+            <div key={r.k} className="flex items-center gap-2 flex-wrap">
+              <div className="w-40"><Select value={r.tierK} onChange={(v) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, tierK: v } : x) })} options={tierOpts} placeholder="Niveau…" /></div>
+              <span className="text-faint text-[12px]">exige</span>
+              <input className="field w-16" type="number" value={r.minCount} placeholder="min" onChange={(e) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, minCount: e.target.value } : x) })} />
+              <span className="text-faint text-[12px]">ingénieur(s) sur</span>
+              <div className="flex-1 min-w-[180px]"><Select value={r.targetK} onChange={(v) => set({ reqs: f.reqs.map((x, j) => j === i ? { ...x, targetK: v } : x) })} options={targetOpts} placeholder="Cible (compétence/certif)…" /></div>
+              <button className="btn-ghost text-clay text-[11px]" onClick={() => set({ reqs: f.reqs.filter((_, j) => j !== i) })}>Retirer</button>
+            </div>
+          ))}
+        </FormBlock>
+
+        <Tip>L'identifiant technique de chaque niveau/compétence/certification est <b>dérivé du libellé</b> (comme les codes de l'ERP). Les <b>exigences</b> sont les <b>objectifs du business plan</b> : pour tenir un niveau, un minimum d'ingénieurs certifiés sur une compétence ou une certification. La <b>date d'expiration</b> des certifs sera dérivée de la <b>validité (mois)</b> saisie ici — jamais ailleurs.</Tip>
+      </div>
+    </Modal>
+  );
+};
+
+// Section repliable d'une liste éditable (niveaux/compétences/…) : en-tête + bouton « Ajouter ». Réutilise
+// l'idiome des lignes de correspondance fournisseur ci-dessus (input + Retirer + Ajouter).
+const FormBlock: FC<{ title: string; onAdd: () => void; children: ReactNode }> = ({ title, onAdd, children }) => (
+  <div className="space-y-2">
+    <div className="flex items-center justify-between">
+      <span className="text-[12px] font-semibold text-muted">{title}</span>
+      <button className="btn-ghost text-[12px]" onClick={onAdd}><Plus size={13} /> Ajouter</button>
+    </div>
+    {children}
+  </div>
+);
