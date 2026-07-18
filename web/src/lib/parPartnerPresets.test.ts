@@ -6,9 +6,10 @@ import { buildPartnerPayload, bpAchievement } from "./parPartnerForm";
 const mkNk = () => { let n = 0; return () => "k" + (++n); };
 
 describe("parPartnerPresets", () => {
-  it("expose les dix partenaires clés NT (données réelles des fichiers de référence)", () => {
+  it("expose les vingt partenaires clés NT (données réelles des fichiers de référence)", () => {
     expect(PARTNER_PRESETS.map((p) => p.id).sort()).toEqual(
-      ["checkpoint", "cisco", "dell", "f5", "fortinet", "hpe-aruba", "huawei", "kaspersky", "microsoft", "paloalto"],
+      ["allot", "apc-schneider", "checkpoint", "cisco", "dell", "f5", "fortinet", "hpe-aruba", "huawei", "jabra",
+        "juniper", "kaspersky", "microsoft", "nutanix", "paloalto", "rapid7", "sophos", "tufin", "veritas", "wallix"],
     );
   });
 
