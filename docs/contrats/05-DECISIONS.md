@@ -3,6 +3,35 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-038 — Le module respecte le filtre global BU/AM/Client (sous-ensemble de contrats visibles)
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction (retour d'usage : les filtres BU/AM/Client s'affichaient mais n'agissaient pas)
+
+### Contexte
+La barre de filtre commune de l'ERP (BU / AM / Client / PM) était **affichée** au-dessus du module Contrats
+mais **inerte** : le module ne la consommait pas (aucun `useFilters`), contrairement à Pipeline. Un directeur
+ne pouvait pas restreindre le parc à une BU ou un client — il subissait tout le parc, table par table.
+
+### Décision
+- Le module consomme `useFilters()` et se restreint au **sous-ensemble de contrats visibles** (`vContrats`),
+  dérivé par `match({bu, am, client})` avec canonicalisation du client via `useClientKey` (parité alias).
+- **Toutes** les vues suivent ce même périmètre : les vues **dérivées client** (tableau de bord, revenu
+  récurrent, conformité, renouvellements, maintenance par type, calendrier SLA, listes contrats/tickets)
+  reçoivent les tableaux filtrés (`vContrats`/`vTickets`/`vInterventions`) ; les **lignes de summary backend**
+  (risque, rentabilité, propositions de statut) sont **sous-filtrées** sur le même ensemble (par bu/am/client
+  pour le risque qui les porte, par N° FP visible pour la rentabilité et le statut).
+- **Invariant de parité PRÉSERVÉ par construction** : on ne **re-calcule aucun score** (le risque reste celui
+  du recompute serveur) — on **compte** les lignes retenues. Un KPI filtré est donc toujours le décompte exact
+  des lignes filtrées affichées, jamais une seconde dérivation divergente. `FilterNote` signale le périmètre actif.
+- Additif, front seul (aucun backend, aucune règle, aucun `deployed-functions.txt`). Hooks tous appelés
+  au-dessus du `return` ; `react-hooks/exhaustive-deps` respecté.
+
+### Conséquences
+- Un directeur peut piloter le parc contrat par BU / AM / client, cohérent avec le reste de l'ERP.
+- Le filtre **PM** n'est pas appliqué (un contrat n'a pas de PM ; dimension non pertinente ici) — assumé.
+
 ## ADR-037 — Les Astreintes vivent dans EXÉCUTION (écran dédié), pas dans Contrats
 
 - **Date :** 2026-07-18

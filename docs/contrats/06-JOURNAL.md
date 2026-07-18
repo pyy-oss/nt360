@@ -1291,3 +1291,17 @@ des imports devenus inutiles dans maintenance.tsx (callFn/httpsCallable/function
 une donnée transverse (charge par affaire) rangée dans un seul module suggère une portée fausse. On a
 distingué la **relocalisation présentationnelle** (bougé, sans risque, ce lot) du **découplage RBAC** (droit
 propre, changement backend, dette assumée et documentée) — ne pas confondre les deux évite un sur-engineering.
+
+## Filtre global BU/AM/Client câblé (CT2) — 2026-07-18
+
+**Fait.** Les filtres BU/AM/Client s'affichaient mais n'agissaient pas sur le module (aucun `useFilters`).
+Câblage (ADR-038) : le module se restreint au sous-ensemble de contrats visibles (`vContrats`) et propage ce
+périmètre à toutes les vues — dérivées client (dashboard/revenu/conformité/renouvellements/type/SLA/listes via
+`vContrats`/`vTickets`/`vInterventions`) et lignes de summary backend (risque par bu/am/client, rentabilité et
+statut par N° FP visible). `useClientKey` pour la parité alias. `FilterNote` signale le périmètre.
+
+**Appris (invariant de parité).** La tentation était de re-dériver des KPI filtrés côté client — source
+classique de divergence. La règle qui a rendu ce lot sûr : **ne jamais re-scorer, seulement sous-compter**.
+Chaque KPI filtré est le décompte exact des lignes filtrées affichées (le risque reste celui du recompute
+serveur, on ne fait que retenir les lignes du périmètre). La parité tient donc **par construction**, pas par
+vérification a posteriori. Le filtre PM est volontairement ignoré (un contrat n'a pas de PM).
