@@ -147,6 +147,7 @@ setParPartnerMap
 upsertParAssignment
 setParAssignmentStatus
 deleteParAssignment
+pushParAssignmentToClickup
 generateParActionPlan
 generateParQbr
 parRelancesSweep

@@ -391,3 +391,27 @@
 **Échoué / en attente**
 - L'historique se construit à partir de zéro (aucun rétro-remplissage possible) : la courbe n'a de valeur
   qu'après plusieurs jours de recompute. Attendu, documenté (comme qualityHistory).
+
+---
+
+## Lot P4 — Push d'une assignation de certification en tâche ClickUp (liste dédiée)
+
+**Fait**
+- Callable `pushParAssignmentToClickup` : crée/met à jour (idempotent) une tâche ClickUp pour une
+  assignation, dans la liste DÉDIÉE `config/clickup.parListId` (ADR-P10). Réutilise `lib/clickup`
+  (createTask/updateTask) + secret `CLICKUP_TOKEN` — rien recréé. Payload PUR (`domain/parClickup`).
+  Écriture `partenariats` + drapeau + rate-limit `clickup`. taskId/url stockés sur l'assignation
+  (anti-doublon). Inactif si parListId non renseigné (défaut).
+- Config : `setClickupConfig` accepte `parListId` (défaut vide) ; champ ajouté dans Habilitations → ClickUp.
+- Front : onglet Assignations — bouton « Pousser / Resynchroniser » + lien vers la tâche.
+- Tests `test/parClickup.test.js`. functions 1110/1110, deploy-targets 178, no-undef OK, bundle 118.1 KB.
+  Aucune règle Firestore touchée (par_assignments déjà gaté ; taskId/url non confidentiels).
+
+**Appris**
+- Décision de convention (mélange d'entités dans le board ClickUp) validée par l'humain → liste dédiée
+  plutôt que la liste commandes. Le défaut « parListId vide = inactif » garantit qu'aucune tâche ne part
+  tant que l'ops n'a pas explicitement désigné une liste — cohérent avec « drapeau éteint = ERP d'avant ».
+
+**Échoué / en attente**
+- Pas de rattachement inverse (une tâche ClickUp fermée ne met pas à jour le statut de l'assignation) :
+  sens app→ClickUp seulement, comme la v1 du push commande. Sens inverse = lot ultérieur si besoin.

@@ -8,7 +8,7 @@ const { validateCertification, computeCertStatus } = require("../domain/parCerti
 const { validateAssignment, ASSIGNMENT_STATUSES } = require("../domain/parAssignment");
 const { isParEnabled } = require("../domain/parFeature");
 
-function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, rateLimit, logOps }) {
+function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -198,6 +198,40 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return canRead(matrix, role, "rentabilite");
   }
 
+  // Pousse (ou met à jour, idempotent) une assignation de certification en TÂCHE ClickUp, dans la liste
+  // DÉDIÉE config/clickup.parListId (ADR-P10) — jamais le board commandes. Réutilise le client ClickUp
+  // existant + le secret CLICKUP_TOKEN. Lien taskId/url stocké sur l'assignation → ré-appui = mise à jour,
+  // pas de doublon. Réservé écriture `partenariats` + drapeau. Inactif si parListId non renseigné.
+  const pushParAssignmentToClickup = onCallG("pushParAssignmentToClickup", { secrets: CLICKUP_TOKEN ? [CLICKUP_TOKEN] : [], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    if (rateLimit && !(await rateLimit(req.auth.uid, "clickup", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations ClickUp en peu de temps — patientez un instant.");
+    const id = String(req.data && req.data.id || "").trim().slice(0, 200);
+    if (!id) throw new HttpsError("invalid-argument", "id d'assignation invalide");
+    const cu = (await db.doc("config/clickup").get()).data() || {};
+    if (cu.enabled === false) throw new HttpsError("failed-precondition", "Intégration ClickUp désactivée.");
+    const listId = String(cu.parListId || "").trim();
+    if (!listId) throw new HttpsError("failed-precondition", "Liste ClickUp des certifications non configurée (Habilitations → ClickUp).");
+    const token = CLICKUP_TOKEN && CLICKUP_TOKEN.value();
+    if (!token) throw new HttpsError("failed-precondition", "CLICKUP_TOKEN non configuré (Secret Manager).");
+    const ref = db.doc(`par_assignments/${id}`);
+    const snap = await ref.get();
+    if (!snap.exists) throw new HttpsError("failed-precondition", "assignation inconnue");
+    const a = snap.data() || {};
+    const clickup = require("../lib/clickup");
+    const { parAssignmentTaskPayload } = require("../domain/parClickup");
+    const payload = parAssignmentTaskPayload(a);
+    let taskId = a.clickupTaskId, url = a.clickupUrl, created = false;
+    try {
+      if (taskId) { await clickup.updateTask(token, taskId, payload); }
+      else { const t = await clickup.createTask(token, listId, payload); taskId = t.id; url = t.url; created = true; }
+    } catch (e) { throw new HttpsError("unavailable", "ClickUp n'a pas répondu (réessayez)."); }
+    await ref.set({ clickupTaskId: taskId, clickupUrl: url || null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: created ? "push_par_assignment_clickup" : "update_par_assignment_clickup", module: "partenariats", entity: "par_assignment", entityId: id, detail: { taskId }, ts: FieldValue.serverTimestamp() });
+    if (logOps) await logOps({ kind: "clickup", action: "parAssignmentPush", status: "ok", uid: req.auth.uid, detail: { id, taskId, created } });
+    return { ok: true, taskId, url: url || null, created };
+  });
+
   // Garde-fou IA commun : droit lecture + drapeau + rate-limit + clé présente. Renvoie la clé.
   async function assertAiReady(req) {
     await requireRead(req, "partenariats");
@@ -257,7 +291,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, qbr: out.qbr, snapshot, model: out.model };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, generateParActionPlan, generateParQbr };
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr };
 }
 
 module.exports = { createPartenariats };

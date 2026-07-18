@@ -27,7 +27,7 @@ const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
 type Partner = { id: string; name: string; programName?: string; tiers?: { id: string; name: string; rank: number }[]; certificationCatalog?: CatalogEntry[]; requirements?: unknown[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
-type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string };
+type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
 type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcCount: number }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[] } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
@@ -325,6 +325,13 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
           colText("Certif visée", (r) => r.cert || r.certificationCatalogId),
           colText("Échéance", (r) => frDate(r.targetDate)),
           colText("Statut", (r) => <Badge tone={assignmentTone(r.status)}>{label(ASSIGNMENT_STATUS_LABEL, r.status)}</Badge>),
+          colText("ClickUp", (r) => (
+            <span className="inline-flex items-center gap-2">
+              {r.clickupUrl && <a href={r.clickupUrl} target="_blank" rel="noreferrer" className="text-[11px] text-emerald hover:underline">Ouvrir la tâche</a>}
+              {canWrite && <Busy label={r.clickupTaskId ? "Resynchroniser" : "Pousser vers ClickUp"} variant="ghost" fn={() => callFn("pushParAssignmentToClickup", { id: r.id })} okMsg={r.clickupTaskId ? "Tâche mise à jour" : "Tâche ClickUp créée"} />}
+              {!r.clickupUrl && !canWrite && <span className="text-faint">—</span>}
+            </span>
+          )),
           ...(canWrite ? [colText("Action", (r) => r.status !== "obtenu" ? <Busy label="Marquer obtenue" variant="ghost" fn={() => markObtenu(r.id)} okMsg="Statut mis à jour" /> : <span className="text-faint">—</span>)] : []),
         ]}
         rows={assigns} rowKey={(r) => r.id} searchKeys={[(r) => r.consultantName, (r) => r.cert, (r) => r.partnerId]}
