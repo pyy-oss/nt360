@@ -265,6 +265,9 @@ service cloud.firestore {
     // drapeau+droit `partenariats`. Écriture callable-only (upsertParCertification valide l'existence du
     // consultant et du catalogue, dérive expiration + statut).
     match /par_certifications/{id} { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
+    // Assignations de certification (échéances + relances) : donnée non confidentielle → lecture directe
+    // gatée drapeau+droit `partenariats`. Écriture callable-only.
+    match /par_assignments/{id}    { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour

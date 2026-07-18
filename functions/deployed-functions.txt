@@ -144,6 +144,9 @@ deleteParPartner
 upsertParCertification
 deleteParCertification
 setParPartnerMap
+upsertParAssignment
+setParAssignmentStatus
+deleteParAssignment
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig

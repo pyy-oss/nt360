@@ -745,8 +745,9 @@ async function recomputeCore(db, only) {
       const { revenueByPartner } = require("../domain/parRevenue");
       const { coverageAll } = require("../domain/parQuota");
       const { certRenewalWatch, watchCounts } = require("../domain/parAlert");
-      const [parPartners, parCertifs] = await Promise.all([
-        readAll(db, "par_partners", true), readAll(db, "par_certifications", true),
+      const { assignmentWatch, watchCounts: assignCounts } = require("../domain/parAssignment");
+      const [parPartners, parCertifs, parAssigns] = await Promise.all([
+        readAll(db, "par_partners", true), readAll(db, "par_certifications", true), readAll(db, "par_assignments", true),
       ]);
       const partnerMap = ((await db.doc("config/parPartnerMap").get()).data() || {}).map || {};
       const nameById = {}; for (const p of parPartners) nameById[p.id] = p.name;
@@ -764,6 +765,10 @@ async function recomputeCore(db, only) {
       // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0).
       const watch = certRenewalWatch(parCertifs, asOf);
       w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length, ...stamp } });
+
+      // Relances d'assignation : assignations en retard ou dans une fenêtre de relance (J-30/14/7).
+      const relances = assignmentWatch(parAssigns, asOf);
+      w.push({ path: "summaries/par_relances", data: { asOf, items: relances.slice(0, 200), counts: assignCounts(relances), ...stamp } });
     }
   }
 

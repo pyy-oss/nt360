@@ -5,6 +5,7 @@
 // requireWrite + drapeau config/parFeature ALLUMÉ (ADR-P01). Exports déclarés dans index.js.
 const { slug, validatePartner, computeExpiry } = require("../domain/parPartner");
 const { validateCertification, computeCertStatus } = require("../domain/parCertification");
+const { validateAssignment, ASSIGNMENT_STATUSES } = require("../domain/parAssignment");
 const { isParEnabled } = require("../domain/parFeature");
 
 function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requestRecompute }) {
@@ -122,7 +123,70 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, entries: Object.keys(map).length };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap };
+  // Crée/met à jour une assignation (idempotent : id = <consultantId>_<catalogId>, une assignation active
+  // par consultant × certif). Valide l'existence du consultant (ADR-P03) et de l'entrée de catalogue ;
+  // dénormalise NOM du consultant + son manager (relance) + libellé de certif — jamais le CJM.
+  const upsertParAssignment = onCallG("upsertParAssignment", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const v = validateAssignment(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    const { consultantId, partnerId, certificationCatalogId } = v.value;
+    const consSnap = await db.doc(`consultants/${consultantId}`).get();
+    if (!consSnap.exists) throw new HttpsError("failed-precondition", "consultant inconnu (annuaire ESN)");
+    const cons = consSnap.data() || {};
+    const partSnap = await db.doc(`par_partners/${partnerId}`).get();
+    if (!partSnap.exists) throw new HttpsError("failed-precondition", "partenaire inconnu (référentiel)");
+    const entry = ((partSnap.data() || {}).certificationCatalog || []).find((e) => e.id === certificationCatalogId);
+    if (!entry) throw new HttpsError("failed-precondition", "certification absente du catalogue du partenaire");
+
+    const id = `${slug(consultantId) || consultantId}_${certificationCatalogId}`;
+    const ref = db.doc(`par_assignments/${id}`);
+    const exists = (await ref.get()).exists;
+    const doc = {
+      ...v.value,
+      // manager par défaut = manager du consultant (destinataire des relances) si non fourni.
+      managerUid: v.value.managerUid || (cons.managerUid ? String(cons.managerUid).slice(0, 128) : null),
+      consultantName: String(cons.name || "").slice(0, 120), consultantBu: String(cons.bu || "").slice(0, 40),
+      cert: entry.code || entry.name || certificationCatalogId, competencyId: entry.competencyId,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (exists) await ref.set(doc, { merge: true });
+    else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_assignment" : "create_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status: v.value.status, targetDate: v.value.targetDate }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_relances
+    return { ok: true, id };
+  });
+
+  // Change le statut d'une assignation (planifie → en_formation → obtenu, etc.). Réservé écriture + drapeau.
+  const setParAssignmentStatus = onCallG("setParAssignmentStatus", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = String(req.data && req.data.id || "").trim().slice(0, 200);
+    const status = String(req.data && req.data.status || "").trim();
+    if (!id) throw new HttpsError("invalid-argument", "id d'assignation invalide");
+    if (!ASSIGNMENT_STATUSES.includes(status)) throw new HttpsError("invalid-argument", "statut d'assignation invalide");
+    const ref = db.doc(`par_assignments/${id}`);
+    if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "assignation inconnue");
+    await ref.set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_assignment_status", module: "partenariats", entity: "par_assignment", entityId: id, detail: { status }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]);
+    return { ok: true, id, status };
+  });
+
+  // Supprime une assignation. Réservé écriture + drapeau. Idempotent.
+  const deleteParAssignment = onCallG("deleteParAssignment", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = String(req.data && req.data.id || "").trim().slice(0, 200);
+    if (!id) throw new HttpsError("invalid-argument", "id d'assignation invalide");
+    await db.doc(`par_assignments/${id}`).delete().catch(() => {});
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]);
+    return { ok: true, id };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment };
 }
 
 module.exports = { createPartenariats };
