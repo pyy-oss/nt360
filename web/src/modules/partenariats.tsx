@@ -12,6 +12,7 @@ import { useCollectionData, useDocData } from "../lib/hooks";
 import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
+import { buildCsv, downloadCsv, type ExportCol } from "../lib/exportCsv";
 import { fmt, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
 import {
@@ -38,6 +39,15 @@ type ConsultantLite = { id: string; name: string; bu?: string };
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
+
+// Bouton d'export CSV (Lot P5) — réutilise lib/exportCsv (BOM UTF-8, séparateur « ; », anti-injection de
+// formule). Données NON confidentielles uniquement (le CA constructeur reste hors export). Désactivé si vide.
+function ExportCsvBtn<T>({ name, cols, rows }: { name: string; cols: ExportCol[]; rows: T[] }) {
+  return (
+    <button type="button" className="btn-ghost !py-1 text-xs" disabled={!rows.length}
+      onClick={() => downloadCsv(`${name}.csv`, buildCsv(cols, rows))}>Export CSV</button>
+  );
+}
 
 export const Partenariats: FC<Props> = () => {
   const canWrite = useCan("partenariats") === "write";
@@ -202,7 +212,12 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
       </Card>
       )}
 
-      <Card title="Conformité des quotas de certification">
+      <Card title="Conformité des quotas de certification" actions={<ExportCsvBtn name="conformite-quotas" cols={[
+        { header: "Constructeur", render: (r) => r.name },
+        { header: "Statut", render: (r) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
+        { header: "Exigences couvertes", render: (r) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}` },
+        { header: "Écarts", render: (r) => (r.gaps || []).map((g: any) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
+      ]} rows={quotaPartners} />}>
         <Table
           columns={[
             colText("Constructeur", (r) => r.name),
@@ -269,8 +284,17 @@ function useConsultants(active: boolean) {
 // ─────────────────────────────────────────────────────────────────────── Certifications
 const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Record<string, string>; partnerOpts: { value: string; label: string }[]; canWrite: boolean }> = ({ certifs, partners, partnerName, partnerOpts, canWrite }) => {
   const [open, setOpen] = useState(false);
+  const exportCols: ExportCol[] = [
+    { header: "Ingénieur", render: (r) => r.consultantName || r.consultantId },
+    { header: "BU", render: (r) => r.consultantBu || "" },
+    { header: "Constructeur", render: (r) => partnerName[r.partnerId] || r.partnerId },
+    { header: "Certification", render: (r) => r.certName || r.certificationCatalogId },
+    { header: "Obtenue", render: (r) => r.obtainedDate || "" },
+    { header: "Expiration", render: (r) => r.expiryDate || "" },
+    { header: "Statut", render: (r) => label(CERT_STATUS_LABEL, r.status) },
+  ];
   return (
-    <Card title="Certifications des ingénieurs" actions={canWrite ? <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button> : undefined}>
+    <Card title="Certifications des ingénieurs" actions={<div className="flex items-center gap-2"><ExportCsvBtn name="certifications" cols={exportCols} rows={certifs} />{canWrite && <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Table
         columns={[
           colText("Ingénieur", (r) => r.consultantName || r.consultantId),
@@ -315,8 +339,16 @@ const CertifForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label:
 const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Record<string, string>; partnerOpts: { value: string; label: string }[]; canWrite: boolean }> = ({ assigns, partners, partnerName, partnerOpts, canWrite }) => {
   const [open, setOpen] = useState(false);
   const markObtenu = (id: string) => callFn("setParAssignmentStatus", { id, status: "obtenu" });
+  const exportCols: ExportCol[] = [
+    { header: "Ingénieur", render: (r) => r.consultantName || r.consultantId },
+    { header: "Constructeur", render: (r) => partnerName[r.partnerId] || r.partnerId },
+    { header: "Certif visée", render: (r) => r.cert || r.certificationCatalogId },
+    { header: "Échéance", render: (r) => r.targetDate || "" },
+    { header: "Statut", render: (r) => label(ASSIGNMENT_STATUS_LABEL, r.status) },
+    { header: "Lien ClickUp", render: (r) => r.clickupUrl || "" },
+  ];
   return (
-    <Card title="Assignations de certification" actions={canWrite ? <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button> : undefined}>
+    <Card title="Assignations de certification" actions={<div className="flex items-center gap-2"><ExportCsvBtn name="assignations-certification" cols={exportCols} rows={assigns} />{canWrite && <button className="btn" onClick={() => setOpen(true)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Tip>Affecter à un ingénieur l'obtention d'une certification à une échéance ; les relances (J-30/14/7) et les retards apparaissent au Tableau de bord.</Tip>
       <Table
         columns={[

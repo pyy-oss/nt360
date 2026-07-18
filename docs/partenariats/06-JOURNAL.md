@@ -415,3 +415,27 @@
 **Échoué / en attente**
 - Pas de rattachement inverse (une tâche ClickUp fermée ne met pas à jour le statut de l'assignation) :
   sens app→ClickUp seulement, comme la v1 du push commande. Sens inverse = lot ultérieur si besoin.
+
+---
+
+## Lot P5 — Export CSV (référentiel de conformité + certifications + assignations)
+
+**Fait**
+- Boutons « Export CSV » dans le module Partenariats : conformité des quotas (tableau de bord),
+  certifications des ingénieurs (onglet Certifications), assignations (onglet Assignations).
+- RÉUTILISE `lib/exportCsv` (buildCsv/downloadCsv) — l'idiome d'export du module Reports : BOM UTF-8,
+  séparateur « ; » (Excel FR), neutralisation de l'injection de formule. Aucune nouvelle dépendance.
+- Composant `ExportCsvBtn` local (désactivé si aucune ligne). Front-only : aucun backend, aucune règle,
+  aucun test nouveau (exportCsv a déjà sa suite). web lint/build OK, bundle 118.1 KB.
+
+**Appris**
+- L'idiome d'export tabulaire de l'ERP est le CSV (`exportCsv.ts`, ouvert nativement par Excel), pas un
+  xlsx front. Le « premium » (slides) passe par pptx (codirPptx/parQbrPptx). On suit l'idiome, on n'ajoute
+  pas de dépendance (xlsx/jsPDF auraient exigé un ADR de dépendance — interdit sans validation).
+
+**Échoué / en attente (note, pas un changement silencieux)**
+- « Excel/PDF » demandé → livré en CSV (Excel-compatible) : pas de PDF, car aucune lib PDF n'existe côté
+  front (seul pptx pour les slides) et en ajouter une serait une dépendance nouvelle (ADR requis). Le CA
+  constructeur (confidentiel) est VOLONTAIREMENT exclu des exports (seules les données non confidentielles :
+  conformité, certifs, assignations). Un export PDF ou un export incluant le CA (gaté rentabilite) = lot
+  ultérieur si le besoin se confirme.
