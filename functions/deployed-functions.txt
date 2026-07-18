@@ -138,6 +138,7 @@ setFxRates
 setInvoiceFp
 setManager
 setMntFeature
+setParFeature
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig
