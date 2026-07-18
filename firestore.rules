@@ -122,6 +122,9 @@ service cloud.firestore {
         : id.matches('pms.*') ? 'overview'
         // Scores de risque des contrats de maintenance (Lot 5) → module 'maintenance'. Le drapeau
         // ajoute un second verrou dans le match /summaries (mnt_risque illisible drapeau éteint, C10).
+        // Agrégats du module Partenariats (CA par constructeur, quotas, alertes) → module 'partenariats'.
+        // Le drapeau parEnabled() ajoute un second verrou dans le match /summaries (par_* illisible drapeau éteint).
+        : id.matches('par_.*') ? 'partenariats'
         : id.matches('mnt_risque.*') ? 'maintenance'
         // Flux du centre de surveillance (Lot 5, ADR-026) → même module + verrou drapeau que mnt_risque.
         : id.matches('mnt_surveillance.*') ? 'maintenance'
@@ -226,7 +229,10 @@ service cloud.firestore {
     // Agrégats : écrits par les Functions, lus selon le module d'appartenance de l'agrégat. Le conjoint
     // « maintenance ⇒ drapeau allumé » est TOUJOURS vrai pour les summaries existants (summaryModule ≠
     // 'maintenance') → comportement inchangé ; il n'ajoute le double verrou du drapeau qu'à mnt_risque (C3/C10).
-    match /summaries/{id}     { allow read: if canRead(summaryModule(id)) && (summaryModule(id) != 'maintenance' || mntEnabled()); allow write: if false; }
+    // Le verrou DRAPEAU utilise le PRÉFIXE d'id (regex bon marché) plutôt qu'un 2ᵉ/3ᵉ appel de
+    // summaryModule() (grand ternaire coûteux) : un summary de module gaté porte toujours son préfixe
+    // (mnt_* / par_*). Évite de dépasser la limite Firestore de 1000 évaluations d'expression par requête.
+    match /summaries/{id}     { allow read: if canRead(summaryModule(id)) && (!id.matches('mnt_.*') || mntEnabled()) && (!id.matches('par_.*') || parEnabled()); allow write: if false; }
     // Chunks des commandes matérialisées (module « overview », comme summaries/commandes).
     match /commandesRows/{id} { allow read: if canRead('overview');       allow write: if false; }
     // Chunks de MARGE par ligne → accès « Rentabilité » requis (confidentialité).
@@ -291,6 +297,9 @@ service cloud.firestore {
     match /config/mntFeature     { allow read: if isNt360(); allow write: if false; }
     // Drapeau du module Partenariats & Certifications (ADR-P01) : même patron que config/mntFeature.
     match /config/parFeature     { allow read: if isNt360(); allow write: if false; }
+    // Overlay de rapprochement fournisseur → constructeur (ADR-P02) : lu par le module (édition/affichage
+    // du mapping), gaté drapeau + droit `partenariats`. Écrit via callable setParPartnerMap (write:false).
+    match /config/parPartnerMap  { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
     // Repli config/* : ALLOWLIST fail-closed (les docs sensibles ont leur propre règle ci-dessus ;
     // un futur doc config/* non listé n'est PAS lisible par défaut). Inclut les référentiels éditables
     // (projectManagers, businessUnits), les taux de change (fxRates) et la config ClickUp NON sensible

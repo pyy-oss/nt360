@@ -109,7 +109,9 @@ async function recomputeCore(db, only) {
   // 'overview' inclus : le bloc `relances` (→ summaries/relancesBc) tourne aussi sur want("overview") et
   // consomme bcLines ; sans 'overview' ici, un recompute only=['overview'] chargeait bcLines=[] et
   // ÉCRASAIT relancesBc à vide (plan de relances fournisseurs effacé). Même piège que 'news'/'relances'.
-  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news", "overview"]);
+  // 'partenariats' inclus : le CA partenaire (summaries/par_ca) est DÉRIVÉ des bcLines (ADR-P02). Sans ça,
+  // un recompute scopé only=['partenariats'] chargerait bcLines=[] et écraserait par_ca à vide.
+  const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news", "overview", "partenariats"]);
   const needCredit = need(["suppliers", "alerts", "news"]);
   // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
   // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces
@@ -727,6 +729,26 @@ async function recomputeCore(db, only) {
       // garantie avec summaries/mnt_risque. Même bloc gaté, même stamp. Lu sous droit `maintenance` + drapeau.
       const { mntSurveillance } = require("../domain/mntSurveillance");
       w.push({ path: "summaries/mnt_surveillance", data: { ...mntSurveillance(risque, asOf), ...stamp } });
+    }
+  }
+
+  // ── PARTENARIATS & CERTIFICATIONS (module gaté) — CA par constructeur MATÉRIALISÉ dans summaries/par_ca
+  // (ADR-P02/P04). DOUBLEMENT gaté : want("partenariats") ET drapeau config/parFeature ALLUMÉ. Éteint
+  // (défaut) ⇒ aucune lecture par_*, aucun summary écrit → recompute STRICTEMENT identique à avant. Bloc
+  // ADDITIF : ne lit que par_partners + l'overlay config/parPartnerMap + bcLines (déjà en mémoire) et ne
+  // pousse qu'un chemin NOUVEAU (summaries/par_ca). Le CA est DÉRIVÉ des BC fournisseurs (aucune saisie) :
+  // même source que le module Fournisseurs → pas de deuxième vérité.
+  if (want("partenariats")) {
+    const { isParEnabled } = require("../domain/parFeature");
+    const parCfg = (await db.doc("config/parFeature").get()).data();
+    if (isParEnabled(parCfg)) {
+      const { revenueByPartner } = require("../domain/parRevenue");
+      const parPartners = await readAll(db, "par_partners", true);
+      const partnerMap = ((await db.doc("config/parPartnerMap").get()).data() || {}).map || {};
+      const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
+      const nameById = {}; for (const p of parPartners) nameById[p.id] = p.name;
+      const byPartner = caPartners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
+      w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof: byPartner.reduce((s, g) => s + g.revenueXof, 0), ...stamp } });
     }
   }
 
