@@ -1421,7 +1421,7 @@ exports.listAstreintes = _maintenance.listAstreintes;
 // d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
 // config/parFeature). Exports déclarés ici (déploiement par nom).
 const { createPartenariats } = require("./handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requestRecompute });
+const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, rateLimit, logOps });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
 exports.upsertParCertification = _partenariats.upsertParCertification;
@@ -1430,6 +1430,8 @@ exports.setParPartnerMap = _partenariats.setParPartnerMap;
 exports.upsertParAssignment = _partenariats.upsertParAssignment;
 exports.setParAssignmentStatus = _partenariats.setParAssignmentStatus;
 exports.deleteParAssignment = _partenariats.deleteParAssignment;
+exports.generateParActionPlan = _partenariats.generateParActionPlan;
+exports.generateParQbr = _partenariats.generateParQbr;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique

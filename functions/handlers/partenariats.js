@@ -8,7 +8,7 @@ const { validateCertification, computeCertStatus } = require("../domain/parCerti
 const { validateAssignment, ASSIGNMENT_STATUSES } = require("../domain/parAssignment");
 const { isParEnabled } = require("../domain/parFeature");
 
-function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requestRecompute }) {
+function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, rateLimit, logOps }) {
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -186,7 +186,59 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, id };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment };
+  // Garde-fou IA commun : droit lecture + drapeau + rate-limit + clé présente. Renvoie la clé.
+  async function assertAiReady(req) {
+    await requireRead(req, "partenariats");
+    await assertParEnabled();
+    if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop de générations IA en peu de temps — patientez un instant.");
+    const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();
+    if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+    return apiKey;
+  }
+
+  // PLAN D'ACTION BUSINESS (IA). Snapshot construit CÔTÉ SERVEUR à partir des summaries par_* (aucune
+  // donnée confidentielle : statuts, quotas, CA agrégé par constructeur). Sortie re-validée (domain/parAi).
+  const generateParActionPlan = onCallG("generateParActionPlan", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    const apiKey = await assertAiReady(req);
+    const { actionPlanSnapshot } = require("../domain/parAi");
+    const [caSnap, quotaSnap, relSnap] = await Promise.all([
+      db.doc("summaries/par_ca").get(), db.doc("summaries/par_quotas").get(), db.doc("summaries/par_relances").get(),
+    ]);
+    const snapshot = actionPlanSnapshot({ dateIso: new Date().toISOString().slice(0, 10), ca: caSnap.data() || {}, quotas: quotaSnap.data() || {}, relances: relSnap.data() || {} });
+    if (!snapshot.partners.length) throw new HttpsError("failed-precondition", "aucune donnée partenaire à analyser (initialisez le référentiel).");
+    const { generateActionPlan } = require("../lib/parAi");
+    let out;
+    try { out = await generateActionPlan(apiKey, snapshot); }
+    catch (e) { if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter la demande."); throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de plan (réessayez)."); }
+    if (logOps) await logOps({ kind: "ai", action: "parActionPlan", status: "ok", uid: req.auth.uid, detail: { partenaires: snapshot.partners.length, items: out.plan.length, model: out.model, usage: out.usage } });
+    return { ok: true, plan: out.plan, model: out.model };
+  });
+
+  // SYNTHÈSE QBR par partenaire (IA). Snapshot construit côté serveur (référentiel + summaries + certifs).
+  const generateParQbr = onCallG("generateParQbr", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    const apiKey = await assertAiReady(req);
+    const partnerId = slug(req.data && req.data.partnerId);
+    if (!partnerId) throw new HttpsError("invalid-argument", "partenaire invalide");
+    const periode = String((req.data && req.data.periode) || "").trim().slice(0, 40);
+    const partSnap = await db.doc(`par_partners/${partnerId}`).get();
+    if (!partSnap.exists) throw new HttpsError("failed-precondition", "partenaire inconnu (référentiel)");
+    const { MAX_SCAN, sliceCapped } = require("../domain/scan");
+    const [caSnap, quotaSnap, relSnap, certSnap] = await Promise.all([
+      db.doc("summaries/par_ca").get(), db.doc("summaries/par_quotas").get(), db.doc("summaries/par_relances").get(),
+      db.collection("par_certifications").where("partnerId", "==", partnerId).limit(MAX_SCAN + 1).get(),
+    ]);
+    const certifs = sliceCapped(certSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const { qbrSnapshot } = require("../domain/parAi");
+    const snapshot = qbrSnapshot({ partnerId, partner: partSnap.data() || {}, periode, ca: caSnap.data() || {}, quotas: quotaSnap.data() || {}, certifs, relances: relSnap.data() || {} });
+    const { generateQbr } = require("../lib/parAi");
+    let out;
+    try { out = await generateQbr(apiKey, snapshot); }
+    catch (e) { if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter la demande."); throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de synthèse (réessayez)."); }
+    if (logOps) await logOps({ kind: "ai", action: "parQbr", status: "ok", uid: req.auth.uid, detail: { partnerId, model: out.model, usage: out.usage } });
+    return { ok: true, qbr: out.qbr, snapshot, model: out.model };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, generateParActionPlan, generateParQbr };
 }
 
 module.exports = { createPartenariats };

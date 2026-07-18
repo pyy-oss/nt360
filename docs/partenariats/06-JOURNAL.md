@@ -4,6 +4,36 @@
 
 ---
 
+## Lot 7 (final) — IA (plan d'action + QBR) + export PPTX
+
+**Fait**
+- Domaine PUR `functions/domain/parAi.js` : `actionPlanSnapshot`/`qbrSnapshot` (dérivés des summaries,
+  montants FCFA), `buildActionPlanPrompt`/`buildQbrPrompt` (prompts FR, XOF), `normalizeActionPlan`/
+  `normalizeQbr` (**re-validation stricte** de la sortie IA — l'IA propose, on ne fait pas confiance).
+  Tests (6 cas).
+- Pont `functions/lib/parAi.js` (patron `lib/aiChurn.js`) : `@anthropic-ai/sdk`, `claude-opus-4-8`,
+  `thinking:{type:"adaptive"}`, gestion `stop_reason==="refusal"`, sortie re-validée par le domaine.
+- Callables `generateParActionPlan` / `generateParQbr` : `requireRead` + drapeau + rate-limit +
+  clé `ANTHROPIC_API_KEY` (Secret Manager) ; snapshot construit CÔTÉ SERVEUR à partir des summaries ;
+  `logOps` sur l'usage seul (jamais le contenu). Exports + `deployed-functions.txt`.
+- Front : onglet « IA & QBR » dans `partenariats.tsx` (plan d'action en cartes + QBR par partenaire) ;
+  export PowerPoint via `web/src/lib/parQbrPptx.ts` (**pptxgenjs en import dynamique** — zéro impact
+  chunk d'entrée ; montants FCFA, charte des tokens de l'ERP).
+
+**Appris**
+- La convention IA du kit (`sonnet-4-6`, `fetch` brut, `ANTHROPIC_KEY`, sortie non validée) est
+  abandonnée au profit du patron nt360 (ADR-P05) : Opus, SDK, refusal, re-validation, secret
+  `ANTHROPIC_API_KEY`, `logOps` usage-seul.
+- L'export PPTX du kit (charte propre, euros codés en dur) est refait sur `codirPptx.ts` (pptxgenjs déjà
+  présent, lazy) en FCFA et aux tokens de l'ERP.
+
+**Échoué / en attente**
+- Rien. **Le module est complet** : référentiel, certifs, CA dérivé, quotas, alertes, assignations,
+  front, IA + QBR PPTX. Prochaine étape : audit utilisateur + technique (gardien / conformiste).
+- Bundle : chunk d'entrée **118,1 KB** (marge 1,9 KB) — pptxgenjs et le module restent hors chunk d'entrée.
+
+---
+
 ## Lot 6 — Front gaté (onglet + UI temps réel)
 
 **Fait**
