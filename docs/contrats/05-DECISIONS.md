@@ -37,6 +37,14 @@ créer de deuxième vérité ni de fuite de confidentialité.
   (`allow read: if false` — firestore.rules) ; `listAstreintes` **masque** le montant (null) sans le droit
   `rentabilite` ; `computeContratPnl`/`deliveryMargin` masquent `coutAstreintes` de la même façon. Aucune
   lecture directe ne peut exposer le montant brut (même logique qu'ADR-034).
+- **Correctif d'audit (gardien)** : la demande copie le montant dans `approvals.amount` (nécessaire pour que
+  l'approbateur décide) ; `listApprovals` **masque `amount` (null) pour les astreintes** dès que le lecteur
+  n'a pas le droit `rentabilite`. Un approbateur `pipeline` seul voit donc la demande (libellé + motif) mais
+  **pas** le montant ; il faut le droit `rentabilite` pour le chiffre. La promesse « montant masqué sans
+  rentabilite » est ainsi tenue **de bout en bout**, y compris dans la boîte d'approbation.
+- **Correctif d'audit (gardien)** : la marge de livraison (`deliveryMarginByAffaire`) ne lit `mnt_astreintes`
+  et ne retranche la charge **que si le module est allumé** (`config/mntFeature`), comme les KPI d'activité
+  du même fichier — sinon l'invariant « éteint = ERP d'avant » était rompu sur cette vue.
 - Le score de risque intègre la charge d'astreinte via le **palier** de marge (ADR-034) : une astreinte
   validée qui fait plonger la marge d'un contrat le fait remonter en risque, **sans exposer le montant**.
 - **Limite assumée** : une astreinte sur une affaire **absente du carnet et sans contrat** n'apparaît dans

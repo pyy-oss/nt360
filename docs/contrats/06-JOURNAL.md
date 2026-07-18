@@ -31,6 +31,41 @@
 
 ---
 
+## 2026-07-18 — Audit du programme (astreintes + overlay) + remédiation
+
+**Fait** — audit adverse en parallèle (gardien back + conformiste UI) des lots #450 (overlay) et #451
+(astreintes). **2 blocages back + 3 écarts UI CERTAINS corrigés**, autres axes propres.
+
+- **Blocage 1 (gardien) — invariant « éteint = ERP d'avant » rompu** : `deliveryMarginByAffaire` lisait
+  `mnt_astreintes` et retranchait la charge **sans garde de drapeau** → la marge de livraison restait amputée
+  module éteint. Corrigé : lecture/soustraction gatées sur `mntEnabled()` (patron du fichier), `{}` sinon.
+- **Blocage 2 (gardien) — fuite du montant confidentiel** : le montant transitait en clair dans
+  `approvals.amount` et `listApprovals` le renvoyait à l'approbateur (droit `pipeline` seul), contredisant la
+  promesse ADR-035. Corrigé : `listApprovals` **masque `amount` (null) pour les astreintes** sans droit
+  `rentabilite`. ADR-035 mis à jour (masquage de bout en bout, y compris boîte d'approbation).
+- **Écarts UI (conformiste)** : (a) champ montant d'astreinte saisi via `decimals` (autorise décimales) →
+  remis à `digits` (le FCFA n'a pas de subdivision, comme « Montant engagé ») ; (b) « Chargement… » de la
+  carte Astreintes remis aux tokens standard (`text-[13px] text-muted py-3`) ; (c) modale de **consultation**
+  de contrat (lecture seule) repassée `form → md` (un aperçu n'est pas une saisie, comme l'aperçu d'import).
+
+**Appris sur l'existant**
+- Le système d'approbation porte `amount` en clair pour toutes les natures (remise/DR/BC) — non confidentiel
+  pour celles-là (pipeline), mais l'astreinte est un **coût** (rentabilite) : il fallait masquer au lecteur.
+- L'invariant « éteint = ERP d'avant » doit être tenu sur **chaque** consommateur d'une collection mnt_, y
+  compris les callables non-mnt_ (ici `deliveryMarginByAffaire`, gouverné `rentabilite`) — pas seulement le
+  recompute.
+
+**Décidé / signalé (sans correction dans ce lot)**
+- `callFn` inline (module lazy) réutilisé plutôt que d'ajouter à `writes.ts` (budget du chunk d'entrée) —
+  assumé (précédent `finance.tsx`). Divergence mineure signalée par le conformiste, non bloquante.
+- `backlog.tsx:929/951` : `text-amber-400` (couleur brute hors tokens) — **pré-existant**, hors périmètre
+  des deux lots ; noté pour un futur passage de conformité.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Astreintes : demande + validation + comptabilité en charge (ADR-035)
 
 **Fait**
