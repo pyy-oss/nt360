@@ -504,3 +504,48 @@ indépendamment des libellés saisis ; remappage vers les slugs au submit → in
 l'ordre d'édition. Aucune 2ᵉ vérité : mêmes primitives (Modal/Field/Select/Busy), même callable, formats et
 voix de l'ERP. Pas d'ADR : additif, aucune nouvelle convention ni donnée (le callable et la structure du
 référentiel préexistent au lot P0).
+
+---
+
+## PA1 — CRUD certifications/assignations : supprimer, éditer, cycle de vie — 2026-07-18
+
+**Fait.** Câblage front des callables CRUD **déjà existants** mais non exposés dans l'UI (audit de
+complétude Partenariats). Onglet **Certifications** : action « Éditer » (révise la date d'obtention) +
+« Suppr. » (`deleteParCertification`) par ligne. Onglet **Assignations** : « Éditer » (révise l'échéance) +
+« Suppr. » (`deleteParAssignment`) + **sélecteur de statut inline** couvrant le cycle de vie
+(`setParAssignmentStatus`) — remplace le bouton unique « Marquer obtenue ». Front seul : aucun changement
+backend, aucun nouvel export, `deployed-functions.txt` intouché (les 3 callables y figuraient déjà).
+
+**Appris.** Deuxième symptôme du même défaut que le formulaire de référentiel : des callables de correction
+existaient côté serveur (supprimer, changer de statut) sans **aucun point d'entrée UI** — une certif saisie
+par erreur restait ineffaçable pour l'utilisateur. Complétude = parcours de bout en bout, pas seulement la
+présence du callable.
+
+**Conception.** Réutilise `DangerBtn` (confirmation + toast + trackWrite) comme le reste de l'ERP — pas de
+`window.confirm`. Édition : l'id d'une certif/assignation étant **dérivé** (`consultant × catalogue`), le
+formulaire verrouille ces clés en mode édition (seule la date change) et affiche « supprimez pour recréer »
+— on ne laisse pas l'utilisateur croire qu'il déplace une certif. Sélecteur de statut : n'expose que les
+statuts **pilotables à la main** (`a_planifier`/`planifie`/`en_formation`/`obtenu`) ; `en_retard` reste
+**dérivé** de l'échéance (domain/parAssignment) et n'est jamais posé manuellement. Pas d'ADR : additif,
+aucune nouvelle convention ni donnée (callables préexistants au lot Moteur de risque).
+
+---
+
+## Modèles constructeurs + listes vides guidées (formulaire partenaire) — 2026-07-18
+
+**Fait.** Le formulaire « Nouveau partenaire » partait de la **page blanche** : sans niveaux ni
+compétences saisis, les listes déroulantes des **exigences de quota** (« Niveau… », « Cible… ») étaient
+**vides** sans explication (signalé en usage réel, capture). Deux corrections : (1) une rangée « Partir d'un
+modèle » en tête de formulaire (création uniquement) pré-remplit tout le référentiel depuis un des grands
+programmes constructeurs — **Fortinet Engage, F5 Unity+, Palo Alto NextWave, Huawei ICT** ; (2) une aide
+apparaît dans le bloc Exigences quand une exigence existe mais qu'aucun niveau/cible n'est encore défini.
+Alignement de deux libellés du bloc au token dominant (`text-[11px]`).
+
+**Conception.** Modèles extraits en helper PUR testé (`web/src/lib/parPartnerPresets.ts` : `PARTNER_PRESETS`,
+`buildPartnerPreset(id, nextKey)` ; 17 tests vérifiant l'intégrité référentielle certif→compétence et
+exigence→niveau/cible, puis `buildPartnerPayload` sans id vide). Les clés locales sont fournies par le
+compteur `nk()` du formulaire → aucune collision avec les lignes ajoutées ensuite. Ce sont des **points de
+départ éditables** (codes de certif publics : NSE/FCP/FCSS, F5-CA/CTS/CSE, PCNSA/PCNSE, HCIA/HCIP/HCIE ;
+niveaux et validités indicatifs) — l'utilisateur ajuste avant d'enregistrer, et le backend
+`validatePartner` reste seul juge. Pas d'ADR : additif, front seul, callable `upsertParPartner` inchangé ;
+les modèles sont des données d'amorçage éditables, pas une convention ni une vérité persistée.
