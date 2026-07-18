@@ -481,3 +481,26 @@
   la lib sous-jacente — est ce qui rend l'export réellement indiscernable des autres exports de l'ERP.
 - L'audit adverse en DEUX rôles (gardien = casse/fuite, conformiste = indiscernabilité) attrape des choses
   orthogonales : le gardien a validé la sécurité, le conformiste a rattrapé le style.
+
+## Formulaire de référentiel partenaire (création + objectifs) — 2026-07-18
+
+**Fait.** Ajout d'un écran de **création/édition de partenaire** dans l'onglet Paramétrage (bouton
+« Nouveau partenaire » + action « Éditer » par ligne). Le formulaire couvre niveaux, compétences,
+catalogue de certifications (avec validité) et **exigences de quota** = les *objectifs du business plan*
+(par niveau : minimum d'ingénieurs sur une compétence ou une certification). Front seul : il s'appuie sur
+le callable `upsertParPartner` **déjà existant** (aucun changement backend, aucun nouvel export, aucun
+`deployed-functions.txt` touché). Logique de préparation du payload extraite en helper PUR testé
+(`web/src/lib/parPartnerForm.ts` : `buildPartnerPayload`/`partnerToForm`/`parSlug`, 6 tests) — le backend
+`validatePartner` reste seul juge de l'intégrité référentielle et des slugs.
+
+**Appris.** Le module était **livré mais non alimentable depuis l'UI** : le référentiel ne pouvait être
+initialisé que par appel technique (`upsertParPartner`). Un utilisateur direction, module activé, tombait
+sur un tableau de bord à zéro sans moyen évident d'y remédier — signalé en usage réel (capture). La leçon :
+un module « complet » côté calcul peut rester **inutilisable** faute d'un point d'entrée de saisie ; la
+complétude se mesure au parcours utilisateur de bout en bout, pas à la seule chaîne dérivée.
+
+**Conception.** Clé locale stable par ligne (`k`) pour relier catalogue→compétence et exigence→niveau/cible
+indépendamment des libellés saisis ; remappage vers les slugs au submit → intégrité préservée quel que soit
+l'ordre d'édition. Aucune 2ᵉ vérité : mêmes primitives (Modal/Field/Select/Busy), même callable, formats et
+voix de l'ERP. Pas d'ADR : additif, aucune nouvelle convention ni donnée (le callable et la structure du
+référentiel préexistent au lot P0).

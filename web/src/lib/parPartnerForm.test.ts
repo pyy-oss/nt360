@@ -1,0 +1,80 @@
+import { describe, it, expect } from "vitest";
+import { buildPartnerPayload, partnerToForm, parSlug, type PartnerFormState } from "./parPartnerForm";
+
+// Formulaire de référentiel partenaire (par_) — prouve : (1) l'id dérive du nom en slug ; (2) les exigences
+// et le catalogue référencent bien le slug de leur cible via la clé locale ; (3) l'aller-retour
+// partenaire → formulaire → payload préserve l'intégrité (édition).
+
+describe("buildPartnerPayload — construction du payload upsertParPartner", () => {
+  const base: PartnerFormState = {
+    name: "Fortinet", programName: "Engage",
+    tiers: [{ k: "t1", name: "Gold", rank: "2" }],
+    comps: [{ k: "c1", name: "Sécurité réseau" }],
+    certs: [{ k: "e1", name: "NSE 7", code: "NSE7", compK: "c1", level: "expert", validityMonths: "24" }],
+    reqs: [{ k: "r1", tierK: "t1", targetK: "comp:c1", minCount: "1" }],
+  };
+
+  it("dérive l'id du nom et relie les références par clé locale", () => {
+    const r = buildPartnerPayload(base);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.id).toBe("fortinet");
+    expect(r.value.programName).toBe("Engage");
+    expect(r.value.tiers).toEqual([{ id: "gold", name: "Gold", rank: 2 }]);
+    // slug SANS repli d'accent (parité backend) : « Sécurité réseau » → « s-curit-r-seau ».
+    expect(r.value.competencies).toEqual([{ id: "s-curit-r-seau", name: "Sécurité réseau" }]);
+    expect((r.value.certificationCatalog as any[])[0]).toMatchObject({ id: "nse7", competencyId: "s-curit-r-seau", level: "expert", validityMonths: 24 });
+    // l'exigence pointe bien le slug de la compétence liée par la clé locale c1
+    expect(r.value.requirements).toEqual([{ tierId: "gold", certIdOrCompetencyId: "s-curit-r-seau", minCount: 1 }]);
+  });
+
+  it("une exigence peut viser une certification (targetK cert:)", () => {
+    const f = { ...base, reqs: [{ k: "r1", tierK: "t1", targetK: "cert:e1", minCount: "3" }] };
+    const r = buildPartnerPayload(f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.requirements).toEqual([{ tierId: "gold", certIdOrCompetencyId: "nse7", minCount: 3 }]);
+  });
+
+  it("ignore les lignes à libellé vide et refuse un nom vide", () => {
+    expect(buildPartnerPayload({ ...base, name: "  " }).ok).toBe(false);
+    const f = { ...base, tiers: [...base.tiers, { k: "t2", name: "  ", rank: "1" }] };
+    const r = buildPartnerPayload(f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.tiers).toHaveLength(1); // la ligne vide est écartée
+  });
+
+  it("validityMonths vide → chaîne vide (le backend appliquera le repli 24 mois)", () => {
+    const f = { ...base, certs: [{ ...base.certs[0], validityMonths: "" }] };
+    const r = buildPartnerPayload(f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect((r.value.certificationCatalog as any[])[0].validityMonths).toBe("");
+  });
+
+  it("aller-retour partenaire stocké → formulaire → payload : intégrité préservée", () => {
+    const stored = {
+      id: "cisco", name: "Cisco", programName: "Partner",
+      tiers: [{ id: "gold", name: "Gold", rank: 2 }],
+      competencies: [{ id: "collaboration", name: "Collaboration" }],
+      certificationCatalog: [{ id: "ccnp", competencyId: "collaboration", code: "CCNP", name: "CCNP Collab", level: "professional", validityMonths: 36 }],
+      requirements: [{ tierId: "gold", certIdOrCompetencyId: "ccnp", minCount: 2 }],
+    };
+    const form = partnerToForm(stored);
+    expect(form.reqs[0].targetK).toBe("cert:ccnp"); // cible = certif (présente au catalogue)
+    const r = buildPartnerPayload(form);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.id).toBe("cisco");
+    expect(r.value.requirements).toEqual([{ tierId: "gold", certIdOrCompetencyId: "ccnp", minCount: 2 }]);
+  });
+});
+
+describe("parSlug", () => {
+  it("normalise en slug stable", () => {
+    expect(parSlug("Sécurité Réseau!")).toBe("s-curit-r-seau");
+    expect(parSlug("  Gold  ")).toBe("gold");
+    expect(parSlug("")).toBe("");
+  });
+});
