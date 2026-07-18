@@ -87,6 +87,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_certification" : "create_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status }, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) + alertes cycle de vie
     return { ok: true, id, status, expiryDate };
   });
 

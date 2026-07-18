@@ -4,6 +4,34 @@
 
 ---
 
+## Lot 4 — Quotas de couverture + alertes cycle de vie (ADR-P04)
+
+**Fait**
+- Domaine PUR `functions/domain/parQuota.js` : `coverageForPartner` (croise exigences × certifs ACTIVES,
+  détenteurs DISTINCTS, cible = certif précise OU compétence), `partnershipQuotaStatus`
+  (on_track/at_risk/non_compliant/non_evalue), `coverageAll`. Tests (5 cas).
+- Domaine PUR `functions/domain/parAlert.js` : `alertBucket` (J-90/60/30/7/0 + expired), `certRenewalWatch`
+  (liste de renouvellement ≤ 90 j triée par urgence, todayIso injecté), `watchCounts`. Tests (5 cas).
+- Bloc recompute `partenariats` étendu : lit aussi `par_certifications`, pousse `summaries/par_quotas`
+  (couverture + statut par partenaire) et `summaries/par_alerts` (watchlist + compteurs par palier).
+- `upsertParCertification` déclenche désormais `requestRecompute(["partenariats"])` (certifs → quotas +
+  alertes). Rules inchangées (par_quotas/par_alerts couverts par `par_.*` → partenariats + verrou drapeau).
+
+**Appris**
+- Correction du bug kit `computeCoverage` (contrat `{cert}` vs données réelles) : le matching se fait sur
+  `certificationCatalogId` OU `competencyId`, sur des certifs dont l'intégrité a été garantie au Lot 1.
+- Correction du bug kit de clé `certificationCounts` (écriture 3-seg vs lecture 2-seg) : ici PAS de
+  collection de compteurs — la couverture est recalculée en un summary, pas matérialisée par trigger.
+
+**Échoué / en attente**
+- Statut de partenariat = **quota-only** en Lot 4 : le volet « revenu vs objectif » du kit exige un
+  `revenueTarget` par partenaire, non stocké (n'invente aucune donnée). À ajouter (champ optionnel sur
+  par_partners + combinaison quota∧revenu) quand les objectifs réels seront fournis.
+- `requiredRole` (« SE ») non filtrant : les rôles ESN (grade) ne mappent pas 1-1 ; conservé pour
+  l'affichage, à raffiner si l'ERP introduit ce mapping.
+
+---
+
 ## Lot 3 — Lien CA : dérivation depuis les BC fournisseurs (ADR-P02/P04)
 
 **Fait**
