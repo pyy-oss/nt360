@@ -31,6 +31,33 @@
 
 ---
 
+## 2026-07-18 — Correctif : « Montant engagé (actifs) » → Revenu récurrent annuel (ARR)
+
+**Fait**
+- Le KPI de tête du tableau de bord contrats additionnait des `montantEngage` **par échéance** de
+  périodicités hétérogènes (mensuel + trimestriel + annuel) → un total sans signification (un mensuel
+  1 M et un annuel 1 M pesaient pareil). Correctif : annualisation avant somme, sur les seuls contrats
+  actifs. Helper `annualise(montantEngage, echeanceType)` = `montant × (12 / PERIOD_MONTHS[type])`,
+  miroir de `functions/domain/mntEcheancier.PERIOD_MONTHS` (`mensuel:1, trimestriel:3, annuel:12`).
+- Champ `MntDashboard.montantEngageActifs` renommé `arrActifs` (revenu récurrent annualisé, FCFA entier).
+  KPI relibellé **« Revenu récurrent annuel (ARR) »** + sous-titre *« contrats actifs · annualisé »*.
+- Test `mntDashboard.test.ts` réécrit : 1 M mensuel + 0,5 M trimestriel + 3 M annuel → **17 M** ARR
+  (au lieu de 4,5 M avant, une somme de périodicités mélangées).
+
+**Appris sur l'existant**
+- `montantEngage` est bien le montant **par échéance** (confirmé par `mntEcheancier`, où `PERIOD_MONTHS`
+  sert déjà à générer les échéances) — pas un montant annuel. Le KPI le traitait à tort comme sommable
+  tel quel. Aucun autre lecteur du champ (grep `montantEngageActifs` → 0 hors définition).
+
+**Décidé**
+- Correctif de présentation additif, pas d'ADR : mêmes données, même population (contrats actifs),
+  seule l'unité du KPI est corrigée (par-échéance → annuelle). Aucun schéma, aucun callable touché.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Actions opérationnelles sur les tables (de la visualisation à la gestion)
 
 **Fait**

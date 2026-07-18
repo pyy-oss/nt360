@@ -619,7 +619,7 @@ export const Maintenance: FC<Props> = () => {
         <Card title="Tableau de bord">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald" />
-            <Kpi label="Montant engagé (actifs)" value={fmt(dash.montantEngageActifs)} tone="ink" />
+            <Kpi label="Revenu récurrent annuel (ARR)" value={fmt(dash.arrActifs)} tone="ink" sub="contrats actifs · annualisé" />
             <Kpi label="Tickets ouverts" value={String(dash.ticketsOuverts)} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"} />
             <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"} />
           </div>

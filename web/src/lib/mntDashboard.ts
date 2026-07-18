@@ -22,7 +22,7 @@ export interface MntEcheanceProche { id: string; fp: string | null; client: stri
 export interface MntDashboard {
   contratsTotal: number;
   contratsActifs: number;
-  montantEngageActifs: number;      // Σ montant engagé des contrats ACTIFS (FCFA entier)
+  arrActifs: number;                // Revenu récurrent ANNUALISÉ (ARR) des contrats ACTIFS (FCFA entier)
   parStatut: Record<string, number>;
   ticketsTotal: number;
   ticketsOuverts: number;           // statut ouvert | en_cours
@@ -30,21 +30,26 @@ export interface MntDashboard {
   echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 60] jours
 }
 
-type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
+type ContratLike = { id?: string; fp?: string | null; client?: string; statut?: string; echeanceType?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };
+// Mois par période (miroir de functions/domain/mntEcheancier.PERIOD_MONTHS) — normalise le montant PAR
+// ÉCHÉANCE en base annuelle. Sans ça, additionner un mensuel + un trimestriel + un annuel donne un total
+// sans signification (bug signalé : « Montant engagé » de tête faussé).
+const PERIOD_MONTHS: Record<string, number> = { mensuel: 1, trimestriel: 3, annuel: 12 };
+const annualise = (montantEngage: number, echeanceType?: string) => montantEngage * (12 / (PERIOD_MONTHS[echeanceType || ""] || 1));
 type TicketLike = { statut?: string; priorite?: string };
 
 /** Agrège les contrats + tickets à une date donnée (asOfIso, AAAA-MM-JJ). PUR. */
 export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike[], asOfIso: string): MntDashboard {
   const parStatut: Record<string, number> = {};
   const echeancesProches: MntEcheanceProche[] = [];
-  let contratsActifs = 0, montantEngageActifs = 0;
+  let contratsActifs = 0, arrActifs = 0;
   const asOf = parseIso(asOfIso);
   for (const c of contrats || []) {
     const st = c.statut || "brouillon";
     parStatut[st] = (parStatut[st] || 0) + 1;
     if (st !== "actif") continue;
     contratsActifs++;
-    montantEngageActifs += Number(c.montantEngage) || 0;
+    arrActifs += annualise(Number(c.montantEngage) || 0, c.echeanceType); // ARR = montant par échéance × échéances/an
     const fin = parseIso(c.dateFin);
     if (fin != null && asOf != null) {
       const jours = Math.round((fin - asOf) / DAY);
@@ -67,7 +72,7 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
   }
   return {
     contratsTotal: (contrats || []).length,
-    contratsActifs, montantEngageActifs, parStatut,
+    contratsActifs, arrActifs: Math.round(arrActifs), parStatut,
     ticketsTotal: (tickets || []).length,
     ticketsOuverts, parPriorite, echeancesProches,
   };
