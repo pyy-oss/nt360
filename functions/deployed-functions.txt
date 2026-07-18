@@ -36,6 +36,7 @@ capacityPlan
 dedupe
 dedupeClickupTasks
 deleteActivity
+deliveryMarginByAffaire
 generateFromInvoices
 deleteAssignment
 deleteCandidate

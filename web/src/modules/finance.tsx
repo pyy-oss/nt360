@@ -8,6 +8,8 @@ import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Bus
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../lib/firebase";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
@@ -282,6 +284,48 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
   );
 }
 
+// MARGE DE LIVRAISON PAR AFFAIRE (DO Lot 2) — marge carnet DIMINUÉE de la main-d'œuvre réellement consommée
+// (jours CRA imputés aux affaires via les affectations, keystone). Callable à la demande, gouverné
+// « rentabilite » : sans le droit, l'appel est refusé → la carte ne s'affiche pas (dégradation silencieuse).
+// Défini ICI (module lazy) plutôt que dans writes.ts pour ne pas alourdir le chunk d'entrée (budget 120 KB).
+type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
+async function deliveryMarginByAffaire() {
+  const res = await httpsCallable(functions, "deliveryMarginByAffaire")({});
+  return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
+}
+function DeliveryMarginCard() {
+  const [rows, setRows] = useState<DeliveryMarginRow[] | null>(null);
+  const [unassigned, setUnassigned] = useState(0);
+  const [state, setState] = useState<"loading" | "ok" | "denied">("loading");
+  useEffect(() => {
+    let live = true;
+    deliveryMarginByAffaire()
+      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setState("ok"); })
+      .catch(() => { if (live) setState("denied"); });
+    return () => { live = false; };
+  }, []);
+  if (state === "denied") return null;
+  return (
+    <Card title="Marge de livraison par affaire (après main-d'œuvre)">
+      {state === "loading" ? <EmptyState label="Calcul de la main-d'œuvre imputée…" /> : (
+        <>
+          <Table columns={[
+            colText("FP", (a: DeliveryMarginRow) => <FpLink fp={a.fp} />, (a: DeliveryMarginRow) => a.fp),
+            colText("Client", (a: DeliveryMarginRow) => a.client || "—", (a: DeliveryMarginRow) => a.client || ""),
+            colNum("Vente", (a: DeliveryMarginRow) => money(a.vente), (a: DeliveryMarginRow) => a.vente),
+            colNum("Marge carnet", (a: DeliveryMarginRow) => money(a.margeCarnet || 0), (a: DeliveryMarginRow) => a.margeCarnet || 0),
+            colNum("Jours-h.", (a: DeliveryMarginRow) => String(a.joursLabor), (a: DeliveryMarginRow) => a.joursLabor),
+            colNum("Coût M-O", (a: DeliveryMarginRow) => money(a.coutLabor || 0), (a: DeliveryMarginRow) => a.coutLabor || 0),
+            colNum("Marge livraison", (a: DeliveryMarginRow) => <span className={cx("tabnum", (a.margeLivraison || 0) < 0 ? "text-clay" : "text-emerald")}>{money(a.margeLivraison || 0)}</span>, (a: DeliveryMarginRow) => a.margeLivraison || 0),
+            colNum("%", (a: DeliveryMarginRow) => (a.margeLivraisonPct == null ? "—" : pct(a.margeLivraisonPct)), (a: DeliveryMarginRow) => a.margeLivraisonPct || 0),
+          ]} rows={(rows || []).slice(0, 30)} colsKey="delivery-margin" empty="Aucune affaire avec de la main-d'œuvre imputée (renseigner les affectations avec un N° FP)." />
+          <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export const Rentabilite: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<RentabiliteSummary>(`summaries/rentabilite_${period}`);
   const { active } = useFilters();
@@ -339,6 +383,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
           colNum("%MB", (a) => <Badge tone={(a.pmb < MARGIN.LOW ? "clay" : a.pmb < MARGIN.OK ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
         ]} rows={p.bottomAffaires || []} empty={`Aucune affaire à ${baseLbl} positif.`} />
       </Card>
+      <DeliveryMarginCard />
       <Card title="Top clients (marge)"><HBars rows={topArr(p.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>
       <Tip><b>Commande</b> : marge P&amp;L sur la prise de commande (CAS, cohorte par année de PO). <b>Facturé</b> : assiette = factures <b>datées</b> dans la période (identique à la vue Facturation), marge = taux de marge de la commande rattachée × montant facturé. L'attribution par date de facture évite les inversions entre exercices.</Tip>
     </div>
