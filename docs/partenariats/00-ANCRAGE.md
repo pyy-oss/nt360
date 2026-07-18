@@ -67,7 +67,7 @@ Collections/artefacts du module (additifs uniquement) :
 | Artefact nt360 | Rôle | Origine kit |
 |---|---|---|
 | `par_partners/{id}` (+ sous-coll. `tiers`/`competencies`/`certificationCatalog`/`requirements`) | référentiel partenaires + catalogue de certifs | `partners` |
-| `consultants/{id}/par_certifications/{certId}` | certifications d'un ingénieur (sous-coll. sur l'annuaire existant) | `certEngineers/.../certifications` |
+| `par_certifications/{id}` | certifications d'un ingénieur (top-level, RÉFÉRENCE `consultantId` ; NOM/BU/grade dénormalisés, jamais le CJM) | `certEngineers/.../certifications` |
 | `par_assignments/{id}` | assignations de certification (échéances, relances) | `certificationAssignments` |
 | `config/parPartnerMap` | overlay `supplier → partnerId` (patron `config/clientAliases`) | `PARTNER_MAP` (script) |
 | `summaries/par_status`, `summaries/par_quotas`, `summaries/par_alerts` | agrégats **dérivés** (statut partenariat, quotas/couverture, alertes cycle de vie) via recompute | `partnershipStatus` / `certificationCounts` / `partnerAlerts` |
@@ -137,11 +137,15 @@ dérivé (summary), recalculé par l'orchestrateur. Statut : **acté (à implém
 ### ADR-P03 — Les certifications s'attachent aux consultants existants, pas à un annuaire `certEngineers`
 **Contexte** : le kit crée `certEngineers` (annuaire d'ingénieurs) ; or nt360 a déjà `consultants`
 (annuaire des ressources ESN, avec `skills[]`). Créer `certEngineers` serait un **second annuaire des
-personnes** (deuxième vérité). **Décision** : les certifications d'un ingénieur vivent en
-sous-collection `consultants/{id}/par_certifications/{certId}`. Le statut RH de certification et
-l'alimentation des quotas partent des consultants. **Conséquence** : un « ingénieur certifié » est un
-consultant ; s'il manque à l'annuaire, c'est une lacune de données à corriger honnêtement, pas un
-motif de second annuaire. Statut : **acté (à implémenter Lot 2)**.
+personnes** (deuxième vérité). **Décision** : les certifications RÉFÉRENCENT un consultant existant par
+`consultantId`. **Raffinement de stockage (Lot 2)** : elles vivent en collection **top-level
+`par_certifications`** (et non en sous-collection de `consultants`, callable-only + CJM confidentiel) —
+la donnée de certif n'est pas confidentielle et se lit sous le seul droit `partenariats`. L'écriture
+`upsertParCertification` VALIDE l'existence du consultant (sinon on créerait une personne fantôme) et
+dénormalise NOM/BU/GRADE — **jamais le CJM**. Le statut RH et l'alimentation des quotas partent des
+consultants. **Conséquence** : un « ingénieur certifié » est un consultant ; s'il manque à l'annuaire,
+c'est une lacune de données à corriger honnêtement, pas un motif de second annuaire. Statut : **acté
+(Lot 2)**.
 
 ### ADR-P04 — États dérivés en summaries recompute, pas en collections écrites par trigger
 **Contexte** : le kit matérialise `partnershipStatus`/`certificationCounts`/`partnerAlerts` via des

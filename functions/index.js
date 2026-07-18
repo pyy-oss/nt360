@@ -1424,6 +1424,8 @@ const { createPartenariats } = require("./handlers/partenariats");
 const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
+exports.upsertParCertification = _partenariats.upsertParCertification;
+exports.deleteParCertification = _partenariats.deleteParCertification;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
