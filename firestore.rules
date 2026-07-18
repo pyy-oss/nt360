@@ -69,6 +69,8 @@ service cloud.firestore {
         : id.matches('billingTrend.*') ? 'facturation'
         // Pré-facturation consolidée (DO Lot 4) : expose TJM/CA par ressource → accès « Rentabilité ».
         : id.matches('preBilling.*') ? 'rentabilite'
+        // Reconnaissance de revenu (DO Lot 4b) : montant/facturé + FAE/PCA par affaire → accès « Rentabilité ».
+        : id.matches('recognition.*') ? 'rentabilite'
         : id.matches('rentabilite.*') ? 'rentabilite'
         // Marge par entité isolée → accès « Rentabilité » requis (avant les règles clients/domaines).
         : id.matches('clientsMargin.*') ? 'rentabilite'
