@@ -3,6 +3,35 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-036 — Navigation du module en 4 sous-onglets (Pilotage / Contrats / Tickets & SLA / Surveillance)
+
+- **Date :** 2026-07-18
+- **Statut :** Accepté
+- **Décideur :** Direction (retour d'usage : « on se perd dans le module »)
+
+### Contexte
+Le module rendait ~18 cartes empilées sur **une seule page** en défilement vertical continu, sans
+sous-navigation — alors que les autres modules de l'ERP (Partenariats, Pipeline) utilisent des sous-onglets
+`Segmented`. Conséquences relevées à l'usage (surtout mobile) : scroll interminable, opérationnel (liste
+contrats en 13ᵉ position, liste tickets en 17ᵉ) enterré sous le pilotage, thèmes (risque, renouvellement,
+statut, revenu) dispersés sur plusieurs cartes, repères instables (cartes montées sous condition de données).
+
+### Décision
+- **4 sous-onglets** de premier niveau via la primitive `Segmented` (déjà utilisée dans l'ERP), atterrissage
+  **Pilotage** par défaut :
+  - **Pilotage** (lecture direction) : Tableau de bord, Revenu récurrent, Risque, Rentabilité, Conformité, Maintenance par type.
+  - **Contrats** (gestionnaire) : liste des contrats, Renouvellements, Statut auto IA, Suggestions IA, Lignées IA, Import.
+  - **Tickets & SLA** (support) : liste des tickets, Calendrier SLA. *(Astreintes y figure temporairement — voir ADR-037.)*
+  - **Surveillance** : Centre de surveillance, Analyse de rétention IA, Registre d'audit.
+- **Regroupement purement présentationnel** : les onglets ne gatent que le JSX (tous les hooks restent appelés
+  au-dessus du `return`, aucune violation des règles de hooks). **Aucune logique `domain/mnt_*` ni calcul touché.**
+- Reste sous `gate` (drapeau + droit) : drapeau éteint ⇒ ERP inchangé. Indiscernable (primitive + libellés maison).
+
+### Conséquences
+- Un clic d'onglet remplace un scroll complet ; les listes opérationnelles redeviennent atteignables.
+- Le **dédoublonnage éditorial** des thèmes (revenu, risque, renouvellement, statut) et le **filtre global
+  BU/AM/Client** sont des décisions distinctes (ADR ultérieurs), pas incluses dans ce regroupement.
+
 ## ADR-035 — Astreintes : première ligne de coût SAISISSABLE, imputée par FP, comptabilisée à la validation
 
 - **Date :** 2026-07-18

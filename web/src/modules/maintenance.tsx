@@ -678,9 +678,20 @@ export const Maintenance: FC<Props> = () => {
     </div>
   ) : null;
 
+  // Sous-navigation de premier niveau (patron `partenariats.tsx`) — le module empilait ~18 cartes sur une
+  // seule page ; on les répartit sous 4 onglets pour cesser de « s'y perdre ». Pilotage (lecture direction)
+  // par défaut ; les onglets opérationnels (Contrats, Tickets) mettent la LISTE en tête. Aucun calcul
+  // déplacé : les onglets ne gatent que le JSX (tous les hooks sont appelés au-dessus).
+  const [tab, setTab] = useState<"pilotage" | "contrats" | "tickets" | "surveillance">("pilotage");
   return (
     <div className="flex flex-col gap-4">
-      {gate && (contrats.length > 0 || tickets.length > 0) && (
+      <Segmented value={tab} onChange={setTab} ariaLabel="Vue du module contrats" options={[
+        { value: "pilotage", label: "Pilotage" },
+        { value: "contrats", label: "Contrats", count: contrats.length || undefined },
+        { value: "tickets", label: "Tickets & SLA", count: tickets.length || undefined },
+        { value: "surveillance", label: "Surveillance" },
+      ]} />
+      {tab === "pilotage" && gate && (contrats.length > 0 || tickets.length > 0) && (
         <Card title="Tableau de bord">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald" />
@@ -727,7 +738,7 @@ export const Maintenance: FC<Props> = () => {
 
       {/* Revenu récurrent CONSOLIDÉ (DO Lot 4) — la BASE récurrente engagée (prévisible), distincte du revenu
           one-shot des projets, ventilée par BU / client / périodicité pour le pilotage direction. */}
-      {recurring.contratsActifs > 0 && (
+      {tab === "pilotage" && recurring.contratsActifs > 0 && (
         <Card title="Revenu récurrent (consolidé)">
           <Tip>Base de revenu <b>récurrent engagé</b> des contrats actifs, distincte du revenu one-shot des projets. <b>ARR</b> = montant par échéance annualisé (même calcul que le KPI ARR du tableau de bord) ; <b>MRR</b> = ARR ÷ 12. Ventilé par BU, client et périodicité.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -758,7 +769,7 @@ export const Maintenance: FC<Props> = () => {
       {/* Maintenance par type (ADR-025) — agrégé sur tout le parc : tickets ET interventions comptés
           SÉPARÉMENT par type. Vue d'ensemble (sans colonne Objectif — les objectifs sont par contrat,
           visibles en consultation). N'apparaît que si au moins un item est classé. */}
-      {gate && MNT_TYPES.some((t) => typeStats.totalTickets[t] || typeStats.totalInterventions[t]) && (
+      {tab === "pilotage" && gate && MNT_TYPES.some((t) => typeStats.totalTickets[t] || typeStats.totalInterventions[t]) && (
         <Card title="Maintenance par type">
           <Tip>Nombre de <b>tickets</b> et d'<b>interventions</b> classés par type sur l'ensemble du parc — comptés <b>séparément</b>. Les <b>objectifs</b> (max visé) se fixent et se suivent <b>par contrat</b> (fiche en consultation). Les items non classés ne sont pas comptés.</Tip>
           <TypeStatsTable tickets={typeStats.totalTickets} interventions={typeStats.totalInterventions} />
@@ -766,7 +777,7 @@ export const Maintenance: FC<Props> = () => {
       )}
       {/* Centre de surveillance (ADR-026) — flux d'événements clés (projection du risque) + abonnements
           ciblés. Proactivité : « Tout » = tout le parc, « Mes abonnements » = ce que je suis (contrat/parc). */}
-      {gate && surv && (
+      {tab === "surveillance" && gate && surv && (
         <Card title="Centre de surveillance"
           actions={(
             <div className="flex flex-wrap items-center gap-2">
@@ -790,7 +801,7 @@ export const Maintenance: FC<Props> = () => {
             : <Table columns={survCols} rows={survRows} colsKey="mnt_surveillance" rowKey={(e) => e.id} />}
         </Card>
       )}
-      {risque && (
+      {tab === "pilotage" && risque && (
         <Card title="Risque des contrats">
           <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
@@ -803,7 +814,7 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {gate && churnInput.length > 0 && (
+      {tab === "surveillance" && gate && churnInput.length > 0 && (
         <Card title={churn ? `Analyse de rétention IA · ${churn.analyses.length}` : "Analyse de rétention IA"}
           actions={<Busy variant="gold" label={churn ? "Réanalyser" : "Analyser le churn (IA)"} okMsg="Analyse prête" errMsg="Analyse IA indisponible" fn={async () => setChurn(await aiAnalyzeChurn(churnInput))} />}>
           {!churn ? (
@@ -816,21 +827,21 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {gate && renouvellements.length > 0 && (
+      {tab === "contrats" && gate && renouvellements.length > 0 && (
         <Card title={`Renouvellements & échéances à revoir · ${renouvellements.length}`}>
           <Tip>Contrats <b>actifs</b> dont la fin est <b>déjà dépassée</b> (statut à revoir, en tête) ou <b>approche</b> (≤ 90 j) — <b>critique ≤ 30 j</b>. « Demander le renouvellement » soumet la décision au <b>circuit d'approbation</b> (comme depuis la fiche).</Tip>
           <Table columns={renouvCols} rows={renouvellements} colsKey="mnt_renouv" />
         </Card>
       )}
 
-      {gate && agenda.length > 0 && (
+      {tab === "tickets" && gate && agenda.length > 0 && (
         <Card title={`Calendrier SLA · ${agenda.length}`}>
           <Tip>Échéances SLA <b>en attente</b> des tickets ouverts (prise en compte / résolution), calculées <b>en direct</b> — <b>rompues d'abord</b>, puis les plus proches. Un ticket dont le contrat n'a pas l'engagement du type n'apparaît pas.</Tip>
           <Table columns={agendaCols} rows={agenda} colsKey="mnt_sla_agenda" />
         </Card>
       )}
 
-      {gate && compliance.activeTotal > 0 && (
+      {tab === "pilotage" && gate && compliance.activeTotal > 0 && (
         <Card title="Conformité des contrats">
           <Tip>Contrôle de <b>complétude</b> des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> et un <b>montant d'engagement</b>. Une échéance <b>dépassée</b> n'est pas un défaut de conformité — elle relève des <b>renouvellements</b> ci-dessus. « Corriger » ouvre la fiche.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
@@ -843,7 +854,7 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {gate && pnl && pnl.rows.length > 0 && (
+      {tab === "pilotage" && gate && pnl && pnl.rows.length > 0 && (
         <Card title="Rentabilité des contrats"
           actions={<Busy variant="ghost" label="Recalculer" okMsg="Rentabilité à jour" errMsg="Recalcul refusé" fn={async () => { const r = await mntContratPnl(); setPnl({ rows: r.rows, hasCost: r.hasCost }); }} />}>
           <Tip>Revenu <b>engagé à ce jour</b> (échéancier) vs <b>coût total</b> de l'affaire = <b>interventions</b> (jours CRA × coût journalier) <b>+ P&L de l'affaire</b> (achats + provisions du carnet, par N° FP) <b>+ astreintes validées</b>. {pnl.hasCost ? <>Survolez le coût pour le détail. Pires marges d'abord. La marge est <b>prudente</b> (revenu engagé qui croît, coût affaire figé) tant que le contrat n'est pas à terme.</> : <b>Coût et marge masqués — droit « Rentabilité » requis.</b>}</Tip>
@@ -852,12 +863,12 @@ export const Maintenance: FC<Props> = () => {
       )}
 
       {/* Astreintes (ADR-035) — demande + validation + comptabilisation en charge (affaire & contrat). */}
-      <AstreintesCard gate={gate} canWrite={canWrite} contrats={contratsSorted} />
+      {tab === "tickets" && <AstreintesCard gate={gate} canWrite={canWrite} contrats={contratsSorted} />}
 
       {/* Statut automatique (ADR-027, révisé ADR-028) — PROPOSE seulement : « Analyser le parc » n'écrit rien,
           l'application est un geste humain (« Appliquer » à l'unité, « Appliquer les recommandés » en masse).
           « Rétablir » annule des statuts auto-appliqués par l'ancienne version (rétablissement d'incident). */}
-      {canWrite && (contrats.length > 0 || !!statutRun) && (
+      {tab === "contrats" && canWrite && (contrats.length > 0 || !!statutRun) && (
         <Card title={statutRun ? `Statut automatique (IA) · ${statutRun.proposals.length} proposition(s)` : "Statut automatique (IA)"}
           actions={(
             <div className="flex flex-wrap items-center gap-2">
@@ -886,15 +897,15 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      <Card title="Contrats de maintenance"
+      {tab === "contrats" && (<Card title="Contrats de maintenance"
         actions={canWrite ? <button type="button" onClick={() => { setCForm(emptyContrat()); setCId(""); setCEdit(false); setCOpen(true); }} className="btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5"><Plus size={14} /> Nouveau contrat</button> : undefined}>
         <Tip>Chaque contrat est adossé au <b>N° FP</b> de l'affaire. Le montant d'engagement est propre au contrat ; la facturation réelle reste celle de l'ERP.</Tip>
         {lc ? <div className="text-[13px] text-muted py-3">Chargement…</div> : contratsSorted.length === 0 ? <EmptyState label="Aucun contrat de maintenance." /> : <Table columns={contratCols} rows={contratsSorted} colsKey="mnt_contrats" rowKey={(c) => c.id || ""} bulk={contratBulk} searchKeys={[(c: MntContrat) => c.client, (c: MntContrat) => c.fp, (c: MntContrat) => label(STATUT_LABEL, c.statut)]} searchPlaceholder="Rechercher (client, N° FP, statut)…" />}
-      </Card>
+      </Card>)}
 
-      {canWrite && <ImportContratsCard />}
+      {tab === "contrats" && canWrite && <ImportContratsCard />}
 
-      {canWrite && (suggestions.length > 0 || candidatePool.length > 0) && (
+      {tab === "contrats" && canWrite && (suggestions.length > 0 || candidatePool.length > 0) && (
         <Card title={aiSug ? `Suggestions IA · ${aiRows.length}` : `Suggestions de contrats · ${suggestions.length}`}
           actions={candidatePool.length > 0 ? (
             <Busy variant="gold" label={aiSug ? "Réanalyser à l'IA" : "Doper à l'IA"}
@@ -915,7 +926,7 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      {canWrite && (
+      {tab === "contrats" && canWrite && (
         <Card title={`Lignées de renouvellement (IA)${lignees.length ? ` · ${lignees.length}` : ""}`}
           actions={<Busy variant="gold" label="Détecter les lignées (IA)" okMsg="Analyse prête" errMsg="Analyse IA indisponible"
             fn={async () => { const r = await aiMntLignees(); setLignees(r.lignees); }} />}>
@@ -942,13 +953,13 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
-      <Card title="Tickets & interventions"
+      {tab === "tickets" && (<Card title="Tickets & interventions"
         actions={canWrite ? <button type="button" onClick={openNewTicket} disabled={contrats.length === 0} className={cx("btn-ghost !px-2.5 !py-1 text-xs inline-flex items-center gap-1.5", contrats.length === 0 && "opacity-50 cursor-not-allowed")}><Plus size={14} /> Nouveau ticket</button> : undefined}>
         <Tip>Un ticket est une demande sous contrat. Le temps saisi sur une <b>intervention</b> alimente le CRA (une seule vérité du temps).</Tip>
         {ticketsSorted.length === 0 ? <EmptyState label="Aucun ticket." /> : <Table columns={ticketCols} rows={ticketsSorted} colsKey="mnt_tickets" rowKey={(t) => t.id || ""} bulk={[]} />}
-      </Card>
+      </Card>)}
 
-      {gate && canAudit && audit.length > 0 && (
+      {tab === "surveillance" && gate && canAudit && audit.length > 0 && (
         <Card title={`Registre d'audit · ${audit.length}${audit.length >= 500 ? "+" : ""}`}>
           <Tip>Traçabilité <b>opposable</b> des actions du module (contrats, tickets, interventions, décisions, imports) — la piste que chaque écriture gouvernée enregistre. Le bouton <b>CSV</b> exporte le registre pour un dossier de conformité.{audit.length >= 500 ? " Affichage borné aux 500 entrées les plus récentes." : ""}</Tip>
           <Table columns={auditCols} rows={audit} colsKey="mnt_audit" />
