@@ -743,12 +743,27 @@ async function recomputeCore(db, only) {
     const parCfg = (await db.doc("config/parFeature").get()).data();
     if (isParEnabled(parCfg)) {
       const { revenueByPartner } = require("../domain/parRevenue");
-      const parPartners = await readAll(db, "par_partners", true);
+      const { coverageAll } = require("../domain/parQuota");
+      const { certRenewalWatch, watchCounts } = require("../domain/parAlert");
+      const [parPartners, parCertifs] = await Promise.all([
+        readAll(db, "par_partners", true), readAll(db, "par_certifications", true),
+      ]);
       const partnerMap = ((await db.doc("config/parPartnerMap").get()).data() || {}).map || {};
-      const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
       const nameById = {}; for (const p of parPartners) nameById[p.id] = p.name;
+
+      // CA par constructeur dérivé des BC (ADR-P02).
+      const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
       const byPartner = caPartners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
       w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof: byPartner.reduce((s, g) => s + g.revenueXof, 0), ...stamp } });
+
+      // Quotas de certification (couverture par exigence) + statut de conformité par partenaire (ADR-P04).
+      const certsByPartner = {}; for (const c of parCertifs) { (certsByPartner[c.partnerId] = certsByPartner[c.partnerId] || []).push(c); }
+      const quotas = coverageAll(parPartners, certsByPartner);
+      w.push({ path: "summaries/par_quotas", data: { asOf, partners: quotas, ...stamp } });
+
+      // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0).
+      const watch = certRenewalWatch(parCertifs, asOf);
+      w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length, ...stamp } });
     }
   }
 
