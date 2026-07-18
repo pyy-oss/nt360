@@ -20,6 +20,14 @@ describe("parAi — snapshots + validation des sorties IA", () => {
     expect(s.certifications_actives).toContain("NSE 4");
   });
 
+  it("masquage CA (ADR-P07) : ca={} ⇒ montant 0 dans les deux snapshots (contrat du handler sans droit rentabilite)", () => {
+    // Sans le droit `rentabilite`, le handler passe ca:{} — le CA confidentiel ne doit apparaître nulle part.
+    const plan = actionPlanSnapshot({ dateIso: "2026-07-18", ca: {}, quotas, relances });
+    expect(plan.partners[0].ca_ytd_fcfa).toBe(0);
+    const qbr = qbrSnapshot({ partnerId: "fortinet", partner: { name: "Fortinet" }, periode: "T3 2026", ca: {}, quotas, certifs: [], relances });
+    expect(qbr.ca_realise_ytd_fcfa).toBe(0);
+  });
+
   it("normalizeActionPlan : ne garde que les items bien formés, priorité normalisée, trié, max 6", () => {
     const raw = [
       { priorite: "basse", titre: "C", actions: ["x"] },
