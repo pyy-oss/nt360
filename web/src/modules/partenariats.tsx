@@ -9,7 +9,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented } from "../design/components";
+import { Card, Tip, Badge, Busy, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { fmt } from "../design/tokens";
@@ -39,7 +39,7 @@ const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) 
 
 export const Partenariats: FC<Props> = () => {
   const canWrite = useCan("partenariats") === "write";
-  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "config">("dash");
+  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "config" | "ia">("dash");
 
   // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
   const { rows: partners } = useCollectionData<Partner>("par_partners");
@@ -63,6 +63,7 @@ export const Partenariats: FC<Props> = () => {
           { value: "certifs", label: "Certifications", count: certifs?.length },
           { value: "assigns", label: "Assignations", count: assigns?.length },
           { value: "config", label: "Paramétrage" },
+          { value: "ia", label: "IA & QBR" },
         ]}
       />
 
@@ -70,9 +71,96 @@ export const Partenariats: FC<Props> = () => {
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "config" && <ConfigTab partners={partners || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
+      {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
     </div>
   );
 };
+
+// ─────────────────────────────────────────────────────────────────────── IA & QBR
+type PlanItem = { priorite: string; partenaire: string; titre: string; constat: string; actions: string[]; impact: string };
+const PRIO_TONE: Record<string, "clay" | "gold" | "steel"> = { haute: "clay", moyenne: "gold", basse: "steel" };
+const PRIO_LABEL: Record<string, string> = { haute: "Haute", moyenne: "Moyenne", basse: "Basse" };
+
+const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partnerOpts }) => {
+  const toast = useToast();
+  const [plan, setPlan] = useState<PlanItem[] | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [partnerId, setPartnerId] = useState("");
+  const [periode, setPeriode] = useState("");
+  const [qbr, setQbr] = useState<{ qbr: any; snapshot: any } | null>(null);
+  const [qbrBusy, setQbrBusy] = useState(false);
+
+  const genPlan = async () => {
+    if (planBusy) return; setPlanBusy(true);
+    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", {}); setPlan(r.plan || []); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setPlanBusy(false); }
+  };
+  const genQbr = async () => {
+    if (qbrBusy || !partnerId) return; setQbrBusy(true);
+    try { const r = await callFn<{ qbr: any; snapshot: any }>("generateParQbr", { partnerId, periode }); setQbr({ qbr: r.qbr, snapshot: r.snapshot }); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setQbrBusy(false); }
+  };
+  const exportPptx = async () => {
+    if (!qbr) return;
+    try { const { exportParQbrPptx } = await import("../lib/parQbrPptx"); await exportParQbrPptx(qbr.qbr, qbr.snapshot); }
+    catch { toast("Export PowerPoint impossible", "err"); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card title="Plan d'action business (IA)" actions={<button className="btn" disabled={planBusy} onClick={genPlan}>{planBusy ? "Génération…" : "Générer le plan"}</button>}>
+        <Tip>Génère, à partir des données du module (statuts, quotas, CA, retards), un plan d'action priorisé — combler les quotas, accélérer le CA, sécuriser les niveaux avant audit. Recommandations proposées par l'IA, à valider.</Tip>
+        {plan == null ? <div className="text-[12px] text-faint py-4">Cliquez « Générer le plan » pour obtenir des recommandations.</div> : plan.length === 0 ? <EmptyState label="Aucune recommandation générée." /> : (
+          <div className="space-y-2 mt-1">
+            {plan.map((it, i) => (
+              <div key={i} className="rounded-lg border border-line p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge tone={PRIO_TONE[it.priorite] || "steel"}>{PRIO_LABEL[it.priorite] || it.priorite}</Badge>
+                  <span className="font-semibold text-[13px]">{it.titre}</span>
+                  {it.partenaire && <span className="text-[11px] text-muted">· {it.partenaire}</span>}
+                </div>
+                {it.constat && <div className="text-[12px] text-muted mb-1">{it.constat}</div>}
+                {!!(it.actions || []).length && <ul className="list-disc pl-5 text-[12px] space-y-0.5">{it.actions.map((a, j) => <li key={j}>{a}</li>)}</ul>}
+                {it.impact && <div className="text-[11px] text-emerald mt-1">Impact : {it.impact}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Revue trimestrielle (QBR) par partenaire">
+        <Tip>Synthèse de revue trimestrielle générée par l'IA, exportable en PowerPoint de marque (montants FCFA).</Tip>
+        <div className="flex flex-wrap items-end gap-2 mb-2">
+          <div className="w-56"><Field label="Constructeur"><Select value={partnerId} onChange={setPartnerId} options={partnerOpts} placeholder="Choisir…" /></Field></div>
+          <div className="w-40"><Field label="Période"><input className="field" value={periode} placeholder="ex. T3 2026" onChange={(e) => setPeriode(e.target.value)} /></Field></div>
+          <button className="btn" disabled={qbrBusy || !partnerId} onClick={genQbr}>{qbrBusy ? "Génération…" : "Générer la QBR"}</button>
+          {qbr && <button className="btn-ghost" onClick={exportPptx}>Exporter en PowerPoint</button>}
+        </div>
+        {qbr && (
+          <div className="rounded-lg border border-line p-3 space-y-2 text-[12px]">
+            <div className="font-semibold text-[14px]">{qbr.qbr.titre}</div>
+            {qbr.qbr.synthese_executive && <div className="italic text-muted">{qbr.qbr.synthese_executive}</div>}
+            <QbrList title="Points forts" tone="text-emerald" items={qbr.qbr.points_forts} />
+            {qbr.qbr.statut_certifications && <div><span className="text-gold font-semibold">Certifications :</span> {qbr.qbr.statut_certifications}</div>}
+            <QbrList title="Points d'attention" tone="text-clay" items={qbr.qbr.points_attention} />
+            <QbrList title="Engagements Neurones" tone="text-emerald" items={qbr.qbr.engagements_neurones} />
+            <QbrList title="Demandes au constructeur" tone="text-gold" items={qbr.qbr.demandes_constructeur} />
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+const QbrList: FC<{ title: string; tone: string; items?: string[] }> = ({ title, tone, items }) => (
+  !items || !items.length ? null : (
+    <div><span className={`${tone} font-semibold`}>{title} :</span>
+      <ul className="list-disc pl-5 space-y-0.5 mt-0.5">{items.map((t, i) => <li key={i}>{t}</li>)}</ul>
+    </div>
+  )
+);
 
 // ─────────────────────────────────────────────────────────────────────── Tableau de bord
 const Dashboard: FC<{ ca: CaSummary; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, quotas, alerts, relances, partners, partnerName }) => {

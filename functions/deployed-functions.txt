@@ -147,6 +147,8 @@ setParPartnerMap
 upsertParAssignment
 setParAssignmentStatus
 deleteParAssignment
+generateParActionPlan
+generateParQbr
 setEmailNotifyConfig
 sendTestEmail
 setNotificationConfig

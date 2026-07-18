@@ -172,4 +172,4 @@ référence pilotée par la direction/steward. Statut : **acté (Lot 1)**.
 `lib/aiChurn.js` : `@anthropic-ai/sdk`, modèle `claude-opus-4-8`, `thinking:{type:"adaptive"}`, gestion
 `stop_reason==="refusal"`, secret `ANTHROPIC_API_KEY`, sortie re-validée par un domaine pur, `logOps`
 sur l'usage seul (jamais le contenu). Le `fetch` brut + `sonnet-4-6` + `ANTHROPIC_KEY` du kit sont
-abandonnés. Statut : **acté (à implémenter Lot 7)**.
+abandonnés. Statut : **acté (Lot 7)**.
