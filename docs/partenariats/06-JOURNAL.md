@@ -457,3 +457,27 @@
 **Appris**
 - La chaîne dérivée du module est entièrement PURE (domain/) : un seul test d'intégration vitest exerce
   tout le parcours métier sans I/O — le meilleur « filet » pour un pipeline de dérivation.
+
+---
+
+## Lot MES — Guide de mise en service + audit d'activation + remédiation conformité
+
+**Fait**
+- **Guide de mise en service** `docs/partenariats/07-MISE-EN-SERVICE.md` : prérequis, activation en 7 étapes
+  (drapeau + droits → référentiel → mapping CA → certifs/assignations → canaux email/ClickUp), surfaces de
+  visibilité, vérification & retour arrière. Aucun secret nouveau (réutilise l'existant).
+- **Audit d'activation** du module étendu (P1-P5), deux passes :
+  - **gardien = VERT** : zéro régression, zéro fuite de CA (5 surfaces vérifiées : par_news, CODIR, export
+    CSV, email, payload ClickUp) ; drapeau éteint = ERP d'avant sur chaque point d'entrée ; buildNews intact ;
+    contrôles mécaniques verts (functions 1114, rules 73, deploy 178, bundle 118.1 KB).
+  - **conformiste = NON CONFORME** (3 écarts, tous sur le bouton d'export P5) → **remédiés** : réutilisation
+    du composant partagé `design/bulk.ExportBtn` (libellé + nom de fichier `nt360-<name>-<stamp>.csv`
+    conformes) au lieu du wrapper divergent ; dates d'export via `frDate` (JJ/MM/AAAA) au lieu d'ISO brut.
+    `ExportCsvBtn` local supprimé. web lint/build OK, bundle 118.1 KB.
+
+**Appris**
+- La conformité (indiscernabilité) se joue dans les détails : un bouton d'export « maison » a suffi à créer
+  trois divergences (libellé, nom de fichier, format de date). Réutiliser le composant partagé — pas juste
+  la lib sous-jacente — est ce qui rend l'export réellement indiscernable des autres exports de l'ERP.
+- L'audit adverse en DEUX rôles (gardien = casse/fuite, conformiste = indiscernabilité) attrape des choses
+  orthogonales : le gardien a validé la sécurité, le conformiste a rattrapé le style.
