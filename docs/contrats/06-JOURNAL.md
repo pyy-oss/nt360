@@ -31,6 +31,33 @@
 
 ---
 
+## 2026-07-18 — Actions opérationnelles sur les tables (de la visualisation à la gestion)
+
+**Fait**
+- Retour terrain : *« le module est encore trop de la visualisation, pas assez de gestion opérationnelle ».*
+  Ajout d'actions contextuelles sur les tables purement descriptives, en réutilisant les callables existants :
+  - **Rentabilité** → « Saisir un temps » (ouvre le ticket du contrat pré-rempli → l'intervention impute enfin
+    un coût aux affaires à 0 j — corrige la cause du 100 % côté saisie).
+  - **Risque** → « Ticket » (ouvre un ticket pré-rempli) + « S'abonner / Abonné » (`toggleWatchContrat`).
+  - **Calendrier SLA** → « Traiter » (ouvre le ticket concerné, `openEditTicket`).
+  - **Rétention / churn** → « Renouveler » (`submitMntDecision` renouvellement, via fp→id contrat).
+  - **Renouvellements** → « Résilier » ajouté à côté de « Renouveler » (symétrie des décisions).
+- Helper transverse `openTicketFor(contratId)` (modal ticket pré-rempli) + `contratIdByFp` (résolution FP→id
+  par fpKey). Aucune nouvelle route, aucun nouveau formulaire : réutilisation stricte du modal ticket existant.
+
+**Appris sur l'existant**
+- Une intervention appartient à un ticket (`upsertMntIntervention` exige `ticketId`) : le point d'entrée
+  opérationnel pour imputer un coût est donc toujours le modal ticket. `RisqueItem`/`MntRenouvellement`/
+  `MntContratPnlRow` portent déjà l'id contrat ; seul le churn est clé-FP (d'où `contratIdByFp`).
+
+**Décidé**
+- Additif UI pur (pas d'ADR) : aucune métrique/donnée nouvelle, réutilisation des callables gouvernés.
+
+**Échoué / abandonné**
+- (rien)
+
+---
+
 ## 2026-07-18 — Rentabilité contrat : coût = interventions + P&L affaire (ADR-033)
 
 **Fait**
