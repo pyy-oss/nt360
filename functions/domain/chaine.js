@@ -32,6 +32,11 @@ function overview(orders, invoices, opps = [], opts = {}) {
   // Facturé = CAF, FIGÉ sur l'exercice = Σ factures datées dans la période (orphelines incluses :
   // une facture est du CA facturé même sans commande retrouvée). Non additif avec CAS/Backlog.
   const facture = sum(invoices, (i) => i.amountHt);
+  // ENCAISSÉ = Σ factures de la période marquées PAYÉES (drapeau `paid` d'Odoo/compta). Boucle la chaîne
+  // jusqu'au cash : CAS → CAF → Encaissé. Même population que CAF (factures datées dans la période). Limite
+  // assumée : `paid` est binaire, sans DATE de règlement ni paiement partiel — l'encaissé est donc rattaché
+  // à la date de FACTURE, pas de paiement (cf. cashflow.js). Le suivi fin du cash vit dans Créances/DSO.
+  const encaisse = sum((invoices || []).filter((i) => i && i.paid), (i) => i.amountHt);
   const mb = sum(orders, (o) => o.mb);
   // Gagné = Commandes : une opportunité gagnée (stage 6) devient un PO/commande (CAS).
   // On ne recompte donc PAS les gagnés dans les certitudes (déjà dans les commandes).
@@ -63,6 +68,7 @@ function overview(orders, invoices, opps = [], opts = {}) {
     tierBreakdown: breakdown,    // décomposition par niveau (Certitudes / Forecast / Pipe) — jamais mélangée
     commandes,
     facture,
+    encaisse,
     rafPeriode,
     backlog,
     backlogCount,
@@ -73,6 +79,8 @@ function overview(orders, invoices, opps = [], opts = {}) {
       // TAUX DE FACTURATION (période) = Facturé / (Facturé + Backlog) : part déjà facturée du
       // « facturé + reste à facturer ». Borné [0,1] par construction (deux grandeurs positives).
       tauxFacturation: (facture + backlog) > 0 ? facture / (facture + backlog) : 0,
+      // TAUX D'ENCAISSEMENT (période) = Encaissé / Facturé : part du CA facturé déjà rentrée en caisse.
+      tauxEncaissement: facture > 0 ? encaisse / facture : 0,
       // TAUX DE CONVERSION VENTE (période) = Commande / (Commande + pipeline projeté + Perdu).
       tauxConversionVente: convDenom > 0 ? commandes / convDenom : 0,
       pmb: commandes > 0 ? mb / commandes : 0,

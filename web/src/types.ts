@@ -1,13 +1,13 @@
 // Types de données Firestore (summaries/* et collections) — frontière typée du front.
 // Volontairement permissifs (champs optionnels) : les agrégats évoluent côté back-end.
 
-export type Ratios = { tauxFacturation?: number; tauxConversionVente?: number; pmb?: number };
+export type Ratios = { tauxFacturation?: number; tauxEncaissement?: number; tauxConversionVente?: number; pmb?: number };
 
 export type TierBucket = { key: string; label: string; band: string; weight: number; active: boolean; brut: number; pond: number; count: number };
 export interface OverviewSummary {
   period?: string;
   certitudes?: number; pondCertain?: number; pipelineProjete?: number; tierBreakdown?: TierBucket[]; commandes?: number;
-  facture?: number; rafPeriode?: number; backlog?: number; backlogCount?: number;
+  facture?: number; encaisse?: number; rafPeriode?: number; backlog?: number; backlogCount?: number;
   mb?: number; pipelineWon?: number; perdu?: number; ratios?: Ratios;
 }
 

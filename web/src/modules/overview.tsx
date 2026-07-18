@@ -169,7 +169,8 @@ export const Overview: FC<Props> = ({ period }) => {
         <Stage idx={1} label="Certitudes" accent={T.gold} value={fmt(v.certitudes)} sub="pondéré IdC ≥ 90 % · D Prev période" />
         <Stage idx={2} label="Commandes · CAS" accent={T.steel} value={fmt(v.commandes)} sub="prise de commande" />
         <Stage idx={3} label="Facturé · CAF" accent={T.emerald} value={fmt(v.facture)} sub="figé sur l'exercice" />
-        <Stage idx={4} label="Backlog · RAF" accent={T.clay} value={fmt(v.backlog)} sub={v.backlogCount ? `${v.backlogCount} commandes · glissant` : "glissant"} />
+        <Stage idx={4} label="Encaissé" accent={T.emerald} value={fmt(v.encaisse)} sub={`${pct(v.ratios?.tauxEncaissement)} du facturé`} />
+        <Stage idx={5} label="Backlog · RAF" accent={T.clay} value={fmt(v.backlog)} sub={v.backlogCount ? `${v.backlogCount} commandes · glissant` : "glissant"} />
       </Chain>
 
       {/* Marge — 2 perspectives sur leur propre ligne (bases CAS/CAF déjà dans la chaîne ci-dessus,
@@ -184,6 +185,7 @@ export const Overview: FC<Props> = ({ period }) => {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
+        <Kpi label="Taux d'encaissement" value={pct(v.ratios?.tauxEncaissement)} sub="Encaissé / Facturé (drapeau payé)" />
         <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
       </div>
 
@@ -205,7 +207,7 @@ export const Overview: FC<Props> = ({ period }) => {
           en tête. */}
       <AlertsBanner />
 
-      <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Backlog</b> (RAF) est <b>glissant</b> (toutes les commandes ouvertes). <b>Certitudes</b> = pondéré ≥ 90 % des opportunités dont la <b>D Prev</b> tombe dans la période sélectionnée. L'<b>atterrissage</b> combine réalisé + pipeline pondéré pour projeter la fin d'exercice.</Tip>
+      <Tip><b>Grandeurs non additives</b> (CAS ≠ Facturé + Backlog). <b>CAS</b> = prise de commande (figée sur l'année de PO). <b>CAF</b> = facturation, seule grandeur figée sur l'exercice. <b>Encaissé</b> = factures de la période marquées payées (drapeau compta, rattaché à la date de facture — le suivi fin du cash vit dans Créances/DSO). <b>Backlog</b> (RAF) est <b>glissant</b> (toutes les commandes ouvertes). <b>Certitudes</b> = pondéré ≥ 90 % des opportunités dont la <b>D Prev</b> tombe dans la période sélectionnée. L'<b>atterrissage</b> combine réalisé + pipeline pondéré pour projeter la fin d'exercice.</Tip>
     </div>
   );
 };

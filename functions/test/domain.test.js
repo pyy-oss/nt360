@@ -47,6 +47,20 @@ describe("overview — chaîne (§7)", () => {
     // Taux de facturation = Facturé / (Facturé + Backlog) : ici Facturé=1400, Backlog=9999.
     expect(ov3.ratios.tauxFacturation).toBeCloseTo(1400 / (1400 + 9999), 6);
   });
+  it("encaissé = Σ factures PAYÉES de la période ; taux d'encaissement = Encaissé / Facturé (DO Lot 4)", () => {
+    const inv = [
+      { numero: "P1", fp: "FP/2026/1", date: "2026-01-10", amountHt: 600, paid: true },
+      { numero: "P2", fp: "FP/2026/1", date: "2026-02-10", amountHt: 300, paid: false }, // facturée, non encaissée
+      { numero: "P3", fp: "FP/2025/2", date: "2025-06-10", amountHt: 100, paid: true },
+    ];
+    const ovp = overview(ORDERS, inv, OPPS);
+    expect(ovp.facture).toBe(1000);                 // 600 + 300 + 100
+    expect(ovp.encaisse).toBe(700);                 // 600 + 100 (payées)
+    expect(ovp.ratios.tauxEncaissement).toBeCloseTo(700 / 1000, 6);
+    // Aucune facture payée → encaissé 0, taux 0 (rétro-compat : INVOICES n'ont pas de drapeau paid).
+    expect(ov.encaisse).toBe(0);
+    expect(ov.ratios.tauxEncaissement).toBe(0);
+  });
   it("certitudes = pondéré certain (IdC≥90%) à 100% du montant ; commandes suivies à part", () => {
     expect(ov.pondCertain).toBe(1000); // o6 éligible, valorisé à 100% du montant
     expect(ov.certitudes).toBe(1000);

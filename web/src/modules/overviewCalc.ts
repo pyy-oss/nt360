@@ -8,9 +8,9 @@ import { projectionWeight, normalizeTiers, p01, type Tier } from "../lib/project
 import { fpKey, isAgedLost, isDormantClosing, buildFpAliasResolver, plausibleYear } from "../lib/ids";
 
 export type FilteredOverview = {
-  certitudes: number; commandes: number; facture: number; backlog: number; backlogCount: number; mb: number;
+  certitudes: number; commandes: number; facture: number; encaisse: number; backlog: number; backlogCount: number; mb: number;
   factureMb: number; facturePmb: number; // perspective Facturé (marge reconnue au prorata, plafonnée au CAS)
-  ratios: { tauxFacturation: number; tauxConversionVente: number; pmb: number };
+  ratios: { tauxFacturation: number; tauxEncaissement: number; tauxConversionVente: number; pmb: number };
 };
 
 const DIMS: Dim[] = ["bu", "am", "client"];
@@ -86,6 +86,9 @@ export function computeFilteredOverview(
   const backlogCount = ordAll.filter((o) => (o.raf || 0) > 0).length;
   const mb = S(ordP, (o) => o.mb);
   const facture = S(invP, (i) => i.amountHt);
+  // ENCAISSÉ (miroir chaine.js) : Σ factures de la période marquées PAYÉES (`paid`) → boucle la chaîne
+  // jusqu'au cash. Même population que CAF. Limite : `paid` binaire, rattaché à la date de facture.
+  const encaisse = S(invP.filter((i) => i.paid), (i) => i.amountHt);
   // Perspective FACTURÉ : marge reconnue = taux(mb/CAS) de la commande × min(facturé_FP, CAS_FP)
   // (plafond au CAS = pas de marge sur la surfacturation, miroir reporting.factureLines).
   const rateByFp = new Map<string, { rate: number; cas: number }>();
@@ -112,9 +115,10 @@ export function computeFilteredOverview(
   const perdu = S(oppP.filter((o) => o.stage === 7), (o) => o.amount);
   const convDenom = commandes + pipelineProjete + perdu;
   return {
-    certitudes: pondCertain, commandes, facture, backlog, backlogCount, mb, factureMb, facturePmb,
+    certitudes: pondCertain, commandes, facture, encaisse, backlog, backlogCount, mb, factureMb, facturePmb,
     ratios: {
       tauxFacturation: (facture + backlog) > 0 ? facture / (facture + backlog) : 0,
+      tauxEncaissement: facture > 0 ? encaisse / facture : 0,
       tauxConversionVente: convDenom > 0 ? commandes / convDenom : 0,
       pmb: commandes > 0 ? mb / commandes : 0,
     },
