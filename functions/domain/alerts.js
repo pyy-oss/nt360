@@ -16,7 +16,7 @@ const { ALERT_DEFAULTS } = require("./thresholds");
  * @param {object[]} [opps] opportunités (pour l'alerte « opportunités dormantes »)
  * @param {object} [thr] seuils configurables (config/alerts) : concentration, surfacturationPct, rafEcartPct, dormantYears
  */
-function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr) {
+function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr, deliveryLate) {
   const out = [];
   opps = opps || [];
   const T = { ...ALERT_DEFAULTS, ...(thr || {}) };
@@ -131,6 +131,12 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
     return eta && String(eta).slice(0, 10) < asOf && !DELIVERED.has(b.status);
   }) : [];
   if (lateBc.length) out.push({ type: "bc_en_retard", severity: "high", count: lateBc.length, message: `${lateBc.length} BC en retard (ETA dépassée, non livré)`, refs: lateBc.slice(0, 10).map((b) => b.bcNumber || b.supplier || b.fp) });
+
+  // Retard de LIVRAISON (DO Lot 3) : affaires du carnet dont la date contractuelle ClickUp est dépassée
+  // alors que la tâche est encore active (calculé par clickupSignals.overdue, réutilisé ici). Remonte le
+  // retard de livraison au Centre d'alertes — le COO pilote par exception, pas en ouvrant le cockpit ClickUp.
+  const deliv = Array.isArray(deliveryLate) ? deliveryLate : [];
+  if (deliv.length) out.push({ type: "livraison_en_retard", severity: "high", count: deliv.length, message: `${deliv.length} affaire(s) en retard de livraison (date contractuelle dépassée)`, refs: deliv.slice(0, 10).map((x) => x && x.fp).filter(Boolean) });
 
   // Opportunités DORMANTES : encore actives (stage 1-5) mais dont la D Prev est déjà dépassée →
   // prévision faussée, à requalifier/reprogrammer. Ancienneté = jours écoulés depuis la D Prev.

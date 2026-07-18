@@ -6,6 +6,22 @@ const { alerts } = require("../domain/alerts");
 const countOf = (arr, type) => { const x = arr.find((a) => a.type === type); return x ? x.count : 0; };
 const sup = { rows: [] };
 
+describe("livraison_en_retard — retard de livraison (ClickUp) remonté au Centre d'alertes (DO Lot 3)", () => {
+  it("émet une alerte high depuis la liste des affaires en retard de livraison", () => {
+    const deliv = [{ fp: "FP/2026/1", client: "ACME" }, { fp: "FP/2026/2", client: "BETA" }];
+    const al = alerts([], [], sup, [], 2026, "2026-07-17", [], null, deliv);
+    const a = al.find((x) => x.type === "livraison_en_retard");
+    expect(a).toBeTruthy();
+    expect(a.severity).toBe("high");
+    expect(a.count).toBe(2);
+    expect(a.refs).toEqual(["FP/2026/1", "FP/2026/2"]);
+  });
+  it("aucune alerte quand la liste est vide ou absente (rétrocompatible)", () => {
+    expect(alerts([], [], sup, [], 2026, "2026-07-17", [], null).find((x) => x.type === "livraison_en_retard")).toBeFalsy();
+    expect(alerts([], [], sup, [], 2026, "2026-07-17", [], null, []).find((x) => x.type === "livraison_en_retard")).toBeFalsy();
+  });
+});
+
 describe("commande_non_facturee — commande signée sans facture depuis > N jours", () => {
   const orders = [
     { fp: "FP/2025/1", cas: 1000, facture: 0, dateCommande: "2025-01-10" }, // signée il y a > 90 j, 0 facturé → alerte
