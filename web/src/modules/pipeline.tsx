@@ -14,6 +14,7 @@ import { trackWrite } from "../lib/activity";
 import { Props, grid4, grid5, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
+import { winLossBySegment } from "../lib/winLoss";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { isDormantClosing } from "../lib/ids"; // miroir client de l'exclusion dormante (parité recompute)
@@ -600,6 +601,10 @@ export const OppList: FC<Props> = () => {
     });
     return [...m.entries()].map(([competitor, v]) => ({ competitor, ...v })).sort((a, b) => b.amount - a.amount);
   }, [rows]);
+  // TAUX DE GAIN par segment (opps clôturées 6/7) — « où gagne-t-on / perd-on » : complète les deux analyses
+  // LOSS-only ci-dessus (helper PUR testé, même assiette `rows`).
+  const winLossBySource = useMemo(() => winLossBySegment(rows, (o) => (o.leadSource || "").trim() || "—"), [rows]);
+  const winLossByBu = useMemo(() => winLossBySegment(rows, (o) => o.bu || "AUTRE"), [rows]);
   // Comptages par statut en UNE seule passe (au lieu de 5 `rows.filter` complets rejoués à chaque render).
   const segCounts = useMemo(() => {
     const c = { active: 0, won: 0, lost: 0, susp: 0, cxl: 0 };
@@ -776,6 +781,30 @@ export const OppList: FC<Props> = () => {
             colNum("Montant perdu", (r) => money(r.amount), (r) => r.amount),
           ]} rows={lostByCompetitor} />
           <Tip>Analyse win/loss <b>concurrentielle</b> : contre qui perd-on, et pour quels montants (concurrent saisi au passage en « Perdu »). Oriente le positionnement et le battlecard commercial.</Tip>
+        </Card>
+      )}
+      {winLossBySource.length > 0 && (
+        <Card title="Taux de gain par origine de lead">
+          <Table columns={[
+            colText("Origine", (r) => r.key, (r) => r.key),
+            colNum("Gagné", (r) => r.won, (r) => r.won),
+            colNum("Perdu", (r) => r.lost, (r) => r.lost),
+            colNum("Taux de gain", (r) => <span className={cx(r.winRate >= 0.5 ? "text-emerald" : r.winRate >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRate)}</span>, (r) => r.winRate),
+            colNum("Montant gagné", (r) => money(r.wonAmount), (r) => r.wonAmount),
+          ]} rows={winLossBySource} colsKey="pipeline-winloss-source" />
+          <Tip>Analyse win/loss par <b>canal d'acquisition</b> : sur les opportunités <b>clôturées</b>, part gagnée par origine de lead. Répond « quel canal convertit », complément du <b>montant perdu</b> par motif/concurrent ci-dessus. « — » = origine non renseignée.</Tip>
+        </Card>
+      )}
+      {winLossByBu.length > 0 && (
+        <Card title="Taux de gain par BU">
+          <Table columns={[
+            colText("BU", (r) => r.key, (r) => r.key),
+            colNum("Gagné", (r) => r.won, (r) => r.won),
+            colNum("Perdu", (r) => r.lost, (r) => r.lost),
+            colNum("Taux de gain", (r) => <span className={cx(r.winRate >= 0.5 ? "text-emerald" : r.winRate >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRate)}</span>, (r) => r.winRate),
+            colNum("Montant gagné", (r) => money(r.wonAmount), (r) => r.wonAmount),
+          ]} rows={winLossByBu} colsKey="pipeline-winloss-bu" />
+          <Tip>Analyse win/loss par <b>Business Unit</b> : sur les opportunités <b>clôturées</b>, part gagnée par BU. Situe les BU les plus (et les moins) performantes en conversion.</Tip>
         </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
