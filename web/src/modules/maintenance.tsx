@@ -368,10 +368,12 @@ export const Maintenance: FC<Props> = () => {
     const all = risque?.items || [];
     return filterActive ? all.filter((i) => fMatch({ bu: i.bu, am: i.am, client: clientKey(i.client) }, ["bu", "am", "client"])) : all;
   }, [risque, filterActive, fMatch, clientKey]);
-  const atRisk = risqueItems.filter((r) => r.niveau !== "vert");
+  // « À risque » = ni sain (vert) NI non scoré (incomplet) — un contrat incomplet est une dette de saisie,
+  // pas un risque avéré (miroir de mntRisque.js atRisk).
+  const atRisk = risqueItems.filter((r) => r.niveau !== "vert" && r.niveau !== "incomplet");
   const counts = useMemo(() => {
-    if (!filterActive) return risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0 };
-    const c = { vert: 0, ambre: 0, rouge: 0, critique: 0 } as Record<string, number>;
+    if (!filterActive) return risque?.counts || { vert: 0, ambre: 0, rouge: 0, critique: 0, incomplet: 0 };
+    const c = { vert: 0, ambre: 0, rouge: 0, critique: 0, incomplet: 0 } as Record<string, number>;
     for (const i of risqueItems) c[i.niveau] = (c[i.niveau] || 0) + 1;
     return c;
   }, [risqueItems, risque, filterActive]);
@@ -794,12 +796,13 @@ export const Maintenance: FC<Props> = () => {
       )}
       {tab === "pilotage" && risque && (
         <Card title="Risque des contrats">
-          <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos reste Vert.</Tip>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos <b>et complet</b> reste Vert ; un contrat sans données de pilotage (engagement, date de fin, montant) est <b>Non scoré</b> — à compléter, jamais « sain » par défaut.</Tip>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
             <Kpi label="Critique" value={String(counts.critique || 0)} tone="plum" />
             <Kpi label="Rouge" value={String(counts.rouge || 0)} tone="clay" />
             <Kpi label="Ambre" value={String(counts.ambre || 0)} tone="gold" />
             <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
+            <Kpi label="Non scoré" value={String(counts.incomplet || 0)} sub="données à compléter" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
         </Card>
@@ -1074,7 +1077,8 @@ export const Maintenance: FC<Props> = () => {
                 <div><div className="text-[11px] text-muted">Client</div><div className="font-display text-lg leading-tight">{vc.client || "—"}</div></div>
                 <div><div className="text-[11px] text-muted">N° FP</div><div className="text-[15px]"><FpLink fp={vc.fp} /></div></div>
                 <Badge tone={statutTone(vc.statut)}>{label(STATUT_LABEL, vc.statut)}</Badge>
-                {vcRisk && vcRisk.niveau !== "vert" && <Badge tone={niveauTone(vcRisk.niveau)}>Risque {riskLabel(NIVEAU_LABEL, vcRisk.niveau)}</Badge>}
+                {vcRisk && vcRisk.niveau !== "vert" && vcRisk.niveau !== "incomplet" && <Badge tone={niveauTone(vcRisk.niveau)}>Risque {riskLabel(NIVEAU_LABEL, vcRisk.niveau)}</Badge>}
+                {vcRisk && vcRisk.niveau === "incomplet" && <Badge tone="neutral">Non scoré</Badge>}
               </div>
               <div className="flex flex-wrap gap-x-8 gap-y-2 text-[13px] border-y border-line/60 py-3">
                 <div><div className="text-[11px] text-muted">Montant engagé</div><div className="tabnum">{money(vc.montantEngage)}</div></div>
@@ -1082,7 +1086,7 @@ export const Maintenance: FC<Props> = () => {
                 <div><div className="text-[11px] text-muted">Périodicité</div><div>{label(ECHEANCE_LABEL, vc.echeanceType)}</div></div>
                 <div><div className="text-[11px] text-muted">Tickets ouverts</div><div className={cx("tabnum", openTk > 0 && "text-gold")}>{openTk} <span className="text-faint">/ {vcTickets.length}</span></div></div>
               </div>
-              {vcRisk && vcRisk.niveau !== "vert" && (vcRisk.signals || []).length > 0 && (
+              {vcRisk && vcRisk.niveau !== "vert" && vcRisk.niveau !== "incomplet" && (vcRisk.signals || []).length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5"><span className="text-[12px] text-muted">Signaux de risque :</span>{vcRisk.signals.map((s, i) => <Badge key={i} tone="clay">{signalText(s)}</Badge>)}</div>
               )}
               <div>

@@ -9,15 +9,29 @@ const NOW = Date.UTC(2026, 6, 15, 12, 0, 0);
 const day = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
 
 describe("mntRisque — paliers & population", () => {
-  it("contrat vivant sans signal → Vert (score 0)", () => {
+  it("contrat vivant COMPLET sans signal → Vert (score 0)", () => {
     const r = mntRisque({
-      contrats: [{ id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", echeanceType: "mensuel", montantEngage: 0, engagements: [] }],
+      // complet : au moins un engagement (scorable) + date de fin lointaine (pas d'échéance) + AUCUNE facture
+      // due (montant 0 → pas de sous-facturation) + aucun ticket → 0 signal → sain (« vert »), pas « incomplet ».
+      contrats: [{ id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", dateFin: "2027-06-01", echeanceType: "mensuel", montantEngage: 0, engagements: [{ type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: 8, quota: null }] }],
       tickets: [], invoices: [], asOf: ASOF, nowMs: NOW,
     });
     expect(r.total).toBe(1);
     expect(r.items[0].niveau).toBe("vert");
     expect(r.items[0].score).toBe(0);
     expect(r.atRisk).toBe(0);
+  });
+
+  it("contrat INCOMPLET (ni engagement, ni date de fin, ni montant) → « incomplet » ≠ Vert (R6, audit)", () => {
+    const r = mntRisque({
+      contrats: [{ id: "c1", fp: "FP/2026/1", client: "A", statut: "actif", dateDebut: "2026-06-01", echeanceType: "mensuel", montantEngage: 0, engagements: [] }],
+      tickets: [], invoices: [], asOf: ASOF, nowMs: NOW,
+    });
+    expect(r.items[0].niveau).toBe("incomplet"); // pas « sain » par défaut
+    expect(r.items[0].score).toBe(0);
+    expect(r.counts.incomplet).toBe(1);
+    expect(r.counts.vert).toBe(0);
+    expect(r.atRisk).toBe(0); // une dette de saisie n'est pas un risque avéré
   });
 
   it("brouillon / échu / résilié : EXCLUS du scoring (terminal ou pas engagé)", () => {
