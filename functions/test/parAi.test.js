@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { actionPlanSnapshot, qbrSnapshot, normalizeActionPlan, normalizeQbr, buildActionPlanPrompt } = require("../domain/parAi");
+const { actionPlanSnapshot, qbrSnapshot, normalizeActionPlan, normalizeQbr, buildActionPlanPrompt, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest } = require("../domain/parAi");
 
 describe("parAi — snapshots + validation des sorties IA", () => {
   const ca = { byPartner: [{ partnerId: "fortinet", name: "Fortinet", revenueXof: 1200000 }] };
@@ -63,5 +63,44 @@ describe("parAi — snapshots + validation des sorties IA", () => {
     const { system, user } = buildActionPlanPrompt({ partners: [] });
     expect(system).toMatch(/FCFA/);
     expect(user).toMatch(/JSON valide/);
+  });
+
+  describe("mapping assisté (IA) — proposition fournisseur → constructeur", () => {
+    const unmapped = [{ supplier: "TECH DISTRIBUTION SA", revenueXof: 5000000, bcCount: 3 }, { supplier: "", revenueXof: 1, bcCount: 1 }];
+    const partners = [{ id: "cisco", name: "Cisco", programName: "Cisco Partner" }, { id: "fortinet", name: "Fortinet" }];
+
+    it("mapSuggestSnapshot : liste fournisseurs (SANS montant CA) + constructeurs connus", () => {
+      const s = mapSuggestSnapshot({ unmapped, partners });
+      expect(s.fournisseurs_non_rattaches).toEqual([{ nom: "TECH DISTRIBUTION SA", nb_bc: 3 }]); // vide écarté
+      expect(JSON.stringify(s)).not.toMatch(/5000000/); // aucun montant CA transmis au modèle (ADR-P07)
+      expect(s.partenaires_connus[0]).toMatchObject({ id: "cisco", marque: "Cisco Partner" });
+    });
+
+    it("buildMapSuggestPrompt : exige des id connus + JSON strict + poids sommant à 1", () => {
+      const { system, user } = buildMapSuggestPrompt(mapSuggestSnapshot({ unmapped, partners }));
+      expect(system).toMatch(/JSON valide/);
+      expect(user).toMatch(/sommer à 1|sommer a 1/i);
+      expect(user).toMatch(/EXACTEMENT/);
+    });
+
+    it("normalizeMapSuggest : n'admet QUE des id connus, normalise les poids à somme 1", () => {
+      const raw = [
+        { fournisseur: "TECH DISTRIBUTION SA", repartition: [{ id: "cisco", poids: 3 }, { id: "fortinet", poids: 1 }], justification: "distributeur multi-marques" },
+        { fournisseur: "AUTRE", repartition: [{ id: "inconnu", poids: 1 }] }, // id hors liste → écarté
+      ];
+      const out = normalizeMapSuggest(raw, ["cisco", "fortinet"]);
+      expect(out).toHaveLength(1);
+      expect(out[0].supplier).toBe("TECH DISTRIBUTION SA");
+      const w = out[0].allocations.reduce((s, a) => s + a.weight, 0);
+      expect(Math.round(w * 100) / 100).toBe(1); // poids re-normalisés (3+1 → 0.75 / 0.25)
+      expect(out[0].allocations.find((a) => a.partnerId === "cisco").weight).toBe(0.75);
+    });
+
+    it("normalizeMapSuggest : un seul constructeur → poids 1 ; sortie invalide → []", () => {
+      const out = normalizeMapSuggest([{ fournisseur: "X", repartition: [{ id: "cisco", poids: 42 }] }], ["cisco"]);
+      expect(out[0].allocations).toEqual([{ partnerId: "cisco", weight: 1 }]);
+      expect(normalizeMapSuggest("pas du json", ["cisco"])).toEqual([]);
+      expect(normalizeMapSuggest(null, ["cisco"])).toEqual([]);
+    });
   });
 });

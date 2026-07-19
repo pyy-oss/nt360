@@ -761,3 +761,20 @@ Tableau de bord : ventilation BC/déclaré sous la carte CA + courbe de tendance
 
 **Conception.** Additif, confidentiel (gaté canSeeCa côté front + rules côté serveur). Aucune primitive
 partagée modifiée. Vérifs : functions + web build + bundle au vert.
+
+---
+
+## Session — mapping assisté par IA (PA+ Lot 1)
+
+**Fait.** Callable `suggestParPartnerMap` (IA) : à partir des fournisseurs BC NON rattachés + du catalogue
+partenaire, l'IA **propose** une répartition fournisseur → constructeur(s) (ADR-P14). Domaine PUR dans
+`domain/parAi` (`mapSuggestSnapshot` SANS montant CA, `buildMapSuggestPrompt`, `normalizeMapSuggest` qui
+n'admet QUE des `partnerId` connus et normalise les poids à somme 1 via `allocationsFor`). Pont SDK
+`lib/parAi.suggestPartnerMap` (Opus, thinking adaptatif, refus géré). Bouton « Suggérer (IA) » dans l'éditeur
+Paramétrage : pré-remplit les lignes vides + ajoute les fournisseurs manquants, JAMAIS d'écrasement d'un choix
+humain ; rien n'est enregistré (l'humain valide puis Enregistre — `setParPartnerMap` reste l'unique porte).
+
+**Conception.** Gouvernance « l'IA propose, l'humain tranche » (ADR-P15). Confidentialité ADR-P07 respectée :
+le modèle ne voit aucun montant CA (rapprochement de NOMS). Additif, aucune primitive partagée modifiée,
+aucun schéma changé. Vérifs : parAi (11 tests dont 4 nouveaux), functions 1158 + web 277, build, bundle
+118.3 KB < 120, guards deploy-targets + no-undef au vert.

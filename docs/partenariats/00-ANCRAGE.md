@@ -330,3 +330,24 @@ peut donc pas attribuer automatiquement le montant à une marque précise. Le ma
   effectif affiché en direct.
 Vérif : `test/parRevenue.test.js` (allocationsFor + répartition + rétro-compat string), typecheck + build.
 Statut : **acté (Lot mapping multi-constructeur, PR #500)**.
+
+### ADR-P15 — Mapping assisté par IA : l'IA PROPOSE le rattachement fournisseur → constructeur(s), l'humain tranche
+**Contexte** : ADR-P14 rend le mapping fournisseur → constructeur(s) manuel (l'utilisateur saisit chaque
+fournisseur et ses poids). Avec des dizaines de distributeurs non rattachés (« fournisseurs BC non rattachés »),
+la saisie est fastidieuse et le rattachement d'un distributeur à ses marques est un savoir métier reproductible.
+**Décision** : ajouter un callable IA `suggestParPartnerMap` qui **propose** une répartition, jamais ne l'applique.
+- **Gouvernance « l'IA propose, l'humain tranche »** (comme le Centre de correction) : la sortie IA **pré-remplit**
+  seulement les lignes ENCORE VIDES de l'éditeur et **ajoute** les fournisseurs manquants — **jamais d'écrasement**
+  d'un choix humain. Rien n'est enregistré : l'utilisateur relit, ajuste les poids, puis clique **Enregistrer**
+  (`setParPartnerMap`, ADR-P14) qui reste l'unique porte d'écriture.
+- **Confidentialité (ADR-P07)** : le snapshot transmis au modèle **ne contient AUCUN montant CA** — la tâche est
+  un rapprochement de NOMS (fournisseur ↔ marque) via le catalogue partenaire, pas une analyse de volume. Le
+  callable n'exige donc que le droit LECTURE `partenariats` (`assertAiReady`), pas `rentabilite`.
+- **Aucun constructeur inventé** : `domain/parAi.normalizeMapSuggest` re-valide la sortie contre les `partnerId`
+  CONNUS (le modèle ne peut pas introduire une marque hors référentiel) et normalise les poids à **somme 1** via
+  `allocationsFor` (même autorité ADR-P14 — pas de seconde vérité de normalisation).
+- **Convention IA nt360 (ADR-P05)** : SDK `@anthropic-ai/sdk`, modèle Opus courant, thinking adaptatif, gestion
+  du refus, snapshot PUR dans `domain/parAi`, pont SDK dans `lib/parAi`, `logOps({kind:"ai", action:"parMapSuggest"})`.
+Vérif : `test/parAi.test.js` (mapSuggestSnapshot sans montant, prompt strict, normalizeMapSuggest n'admet que
+des id connus + poids somme 1), suite functions (1158) + web (277), build + bundle 118.3 KB < 120.
+Statut : **acté (PA+ Lot 1 — mapping assisté IA)**.
