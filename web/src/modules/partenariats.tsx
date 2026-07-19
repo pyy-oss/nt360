@@ -558,7 +558,10 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
         ]}
         rows={certifs} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.consultantName, (r) => r.certName, (r) => r.partnerId]}
         bulk={canWrite ? [
-          { label: "Supprimer", tone: "danger", confirm: "Supprimer les certifications sélectionnées ?", run: (rows) => Promise.all(rows.map((r) => callFn("deleteParCertification", { id: r.id }))), okMsg: (rows) => `${rows.length} certification(s) supprimée(s)` },
+          // Échec partiel honnête (allSettled) : un item en échec ne doit pas masquer les autres déjà passés.
+          { label: "Supprimer", tone: "danger", confirm: "Supprimer les certifications sélectionnées ?",
+            run: async (rows) => { const res = await Promise.allSettled(rows.map((r) => callFn("deleteParCertification", { id: r.id }))); const ok = res.filter((x) => x.status === "fulfilled").length; const fail = res.length - ok; if (fail) throw new Error(`${ok} supprimée(s), ${fail} en échec`); return ok; },
+            okMsg: (rows) => `${rows.length} certification(s) supprimée(s)` },
         ] : undefined}
         empty="Aucune certification enregistrée."
       />
@@ -649,10 +652,14 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
         ]}
         rows={assigns} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.consultantName, (r) => r.cert, (r) => r.partnerId]}
         bulk={canWrite ? [
+          // Échec partiel honnête (allSettled) : id périmé, rate-limit ClickUp (30/60s) → on rapporte ok/échec
+          // au lieu de masquer les écritures déjà passées sous un rejet global (Promise.all).
           { label: "Changer le statut", pick: { options: MANUAL_ASSIGN_STATUSES.map((s) => ({ value: s, label: label(ASSIGNMENT_STATUS_LABEL, s) })), placeholder: "Statut cible" },
-            run: (rows, picked) => { if (!picked) throw new Error("Choisissez un statut cible"); return Promise.all(rows.map((r) => callFn("setParAssignmentStatus", { id: r.id, status: picked }))); }, okMsg: (rows) => `${rows.length} statut(s) mis à jour` },
-          { label: "Pousser vers ClickUp", run: (rows) => Promise.all(rows.map((r) => callFn("pushParAssignmentToClickup", { id: r.id }))), okMsg: (rows) => `${rows.length} tâche(s) synchronisée(s)` },
-          { label: "Supprimer", tone: "danger", confirm: "Supprimer les assignations sélectionnées ?", run: (rows) => Promise.all(rows.map((r) => callFn("deleteParAssignment", { id: r.id }))), okMsg: (rows) => `${rows.length} assignation(s) supprimée(s)` },
+            run: async (rows, picked) => { if (!picked) throw new Error("Choisissez un statut cible"); const res = await Promise.allSettled(rows.map((r) => callFn("setParAssignmentStatus", { id: r.id, status: picked }))); const ok = res.filter((x) => x.status === "fulfilled").length; const fail = res.length - ok; if (fail) throw new Error(`${ok} mis à jour, ${fail} en échec`); return ok; }, okMsg: (rows) => `${rows.length} statut(s) mis à jour` },
+          { label: "Pousser vers ClickUp",
+            run: async (rows) => { const res = await Promise.allSettled(rows.map((r) => callFn("pushParAssignmentToClickup", { id: r.id }))); const ok = res.filter((x) => x.status === "fulfilled").length; const fail = res.length - ok; if (fail) throw new Error(`${ok} synchronisée(s), ${fail} en échec (rate-limit ClickUp ou erreur)`); return ok; }, okMsg: (rows) => `${rows.length} tâche(s) synchronisée(s)` },
+          { label: "Supprimer", tone: "danger", confirm: "Supprimer les assignations sélectionnées ?",
+            run: async (rows) => { const res = await Promise.allSettled(rows.map((r) => callFn("deleteParAssignment", { id: r.id }))); const ok = res.filter((x) => x.status === "fulfilled").length; const fail = res.length - ok; if (fail) throw new Error(`${ok} supprimée(s), ${fail} en échec`); return ok; }, okMsg: (rows) => `${rows.length} assignation(s) supprimée(s)` },
         ] : undefined}
         empty="Aucune assignation."
       />
@@ -727,6 +734,14 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   }, [mapDoc]);
   const unmapped = ca?.unmapped || [];
   const save = async () => {
+    // Garde anti-perte silencieuse : deux lignes du MÊME fournisseur (après normalisation) verraient la seconde
+    // écraser la première dans la table → allocations perdues sans avertissement. On bloque et on nomme le doublon.
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const sup = r.supplier.trim().toUpperCase(); if (!sup) continue;
+      if (seen.has(sup)) throw new Error(`Fournisseur en double : « ${r.supplier.trim()} » — fusionnez les deux lignes avant d'enregistrer`);
+      seen.add(sup);
+    }
     // 1 constructeur → forme simple (string) ; plusieurs → { partnerId: poids }. Le backend renormalise.
     const map: Record<string, string | Record<string, number>> = {};
     for (const r of rows) {

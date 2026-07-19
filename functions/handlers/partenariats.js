@@ -109,6 +109,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!id) throw new HttpsError("invalid-argument", "id de certification invalide");
     await db.doc(`par_certifications/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) — sinon un partenaire reste conforme à tort après suppression
     return { ok: true, id };
   });
 
@@ -120,21 +121,28 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     await assertParEnabled();
     const raw = (req.data && req.data.map) || {};
     if (typeof raw !== "object" || Array.isArray(raw)) throw new HttpsError("invalid-argument", "table de correspondance invalide");
+    // Intégrité référentielle (audit adverse) : un mapping vers un partnerId INEXISTANT attribuerait du CA à un
+    // partenaire fantôme dans summaries/par_ca (ligne non résoluble, nom brut affiché). On lit les partenaires
+    // connus et on ÉCARTE toute allocation vers un id absent — le CA de ce fournisseur retombe alors dans
+    // « non rattaché » (visible, corrigeable) plutôt que dans un orphelin silencieux. Skippés reportés.
+    const known = new Set((await db.collection("par_partners").select().get()).docs.map((d) => d.id));
+    let skipped = 0;
+    const keepKnown = (id) => { if (known.has(id)) return true; skipped++; return false; };
     // Valeur = soit un partnerId (string, un seul constructeur à 100 %), soit une RÉPARTITION pondérée
     // { partnerId: poids } pour un distributeur multi-marques (ADR-P14). On slugifie les partnerId, écarte les
-    // poids ≤ 0 / non finis, et n'écrit une entrée que si au moins une allocation valide subsiste.
+    // poids ≤ 0 / non finis ET les id inconnus, et n'écrit une entrée que si au moins une allocation valide subsiste.
     const map = {};
     for (const [k, val] of Object.entries(raw)) {
       const key = String(k || "").trim().toUpperCase();
       if (!key) continue;
       if (typeof val === "string") {
         const partnerId = slug(val);
-        if (partnerId) map[key] = partnerId;
+        if (partnerId && keepKnown(partnerId)) map[key] = partnerId;
       } else if (val && typeof val === "object" && !Array.isArray(val)) {
         const alloc = {};
         for (const [pid, w] of Object.entries(val)) {
           const id = slug(pid); const weight = Number(w);
-          if (id && Number.isFinite(weight) && weight > 0) alloc[id] = weight;
+          if (id && Number.isFinite(weight) && weight > 0 && keepKnown(id)) alloc[id] = weight;
         }
         const ids = Object.keys(alloc);
         if (ids.length === 1) map[key] = ids[0];        // un seul constructeur → forme simple (canonique)
@@ -142,9 +150,9 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
       }
     }
     await db.doc("config/parPartnerMap").set({ map, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length }, ts: FieldValue.serverTimestamp() });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length, skipped }, ts: FieldValue.serverTimestamp() });
     await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nouveau mapping)
-    return { ok: true, entries: Object.keys(map).length };
+    return { ok: true, entries: Object.keys(map).length, skipped };
   });
 
   // Crée/met à jour une assignation (idempotent : id = <consultantId>_<catalogId>, une assignation active
