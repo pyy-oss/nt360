@@ -89,6 +89,9 @@ function Financials({ fin }: { fin: NonNullable<Fiche["financials"]> }) {
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
         {rows.map(([k, v]) => (<div key={k} className="flex justify-between"><span className="text-muted">{k}</span>{v}</div>))}
       </div>
+      {fin.missing_fx_rate && (
+        <div className="mt-2 text-[12px] text-clay">⚠ Taux de change manquant sur une ligne en devise — coût sous-évalué, <b>marge non fiable</b>. Renseignez le taux (la validation est bloquée).</div>
+      )}
       {fin.below_threshold && (
         <div className="mt-2 text-[12px] text-clay">⚠ Marge sous le seuil de vigilance ({fin.seuil_marge_pct} %) — non bloquant.</div>
       )}

@@ -984,6 +984,7 @@ export type FicheLine = {
 export type FicheFinancials = {
   lignes_xof: number; prix_de_revient_ht: number; prix_vente_ht: number;
   marge_brute: number; pct_marge: number; seuil_marge_pct: number; below_threshold: boolean;
+  missing_fx_rate?: boolean; // devise étrangère sans taux → coût sous-évalué, marge non fiable (audit ①)
 };
 export type Fiche = {
   _id?: string; numero_fp: string; numero_dc?: string | null; client: string; affaire: string;
