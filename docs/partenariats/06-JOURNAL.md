@@ -893,3 +893,17 @@ web 277, build, bundle 118.3 KB < 120, guards verts.
 
 **Conception.** Additif/correctif backend uniquement, aucun schéma ni primitive modifié. Vérifs : functions
 1175, guards deploy-targets + no-undef au vert.
+
+---
+
+## Session — audit adverse lot B #4 (volet module) : clé fournisseur robuste (ADR-P19)
+
+**Fait.** `parRevenue.normalizeSupplier` compacte désormais les espaces internes (+ trim + MAJUSCULES),
+`setParPartnerMap` et le front `save` appliquent la même règle → au sein du module, un fournisseur résout à la
+MÊME clé quelle que soit la source du BC. Fini la scission du CA d'un fournisseur à un espace près.
+
+**Différé (documenté).** L'unification ERP-wide (fournisseurs.js + ingestion + ClickUp) a un blast radius sur
+tout l'ERP → session dédiée avec fixtures d'import.
+
+**Bilan audit adverse** : 10/10 constats traités (le seul volet restant, l'unification ERP-wide du #4, est
+documenté hors périmètre module). Vérifs : parRevenue (+2), functions 1177, web 277, bundle 118.3 KB < 120.
