@@ -879,3 +879,17 @@ Aucun schéma ni primitive modifié. Vérifs : parRevenue (+3 tests), functions 
 **Conception.** #3 = correctif pur (tests mis à jour). #2 = additif (param `dryRun` + confirm front), aucun
 schéma ni enum partagé modifié. Vérifs : parCertSeed (normName ponctuation + non-réordre), functions 1175,
 web 277, build, bundle 118.3 KB < 120, guards verts.
+
+---
+
+## Session — audit adverse lot B #8 + #10 (ADR-P18)
+
+**Fait.**
+- #8 : `importParCertifications` lit la `source` des certifs/assignations existantes ; préserve (ne réécrit
+  jamais) les docs édités à la main (source ≠ par_cert_import) et ne repose `createdAt`/`createdBy` qu'à la
+  création. Import redevenu strictement additif au niveau des docs. Skippés reportés.
+- #10 : `suggestParPartnerMap` exige `rentabilite` (parCanSeeCa) — il lit `summaries/par_ca` (confidentiel),
+  dont la liste des fournisseurs non rattachés relève. Front déjà masqué sans droit CA ; back = défense en profondeur.
+
+**Conception.** Additif/correctif backend uniquement, aucun schéma ni primitive modifié. Vérifs : functions
+1175, guards deploy-targets + no-undef au vert.

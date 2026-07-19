@@ -393,3 +393,19 @@ créait une **fiche fantôme** pour un salarié déjà présent.
   dans l'annuaire partagé. Pas de nouveau statut inventé (l'enum `STATUSES` partagé reste intouché).
 Vérif : `test/parCertSeed.test.js` (normName plie apostrophe/tiret, ne réordonne pas ; plan de création mis à
 jour), functions (1175) + web (277), build + bundle 118.3 KB < 120. Statut : **acté (audit adverse lot B — #2 + #3)**.
+
+### ADR-P18 — Import certifs additif non destructif + rattachement IA gaté `rentabilite`
+**Contexte** (audit adverse #8 + #10) : (#8) l'import réécrivait en `merge:true` les certifs/assignations
+existantes — y compris `obtainedDate`/`status` corrigés à la main et `createdAt`/`createdBy` — révoquant les
+corrections steward et faussant la piste d'audit ; (#10) `suggestParPartnerMap` lisait `summaries/par_ca`
+(réservé `rentabilite`, ADR-P07) et en exposait la LISTE des fournisseurs non rattachés à un rôle `partenariats`
+seul (noms, pas montants).
+**Décision** :
+- **#8 (additif non destructif)** : l'import lit d'abord la `source` des docs existants. Un doc dont la source
+  ≠ `par_cert_import` a été créé/édité À LA MAIN → **préservé** (jamais écrasé, reporté dans `skipped`). Un doc
+  import-owned est rafraîchi SANS réécrire `createdAt`/`createdBy` (posés à la seule CRÉATION). L'import
+  redevient strictement additif au niveau des DOCS (règle « additif uniquement »).
+- **#10 (cloisonnement)** : `suggestParPartnerMap` exige désormais `rentabilite` (`parCanSeeCa`), aligné sur le
+  second verrou des rules sur `par_ca`. Le front masque déjà le bouton « Suggérer (IA) » sans droit CA (le doc
+  `par_ca` n'est pas chargé) — le back ajoute la défense en profondeur (appel direct au callable refusé).
+Vérif : gardes no-undef + deploy-targets, functions (1175) au vert. Statut : **acté (audit adverse lot B — #8 + #10)**.
