@@ -7,7 +7,7 @@ export type ParQbr = {
   titre: string; synthese_executive: string; points_forts: string[]; statut_certifications: string;
   points_attention: string[]; engagements_neurones: string[]; demandes_constructeur: string[];
 };
-export type ParQbrSnapshot = { partenaire?: string; periode?: string; statut_conformite?: string; ca_realise_ytd_fcfa?: number; quotas?: string[] };
+export type ParQbrSnapshot = { partenaire?: string; periode?: string; statut_conformite?: string; ca_realise_ytd_fcfa?: number; ca_dont_bc_fcfa?: number; ca_dont_declare_fcfa?: number; exercice_fiscal?: string; quotas?: string[] };
 
 // Palette (hex sans #, format pptxgenjs) alignée sur les tokens de l'ERP.
 const C = { ink: "1A2B2B", muted: "5B6B6B", emerald: "10996B", gold: "C79A3C", clay: "C0574E", panel: "EEF2F1", line: "D6DEDC", white: "FFFFFF" };
@@ -26,8 +26,11 @@ export async function exportParQbrPptx(qbr: ParQbr, snap: ParQbrSnapshot): Promi
   s1.background = { color: C.ink };
   s1.addText("REVUE TRIMESTRIELLE DE PARTENARIAT", { x: 0.6, y: 1.6, w: 8.8, h: 0.5, color: C.gold, bold: true, fontSize: 14, charSpacing: 2 });
   s1.addText(String(snap.partenaire || ""), { x: 0.6, y: 2.1, w: 8.8, h: 0.9, color: C.white, bold: true, fontSize: 40 });
-  s1.addText(String(snap.periode || ""), { x: 0.6, y: 3.1, w: 8.8, h: 0.5, color: C.white, fontSize: 16 });
-  s1.addText(`CA réalisé : ${fmt(snap.ca_realise_ytd_fcfa || 0)} FCFA`, { x: 0.6, y: 3.7, w: 8.8, h: 0.4, color: C.emerald, fontSize: 14, bold: true });
+  s1.addText([{ text: String(snap.periode || "") }, ...(snap.exercice_fiscal ? [{ text: `   ·   exercice ${snap.exercice_fiscal}`, options: { color: C.muted } }] : [])], { x: 0.6, y: 3.1, w: 8.8, h: 0.5, color: C.white, fontSize: 16 });
+  // CA réalisé + ventilation MIXTE (part adossée aux BC vs déclarative, ADR-P12) quand elle est connue.
+  const caVent = (snap.ca_dont_bc_fcfa || snap.ca_dont_declare_fcfa)
+    ? `   (dont BC ${fmt(snap.ca_dont_bc_fcfa || 0)} · déclaré ${fmt(snap.ca_dont_declare_fcfa || 0)})` : "";
+  s1.addText(`CA réalisé : ${fmt(snap.ca_realise_ytd_fcfa || 0)} FCFA${caVent}`, { x: 0.6, y: 3.7, w: 8.8, h: 0.4, color: C.emerald, fontSize: 14, bold: true });
 
   // Bandeau réutilisé
   const header = (slide: any, title: string) => {

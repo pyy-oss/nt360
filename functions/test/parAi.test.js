@@ -1,37 +1,59 @@
 import { describe, it, expect } from "vitest";
-const { actionPlanSnapshot, qbrSnapshot, normalizeActionPlan, normalizeQbr, buildActionPlanPrompt, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest } = require("../domain/parAi");
+const { actionPlanSnapshot, qbrSnapshot, normalizeActionPlan, normalizeQbr, buildActionPlanPrompt, buildQbrPrompt, fiscalMonthsLabel, gapLabel, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest } = require("../domain/parAi");
 
 describe("parAi — snapshots + validation des sorties IA", () => {
-  const ca = { byPartner: [{ partnerId: "fortinet", name: "Fortinet", revenueXof: 1200000 }] };
+  const ca = { byPartner: [{ partnerId: "fortinet", name: "Fortinet", revenueXof: 1200000, bcXof: 800000, declaredXof: 400000, source: "bc" }] };
   const quotas = { partners: [{ partnerId: "fortinet", name: "Fortinet", status: "at_risk", coverage: [{ target: "fortinet-nse7", holders: 1, minCount: 2, ok: false }], gaps: [{ target: "fortinet-nse7", holders: 1, minCount: 2 }] }] };
   const relances = { items: [{ partnerId: "fortinet", consultantName: "Awa", cert: "NSE7", bucket: "retard" }] };
 
-  it("actionPlanSnapshot : dérive statut + CA FCFA + quotas manquants + retards", () => {
+  it("actionPlanSnapshot : dérive statut + CA FCFA ventilé (BC/déclaré) + quotas chiffrés + retards", () => {
     const s = actionPlanSnapshot({ dateIso: "2026-07-18", ca, quotas, relances });
-    expect(s.partners[0]).toMatchObject({ nom: "Fortinet", statut_conformite: "at_risk", ca_ytd_fcfa: 1200000 });
-    expect(s.partners[0].quotas_manquants[0]).toMatch(/fortinet-nse7 : 1\/2/);
+    expect(s.partners[0]).toMatchObject({ nom: "Fortinet", statut_conformite: "at_risk", ca_ytd_fcfa: 1200000, ca_dont_bc_fcfa: 800000, ca_dont_declare_fcfa: 400000 });
+    expect(s.partners[0].quotas_manquants[0]).toMatch(/fortinet-nse7 : 1\/2 certifié\(s\) — manque 1/); // écart chiffré
     expect(s.assignations_en_retard[0]).toMatch(/Awa/);
   });
 
-  it("qbrSnapshot : CA FCFA + couverture + certifs actives (statut re-dérivé en amont ⇒ expirées exclues)", () => {
+  it("qbrSnapshot : CA ventilé + exercice fiscal + couverture + certifs actives (statut re-dérivé en amont ⇒ expirées exclues)", () => {
     // Le handler re-dérive le statut (computeCertStatus) AVANT d'appeler qbrSnapshot ; qbrSnapshot ne garde
     // que les `active`. Une certif expirée (statut re-dérivé) ne doit donc jamais figurer dans la liste QBR.
     const certifs = [
       { partnerId: "fortinet", status: "active", certName: "NSE 4" },
       { partnerId: "fortinet", status: "expired", certName: "NSE 7 (périmée)" },
     ];
-    const s = qbrSnapshot({ partnerId: "fortinet", partner: { name: "Fortinet" }, periode: "T3 2026", ca, quotas, certifs, relances });
-    expect(s).toMatchObject({ partenaire: "Fortinet", statut_conformite: "at_risk", ca_realise_ytd_fcfa: 1200000 });
+    const s = qbrSnapshot({ partnerId: "fortinet", partner: { name: "Fortinet", fiscalStartMonth: 8 }, periode: "T3 2026", ca, quotas, certifs, relances });
+    expect(s).toMatchObject({ partenaire: "Fortinet", statut_conformite: "at_risk", ca_realise_ytd_fcfa: 1200000, ca_dont_bc_fcfa: 800000, ca_dont_declare_fcfa: 400000 });
+    expect(s.exercice_fiscal).toBe("août → juillet"); // Cisco-like : exercice décalé
+    expect(s.quotas[0]).toMatch(/fortinet-nse7 : 1\/2 certifié\(s\) — manque 1/); // écart chiffré, pas de ✓
     expect(s.certifications_actives).toContain("NSE 4");
     expect(s.certifications_actives).not.toContain("NSE 7 (périmée)");
   });
 
-  it("masquage CA (ADR-P07) : ca={} ⇒ montant 0 dans les deux snapshots (contrat du handler sans droit rentabilite)", () => {
+  it("masquage CA (ADR-P07) : ca={} ⇒ montants 0 (dont ventilation) dans les deux snapshots", () => {
     // Sans le droit `rentabilite`, le handler passe ca:{} — le CA confidentiel ne doit apparaître nulle part.
     const plan = actionPlanSnapshot({ dateIso: "2026-07-18", ca: {}, quotas, relances });
-    expect(plan.partners[0].ca_ytd_fcfa).toBe(0);
+    expect(plan.partners[0]).toMatchObject({ ca_ytd_fcfa: 0, ca_dont_bc_fcfa: 0, ca_dont_declare_fcfa: 0 });
     const qbr = qbrSnapshot({ partnerId: "fortinet", partner: { name: "Fortinet" }, periode: "T3 2026", ca: {}, quotas, certifs: [], relances });
-    expect(qbr.ca_realise_ytd_fcfa).toBe(0);
+    expect(qbr).toMatchObject({ ca_realise_ytd_fcfa: 0, ca_dont_bc_fcfa: 0, ca_dont_declare_fcfa: 0 });
+    expect(qbr.exercice_fiscal).toBe("calendaire (janvier → décembre)"); // exercice non confidentiel, présent
+  });
+
+  it("fiscalMonthsLabel : mois de début → « <mois> → <mois−1> » ; hors bornes → calendaire", () => {
+    expect(fiscalMonthsLabel(8)).toBe("août → juillet");
+    expect(fiscalMonthsLabel(1)).toBe("janvier → décembre");
+    expect(fiscalMonthsLabel(0)).toBe("calendaire (janvier → décembre)");
+    expect(fiscalMonthsLabel(undefined)).toBe("calendaire (janvier → décembre)");
+    expect(fiscalMonthsLabel(13)).toBe("calendaire (janvier → décembre)");
+  });
+
+  it("gapLabel : chiffre le déficit ; couvert → suffixe ok (pas de « manque »)", () => {
+    expect(gapLabel("nse7", 1, 3)).toBe("nse7 : 1/3 certifié(s) — manque 2");
+    expect(gapLabel("nse7", 3, 3, " ✓")).toBe("nse7 : 3/3 certifié(s) ✓");
+  });
+
+  it("buildQbrPrompt : guide l'IA sur la ventilation BC/déclaré + l'exercice fiscal", () => {
+    const { user } = buildQbrPrompt({ partenaire: "Fortinet", periode: "T3", exercice_fiscal: "août → juillet" });
+    expect(user).toMatch(/ca_dont_bc_fcfa/);
+    expect(user).toMatch(/exercice_fiscal/);
   });
 
   it("normalizeActionPlan : ne garde que les items bien formés, priorité normalisée, trié, max 6", () => {
