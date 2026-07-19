@@ -88,7 +88,7 @@ export const Partenariats: FC<Props> = () => {
 
       {empty && canWrite && (
         <Card title="Démarrer le module Partenariats">
-          <Tip>Le module est <b>activé mais vide</b>. Pour l'amorcer : ouvrez <b>Paramétrage</b> et créez votre premier constructeur avec <b>« Nouveau partenaire »</b>, ou gagnez du temps en <b>partant d'un modèle</b> (Fortinet, Palo Alto, Cisco, Huawei…). Ajoutez ensuite les <b>certifications</b> de vos ingénieurs et leurs <b>assignations</b> à venir — le tableau de bord se remplit tout seul.</Tip>
+          <Tip>Le module est <b>activé mais vide</b>. Le plus rapide : ouvrez <b>Paramétrage</b> et cliquez <b>« Importer les 20 partenaires de référence »</b> — le référentiel se remplit d'un coup avec vos données (statut, plan d'affaires, certifications, exigences de quota). Sinon, créez un constructeur à la main avec <b>« Nouveau partenaire »</b> (ou en <b>partant d'un modèle</b>). Ajoutez ensuite les <b>certifications</b> de vos ingénieurs et leurs <b>assignations</b> — le tableau de bord se remplit tout seul.</Tip>
           <button className="btn mt-2" onClick={() => setTab("config")}><Plus size={14} /> Créer un partenaire</button>
         </Card>
       )}
@@ -588,6 +588,23 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
           { header: "Certifs catalogue", render: (r: Partner) => String((r.certificationCatalog || []).length) },
           { header: "Exigences", render: (r: Partner) => String((r.requirements || []).length) },
         ]} rows={partners} />
+        {/* Amorçage en MASSE : enregistre les 20 partenaires de référence (données réelles NT — statut, plan
+            d'affaires, échéances, catalogue de certifs, exigences de quota) via le callable existant. Réservé
+            au référentiel VIDE : les modèles sont des points de départ, ce bouton les matérialise en une fois
+            (sinon le module reste à zéro tant qu'on n'a pas créé chaque partenaire un par un). Idempotent
+            (upsertParPartner clé par slug) mais masqué dès qu'un partenaire existe, pour éviter tout écrasement. */}
+        {canWrite && !partners.length && (
+          <Busy label="Importer les 20 partenaires de référence" okMsg="Partenaires de référence importés — le tableau de bord se remplit"
+            fn={async () => {
+              const errs: string[] = [];
+              for (const p of PARTNER_PRESETS) {
+                const built = buildPartnerPayload(buildPartnerPreset(p.id, nk));
+                if (!built.ok) { errs.push(`${p.label}: ${built.error}`); continue; }
+                await callFn("upsertParPartner", built.value);
+              }
+              if (errs.length) throw new Error(`Échecs (${errs.length}/${PARTNER_PRESETS.length}) : ${errs.slice(0, 3).join(" ; ")}`);
+            }} />
+        )}
         {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
       </div>}>
         <Tip>Un <b>partenaire</b> = un constructeur (Dell, Cisco, Fortinet…) avec ses <b>niveaux</b>, ses <b>compétences</b>, son <b>catalogue de certifications</b> et ses <b>exigences de quota</b> (les objectifs : par niveau, combien d'ingénieurs certifiés sur quelle cible). Ces exigences alimentent la conformité des quotas et les partenariats à risque du tableau de bord.</Tip>
