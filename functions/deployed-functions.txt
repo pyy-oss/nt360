@@ -150,6 +150,7 @@ deleteParAssignment
 pushParAssignmentToClickup
 generateParActionPlan
 generateParQbr
+importParCertifications
 parRelancesSweep
 setEmailNotifyConfig
 sendTestEmail

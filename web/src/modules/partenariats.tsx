@@ -605,6 +605,15 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
               if (errs.length) throw new Error(`Échecs (${errs.length}/${PARTNER_PRESETS.length}) : ${errs.slice(0, 3).join(" ; ")}`);
             }} />
         )}
+        {/* Amorçage des CERTIFICATIONS par ingénieur (2ᵉ fichier direction). Le callable résout les noms contre
+            l'annuaire ESN, crée les consultants nommés manquants, complète le catalogue, écrit certifs détenues
+            + assignations, et renvoie un rapport. Réservé au référentiel PEUPLÉ (les partenaires doivent exister). */}
+        {canWrite && !!partners.length && (
+          <Busy label="Importer les certifications de référence"
+            okMsg={(r: { createdConsultants?: number; certsWritten?: number; assignsWritten?: number; catalogAdded?: number; skipped?: number }) =>
+              `${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s) · ${r?.catalogAdded || 0} entrée(s) catalogue${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`}
+            fn={() => callFn("importParCertifications", {})} />
+        )}
         {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
       </div>}>
         <Tip>Un <b>partenaire</b> = un constructeur (Dell, Cisco, Fortinet…) avec ses <b>niveaux</b>, ses <b>compétences</b>, son <b>catalogue de certifications</b> et ses <b>exigences de quota</b> (les objectifs : par niveau, combien d'ingénieurs certifiés sur quelle cible). Ces exigences alimentent la conformité des quotas et les partenariats à risque du tableau de bord.</Tip>
