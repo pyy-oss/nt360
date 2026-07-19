@@ -14,6 +14,13 @@ export function plausibleYear(y?: string | number | null): number {
   return n >= 2015 && n <= max ? n : 0;
 }
 
+/** Clé fournisseur CANONIQUE (miroir exact de functions/lib/ids.js `cleanName`, ADR-P20) : compacte les
+ *  espaces internes + trim + MAJUSCULES. Autorité UNIQUE de regroupement fournisseur — un même fournisseur
+ *  « à un espace/casse près » selon la source du BC résout à la même clé (comme côté serveur). */
+export function cleanName(s?: string | null): string {
+  return String(s ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+
 /** Normalise un N° FP → forme canonique "FP/AAAA/N" (miroir exact de functions/lib/ids.js). */
 export function fpKey(v?: string | null): string | null {
   const m = String(v || "").match(/FP\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);

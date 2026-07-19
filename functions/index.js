@@ -3817,7 +3817,7 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   const bc = require("./lib/clickupBc");
   const { toXof } = require("./lib/fx");
   const { safeId } = require("./lib/sheets");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey, cleanName } = require("./lib/ids");
   const listId = bcListIdOf(cfg, req.data?.listId);
   const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
   // BC déjà connus par une source COMPTABLE (≠ clickup) → prioritaires, on ne les réimporte pas.
@@ -3837,7 +3837,7 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
     const conv = toXof(r.currency || "XOF", r.amount, null, rates);
     const id = "bc_cu_" + key; // id stable → ré-import = même doc (idempotent)
     writes.push({ path: `bcLines/${id}`, data: {
-      _id: id, fp: fpKey(r.fp) || "", bcNumber: r.bcNumber, supplier: r.supplier || "", customer: r.customer || "",
+      _id: id, fp: fpKey(r.fp) || "", bcNumber: r.bcNumber, supplier: cleanName(r.supplier), customer: r.customer || "",
       country: r.country || "", currency: r.currency || "XOF", amount: r.amount || 0,
       amountXof: conv.amountXof, fxRate: conv.fxRate, fxSource: conv.fxSource,
       status: "emis", // ENGAGÉ non facturé → engagement fournisseur, JAMAIS le solde SOA
@@ -4347,8 +4347,11 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
 
 exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "fournisseurs");
-  // id = nom du fournisseur en MAJUSCULES (clé d'appariement avec l'exposition, cf. domain/fournisseurs).
-  const id = String(req.data?.id || "").trim().toUpperCase();
+  // id = nom du fournisseur CANONIQUE (cleanName, autorité unique ADR-P20) — clé d'appariement avec
+  // l'exposition (domain/fournisseurs utilise la MÊME cleanName). Compacte les espaces internes : sans ça,
+  // un plafond saisi « à un espace près » ne s'appariait pas à son fournisseur agrégé.
+  const { cleanName } = require("./lib/ids");
+  const id = cleanName(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
   assertPlainId(id, "id fournisseur");
   // SOA : plafond autorisé + solde d'OUVERTURE (posé à date, « à jour maintenant »). Seule une FACTURE
@@ -4364,6 +4367,39 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
   });
   await requestRecompute(["suppliers", "alerts"]);
   return { ok: true };
+});
+
+// MIGRATION one-shot (ADR-P20) : re-clé les creditLines existantes vers la forme CANONIQUE (cleanName). Les id
+// historiques étaient en `trim+MAJUSCULES` SANS compaction ; désormais le SOA agrège en `cleanName` (compacte).
+// Un plafond dont l'id porte un double espace ne s'apparierait plus à son fournisseur → on le DÉPLACE vers l'id
+// canonique. Idempotent (ré-exécution = no-op une fois les clés canoniques). Si l'id canonique existe déjà
+// (les deux formes coexistaient), on GARDE la cible non vide et on supprime la source (rapporté). Réservé écriture.
+exports.migrateCreditLineKeys = onCallG("migrateCreditLineKeys", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
+  await requireWrite(req, "fournisseurs");
+  const { cleanName } = require("./lib/ids");
+  const snap = await db.collection("creditLines").limit(5000).get();
+  let moved = 0, merged = 0; const skipped = [];
+  for (const doc of snap.docs) {
+    const data = doc.data() || {};
+    const canon = cleanName(data.name || data.id || doc.id);
+    if (!canon || canon === doc.id) continue; // déjà canonique
+    const targetRef = db.doc(`creditLines/${canon}`);
+    const target = await targetRef.get();
+    if (target.exists) {
+      // Collision : la forme canonique existe déjà. On ne fusionne pas les montants (risque de double) —
+      // on garde la cible et on supprime la source, en rapportant pour arbitrage manuel si besoin.
+      skipped.push({ from: doc.id, to: canon, reason: "cible existante conservée" });
+      await doc.ref.delete().catch(() => {});
+      merged++;
+    } else {
+      await targetRef.set({ ...data, name: canon, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+      await doc.ref.delete().catch(() => {});
+      moved++;
+    }
+  }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "migrate_credit_line_keys", module: "fournisseurs", entity: "creditLine", entityId: "batch", detail: { moved, merged }, ts: FieldValue.serverTimestamp() });
+  if (moved || merged) await requestRecompute(["suppliers", "alerts"]);
+  return { ok: true, moved, merged, skipped: skipped.slice(0, 40) };
 });
 
 // --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis

@@ -427,3 +427,26 @@ d'un SEUL fournisseur se scinde entre rattaché et « non rattaché ».
 Vérif : `test/parRevenue.test.js` (compaction ; un fournisseur à espacement variable résout au même partenaire,
 pas de scission), functions (1177) + web (277), build + bundle 118.3 KB < 120.
 Statut : **acté (audit adverse lot B — #4, volet module ; volet ERP-wide différé)**.
+
+### ADR-P20 — Autorité UNIQUE de normalisation fournisseur (ERP-wide), `cleanName`
+**Contexte** : suite d'ADR-P19 (volet module). L'audit avait cartographié 4+ normalisations divergentes du nom
+fournisseur ; le maillon faible était `domain/fournisseurs.js` (SOA) qui n'agrégeait qu'en `.toUpperCase()`
+(ni trim ni compaction) — tandis que `par_ca` compactait. Un même fournisseur (« DELL  TECHNOLOGIES » ClickUp
+vs « DELL TECHNOLOGIES » Odoo) était donc **un** pour Partenariats, **deux** pour le SOA.
+**Décision (validée, changement de chiffres SOA accepté)** : UNE seule autorité, `cleanName` (`lib/ids.js`,
+miroir web `web/src/lib/ids.ts`) = compacte espaces + trim + MAJUSCULES. Tous les sites y sont routés :
+- **Agrégation SOA** `fournisseurs.js` (BC, orders.suppliers, creditLines) → `cleanName`. **Aligne le SOA sur
+  par_ca** ; fusionne les fournisseurs mal espacés (moins de lignes, totaux `solde`/`engagement`/`expo`
+  recalculés — assumé).
+- **`upsertCreditLine`** (id du plafond) → `cleanName` + **migration one-shot `migrateCreditLineKeys`** qui
+  re-clé les plafonds existants vers la forme canonique (aucun plafond perdu ; collision → cible conservée,
+  source supprimée, rapportée).
+- **Écriture à la source** : import ClickUp (index.js), parser fiche (`ficheAffaire.js`) → `cleanName` (stockage
+  propre à l'avenir ; l'ancien est de toute façon re-normalisé à l'agrégation).
+- **Qualité** `dataQuality` (doublons BC) et **Top HBars** (web) → clé `cleanName`.
+- `parRevenue.normalizeSupplier` DÉLÈGUE à `cleanName` (fin de la seconde définition).
+Vérif : `test/fournisseurs.test.js` (fusion ClickUp/Odoo + appariement plafond), functions (1178) + web (277),
+build + bundle 118.3 KB < 120, guards deploy-targets (181) + no-undef.
+**Mise en service** : après déploiement, exécuter une fois `migrateCreditLineKeys` (droit `fournisseurs`) pour
+re-clé les plafonds historiques, puis un recompute `suppliers`.
+Statut : **acté (unification ERP-wide de la normalisation fournisseur — reliquat ADR-P19 clôturé)**.

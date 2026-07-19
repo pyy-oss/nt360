@@ -4,6 +4,22 @@ const { suppliers } = require("../domain/fournisseurs");
 // Récupère l'agrégat d'un fournisseur par nom (normalisé majuscules dans le domaine).
 const sup = (res, name) => res.bySupplier.find((s) => s.name === name.toUpperCase());
 
+// ADR-P20 : un même fournisseur importé « à un espace/casse près » selon la source du BC ne doit plus se
+// scinder en deux dans le SOA (clé canonique cleanName). Fusion des lignes + appariement du plafond.
+describe("suppliers — clé fournisseur canonique (ADR-P20)", () => {
+  it("fusionne un fournisseur mal espacé (ClickUp) avec sa forme propre (Odoo), plafond apparié", () => {
+    const r = suppliers([], [
+      { bcNumber: "BC1", supplier: "DELL TECHNOLOGIES", amountXof: 60_000, status: "facture" }, // Odoo (compacté)
+      { bcNumber: "BC2", supplier: "dell  technologies", amountXof: 40_000, status: "facture" }, // ClickUp (double espace + casse)
+    ], [{ id: "DELL TECHNOLOGIES", authorized: 200_000, openingBalance: 0 }]);
+    const rows = r.bySupplier.filter((s) => s.name === "DELL TECHNOLOGIES");
+    expect(rows).toHaveLength(1);                 // un SEUL fournisseur, pas deux
+    expect(rows[0].facture).toBe(100_000);        // 60k + 40k agrégés
+    expect(rows[0].hasCredit).toBe(true);         // plafond « DELL TECHNOLOGIES » bien apparié
+    expect(rows[0].authorized).toBe(200_000);
+  });
+});
+
 describe("suppliers — BC en devise non convertie (SOA indéterminé)", () => {
   it("BC réel (N° BC) à montant XOF nul → fournisseur `unvalued` + état « indetermine » (pas « ok » à tort)", () => {
     const orders = [];
