@@ -13,7 +13,7 @@ import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, 
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
-import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
+import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, FR_MONTHS, fiscalMonthsLabel, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
 import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
 import { tierProgress } from "../lib/parTier";
 import { byEngineer } from "../lib/parEngineer";
@@ -31,10 +31,10 @@ const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, 
 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
 type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | "bookingYtd" | "certBp" | "certYtd" | "growthBp" | "growthYtd", number>>;
-type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
+type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; caDeclaredXof?: number; fiscalStartMonth?: number; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
-type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcCount: number }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
+type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[] } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
@@ -250,7 +250,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label="Partenaires" value={String(partners.length)} sub="référentiel" />
         {/* CA constructeur = donnée confidentielle (droit `rentabilite`) — masquée sinon (ADR-P07). */}
-        {canSeeCa && <Kpi label="CA constructeurs (dérivé BC)" value={fmt(ca?.totalXof || 0)} sub={`${(ca?.byPartner || []).length} partenaire(s)`} tone="emerald" />}
+        {canSeeCa && <Kpi label="CA constructeurs (BC + déclaré)" value={fmt(ca?.totalXof || 0)} sub={`${(ca?.byPartner || []).length} partenaire(s)`} tone="emerald" />}
         <Kpi label="Certifs à renouveler" value={String(alerts?.total || 0)} sub={`${alerts?.counts?.expired || 0} expirée(s)`} tone={(alerts?.total || 0) > 0 ? "gold" : "ink"} />
         <Kpi label="Partenariats à risque" value={String(nonConf)} sub={`${relances?.counts?.late || 0} relance(s) en retard`} tone={nonConf > 0 ? "clay" : "ink"} />
       </div>
@@ -280,11 +280,11 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
       )}
 
       {canSeeCa && (
-      <Card title="CA par constructeur — dérivé des BC fournisseurs">
-        <Tip>Le chiffre d'affaires par partenaire est <b>dérivé des bons de commande fournisseurs</b> (aucune saisie), en rapprochant le fournisseur du constructeur (Paramétrage). Montants en FCFA.</Tip>
+      <Card title="CA par constructeur — BC dérivé + déclaratif">
+        <Tip>Le chiffre d'affaires par partenaire <b>mélange</b> le <b>dérivé des bons de commande fournisseurs</b> (via la correspondance fournisseur→constructeur, Paramétrage) et le <b>CA réalisé déclaré</b> sur la fiche partenaire (repli = booking YTD du plan d'affaires). Règle : le <b>BC prime</b> dès qu'il existe, le déclaratif comble sinon — jamais additionnés. Montants en FCFA.</Tip>
         <Table
-          columns={[colText("Constructeur", (r) => r.name), colNum("CA (FCFA)", (r) => money(r.revenueXof)), colNum("BC", (r) => String(r.bcCount))]}
-          rows={ca?.byPartner || []} rowKey={(r) => r.partnerId} empty="Aucun CA constructeur — renseignez la correspondance fournisseur → constructeur dans Paramétrage."
+          columns={[colText("Constructeur", (r) => r.name), colNum("CA (FCFA)", (r) => money(r.revenueXof)), colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>), colNum("BC", (r) => String(r.bcCount))]}
+          rows={ca?.byPartner || []} rowKey={(r) => r.partnerId} empty="Aucun CA — ni BC rattaché, ni CA déclaré/booking YTD sur les fiches partenaires."
         />
         {!!(ca?.unmapped || []).length && (
           <div className="mt-2 text-[12px] text-gold">
@@ -630,6 +630,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
             colNum("Niveaux", (r) => String((r.tiers || []).length)),
             colNum("Certifs au catalogue", (r) => String((r.certificationCatalog || []).length)),
             colNum("Exigences", (r) => String((r.requirements || []).length)),
+            colText("Exercice", (r) => fiscalMonthsLabel(r.fiscalStartMonth) || "Calendaire"),
             colNum("Rattachés", (r) => { const l = links.get(r.id); return l ? String(l.certs + l.assigns) : "—"; }, (r) => { const l = links.get(r.id); return l ? l.certs + l.assigns : 0; }),
             ...(canWrite ? [colText("", (r) => (
               <span className="inline-flex items-center gap-2">
@@ -659,7 +660,7 @@ const nk = () => "k" + (++_pk);
 const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ initial, onClose }) => {
   const [f, setF] = useState<PartnerFormState>(() => initial
     ? partnerToForm(initial)
-    : { name: "", programName: "", status: "", renewalDate: "", validationStatus: "", bp: { ...EMPTY_BP }, tiers: [], comps: [], certs: [], reqs: [] });
+    : { name: "", programName: "", status: "", renewalDate: "", validationStatus: "", bp: { ...EMPTY_BP }, caDeclaredXof: "", fiscalStartMonth: "", tiers: [], comps: [], certs: [], reqs: [] });
   const set = (patch: Partial<PartnerFormState>) => setF((s) => ({ ...s, ...patch }));
   const setBp = (k: keyof BpForm, v: string) => setF((s) => ({ ...s, bp: { ...s.bp, [k]: v } }));
   const compOpts = f.comps.filter((c) => c.name.trim()).map((c) => ({ value: c.k, label: c.name }));
@@ -702,6 +703,11 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
             <Field label="Statut actuel"><input className="field" value={f.status} placeholder="Ex. Platinum, Silver…" onChange={(e) => set({ status: e.target.value })} /></Field>
             <Field label="Échéance de renouvellement"><DateField value={f.renewalDate} onChange={(v) => set({ renewalDate: v })} /></Field>
             <Field label="Validation du plan"><Select value={f.validationStatus} onChange={(v) => set({ validationStatus: v })} options={[{ value: "", label: "—" }, ...Object.entries(VALIDATION_STATUS_LABEL).map(([value, l]) => ({ value, label: l }))]} placeholder="—" /></Field>
+          </div>
+          {/* CA réalisé déclaratif (mixé au CA dérivé des BC — cf. Tableau de bord) + exercice fiscal du partenaire. */}
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="CA réalisé déclaré (FCFA)"><input className="field tabnum" type="number" value={f.caDeclaredXof} placeholder="Repli = booking YTD" onChange={(e) => set({ caDeclaredXof: e.target.value })} /></Field>
+            <Field label="Début d'exercice fiscal"><Select value={f.fiscalStartMonth} onChange={(v) => set({ fiscalStartMonth: v })} options={FR_MONTHS.map((m, i) => ({ value: i === 0 ? "" : String(i), label: i === 0 ? "Calendaire (janvier)" : m }))} placeholder="Calendaire (janvier)" /></Field>
           </div>
           <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2">
             {BP_AXES.map((ax) => (

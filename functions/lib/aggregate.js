@@ -802,7 +802,7 @@ async function recomputeCore(db, only) {
     const { isParEnabled } = require("../domain/parFeature");
     const parCfg = (await db.doc("config/parFeature").get()).data();
     if (isParEnabled(parCfg)) {
-      const { revenueByPartner } = require("../domain/parRevenue");
+      const { revenueByPartner, blendRevenue } = require("../domain/parRevenue");
       const { coverageAll } = require("../domain/parQuota");
       const { certRenewalWatch, watchCounts } = require("../domain/parAlert");
       const { assignmentWatch, watchCounts: assignCounts } = require("../domain/parAssignment");
@@ -819,9 +819,17 @@ async function recomputeCore(db, only) {
       const { computeCertStatus } = require("../domain/parCertification");
       for (const c of parCertifs) c.status = computeCertStatus(c.expiryDate, asOf);
 
-      // CA par constructeur dérivé des BC (ADR-P02).
+      // CA par constructeur : MÉLANGE BC dérivé + déclaratif (ADR-P02/P10). Le déclaratif d'un partenaire =
+      // caDeclaredXof s'il est renseigné, sinon le réalisé booking YTD du plan d'affaires (repli sur la donnée
+      // déjà saisie/importée). blendRevenue tranche : BC prime, déclaratif en repli — jamais additif (anti-double-compte).
       const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
-      const byPartner = caPartners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
+      const declaredByPartner = {};
+      for (const p of parPartners) {
+        const d = p.caDeclaredXof != null ? p.caDeclaredXof : (p.businessPlan && p.businessPlan.bookingYtd);
+        const n = Number(d);
+        if (Number.isFinite(n) && n > 0) declaredByPartner[p.id] = n;
+      }
+      const byPartner = blendRevenue(caPartners, declaredByPartner).map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
       w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof: byPartner.reduce((s, g) => s + g.revenueXof, 0), ...stamp } });
 
       // Quotas de certification (couverture par exigence) + statut de conformité par partenaire (ADR-P04).

@@ -50,4 +50,30 @@ function revenueProgress(revenueYtd, revenueTarget) {
   return Math.min(100, Math.round((Number(revenueYtd) || 0) / Number(revenueTarget) * 100));
 }
 
-module.exports = { normalizeSupplier, resolvePartner, revenueByPartner, revenueProgress };
+/**
+ * CA effectif par partenaire = MÉLANGE du dérivé des BC et du déclaratif (ADR-P10). Règle ANTI-DOUBLE-COMPTE :
+ * le CA dérivé des BC PRIME dès qu'il existe (fournisseur mappé, montant > 0) ; le déclaratif ne comble que
+ * lorsqu'aucun BC n'est rattaché. Ainsi, à mesure que le mapping fournisseur→constructeur se complète, les BC
+ * prennent le relais du déclaratif SANS jamais s'y ajouter.
+ * @param bcPartners  sortie de revenueByPartner(...).partners : [{partnerId, revenueXof, bcCount}]
+ * @param declaredByPartner  { [partnerId]: caDéclaréXof }
+ * @returns [{ partnerId, revenueXof (effectif), bcXof, declaredXof, bcCount, source: "bc"|"declare" }] trié desc
+ */
+function blendRevenue(bcPartners, declaredByPartner) {
+  const bcMap = {};
+  for (const g of bcPartners || []) bcMap[g.partnerId] = g;
+  const decl = declaredByPartner || {};
+  const ids = new Set([...Object.keys(bcMap), ...Object.keys(decl)]);
+  const out = [];
+  for (const id of ids) {
+    const bc = bcMap[id];
+    const bcXof = bc ? Math.round(Number(bc.revenueXof) || 0) : 0;
+    const declaredXof = Math.max(0, Math.round(Number(decl[id]) || 0));
+    const effectiveXof = bcXof > 0 ? bcXof : declaredXof; // BC prime ; déclaratif en repli (jamais additif)
+    if (!(effectiveXof > 0)) continue; // ni BC ni déclaré > 0 → pas de ligne CA
+    out.push({ partnerId: id, revenueXof: effectiveXof, bcXof, declaredXof, bcCount: bc ? bc.bcCount : 0, source: bcXof > 0 ? "bc" : "declare" });
+  }
+  return out.sort((a, b) => b.revenueXof - a.revenueXof);
+}
+
+module.exports = { normalizeSupplier, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };
