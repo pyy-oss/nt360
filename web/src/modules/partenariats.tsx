@@ -232,6 +232,24 @@ const Dot: FC<{ color: string; label: ReactNode }> = ({ color, label }) => (
   </span>
 );
 
+// Couleur de trajectoire selon le taux d'atteinte (miroir des tons Kpi : tenu / proche / en retard).
+const ratioColor = (r: number | null): string => (r == null ? T.faint : r >= 1 ? T.emerald : r >= 0.8 ? T.gold : T.clay);
+
+// Mini-barre de trajectoire (0..1, barre bornée à 100 % ; le libellé garde le % réel qui peut dépasser).
+// Cellule de tableau premium — remplace un % brut par une jauge lisible d'un coup d'œil. Tokens uniquement.
+const MiniBar: FC<{ ratio: number | null; color?: string; label?: ReactNode }> = ({ ratio, color, label }) => {
+  const w = ratio == null ? 0 : Math.max(0, Math.min(1, ratio));
+  const c = color || ratioColor(ratio);
+  return (
+    <span className="inline-flex items-center gap-2 min-w-[96px]">
+      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: T.panel2 }}>
+        <span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${w * 100}%`, backgroundColor: c }} />
+      </span>
+      <span className="tabnum text-[11px] w-9 text-right" style={{ color: ratio == null ? undefined : c }}>{label ?? (ratio == null ? "—" : pct(ratio))}</span>
+    </span>
+  );
+};
+
 // HERO du cockpit partenariats — vocabulaire premium CODIR (grand nombre `font-display`, barre de couverture
 // segmentée, tuiles-stats en capitales espacées). Tout par tokens `T.*` (aucune couleur en dur). Remplace la
 // grille de KPI plate en fusionnant : focus sur la CONFORMITÉ (la métrique de pilotage) + stats de tête.
@@ -301,13 +319,12 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
     .filter((p) => p.businessPlan && Object.keys(p.businessPlan).length)
     .map((p) => ({ p, a: bpAchievement(p.businessPlan) }))
     .sort((x, y) => (x.a.global ?? -1) - (y.a.global ?? -1)); // les moins avancés en tête (à traiter)
-  const bpTone = (r: number | null) => (r == null ? "neutral" : r >= 1 ? "emerald" : r >= 0.8 ? "gold" : "clay");
   // Niveau de partenariat tenu / prochain (PA2) : dérivé de la couverture des quotas + des rangs de niveaux
   // du référentiel. Aucun re-calcul de couverture — on interprète les `ok` du summary (parité preservée).
   const tiersByPartner = new Map(partners.map((p) => [p.id, p.tiers || []]));
   const tp = (r: { partnerId: string; coverage?: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[] }) =>
     tierProgress(tiersByPartner.get(r.partnerId), r.coverage);
-  const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => pct(r.a[ax]), (r: typeof bpRows[number]) => r.a[ax] ?? -1);
+  const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => <MiniBar ratio={r.a[ax]} />, (r: typeof bpRows[number]) => r.a[ax] ?? -1);
   return (
     <div className="space-y-4">
       <HeroBand partners={partners} ca={ca} canSeeCa={canSeeCa} alerts={alerts} relances={relances} quotaPartners={quotaPartners} asOf={quotas?.asOf} />
@@ -328,7 +345,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
               colText("Partenaire", (r) => r.p.name),
               colText("Statut", (r) => r.p.status || "—"),
               bpCol("pipeline"), bpCol("booking"), bpCol("cert"), bpCol("growth"),
-              colNum("% global", (r) => <Badge tone={bpTone(r.a.global)}>{pct(r.a.global)}</Badge>, (r) => r.a.global ?? -1),
+              colNum("% global", (r) => <MiniBar ratio={r.a.global} />, (r) => r.a.global ?? -1),
               colText("Échéance", (r) => r.p.renewalDate ? frDate(r.p.renewalDate) : "—"),
               colText("Validation", (r) => <Badge tone={validationTone(r.p.validationStatus)}>{label(VALIDATION_STATUS_LABEL, r.p.validationStatus)}</Badge>, (r) => r.p.validationStatus || ""),
             ]}
@@ -367,7 +384,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
             colText("Statut", (r) => <Badge tone={partnershipTone(r.status)}>{label(PARTNERSHIP_STATUS_LABEL, r.status)}</Badge>),
             colText("Niveau tenu", (r) => tp(r).achieved?.name || "—"),
             colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
-            colText("Exigences couvertes", (r) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}`),
+            colText("Exigences couvertes", (r) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c: any) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
             colText("Écarts", (r) => (r.gaps || []).length ? (r.gaps as any[]).map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
           ]}
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
