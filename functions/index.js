@@ -1938,6 +1938,10 @@ exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeco
   let q = db.collection("activities");
   if (d.relatedId) q = q.where("relatedId", "==", String(d.relatedId));
   else if (d.mine) q = q.where("ownerUid", "==", req.auth.uid);
+  // FLUX GLOBAL (sans filtre) : tri serveur par date DÉCROISSANTE AVANT le plafond — sinon `.limit(1000)`
+  // retient un sous-ensemble ARBITRAIRE (ordre `__name__`) et « récent » omet les plus récentes à N grand.
+  // orderBy mono-champ (aucun index composite requis). Les chemins filtrés (relatedId/mine) restent bornés par nature.
+  else q = q.orderBy("createdAt", "desc");
   const cap = Math.min(500, Math.max(1, Number(d.limit) || 300));
   const snap = await q.limit(1000).get();
   let rows = snap.docs.map((s) => ({ id: s.id, ...s.data() }));
@@ -2012,7 +2016,10 @@ exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIEN
 });
 
 exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
-  await requireWrite(req, "pipeline");
+  // DÉCIDER ≠ ÉDITER une opp : droit LECTURE `pipeline` suffit (le manager approbateur peut n'avoir que
+  // la lecture). QUI peut décider reste borné dur ci-dessous (approbateur désigné OU direction) → aucune
+  // fuite. Corrige le workflow d'approbation bloqué quand le décideur n'a pas `pipeline:write` (audit).
+  await requireRead(req, "pipeline");
   const id = assertPlainId(req.data?.id, "id approbation");
   const decision = String(req.data?.decision || "");
   if (!["approved", "rejected"].includes(decision)) throw new HttpsError("invalid-argument", "décision invalide");
@@ -2042,6 +2049,9 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
   let q = db.collection("approvals");
   if (box === "toDecide") q = q.where("approverUid", "==", req.auth.uid).where("status", "==", "pending");
   else if (box === "mine") q = q.where("requestedBy", "==", req.auth.uid);
+  // box « all » (admin, sans filtre) : tri serveur par date décroissante avant le plafond — sinon 500
+  // approbations ARBITRAIRES (ordre `__name__`). orderBy mono-champ (aucun index composite requis).
+  else q = q.orderBy("createdAt", "desc");
   const snap = await q.limit(500).get();
   // Le montant d'une astreinte est une CHARGE confidentielle (ADR-035, révisé) : masqué (null) pour un
   // approbateur/lecteur SANS droit `rentabilite`. L'approbation reste possible sur le libellé + le motif ;
@@ -2179,10 +2189,15 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
     .select("client", "am", "amount", "stage", "probability", "forecastCategory", "nextStep", "nextStepDate", "dr", "mbPrev", "stale", "source", "ageDays", "fp", "updatedAt", "visibleTo")
     .limit(MAX_SCAN + 1).get(); // scan borné (R1)
   const all = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-  // Calibration EMPIRIQUE (R6) : on dérive base + poids de catégorie du taux de gain HISTORIQUE réel
-  // (opps fermées : gagné=6 / perdu=7). Sous échantillon insuffisant → calib=null → heuristique.
-  const closed = all.filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7)
-    .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: o.forecastCategory }));
+  // Calibration EMPIRIQUE (R6, dé-biais audit) : base + poids de catégorie dérivés du taux de gain HISTORIQUE.
+  // Population fermée DÉDUPLIQUÉE par FP (une 'saisie' ré-importée ne compte pas deux fois) et incluant les
+  // AUTO-PERDUES PAR ÂGE comme des PERTES — sinon le taux de gain de base est surévalué (ces affaires restent
+  // stockées en étape 1-5, donc absentes du dénominateur). Catégorie EFFECTIVE (posée sinon dérivée de l'étape)
+  // pour aligner les paliers de calibration sur le forecast (au lieu du champ brut, souvent vide).
+  const { effectiveCategory } = require("./domain/forecast");
+  const closed = dedupOppsByFp(all)
+    .filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7 || isAgedLost(o))
+    .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: effectiveCategory(o) }));
   const calib = calibrate(closed);
   // Population alignée sur pipeline/vélocité : NON `stale`, NON périmée par âge, DÉDUPLIQUÉE par FP (parité
   // aggregate.js). On DÉDUPLIQUE sur l'ensemble stale/aged-filtré (toutes étapes) AVANT de restreindre aux

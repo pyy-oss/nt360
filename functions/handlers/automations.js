@@ -29,11 +29,15 @@ function createAutomations({ onCallG, HttpsError, db, FieldValue, loadUsersMap, 
     if (!rules.length) return { created: 0, evaluated: 0 };
     const [oppSnap, existingSnap, usersMap] = await Promise.all([
       // Scans BORNÉS (MAX_SCAN+1 + sliceCapped) — `activities` (tâches auto quotidiennes) croît sans limite.
-      db.collection("opportunities").select("client", "stage", "nextStep", "stale", "ownerUid").limit(MAX_SCAN + 1).get(),
+      // source/ageDays/probability : requis pour EXCLURE les auto-perdues par âge (parité cockpit/scoring).
+      db.collection("opportunities").select("client", "stage", "nextStep", "stale", "ownerUid", "source", "ageDays", "probability").limit(MAX_SCAN + 1).get(),
       db.collection("activities").where("auto", "==", true).select("autoKey").limit(MAX_SCAN + 1).get(),
       loadUsersMap(),
     ]);
-    const opps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const { isAgedLost } = require("../domain/oppLifecycle");
+    // Ne pas générer de tâche « définir la prochaine action » sur une affaire AUTO-PERDUE PAR ÂGE : le cockpit
+    // la traite comme morte (retirée du pipeline actif) → une tâche dessus serait du bruit sur une affaire zombie.
+    const opps = sliceCapped(oppSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() })).filter((o) => !isAgedLost(o));
     const existing = new Set(sliceCapped(existingSnap.docs).docs.map((d) => d.data().autoKey).filter(Boolean));
     const tasks = evaluateAutomations(rules, opps, existing);
     if (!tasks.length) return { created: 0, evaluated: opps.length };

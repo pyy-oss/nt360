@@ -68,6 +68,9 @@ function NewApprovalForm({ onDone }: { onDone: () => void }) {
 
 export const Approvals: FC<Props> = () => {
   const canWrite = useCan("pipeline") === "write";
+  // DÉCIDER ≠ ÉDITER : un manager approbateur en LECTURE seule peut décider (le serveur borne à l'approbateur
+  // désigné / la direction — decideApproval gaté `pipeline:read`). Seule la SOUMISSION exige l'écriture.
+  const canDecide = useCan("pipeline") !== "none";
   const [toDecide, setToDecide] = useState<Approval[]>([]);
   const [mine, setMine] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,7 +88,7 @@ export const Approvals: FC<Props> = () => {
     <div className="flex flex-col gap-4">
       <Card title={`À décider${toDecide.length ? ` · ${toDecide.length}` : ""}`}>
         {loading ? <div className="text-[13px] text-muted py-2">Chargement…</div>
-          : toDecide.length ? <div>{toDecide.map((a) => <ApprovalCard key={a.id} a={a} canDecide={canWrite} onChange={load} />)}</div>
+          : toDecide.length ? <div>{toDecide.map((a) => <ApprovalCard key={a.id} a={a} canDecide={canDecide} onChange={load} />)}</div>
           : <Tip>Aucune demande en attente de votre décision. Les demandes vous sont routées quand vous êtes le <b>manager</b> du demandeur (hiérarchie), ou à la direction à défaut.</Tip>}
       </Card>
       {canWrite && (

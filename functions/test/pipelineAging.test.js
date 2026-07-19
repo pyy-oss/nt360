@@ -54,4 +54,31 @@ describe("agingAnalysis — âge des opps actives (périmètre daté)", () => {
     expect(r.withDate).toBe(0);
     expect(r.avgAge).toBe(0);
   });
+
+  it("millésime de création ABERRANT (1900) → ignoré (pas de tranche « ancienne » à tort) [audit]", () => {
+    const active = [
+      { oppId: "ok", amount: 10, stage: 2, dateCreation: "2026-07-01" }, // 17 j
+      { oppId: "aberrant", amount: 999, stage: 3, dateCreation: "1900-01-01" }, // millésime hors [2015..]
+    ];
+    const r = agingAnalysis(active, TODAY);
+    expect(r.withDate).toBe(1);              // seule l'opp au millésime plausible est datée
+    expect(r.buckets.dPlus.count).toBe(0);   // 1900 ne gonfle PAS la tranche la plus ancienne
+    expect(r.total).toBe(2);
+  });
+});
+
+const { closingAnalysis } = require("../domain/pipeline");
+const pwOne = (o) => o.amount || 0; // pondération neutre pour le test
+
+describe("closingAnalysis — millésime de closing borné (audit)", () => {
+  it("closing ABERRANT (« 20226-… » trie AVANT today en chaîne) → seau « sans », PAS « retard »", () => {
+    const active = [
+      { oppId: "aberrant", amount: 100, closingDate: "20226-01-01" }, // année à 5 chiffres
+      { oppId: "vraiRetard", amount: 50, closingDate: "2026-01-01" },  // vraie D Prev passée
+    ];
+    const r = closingAnalysis(active, "2026-07-18", pwOne);
+    expect(r.buckets.sans.count).toBe(1);    // l'aberrant tombe en « à requalifier/dater »
+    expect(r.buckets.retard.count).toBe(1);  // seul le vrai retard est « en retard »
+    expect(r.staleCount).toBe(1);            // et un seul entre dans le top des retards
+  });
 });

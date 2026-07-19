@@ -5,7 +5,7 @@
 // ventilations, le funnel et l'analyse de closing utilisent tous ces mêmes niveaux (cohérence
 // avec l'atterrissage et la Vue d'ensemble).
 const { sum } = require("./chaine");
-const { fpKey } = require("../lib/ids");
+const { fpKey, plausibleYear } = require("../lib/ids");
 const { projectionWeight, tierBreakdown, normalizeTiers, p01 } = require("./projection");
 const { groupSum } = require("./backlog");
 const { isDormantClosing } = require("./oppLifecycle");
@@ -62,8 +62,12 @@ function closingAnalysis(active, asOf, pw) {
   const stale = [];
   for (const o of active) {
     const d = o.closingDate ? String(o.closingDate) : "";
+    // Millésime BORNÉ (plausibleYear) : un closing aberrant (« 20226-… » trie AVANT « 2026 » en comparaison
+    // de chaînes → faux « en retard ») est traité comme non attribuable → seau « sans » (à requalifier).
+    // Année = token AVANT le premier « - » (PAS slice(0,4) : « 20226 ».slice(0,4)==« 2022 » resterait plausible).
+    const y = d ? plausibleYear(Number(d.split("-")[0])) : 0;
     let key;
-    if (!d) key = "sans";
+    if (!d || !y) key = "sans";
     else if (d < today) key = "retard"; // clôture prévue déjà passée → à requalifier
     else if (d.slice(0, 7) === ym) key = "mois";
     else if (d.slice(0, 4) === yr && Math.floor((Number(d.slice(5, 7)) - 1) / 3) === q) key = "trim";
@@ -111,7 +115,9 @@ function agingAnalysis(active, asOf) {
   for (const o of active) {
     const dc = o.dateCreation ? String(o.dateCreation).slice(0, 10) : "";
     const age = daysBetweenIso(dc, today);
-    if (age == null || age < 0) continue; // pas de date de création (opp Excel) ou incohérente → ignorée
+    // Millésime de création BORNÉ (plausibleYear) : une date aberrante (« 1900-… ») ne tombe pas en tranche
+    // « ancienne » à tort. Pas de date (opp Excel) ou incohérente/aberrante → ignorée (couverture withDate honnête).
+    if (age == null || age < 0 || !plausibleYear(Number(dc.slice(0, 4)))) continue;
     withDate++; ageSum += age;
     const k = age <= 30 ? "d30" : age <= 90 ? "d90" : age <= 180 ? "d180" : "dPlus";
     buckets[k].brut += o.amount || 0; buckets[k].count++;

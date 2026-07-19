@@ -112,9 +112,14 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
   // en commande) et le réalisé / facturé DÉJÀ enregistrés pour N+1. Le RAF glissant N'y entre PAS
   // (il est facturé en N) : seule la part reportée constitue le backlog entrant en N+1.
   const fyNext = fy + 1;
+  // Anti double-compte N+1 (symétrie de M1) : une opp de closing N+1 dont le FP est DÉJÀ commandé en N+1
+  // est réalisée → exclue du pipeline N+1. Sans cette borne (l'ancien code réutilisait `alreadyBooked`,
+  // scopé à {fy}), elle comptait à la fois dans realiseCasNext ET pipelineNext → projeteNext sur-compté.
+  const orderFpsNext = new Set((orders || []).filter((o) => orderYear(o) === fyNext).map((o) => fpKey(o.fp)).filter(Boolean));
+  const alreadyBookedNext = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !!k && orderFpsNext.has(k); };
   const realiseCasNext = sum(orders.filter((o) => orderYear(o) === fyNext), (o) => o.cas);
   const factureNext = sum(invoices.filter((i) => yearOf(i.date) === String(fyNext)), (i) => i.amountHt);
-  const pipelineNext = sum(opps.filter((o) => isActive(o) && yearOf(o.closingDate) === String(fyNext) && !alreadyBooked(o)), pw);
+  const pipelineNext = sum(opps.filter((o) => isActive(o) && yearOf(o.closingDate) === String(fyNext) && !alreadyBookedNext(o)), pw);
   const objGlobalNext = objectives.filter((o) => Number(o.fiscalYear) === fyNext && (!o.scope || o.scope === "global"));
   const objectifNext = sum(objGlobalNext, (o) => o.targetCas);
   const objectifCafNext = sum(objGlobalNext, (o) => o.targetInvoiced);
