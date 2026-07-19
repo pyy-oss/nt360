@@ -376,6 +376,17 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
 
     const plan = planCertImport(consultants, partners, today);
 
+    // PRÉ-VISUALISATION (audit adverse #2) : l'import crée des consultants `active` dans l'annuaire ESN PARTAGÉ
+    // (ils entrent alors dans les dénominateurs TACE/occupation). Pour rendre cette création VISIBLE et
+    // consentie, un appel `dryRun` renvoie QUI serait créé, SANS aucune écriture — le front demande confirmation
+    // avant l'import réel. Ne requiert pas le droit `pipeline` (rien n'est écrit).
+    if (req.data && req.data.dryRun === true) {
+      return { ok: true, dryRun: true,
+        wouldCreateConsultants: plan.needConsultants.map((n) => n.name).slice(0, 300),
+        wouldCreateCount: plan.needConsultants.length,
+        certsPlanned: plan.certs.length, assignsPlanned: plan.assignments.length, skipped: plan.skipped.length };
+    }
+
     // 1) Consultants nommés manquants → création marquée (le rapprochement par nom est fait par le planner).
     //    GARDE RBAC (anti-escalade) : créer une fiche consultant relève du droit `pipeline` (upsertConsultant).
     //    On ne l'exige QUE s'il y a réellement des consultants à créer — un ré-import (tout déjà en annuaire)

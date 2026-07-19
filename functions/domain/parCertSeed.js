@@ -14,11 +14,19 @@
 // Slug d'identifiant (même règle que parCertification.js / le handler) : minuscules, non-alphanumérique → tiret.
 const slug = (v) => { const s = String(v == null ? "" : v).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); return s || null; };
 
-// Normalisation de nom pour le rapprochement annuaire : sans accents, casse repliée, espaces compactés.
-// « Stevensky Aboua » ≡ « STEVENSKY  ABOUA ». On NE réordonne PAS (prénom/nom) — le fichier et l'annuaire
-// suivent le même ordre (prénom nom) ; réordonner créerait de faux positifs.
+// Normalisation de nom pour le rapprochement annuaire : sans accents, casse repliée, PONCTUATION pliée,
+// espaces compactés. « Stevensky Aboua » ≡ « STEVENSKY  ABOUA » ; « Mel N'DIAMOI » ≡ « Mel Ndiamoi » ;
+// « Jean-Marc » ≡ « Jean Marc » — sinon l'import crée une fiche FANTÔME pour un salarié déjà présent
+// (audit adverse #3). Règle : les apostrophes LIENT (O'Brien → obrien), les autres séparateurs (tiret,
+// point…) deviennent des espaces, puis on compacte. On NE réordonne PAS (prénom/nom) — le fichier et
+// l'annuaire suivent le même ordre ; réordonner créerait de faux positifs (« Jean Marc » ≠ « Marc Jean »).
 function normName(s) {
-  return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  return String(s == null ? "" : s)
+    .normalize("NFD").replace(/[̀-ͯ]/g, "") // accents
+    .toLowerCase()
+    .replace(/['’`]/g, "")        // apostrophes : lient (n'diamoi → ndiamoi)
+    .replace(/[^a-z0-9]+/g, " ")  // autres séparateurs (tiret, point, /…) → espace
+    .replace(/\s+/g, " ").trim();
 }
 
 // Rétro-calcul de la date d'obtention d'une certif détenue à partir de son échéance et de sa validité (mois).
