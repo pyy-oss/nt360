@@ -698,3 +698,21 @@ synchrone, pas se fier au différé.
 **Conception.** Additif, cantonné `par_` + une primitive graphique optionnelle rétro-compatible. Deux champs
 partenaire additifs (jamais de colonne modifiée). ADR-P12 (validé « go »). Bundle d'entrée 118,3 KB ;
 functions 1150 tests, web 276 tests au vert.
+
+---
+
+## Session — actions de masse, actions de ligne cross-vue, refonte formulaire (PR #499, ADR-P13)
+
+**Fait.**
+- **Actions en masse** (primitive partagée `Table.bulk`, non modifiée) : Certifs (supprimer), Assignations
+  (changer statut via `pick` + pousser ClickUp + supprimer), Référentiel partenaires (supprimer, échec partiel
+  toléré et rapporté — garde d'intégrité PA3). Boucle sur les callables existants.
+- **Actions de ligne cross-vue** : « Éditer le partenaire » depuis Plan d'affaires et Conformité → bascule
+  Paramétrage + ouvre le formulaire (`editPartnerId` remonté au parent, consommé par ConfigTab).
+- **Pagination** : `pageSize=12` + `searchKeys` explicites sur les listes longues (déjà fourni par `Table`).
+- **Refonte formulaire** : modal d'édition partenaire restructuré en sections premium (`FormSection` =
+  Eyebrow + aide + conteneur bordé) — Identité / Statut & plan / CA & exercice / Niveaux / Compétences /
+  Catalogue / Exigences. Purement visuel (mêmes champs, même `buildPartnerPayload`).
+
+**Conception.** Additif, cantonné au module `par_`, aucune primitive partagée modifiée. ADR-P13. Bundle
+d'entrée sous budget ; suites de tests au vert.
