@@ -11,10 +11,28 @@ function normalizeSupplier(s) {
   return String(s == null ? "" : s).trim().toUpperCase();
 }
 
-// Résout un fournisseur (nom libre du BC) vers un partnerId via la table d'overlay. null si non mappé.
+// Normalise la valeur de mapping d'un fournisseur en ALLOCATIONS [{partnerId, weight}] dont les poids SOMMENT
+// À 1 (ADR-P14). Un fournisseur (distributeur) porte souvent PLUSIEURS constructeurs — une ligne BC ne dit pas
+// lequel, on RÉPARTIT donc le montant selon des poids déclarés. Rétro-compat : une valeur STRING = un seul
+// constructeur à 100 % ; un OBJET { partnerId: poids } = répartition (poids ≤ 0 / non finis écartés, normalisés).
+function allocationsFor(value) {
+  if (value == null) return [];
+  if (typeof value === "string") { const id = value.trim(); return id ? [{ partnerId: id, weight: 1 }] : []; }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value)
+      .map(([pid, w]) => ({ partnerId: String(pid || "").trim(), weight: Number(w) }))
+      .filter((e) => e.partnerId && Number.isFinite(e.weight) && e.weight > 0);
+    const sum = entries.reduce((s, e) => s + e.weight, 0);
+    if (!(sum > 0)) return [];
+    return entries.map((e) => ({ partnerId: e.partnerId, weight: e.weight / sum }));
+  }
+  return [];
+}
+
+// Résout un fournisseur vers UN partnerId (rétro-compat : premier constructeur de la répartition). null sinon.
 function resolvePartner(supplier, map) {
-  const key = normalizeSupplier(supplier);
-  return (map && map[key]) || null;
+  const a = allocationsFor((map || {})[normalizeSupplier(supplier)]);
+  return a.length ? a[0].partnerId : null;
 }
 
 /**
@@ -28,10 +46,13 @@ function revenueByPartner(bcLines, map) {
   for (const b of bcLines || []) {
     const amt = Number(b && b.amountXof) || 0;
     if (!(amt > 0)) continue; // BC à montant nul/négatif : hors CA (déjà signalé par la qualité fournisseurs)
-    const pid = resolvePartner(b && b.supplier, map);
-    if (pid) {
-      const g = byPartner[pid] || { partnerId: pid, revenueXof: 0, bcCount: 0 };
-      g.revenueXof += amt; g.bcCount += 1; byPartner[pid] = g;
+    const allocs = allocationsFor((map || {})[normalizeSupplier(b && b.supplier)]);
+    if (allocs.length) {
+      // Répartition pondérée (ADR-P14) : la somme des parts = amt → aucun double-compte inter-constructeurs.
+      for (const a of allocs) {
+        const g = byPartner[a.partnerId] || { partnerId: a.partnerId, revenueXof: 0, bcCount: 0 };
+        g.revenueXof += amt * a.weight; g.bcCount += 1; byPartner[a.partnerId] = g;
+      }
     } else {
       const key = normalizeSupplier(b && b.supplier) || "(inconnu)";
       const u = unmapped[key] || { supplier: key, revenueXof: 0, bcCount: 0 };
@@ -76,4 +97,4 @@ function blendRevenue(bcPartners, declaredByPartner) {
   return out.sort((a, b) => b.revenueXof - a.revenueXof);
 }
 
-module.exports = { normalizeSupplier, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };
+module.exports = { normalizeSupplier, allocationsFor, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };

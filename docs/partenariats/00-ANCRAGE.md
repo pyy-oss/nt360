@@ -311,3 +311,22 @@ lisible. **Décision (validée par l'humain, « go »)** :
   même backend. Tokens uniquement, aucune primitive partagée modifiée.
 Vérif : `web/src/lib/parPartnerForm.test.ts` (inchangé), typecheck + build + bundle.
 Statut : **acté (Lot PA-actions + refonte formulaire, PR #499)**.
+
+### ADR-P14 — Un fournisseur est MULTI-CONSTRUCTEUR : répartition pondérée du CA (pas de mapping 1→1)
+**Contexte** : ADR-P02/P12 dérivaient le CA constructeur en rattachant chaque fournisseur BC à UN constructeur.
+Or un fournisseur est le plus souvent un **distributeur** (HDF SAS, EXCLUSIVE, HIPERDIST…) qui porte **plusieurs
+marques**. Une **ligne BC ne contient PAS le constructeur** (seulement fournisseur + montant + affaire) : on ne
+peut donc pas attribuer automatiquement le montant à une marque précise. Le mapping 1→1 **mésattribuait** le CA.
+**Décision (validée par l'humain — « les fournisseurs sont multi-constructeurs »)** :
+- L'overlay `config/parPartnerMap` accepte, par fournisseur, soit un `partnerId` (string, un seul constructeur
+  à 100 % — **forme canonique rétro-compatible**), soit une **répartition** `{ partnerId: poids }` (distributeur
+  multi-marques). `domain/parRevenue.allocationsFor` normalise les poids à **somme 1** (poids ≤ 0 / non finis écartés).
+- `revenueByPartner` **répartit** `amountXof` de chaque BC selon les poids : la somme des parts = le montant →
+  **jamais de double-compte** entre constructeurs. `bcCount` compte +1 par constructeur touché (informatif).
+- **Aucune donnée inventée** : la répartition est **déclarée** par l'utilisateur (poids), pas devinée. Sans
+  mapping, le fournisseur reste « non rattaché » (le CA déclaratif ADR-P12 comble).
+- Backend `setParPartnerMap` accepte les deux formes ; un objet à une seule allocation est stocké en forme
+  simple (canonique). L'éditeur front (Paramétrage) permet N constructeurs + poids par fournisseur, avec le %
+  effectif affiché en direct.
+Vérif : `test/parRevenue.test.js` (allocationsFor + répartition + rétro-compat string), typecheck + build.
+Statut : **acté (Lot mapping multi-constructeur, PR #500)**.

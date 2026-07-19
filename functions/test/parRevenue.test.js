@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue } = require("../domain/parRevenue");
+const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor } = require("../domain/parRevenue");
 
 // CA partenaire dérivé des BC fournisseurs (ADR-P02). Aucune saisie : somme des BC par constructeur.
 describe("parRevenue — CA dérivé des BC", () => {
@@ -44,6 +44,36 @@ describe("parRevenue — CA dérivé des BC", () => {
     expect(revenueProgress(1500000, 1000000)).toBe(100);
     expect(revenueProgress(500000, null)).toBe(null);
     expect(revenueProgress(500000, 0)).toBe(null);
+  });
+});
+
+// Mapping fournisseur MULTI-CONSTRUCTEUR (ADR-P14) : un distributeur porte plusieurs marques ; on répartit
+// le montant BC par poids (somme = 1) — jamais de double-compte entre constructeurs.
+describe("allocationsFor — répartition d'un fournisseur", () => {
+  it("string legacy → un seul constructeur à 100 %", () => {
+    expect(allocationsFor("dell")).toEqual([{ partnerId: "dell", weight: 1 }]);
+    expect(allocationsFor("  ")).toEqual([]);
+    expect(allocationsFor(null)).toEqual([]);
+  });
+  it("objet { partnerId: poids } → normalisé à somme 1, poids invalides écartés", () => {
+    const a = allocationsFor({ cisco: 3, fortinet: 1, bad: 0, nope: -2 });
+    expect(a).toEqual([{ partnerId: "cisco", weight: 0.75 }, { partnerId: "fortinet", weight: 0.25 }]);
+  });
+});
+
+describe("revenueByPartner — répartition multi-constructeur", () => {
+  it("un BC d'un distributeur est réparti par poids (somme des parts = montant)", () => {
+    const bc = [{ supplier: "HDF SAS", amountXof: 1000000 }];
+    const map = { "HDF SAS": { cisco: 3, fortinet: 1 } }; // 75 % / 25 %
+    const { partners } = revenueByPartner(bc, map);
+    const byId = Object.fromEntries(partners.map((p) => [p.partnerId, p.revenueXof]));
+    expect(byId.cisco).toBe(750000);
+    expect(byId.fortinet).toBe(250000);
+    expect(byId.cisco + byId.fortinet).toBe(1000000); // aucun double-compte
+  });
+  it("mapping simple (string) inchangé — 100 % au constructeur", () => {
+    const { partners } = revenueByPartner([{ supplier: "Dell", amountXof: 500000 }], { DELL: "dell" });
+    expect(partners).toEqual([{ partnerId: "dell", revenueXof: 500000, bcCount: 1 }]);
   });
 });
 

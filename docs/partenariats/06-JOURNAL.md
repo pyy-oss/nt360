@@ -716,3 +716,23 @@ functions 1150 tests, web 276 tests au vert.
 
 **Conception.** Additif, cantonné au module `par_`, aucune primitive partagée modifiée. ADR-P13. Bundle
 d'entrée sous budget ; suites de tests au vert.
+
+---
+
+## Session — mapping fournisseur MULTI-constructeur (PR #500, ADR-P14)
+
+**Constat.** Une ligne BC ne porte pas le constructeur (fournisseur + montant + affaire seulement). Un
+fournisseur est souvent un distributeur multi-marques → le mapping 1→1 mésattribuait le CA.
+
+**Fait.**
+- `domain/parRevenue.allocationsFor` : normalise la valeur de mapping (string legacy = 100 % | objet
+  { partnerId: poids } normalisé à somme 1). `revenueByPartner` répartit `amountXof` par poids — somme des
+  parts = montant, **zéro double-compte**.
+- `setParPartnerMap` accepte les deux formes (objet à 1 allocation → forme simple canonique).
+- Éditeur front : N constructeurs + poids par fournisseur, % effectif en direct ; rétro-compat totale.
+- Tests parRevenue (allocationsFor, répartition, legacy string).
+
+**Appris.** Sans donnée par ligne, on ne DEVINE pas la répartition : on la fait DÉCLARER (poids). Le CA
+déclaratif (ADR-P12) reste le repli pour les fournisseurs non mappés.
+
+**Conception.** Additif, rétro-compatible, cantonné `par_`. ADR-P14. Suites de tests + build au vert.
