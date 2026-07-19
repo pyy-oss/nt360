@@ -39,8 +39,10 @@ function actionPlanSnapshot({ dateIso, ca, quotas, relances }) {
       nom: str(q.name || q.partnerId, 80),
       statut_conformite: str(q.status, 20),
       ca_ytd_fcfa: Number(c.revenueXof || 0),
+      // Ventilation EFFECTIVE : le déclaratif n'est compté que lorsqu'il est la source (BC prime, ADR-P12).
+      // La part déclarative effective = CA effectif − part BC (jamais le déclaré BRUT, ignoré si des BC existent).
       ca_dont_bc_fcfa: Number(c.bcXof || 0),
-      ca_dont_declare_fcfa: Number(c.declaredXof || 0),
+      ca_dont_declare_fcfa: Math.max(0, Number(c.revenueXof || 0) - Number(c.bcXof || 0)),
       quotas_manquants: ((q.gaps || []).map((g) => gapLabel(g.target, g.holders, g.minCount))).slice(0, 6),
     };
   });
@@ -63,9 +65,10 @@ function qbrSnapshot({ partnerId, partner, periode, ca, quotas, certifs, relance
     exercice_fiscal: fiscalMonthsLabel(partner && partner.fiscalStartMonth),
     statut_conformite: str(q && q.status, 20),
     ca_realise_ytd_fcfa: Number(rev.revenueXof || 0),
-    // Ventilation CA MIXTE (ADR-P12) : part BC (fiable) vs part déclarative (à confirmer). 0 si CA masqué (ADR-P07).
+    // Ventilation CA MIXTE EFFECTIVE (ADR-P12) : part BC (fiable) vs part déclarative effective = CA − part BC
+    // (le déclaré BRUT est ignoré quand des BC existent, BC prime). 0 partout si CA masqué (ADR-P07).
     ca_dont_bc_fcfa: Number(rev.bcXof || 0),
-    ca_dont_declare_fcfa: Number(rev.declaredXof || 0),
+    ca_dont_declare_fcfa: Math.max(0, Number(rev.revenueXof || 0) - Number(rev.bcXof || 0)),
     quotas: ((q && q.coverage) || []).map((c) => gapLabel(c.target, c.holders, c.minCount, c.ok ? " ✓" : "")).slice(0, 10),
     certifications_actives: recentes,
     assignations: enRetard,

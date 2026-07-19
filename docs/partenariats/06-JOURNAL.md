@@ -799,3 +799,24 @@ le format de SORTIE (aucune régression front/PPTX) :
 **Conception.** 100 % additif : entrée du modèle enrichie, sortie inchangée. Aucune primitive partagée
 modifiée, aucun schéma changé. Vérifs : parAi (14 tests, +6), functions 1161 + web 277, build, bundle
 118.3 KB < 120, guards deploy-targets + no-undef au vert.
+
+---
+
+## Session — filet E2E parcours CA + correctif ventilation (PA+ Lot 5)
+
+**Fait.** Nouveau `test/parParcoursCa.test.js` : filet de bout en bout (domaine PUR, sans émulateur) du
+parcours CA constructeur — **activation** (drapeau parFeature) → **import MIXTE** (BC dérivés + déclaratif,
+BC prime) → **mapping MULTI-CONSTRUCTEUR** (répartition pondérée, anti-double-compte) → **suggestion IA**
+(proposée, re-validée contre les id connus) → **CA cohérent bout-en-bout**. Prouve l'invariant « une même
+métrique calculée à deux endroits donne le même nombre » (le CA par partenaire de la chaîne BC/déclaratif se
+retrouve IDENTIQUE dans les snapshots IA). Couvre aussi le contrat des statuts d'assignation (garde-fou des
+actions de masse) et la boucle suggestion→map→CA (le fournisseur rattaché sort des « non mappés »).
+
+**Appris / corrigé.** Le filet a révélé un **double-compte latent** introduit au Lot 4 : `blendRevenue`
+conserve le déclaré BRUT dans `declaredXof` même quand les BC priment (source « bc »). Les snapshots IA
+lisaient ce champ brut → la « part déclarative » d'un partenaire tout-BC apparaissait à tort > 0. Corrigé :
+`ca_dont_declare_fcfa = CA effectif − part BC` (ventilation EFFECTIVE, jamais le déclaré ignoré). Cohérent
+avec le calcul summary d'aggregate.js (declaredXof = total − Σ source « bc »).
+
+**Conception.** Additif (un fichier de test + un correctif de calcul pur). Aucun schéma ni primitive modifié.
+Vérifs : functions 1167 (+6, dont le filet), parAi toujours vert, guards deploy-targets + no-undef au vert.
