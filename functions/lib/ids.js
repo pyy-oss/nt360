@@ -16,6 +16,18 @@ const fpKey = (v) => {
   return `FP/${m[1]}/${seq}`;
 };
 
+/** Normalise un N° de BON DE COMMANDE fournisseur → clé canonique (audit continuité : un même BC saisi
+ *  « BC-001 » côté Excel et « BC 001 » côté ClickUp créait DEUX bcLines → double engagement du fournisseur).
+ *  Forme structurée BC/AAAA/NNNN (comme fpKey : zéros de tête normalisés, placeholder .../0000 rejeté) ;
+ *  sinon repli générique MAJUSCULES sans séparateurs (espaces/tirets/points/slash). "" si vide. */
+const bcKey = (v) => {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const m = s.match(/BC\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);
+  if (m && !/^0+$/.test(m[2])) return `BC/${m[1]}/${String(parseInt(m[2], 10))}`;
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+};
+
 /** Parse un nombre tolérant : gère milliers (espaces, ".", ","), décimale "." ou ",",
  *  symboles/lettres, et négatifs comptables "(1 000)" ou "1000-". Renvoie 0 si non numérique. */
 const num = (v) => {
@@ -85,4 +97,4 @@ const buildFpAliasResolver = (map) => {
   };
 };
 
-module.exports = { fpKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear, buildFpAliasResolver };
+module.exports = { fpKey, bcKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear, buildFpAliasResolver };

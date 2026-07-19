@@ -3832,12 +3832,14 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   const bc = require("./lib/clickupBc");
   const { toXof } = require("./lib/fx");
   const { safeId } = require("./lib/sheets");
-  const { fpKey, cleanName } = require("./lib/ids");
+  const { fpKey, cleanName, bcKey: idBcKey } = require("./lib/ids");
   const listId = bcListIdOf(cfg, req.data?.listId);
   const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
-  // BC déjà connus par une source COMPTABLE (≠ clickup) → prioritaires, on ne les réimporte pas.
+  // BC déjà connus par une source COMPTABLE (≠ clickup) → prioritaires, on ne les réimporte pas. Le `known`
+  // porte DEUX clés par BC : l'id de stockage (bc.bcKey, safeId) ET la clé LOGIQUE (ids.bcKey, sans séparateur)
+  // → un BC saisi « BC-001 » (Excel) est reconnu quand ClickUp l'écrit « BC 001 » (audit : double engagement sinon).
   const known = new Set();
-  (await db.collection("bcLines").get()).forEach((doc) => { const v = doc.data() || {}; if (v.bcNumber && v.source !== "clickup") known.add(bc.bcKey(v.bcNumber, safeId)); });
+  (await db.collection("bcLines").get()).forEach((doc) => { const v = doc.data() || {}; if (v.bcNumber && v.source !== "clickup") { known.add(bc.bcKey(v.bcNumber, safeId)); known.add(idBcKey(v.bcNumber)); } });
   let tasks;
   try { tasks = await clickup.listTasks(token, listId, { includeClosed: true }); }
   catch (e) { throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "liste illisible"}`); }
@@ -3847,15 +3849,18 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   for (const t of tasks) {
     const r = bc.readBcFromTask(t);
     if (!r || !r.bcNumber || !(r.amount > 0)) { skippedIncomplete++; continue; }
-    const key = bc.bcKey(r.bcNumber, safeId);
-    if (known.has(key)) { skippedKnown++; continue; } // import comptable prime
+    const key = bc.bcKey(r.bcNumber, safeId); // id de stockage (inchangé → idempotence préservée, pas de migration)
+    if (known.has(key) || known.has(idBcKey(r.bcNumber))) { skippedKnown++; continue; } // import comptable prime (aussi « à un séparateur près »)
     const conv = toXof(r.currency || "XOF", r.amount, null, rates);
     const id = "bc_cu_" + key; // id stable → ré-import = même doc (idempotent)
     writes.push({ path: `bcLines/${id}`, data: {
       _id: id, fp: fpKey(r.fp) || "", bcNumber: r.bcNumber, supplier: cleanName(r.supplier), customer: r.customer || "",
       country: r.country || "", currency: r.currency || "XOF", amount: r.amount || 0,
       amountXof: conv.amountXof, fxRate: conv.fxRate, fxSource: conv.fxSource,
-      status: "emis", // ENGAGÉ non facturé → engagement fournisseur, JAMAIS le solde SOA
+      // Statut RÉEL depuis ClickUp (livre/annule/en_cours) au lieu de « emis » figé — sinon un BC déjà livré
+      // reste « en retard à vie » et un BC annulé compte à tort dans l'engagement (audit P1-2). mapBcStatus ne
+      // renvoie JAMAIS « facture » → le solde SOA n'est jamais mû par un simple label ClickUp (reste un acte compta).
+      status: bc.mapBcStatus(r.statusRaw) || "emis", // engagement fournisseur, JAMAIS le solde SOA
       etaReel: r.etaReel || null, clickupBcStatusRaw: r.statusRaw || null,
       source: "clickup", clickupTaskId: r.taskId || null, importedAt: FieldValue.serverTimestamp(),
     } });
