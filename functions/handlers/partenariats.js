@@ -293,7 +293,96 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, qbr: out.qbr, snapshot, model: out.model };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr };
+  // Import en MASSE des certifications par ingénieur depuis le fichier direction (domain/parCertSeed). Choix
+  // direction : CRÉE les consultants nommés manquants (après rapprochement par nom normalisé contre l'annuaire
+  // ESN existant, pour ne PAS dupliquer un salarié présent), COMPLÈTE le catalogue des partenaires (compétences
+  // + certifs additives, dédup par id), écrit les certifs DÉTENUES (date d'obtention rétro-calculée) et les
+  // ASSIGNATIONS à obtenir. Tout est marqué `source: "par_cert_import"` (réversible). Renvoie un RAPPORT. Le
+  // référentiel des 20 partenaires doit exister d'abord (bouton « Importer les 20 partenaires de référence »).
+  const importParCertifications = onCallG("importParCertifications", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const { planCertImport, normName } = require("../domain/parCertSeed");
+    const { validateConsultant } = require("../domain/consultant");
+    const today = new Date().toISOString().slice(0, 10);
+
+    const [consSnap, partSnap] = await Promise.all([
+      db.collection("consultants").select("name").limit(5000).get(),
+      db.collection("par_partners").select("competencies", "certificationCatalog").get(),
+    ]);
+    const consultants = consSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "" }));
+    const partners = partSnap.docs.map((d) => ({ id: d.id }));
+    const partnerDocs = new Map(partSnap.docs.map((d) => [d.id, d.data() || {}]));
+    if (!partners.length) throw new HttpsError("failed-precondition", "aucun partenaire au référentiel — importer d'abord les 20 partenaires de référence");
+
+    const plan = planCertImport(consultants, partners, today);
+
+    // 1) Consultants nommés manquants → création marquée (le rapprochement par nom est fait par le planner).
+    const idxByNorm = new Map();
+    for (const c of consultants) { const n = normName(c.name); if (n && !idxByNorm.has(n)) idxByNorm.set(n, c.id); }
+    const createdConsultants = [];
+    for (const nc of plan.needConsultants) {
+      const v = validateConsultant({ name: nc.name });
+      if (!v.ok) { plan.skipped.push({ reason: "consultant invalide", detail: nc.name }); continue; }
+      const ref = await db.collection("consultants").add({ ...v.value, source: "par_cert_import", createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      idxByNorm.set(nc.norm, ref.id);
+      createdConsultants.push({ id: ref.id, name: nc.name });
+    }
+    const nameById = new Map([...consultants.map((c) => [c.id, c.name]), ...createdConsultants.map((c) => [c.id, c.name])]);
+
+    // 2) Catalogue partenaire : ajout ADDITIF (compétences + certifs) par merge ciblé — le reste du référentiel
+    //    (niveaux, exigences, plan d'affaires) reste intact. Dédup par id.
+    let catalogAdded = 0;
+    for (const [pid, patch] of Object.entries(plan.partnerPatches)) {
+      const d = partnerDocs.get(pid); if (!d) continue;
+      const comps = Array.isArray(d.competencies) ? [...d.competencies] : [];
+      const compIds = new Set(comps.map((c) => c.id));
+      for (const c of patch.addComps) if (!compIds.has(c.id)) { comps.push(c); compIds.add(c.id); }
+      const cat = Array.isArray(d.certificationCatalog) ? [...d.certificationCatalog] : [];
+      const catIds = new Set(cat.map((e) => e.id));
+      for (const e of patch.addCerts) if (!catIds.has(e.id)) { cat.push(e); catIds.add(e.id); catalogAdded++; }
+      await db.doc(`par_partners/${pid}`).set({ competencies: comps, certificationCatalog: cat, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      partnerDocs.set(pid, { ...d, competencies: comps, certificationCatalog: cat });
+    }
+    const catEntry = (pid, catalogId) => ((partnerDocs.get(pid) || {}).certificationCatalog || []).find((e) => e.id === catalogId) || null;
+
+    // 3) Certifs détenues (statut/expiration DÉRIVÉS du catalogue, comme upsertParCertification).
+    let certsWritten = 0;
+    for (const c of plan.certs) {
+      const consultantId = idxByNorm.get(c.norm), entry = catEntry(c.partnerId, c.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "certif non écrite (consultant/catalogue non résolu)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      const expiryDate = computeExpiry(c.obtainedDate, entry.validityMonths);
+      const status = computeCertStatus(expiryDate, today);
+      const id = `${slug(consultantId) || consultantId}_${c.catalogId}`;
+      await db.doc(`par_certifications/${id}`).set({
+        consultantId, partnerId: c.partnerId, certificationCatalogId: c.catalogId, obtainedDate: c.obtainedDate, expiryDate, status, inTraining: false,
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      certsWritten++;
+    }
+
+    // 4) Assignations à obtenir (date cible = échéance du fichier).
+    let assignsWritten = 0;
+    for (const a of plan.assignments) {
+      const consultantId = idxByNorm.get(a.norm), entry = catEntry(a.partnerId, a.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "assignation non écrite (consultant/catalogue non résolu)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      const id = `${slug(consultantId) || consultantId}_${a.catalogId}`;
+      await db.doc(`par_assignments/${id}`).set({
+        consultantId, partnerId: a.partnerId, certificationCatalogId: a.catalogId, targetDate: a.targetDate, status: "planifie", reminderOffsets: [],
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), cert: entry.code || entry.name || a.catalogId, competencyId: entry.competencyId,
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      assignsWritten++;
+    }
+
+    const report = { createdConsultants: createdConsultants.length, catalogAdded, certsWritten, assignsWritten, skipped: plan.skipped.length };
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_par_certifications", module: "partenariats", entity: "par_certification", entityId: "batch", detail: report, ts: FieldValue.serverTimestamp() });
+    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) + relances + actualité
+    return { ok: true, ...report, notes: plan.notes, skippedDetail: plan.skipped.slice(0, 40) };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, importParCertifications };
 }
 
 module.exports = { createPartenariats };
