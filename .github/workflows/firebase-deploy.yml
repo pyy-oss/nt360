@@ -6,6 +6,15 @@ on:
   push:
     branches: [main]
 
+# Un SEUL déploiement Firebase à la fois. Deux merges rapprochés sur main lançaient deux `firebase deploy`
+# CONCURRENTS sur le même projet → collision Cloud Run / Artifact Registry (HTTP 409 « service already
+# exists », images d'artefacts mélangées entre les deux runs) et échec de déploiement de fonctions. On
+# SÉRIALISE : les déploiements font la QUEUE (cancel-in-progress: false — on n'interrompt JAMAIS un déploiement
+# prod en cours, ce qui laisserait un état partiel). Le run le plus récent attend la fin du précédent.
+concurrency:
+  group: firebase-deploy-main
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
