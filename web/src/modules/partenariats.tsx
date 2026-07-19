@@ -766,14 +766,14 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
     // écraser la première dans la table → allocations perdues sans avertissement. On bloque et on nomme le doublon.
     const seen = new Set<string>();
     for (const r of rows) {
-      const sup = r.supplier.trim().toUpperCase(); if (!sup) continue;
+      const sup = r.supplier.replace(/\s+/g, " ").trim().toUpperCase(); if (!sup) continue;
       if (seen.has(sup)) throw new Error(`Fournisseur en double : « ${r.supplier.trim()} » — fusionnez les deux lignes avant d'enregistrer`);
       seen.add(sup);
     }
     // 1 constructeur → forme simple (string) ; plusieurs → { partnerId: poids }. Le backend renormalise.
     const map: Record<string, string | Record<string, number>> = {};
     for (const r of rows) {
-      const sup = r.supplier.trim().toUpperCase(); if (!sup) continue;
+      const sup = r.supplier.replace(/\s+/g, " ").trim().toUpperCase(); if (!sup) continue;
       const valid = r.allocs.filter((a) => a.partnerId && (Number(a.weight) || 0) > 0);
       if (valid.length === 1) map[sup] = valid[0].partnerId;
       else if (valid.length > 1) { const o: Record<string, number> = {}; for (const a of valid) o[a.partnerId] = Number(a.weight); map[sup] = o; }

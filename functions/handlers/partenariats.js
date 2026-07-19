@@ -131,9 +131,13 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     // Valeur = soit un partnerId (string, un seul constructeur à 100 %), soit une RÉPARTITION pondérée
     // { partnerId: poids } pour un distributeur multi-marques (ADR-P14). On slugifie les partnerId, écarte les
     // poids ≤ 0 / non finis ET les id inconnus, et n'écrit une entrée que si au moins une allocation valide subsiste.
+    // MÊME autorité de normalisation que la lecture du CA (audit adverse #4) : la clé de mapping est compactée
+    // + MAJUSCULES comme normalizeSupplier, sinon un fournisseur mappé « à un espace près » ne serait jamais
+    // rapproché des BC lus (espacement variable selon la source).
+    const { normalizeSupplier } = require("../domain/parRevenue");
     const map = {};
     for (const [k, val] of Object.entries(raw)) {
-      const key = String(k || "").trim().toUpperCase();
+      const key = normalizeSupplier(k);
       if (!key) continue;
       if (typeof val === "string") {
         const partnerId = slug(val);

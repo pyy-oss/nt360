@@ -409,3 +409,21 @@ seul (noms, pas montants).
   second verrou des rules sur `par_ca`. Le front masque déjà le bouton « Suggérer (IA) » sans droit CA (le doc
   `par_ca` n'est pas chargé) — le back ajoute la défense en profondeur (appel direct au callable refusé).
 Vérif : gardes no-undef + deploy-targets, functions (1175) au vert. Statut : **acté (audit adverse lot B — #8 + #10)**.
+
+### ADR-P19 — Clé fournisseur robuste à l'espacement (module par_), unification ERP-wide DIFFÉRÉE
+**Contexte** (audit adverse #4) : quatre sites normalisent le nom de fournisseur DIFFÉREMMENT — ingestion Odoo
+(`index.js`, compacte les espaces internes + MAJUSCULES), import ClickUp (`clickupBc.js`, `trim` seul), CA par
+partenaire (`parRevenue.normalizeSupplier`) et clé de mapping (`setParPartnerMap`) `trim`+MAJUSCULES sans
+compaction. Conséquence : « DELL  TECHNOLOGIES » (ClickUp, double espace) ≠ « DELL TECHNOLOGIES » (Odoo) → le CA
+d'un SEUL fournisseur se scinde entre rattaché et « non rattaché ».
+**Décision (bornée au module, validée)** :
+- `parRevenue.normalizeSupplier` **compacte** les espaces internes (`\s+`→` `) + coupe les bords + MAJUSCULES.
+  `setParPartnerMap` applique la MÊME fonction (autorité UNIQUE côté module) ; le front `save` compacte aussi.
+  → au sein du module, un fournisseur résout à la même clé quelle que soit la source du BC. Additif, aucun
+  fichier partagé touché.
+- **DIFFÉRÉ (hors périmètre, blast radius ERP-wide)** : unifier `domain/fournisseurs.js` + l'ingestion + ClickUp
+  autour d'UNE autorité canonique changerait les regroupements fournisseurs de TOUT l'ERP (SOA, cockpit
+  fournisseurs) — session dédiée avec fixtures d'import.
+Vérif : `test/parRevenue.test.js` (compaction ; un fournisseur à espacement variable résout au même partenaire,
+pas de scission), functions (1177) + web (277), build + bundle 118.3 KB < 120.
+Statut : **acté (audit adverse lot B — #4, volet module ; volet ERP-wide différé)**.
