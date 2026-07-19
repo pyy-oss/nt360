@@ -9,7 +9,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, Modal, Segmented, useToast, useConfirm } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
@@ -704,6 +704,28 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   const [rows, setRows] = useState<{ supplier: string; allocs: { partnerId: string; weight: string }[] }[]>([]);
   const toast = useToast();
   const [suggBusy, setSuggBusy] = useState(false);
+  const [askImport, importConfirmNode] = useConfirm();
+  const [impBusy, setImpBusy] = useState(false);
+  // Import des certifs en DEUX temps (audit adverse #2) : un dry-run montre QUI serait créé dans l'annuaire ESN
+  // partagé (consultants « actifs », comptés dans les KPI d'activité) ; l'utilisateur confirme avant l'écriture.
+  const runCertImport = async () => {
+    if (impBusy) return; setImpBusy(true);
+    try {
+      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number }>("importParCertifications", { dryRun: true });
+      const n = prev?.wouldCreateCount || 0;
+      if (n > 0) {
+        const names = (prev.wouldCreateConsultants || []).slice(0, 20).join(", ");
+        const ok = await askImport(
+          <div className="space-y-1 text-[13px]"><div>Cet import créera <b>{n}</b> consultant(s) absent(s) de l'annuaire ESN, en statut <b>actif</b> — ils entreront dans les indicateurs d'activité (TACE, occupation).</div><div className="text-muted">{names}{n > 20 ? " …" : ""}</div></div>,
+          { title: "Création de consultants", confirmLabel: `Créer et importer`, tone: "gold" },
+        );
+        if (!ok) { toast("Import annulé", "info"); return; }
+      }
+      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; catalogAdded?: number; skipped?: number }>("importParCertifications", {});
+      toast(`${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s) · ${r?.catalogAdded || 0} entrée(s) catalogue${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`, "ok");
+    } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
+    finally { setImpBusy(false); }
+  };
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
   // Édition demandée depuis une vue read-only (Plan d'affaires / Conformité) : ouvre le formulaire pour ce
@@ -873,10 +895,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
             l'annuaire ESN, crée les consultants nommés manquants, complète le catalogue, écrit certifs détenues
             + assignations, et renvoie un rapport. Réservé au référentiel PEUPLÉ (les partenaires doivent exister). */}
         {canWrite && !!partners.length && (
-          <Busy label="Importer les certifications de référence"
-            okMsg={(r: { createdConsultants?: number; certsWritten?: number; assignsWritten?: number; catalogAdded?: number; skipped?: number }) =>
-              `${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s) · ${r?.catalogAdded || 0} entrée(s) catalogue${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`}
-            fn={() => callFn("importParCertifications", {})} />
+          <button className="btn-ghost text-[12px]" disabled={impBusy} onClick={runCertImport}>{impBusy ? "Import…" : "Importer les certifications de référence"}</button>
         )}
         {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
       </div>}>
@@ -909,6 +928,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
         />
       </Card>
       {edit !== undefined && <PartnerForm initial={edit} onClose={() => setEdit(undefined)} />}
+      {importConfirmNode}
     </div>
   );
 };

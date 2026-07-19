@@ -375,3 +375,21 @@ le millésime est disponible sur chaque BC (toutes sources : unitaire, Odoo, Cli
 Vérif : `test/parRevenue.test.js` (bcYear BC/FP/aberrant/non-daté ; year écarte les autres millésimes vers
 offExerciseXof, garde les non datés ; rétro-compat sans year), functions (1173) + web (277), build + bundle
 118.3 KB < 120. Statut : **acté (audit adverse lot B — #1)**.
+
+### ADR-P17 — Import de certifs : rapprochement de noms tolérant à la ponctuation + création de consultants VISIBLE
+**Contexte** (audit adverse #2 + #3) : l'import (`importParCertifications`) crée dans l'annuaire ESN **partagé**
+les consultants nommés absents, en statut `active` (donc comptés dans les KPI d'activité TACE/occupation), et
+le rapprochement `normName` ne pliait ni la ponctuation ni la casse fine → « Mel N'DIAMOI » ≠ « Mel Ndiamoi »
+créait une **fiche fantôme** pour un salarié déjà présent.
+**Décision** :
+- **#3 (correctif net)** : `normName` (domain/parCertSeed) plie désormais accents + casse + **ponctuation**
+  (apostrophes supprimées — *lient* : `n'diamoi`→`ndiamoi` ; tiret/point → espace ; puis compactage). On
+  **NE réordonne PAS** (prénom/nom) — choix délibéré, réordonner créerait de faux positifs (`Jean Marc` ≠
+  `Marc Jean`). Réduit fortement les créations fantômes du #2.
+- **#2 (arbitrage validé — option a + visible)** : le consultant importé reste `active` (un ingénieur certifié
+  EST un salarié réel — l'exclure de l'effectif serait faux). MAIS la création devient **consentie** : le
+  callable accepte `dryRun` et renvoie **qui** serait créé SANS écrire ; le front fait un dry-run puis
+  **demande confirmation** (`useConfirm`) en listant les noms avant l'import réel. Plus de création silencieuse
+  dans l'annuaire partagé. Pas de nouveau statut inventé (l'enum `STATUSES` partagé reste intouché).
+Vérif : `test/parCertSeed.test.js` (normName plie apostrophe/tiret, ne réordonne pas ; plan de création mis à
+jour), functions (1175) + web (277), build + bundle 118.3 KB < 120. Statut : **acté (audit adverse lot B — #2 + #3)**.

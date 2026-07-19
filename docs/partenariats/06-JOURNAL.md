@@ -863,3 +863,19 @@ sur `bcLines`). L'exercice fiscal par partenaire reste un cadre d'interprétatio
 **Conception.** Additif (helper + param optionnel `year`, rétro-compat sans `year` → le filet E2E reste vert).
 Aucun schéma ni primitive modifié. Vérifs : parRevenue (+3 tests), functions 1173, web 277, build, bundle
 118.3 KB < 120, guards verts.
+
+---
+
+## Session — audit adverse lot B #2 + #3 : rapprochement de noms + création visible (ADR-P17)
+
+**Fait.**
+- **#3** : `normName` (domain/parCertSeed) plie désormais la ponctuation — apostrophes supprimées (lient :
+  `n'diamoi`→`ndiamoi`), tiret/point → espace, compactage. « Mel N'DIAMOI » ≡ « Mel Ndiamoi » → plus de
+  fiche fantôme. On NE réordonne toujours PAS (choix délibéré anti-faux-positif prénom/nom).
+- **#2** : le consultant importé reste `active` (salarié réel), mais la création est CONSENTIE : callable
+  `importParCertifications` accepte `dryRun` (renvoie qui serait créé, sans écrire) ; le front fait un dry-run
+  puis demande confirmation (`useConfirm`, liste des noms) avant l'import réel. Aucun nouveau statut inventé.
+
+**Conception.** #3 = correctif pur (tests mis à jour). #2 = additif (param `dryRun` + confirm front), aucun
+schéma ni enum partagé modifié. Vérifs : parCertSeed (normName ponctuation + non-réordre), functions 1175,
+web 277, build, bundle 118.3 KB < 120, guards verts.

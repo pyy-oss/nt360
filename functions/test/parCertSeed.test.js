@@ -9,6 +9,16 @@ describe("normName — rapprochement annuaire", () => {
     expect(normName("Mel N'DIAMOI")).toBe(normName("mel n'diamoi"));
     expect(normName("Agadji DJIBRINE")).toBe("agadji djibrine");
   });
+  // Audit adverse #3 : la ponctuation ne doit plus créer de fiches fantômes.
+  it("plie l'apostrophe (lie) et le tiret (sépare) — anti-doublon annuaire", () => {
+    expect(normName("Mel N'DIAMOI")).toBe("mel ndiamoi");      // apostrophe supprimée → matche « Mel Ndiamoi »
+    expect(normName("O'Brien")).toBe("obrien");
+    expect(normName("Jean-Marc Kouassi")).toBe("jean marc kouassi"); // tiret → espace → matche « Jean Marc Kouassi »
+    expect(normName("Awa  Koné")).toBe("awa kone");
+  });
+  it("ne réordonne PAS (choix délibéré : éviter les faux positifs prénom/nom)", () => {
+    expect(normName("KOUADIO Richard")).not.toBe(normName("Richard KOUADIO"));
+  });
 });
 
 describe("obtainedFromExpiry — rétro-calcul date d'obtention", () => {
@@ -32,7 +42,7 @@ describe("planCertImport", () => {
     // Stevensky existe → pas dans needConsultants ; les autres nommés y sont.
     const needNorms = plan.needConsultants.map((n) => n.norm);
     expect(needNorms).not.toContain("stevensky aboua");
-    expect(needNorms).toContain("mel n'diamoi");
+    expect(needNorms).toContain("mel ndiamoi"); // apostrophe pliée (audit adverse #3)
     expect(needNorms).toContain("agadji djibrine");
   });
 
