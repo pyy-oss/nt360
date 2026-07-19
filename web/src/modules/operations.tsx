@@ -8,11 +8,12 @@ import { useRecordScope } from "../lib/scope";
 import { fpKey, cleanName } from "../lib/ids";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, useConfirm, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
-import { setBcStatus, patchBcLine, upsertCreditLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
+import { setBcStatus, patchBcLine, upsertCreditLine, migrateCreditLineKeys, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
+import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, useSupplierOptions, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
@@ -183,7 +184,7 @@ export const Fournisseurs: FC<Props> = () => {
         <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone="steel" />
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
-      <Card title="Par fournisseur">
+      <Card title="Par fournisseur" actions={canWrite ? <MigrateCreditKeysBtn /> : undefined}>
         <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
         <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
       </Card>
@@ -201,6 +202,36 @@ function CreditEditor({ name, authorized, opening, openingDate }: { name: string
       <DateField className="w-36 !py-1" ariaLabel={`Date d'ouverture ${name}`} value={d} onChange={setD} placeholder="date SOA" />
       <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, openingBalance: Number(o) || 0, openingDate: d || null })} />
     </span>
+  );
+}
+
+// MES ADR-P20 — action ponctuelle de réconciliation : ré-appareille les lignes de crédit sur la clé
+// fournisseur CANONIQUE (cleanName). À lancer une fois après le déploiement de l'unification, pour que
+// les plafonds saisis « à un espace/casse près » (selon la source du BC) retrouvent leur fournisseur du
+// SOA. Idempotent (relançable sans effet). Même patron qu'un backfill admin (confirmation + compteurs).
+function MigrateCreditKeysBtn() {
+  const [ask, confirmNode] = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const run = async () => {
+    if (!(await ask(
+      <>Ré-appareiller les lignes de crédit fournisseur sur leur clé canonique (espaces internes et casse normalisés) ?
+        <p className="mt-2 text-faint">Réconcilie les plafonds saisis « à un espace/casse près » selon la source. <b>Additif et sans perte</b> : le plafond est conservé sur la clé canonique, puis le SOA est recalculé. Opération unique, relançable sans effet.</p></>,
+      { title: "Migrer les clés fournisseur (ADR-P20)", confirmLabel: "Migrer", tone: "steel" }))) return;
+    setBusy(true);
+    try {
+      const r = await trackWrite(migrateCreditLineKeys(), "Migration des clés fournisseur");
+      toast(`${r.moved} clé(s) migrée(s)${r.merged ? `, ${r.merged} fusionnée(s)` : ""}${r.skipped ? `, ${r.skipped} déjà canonique(s)` : ""}`, "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail ? `Migration refusée — ${detail}` : "Migration refusée", "err");
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button className="btn-ghost hover:opacity-80 text-steel" disabled={busy} onClick={run}>{busy ? "…" : "Migrer les clés fournisseur"}</button>
+      {confirmNode}
+    </>
   );
 }
 

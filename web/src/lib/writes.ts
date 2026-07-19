@@ -758,6 +758,16 @@ export async function upsertCreditLine(id: string, data: { authorized: number; o
   await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, openingBalance: data.openingBalance, openingDate: data.openingDate ?? null });
 }
 
+/** MES ADR-P20 — ré-appareille les lignes de crédit fournisseur sur leur clé CANONIQUE (cleanName :
+ *  espaces internes compactés + casse). Une ligne saisie « à un espace/casse près » (selon la source
+ *  du BC) est DÉPLACÉE vers sa clé canonique ; en cas de collision, la cible conserve son plafond et la
+ *  source est retirée (fusion sans perte). À lancer UNE fois après le déploiement de l'unification, puis
+ *  le SOA est recalculé. Idempotent (relançable). Droit « fournisseurs ». */
+export async function migrateCreditLineKeys() {
+  const res = await httpsCallable(functions, "migrateCreditLineKeys", { timeout: 300_000 })({});
+  return res.data as { ok: boolean; moved: number; merged: number; skipped: number };
+}
+
 /** Identifiant déterministe d'un objectif (année × périmètre × valeur). */
 export const objectiveId = (o: { fiscalYear: number; scope?: string; scopeValue?: string }) =>
   `${o.fiscalYear}_${o.scope || "global"}_${o.scopeValue || "all"}`;
