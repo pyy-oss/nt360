@@ -820,3 +820,28 @@ avec le calcul summary d'aggregate.js (declaredXof = total − Σ source « bc �
 
 **Conception.** Additif (un fichier de test + un correctif de calcul pur). Aucun schéma ni primitive modifié.
 Vérifs : functions 1167 (+6, dont le filet), parAi toujours vert, guards deploy-targets + no-undef au vert.
+
+---
+
+## Session — audit adverse transverse : lot A (correctifs sûrs)
+
+**Fait.** Audit adverse en 4 axes parallèles (cohérence des chiffres, RBAC/confidentialité/activation, IA,
+intégrité/imports/mapping). Cloisonnement CA (triple verrou), masquage IA, activation et anti-escalade
+CONFIRMÉS solides. Lot A = les 5 correctifs nets et additifs remontés :
+- #5 `deleteParCertification` → `requestRecompute(["partenariats"])` (symétrie avec les autres delete/upsert ;
+  sinon `par_quotas` reste figé → partenaire conforme à tort après suppression).
+- #6 `setParPartnerMap` valide désormais chaque `partnerId` contre `par_partners` et ÉCARTE les id inconnus
+  (le CA retombe en « non rattaché » visible plutôt qu'en orphelin silencieux). `skipped` reporté.
+- #9 bulks Certifs/Assignations en `Promise.allSettled` (rapport honnête ok/échec), alignés sur le bulk
+  Partenaires — fini l'échec total masquant les écritures déjà passées.
+- #12 `lib/anthropic.parseJson` récupère aussi un TABLEAU tronqué/enrobé (chemin objet inchangé) — l'IA
+  partenariats attend des tableaux (plan d'action, mapping).
+- #17 `save()` du mapping bloque les fournisseurs en double (perte silencieuse d'allocations).
+
+**Constats laissés à arbitrage (lot B, ADR requis)** : #1 « CA YTD » sans filtre d'exercice (all-time) ;
+#2 import créant des consultants `active` (impact TACE inter-module) ; #3 `normName` (ponctuation/ordre) ;
+#4 autorité unique de normalisation fournisseur ; #8 import écrasant les corrections manuelles ;
+#10 exposition des noms fournisseurs par `suggestParPartnerMap`.
+
+**Conception.** Lot A strictement additif/correctif, aucun schéma ni primitive modifié. Vérifs : functions
+1170 (+3), web 277, build, bundle 118.3 KB < 120, guards verts.

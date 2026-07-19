@@ -76,4 +76,15 @@ describe("anthropic — parseJson (tolère enrobage / prose)", () => {
   it("renvoie {} sur une entrée illisible", () => {
     expect(parseJson("pas du json")).toEqual({});
   });
+  // Audit adverse : parseJson est réutilisé par l'IA partenariats qui attend des TABLEAUX (plan d'action,
+  // mapping IA). Une réponse tableau — propre, enrobée de ``` ou noyée dans de la prose — doit être récupérée.
+  it("parse un TABLEAU JSON simple", () => {
+    expect(parseJson('[{"priorite":"haute"}]')).toEqual([{ priorite: "haute" }]);
+  });
+  it("parse un TABLEAU enrobé de ``` et de prose", () => {
+    expect(parseJson('Voici le plan : ```json\n[{"a":1},{"b":2}]\n``` fin')).toEqual([{ a: 1 }, { b: 2 }]);
+  });
+  it("le chemin OBJET reste prioritaire (aucune régression sur {scores})", () => {
+    expect(parseJson('Voici : {"scores":[{"key":"b"}]} merci').scores[0].key).toBe("b");
+  });
 });

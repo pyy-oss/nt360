@@ -7,12 +7,16 @@
 // signaux (catalogue statique), pas à un filtrage ici.
 const DEFAULT_MODEL = "claude-sonnet-5";
 
-/** Extrait le 1er objet JSON d'une réponse (tolère un éventuel enrobage ``` / prose). */
+/** Extrait le 1er objet OU tableau JSON d'une réponse (tolère un éventuel enrobage ``` / prose). Certains
+ * appelants attendent un objet ({scores:[...]}), d'autres un TABLEAU ([{...}] : plan d'action, mapping IA).
+ * On tente d'abord un objet enrobé (chemin historique inchangé), puis un tableau enrobé — sinon {}. */
 function parseJson(text) {
   const t = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   try { return JSON.parse(t); } catch (_) { /* repli ci-dessous */ }
-  const m = t.match(/\{[\s\S]*\}/);
-  if (m) { try { return JSON.parse(m[0]); } catch (_) { /* abandon */ } }
+  const obj = t.match(/\{[\s\S]*\}/);
+  if (obj) { try { return JSON.parse(obj[0]); } catch (_) { /* essai tableau ci-dessous */ } }
+  const arr = t.match(/\[[\s\S]*\]/);
+  if (arr) { try { return JSON.parse(arr[0]); } catch (_) { /* abandon */ } }
   return {};
 }
 
