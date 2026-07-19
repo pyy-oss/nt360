@@ -924,3 +924,20 @@ totaux par fournisseur recalculés. C'est le fond de la correction.
 **Conception.** Additif/correctif + 1 migration. `cleanName` = autorité canonique fournisseur, comme `fpKey`
 pour les FP. Vérifs : fournisseurs (+1 test de fusion), functions 1178, web 277, bundle 118.3 KB < 120, guards
 verts. **Audit adverse : 10/10 + le reliquat ERP-wide du #4 désormais CLÔTURÉ.**
+
+---
+
+## Session — bouton MES « Migrer les clés fournisseur » (ADR-P20)
+
+**Fait.** Ajout du déclencheur UI de la migration one-shot ADR-P20 : bouton *« Migrer les clés fournisseur »*
+dans le SOA (Fournisseurs → carte « Par fournisseur »), gated `canWrite` (droit `fournisseurs`), appelant le
+callable `migrateCreditLineKeys`. Patron indiscernable d'un backfill admin : confirmation `useConfirm`
+(ton steel, op de réconciliation non destructive) + `trackWrite` + toast surfaçant les compteurs
+(`{moved, merged, skipped}`). `migrateCreditLineKeys` ajouté à `lib/writes.ts` (timeout 300 s).
+
+**Pourquoi un bouton.** Le callable existait (posé avec l'unification), mais sans surface : une MES ne doit pas
+exiger la CLI Firebase. Un habilité `fournisseurs` déclenche la migration d'un clic, là où il édite déjà les
+plafonds (CreditEditor). Idempotent → relançable sans effet.
+
+**Vérifs.** ESLint web propre (hors warning préexistant partenariats), build vert, bundle 118.4 KB < 120
+(module lazy). Additif pur, tokens (`text-steel`, `btn-ghost`), primitives réutilisées.

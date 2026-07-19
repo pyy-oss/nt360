@@ -448,5 +448,7 @@ miroir web `web/src/lib/ids.ts`) = compacte espaces + trim + MAJUSCULES. Tous le
 Vérif : `test/fournisseurs.test.js` (fusion ClickUp/Odoo + appariement plafond), functions (1178) + web (277),
 build + bundle 118.3 KB < 120, guards deploy-targets (181) + no-undef.
 **Mise en service** : après déploiement, exécuter une fois `migrateCreditLineKeys` (droit `fournisseurs`) pour
-re-clé les plafonds historiques, puis un recompute `suppliers`.
+re-clé les plafonds historiques, puis un recompute `suppliers`. Déclencheur UI : bouton *« Migrer les clés
+fournisseur »* dans le SOA (Fournisseurs → carte « Par fournisseur »), visible aux habilités `fournisseurs`
+(confirmation + compteurs). Idempotent (relançable sans effet).
 Statut : **acté (unification ERP-wide de la normalisation fournisseur — reliquat ADR-P19 clôturé)**.
