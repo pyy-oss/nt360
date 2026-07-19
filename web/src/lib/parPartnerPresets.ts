@@ -325,5 +325,8 @@ export function buildPartnerPreset(id: PresetId, nextKey: () => string): Partner
   // Plan d'affaires : objectif BP + réalisé YTD par axe (VERBATIM du fichier direction — cf. SCORECARD).
   const bp = {} as BpForm;
   for (const ax of BP_AXES) { bp[`${ax}Bp`] = String(sc.bp[ax][0]); bp[`${ax}Ytd`] = String(sc.bp[ax][1]); }
-  return { name: d.name, programName: d.programName, status: sc.status, renewalDate: sc.renewalDate, validationStatus: sc.validationStatus, bp, tiers, comps, certs, reqs };
+  // caDeclaredXof laissé vide : l'agrégat retombe sur le réalisé booking YTD du plan d'affaires (déjà saisi)
+  // comme CA déclaratif — pas de double saisie. fiscalStartMonth vide : exercice calendaire par défaut (le
+  // fichier direction ne fournit pas d'exercice décalé par partenaire ; éditable au cas par cas).
+  return { name: d.name, programName: d.programName, status: sc.status, renewalDate: sc.renewalDate, validationStatus: sc.validationStatus, bp, caDeclaredXof: "", fiscalStartMonth: "", tiers, comps, certs, reqs };
 }

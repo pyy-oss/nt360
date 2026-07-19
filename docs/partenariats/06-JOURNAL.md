@@ -668,3 +668,33 @@ Regroupement PUR et testé ; onboarding piloté par `partners.length === 0`. Pas
 nouvelle donnée ni convention. Bundle d'entrée inchangé (118,3 KB) ; 271 tests web au vert.
 
 **Backlog Partenariats (PA1-PA5) : terminé.**
+
+---
+
+## Session — CA mixte, exercice fiscal, rafraîchissement des imports (PR #497, ADR-P12)
+
+**Contexte.** Après import des 20 partenaires puis des certifications en prod, le tableau de bord restait
+« vide » (conformité, à risque, plan d'affaires « Certifications »). **Cause racine** : les résumés `par_*`
+sont dérivés d'un recompute, or les imports ne déclenchaient qu'un recompute **différé**
+(`config/recomputeRequest` → `onRecomputeRequest`), trigger **non déployé en prod** — jamais traité. Seul le
+recompute nocturne (05:00) ou manuel (« Recalculer ») rafraîchissait. Confirmé : « Recalculer » a tout peuplé.
+
+**Fait.**
+- **A** — `importParCertifications` force un recompute **synchrone garanti** (injection `recomputeNow`) ;
+  l'import des 20 partenaires force un recompute scopé après la boucle (best-effort direction).
+- **B** — tendance de conformité en **compteurs** (plus « 20 FCFA ») : `MultiLine`/`ChartTooltip` acceptent
+  `money={false}`.
+- **C** — **CA réalisé mixte** : `domain/parRevenue.blendRevenue` (BC prime, déclaratif en repli, jamais
+  additif). Champ additif `caDeclaredXof` (XOF entier) ; repli sur `businessPlan.bookingYtd` → les 20
+  partenaires existants surfacent un CA sans re-import. `summaries/par_ca` porte `bcXof`/`declaredXof`/`source` ;
+  colonne « Source » (BC/Déclaré) au tableau.
+- **D** — **exercice fiscal** par partenaire : champ additif `fiscalStartMonth` (1–12), fin dérivée,
+  `fiscalMonthsLabel`, colonne « Exercice » au référentiel. Absent = calendaire.
+
+**Appris.** Un recompute différé non déployé est un piège silencieux : tout paraît écrit (collections en
+temps réel) mais les summaries dérivés sont figés. Les écritures en masse doivent finaliser par un recompute
+synchrone, pas se fier au différé.
+
+**Conception.** Additif, cantonné `par_` + une primitive graphique optionnelle rétro-compatible. Deux champs
+partenaire additifs (jamais de colonne modifiée). ADR-P12 (validé « go »). Bundle d'entrée 118,3 KB ;
+functions 1150 tests, web 276 tests au vert.

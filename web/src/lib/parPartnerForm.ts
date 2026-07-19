@@ -18,8 +18,20 @@ export const EMPTY_BP: BpForm = { pipelineBp: "", pipelineYtd: "", bookingBp: ""
 export type PartnerFormState = {
   id?: string; name: string; programName: string;
   status: string; renewalDate: string; validationStatus: string; bp: BpForm;
+  caDeclaredXof: string; fiscalStartMonth: string; // CA réalisé déclaratif (XOF) + mois de début d'exercice (1–12)
   tiers: TierRow[]; comps: CompRow[]; certs: CertRow[]; reqs: ReqRow[];
 };
+
+// Mois (1–12) → libellé FR ; index 0 = « — » (non défini, exercice calendaire par défaut).
+export const FR_MONTHS = ["—", "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"] as const;
+
+// Libellé « début → fin » de l'exercice fiscal à partir du mois de début (fin = mois−1). "" si non défini.
+export function fiscalMonthsLabel(startMonth?: number | string | null): string {
+  const m = Number(startMonth);
+  if (!Number.isInteger(m) || m < 1 || m > 12) return "";
+  const end = m === 1 ? 12 : m - 1;
+  return `${FR_MONTHS[m]} → ${FR_MONTHS[end]}`;
+}
 
 // Slug stable — MÊME règle que le backend (domain/parPartner.slug) : minuscules, chiffres, tirets.
 export function parSlug(v: string): string {
@@ -80,6 +92,13 @@ export function buildPartnerPayload(f: PartnerFormState): BuildResult {
     if (raw != null && String(raw).trim() !== "") { const n = Number(raw); if (Number.isFinite(n)) bp[`${ax}${suffix}`] = n; }
   }
   if (Object.keys(bp).length) value.businessPlan = bp;
+  // CA réalisé déclaratif (XOF entier) — ne transmet que si renseigné ; le backend revalide ≥ 0.
+  if (f.caDeclaredXof != null && String(f.caDeclaredXof).trim() !== "") {
+    const n = Number(f.caDeclaredXof); if (Number.isFinite(n) && n >= 0) value.caDeclaredXof = Math.round(n);
+  }
+  // Mois de début d'exercice fiscal (1–12) — ne transmet que si valide.
+  const fsm = Number(f.fiscalStartMonth);
+  if (Number.isInteger(fsm) && fsm >= 1 && fsm <= 12) value.fiscalStartMonth = fsm;
   return { ok: true, value };
 }
 
@@ -105,6 +124,7 @@ type StoredPartner = {
   id: string; name: string; programName?: string;
   status?: string; renewalDate?: string; validationStatus?: string;
   businessPlan?: Partial<Record<`${BpAxis}Bp` | `${BpAxis}Ytd`, number>>;
+  caDeclaredXof?: number; fiscalStartMonth?: number;
   tiers?: { id: string; name: string; rank: number }[];
   competencies?: { id: string; name: string }[];
   certificationCatalog?: { id: string; competencyId: string; code?: string; name: string; level: string; validityMonths: number }[];
@@ -120,6 +140,8 @@ export function partnerToForm(p: StoredPartner): PartnerFormState {
   return {
     id: p.id, name: p.name || "", programName: p.programName || "",
     status: p.status || "", renewalDate: p.renewalDate || "", validationStatus: p.validationStatus || "", bp,
+    caDeclaredXof: p.caDeclaredXof != null ? String(p.caDeclaredXof) : "",
+    fiscalStartMonth: p.fiscalStartMonth != null ? String(p.fiscalStartMonth) : "",
     tiers: (p.tiers || []).map((t) => ({ k: t.id, id: t.id, name: t.name, rank: String(t.rank ?? 0) })),
     comps: (p.competencies || []).map((c) => ({ k: c.id, id: c.id, name: c.name })),
     certs: (p.certificationCatalog || []).map((e) => ({ k: e.id, id: e.id, name: e.name, code: e.code || "", compK: e.competencyId, level: e.level, validityMonths: String(e.validityMonths ?? "") })),

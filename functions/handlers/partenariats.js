@@ -8,7 +8,14 @@ const { validateCertification, computeCertStatus } = require("../domain/parCerti
 const { validateAssignment, ASSIGNMENT_STATUSES } = require("../domain/parAssignment");
 const { isParEnabled } = require("../domain/parFeature");
 
-function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps }) {
+function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, recomputeNow, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps }) {
+  // Recompute SYNCHRONE garanti pour les imports en MASSE (amorçage). `requestRecompute` est DIFFÉRÉ
+  // (dépose config/recomputeRequest) ; or le trigger `onRecomputeRequest` n'est pas déployé en prod →
+  // les demandes différées ne sont jamais traitées et les summaries par_* ne se rafraîchissent qu'au
+  // recompute nocturne / manuel. Un import qui écrit des dizaines de docs DOIT rendre le tableau de bord
+  // à jour immédiatement : on force donc un recompute synchrone (comme le bouton « Recalculer »). Repli
+  // sur requestRecompute si l'injection manque (émulateur / tests).
+  const recomputeParNow = async () => { if (recomputeNow) { await recomputeNow(["partenariats"]); } else { await requestRecompute(["partenariats"]); } };
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -394,7 +401,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
 
     const report = { createdConsultants: createdConsultants.length, catalogAdded, certsWritten, assignsWritten, skipped: plan.skipped.length };
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_par_certifications", module: "partenariats", entity: "par_certification", entityId: "batch", detail: report, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) + relances + actualité
+    await recomputeParNow(); // recompute SYNCHRONE : quotas (couverture) + relances + actualité à jour dès le retour
     return { ok: true, ...report, notes: plan.notes, skippedDetail: plan.skipped.slice(0, 40) };
   });
 

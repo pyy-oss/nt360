@@ -7,13 +7,15 @@ import { T, BU_COL, fmt, fmtFull } from "./tokens";
 
 const legendStyle = { fontSize: 11, color: T.dim, lineHeight: "16px" } as const;
 
-export function ChartTooltip({ active, payload, label }: any) {
+// `money` (défaut) suffixe « FCFA » ; à false, valeurs NUES (compteurs — ex. nombre de partenariats
+// conformes/à risque, qui ne sont pas des montants). Évite le « 20 FCFA » sur un décompte.
+export function ChartTooltip({ active, payload, label, money = true }: any) {
   if (!active || !payload || !payload.length) return null;
   return (
     <div className="rounded-lg border border-line bg-panel2 px-3 py-2 text-xs shadow-card">
       {label != null && <div className="text-muted mb-1">{label}</div>}
       {payload.map((p: any, i: number) => (
-        <div key={i} className="tabnum" style={{ color: p.color || T.ink }}>{p.name}: <b>{fmtFull(p.value)}</b> FCFA</div>
+        <div key={i} className="tabnum" style={{ color: p.color || T.ink }}>{p.name}: <b>{fmtFull(p.value)}</b>{money ? " FCFA" : ""}</div>
       ))}
     </div>
   );
@@ -100,14 +102,16 @@ export function GroupedBars({ data, series, h = 230, size = 22, interval }: { da
 }
 
 /** Séries temporelles multi-lignes (tendances). data: [{name, <clé>...}] */
-export function MultiLine({ data, series, h = 240 }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number }) {
+// `money` (défaut) affiche les valeurs en FCFA ; à false, en compteurs nus (séries qui sont des NOMBRES,
+// ex. tendance de conformité des partenariats — conformes/à risque/non conformes).
+export function MultiLine({ data, series, h = 240, money = true }: { data: any[]; series: { key: string; color: string; name: string }[]; h?: number; money?: boolean }) {
   return (
     <H h={h} label="Tendances">
       <LineChart data={data} margin={{ left: -6, right: 8 }}>
         <CartesianGrid stroke={T.line} vertical={false} />
         <XAxis dataKey="name" {...axis} interval="preserveStartEnd" minTickGap={24} />
-        <YAxis {...axis} tickFormatter={fmt} width={44} />
-        <Tooltip cursor={{ stroke: T.line }} content={<ChartTooltip />} />
+        <YAxis {...axis} tickFormatter={money ? fmt : (v: number) => String(v)} width={44} />
+        <Tooltip cursor={{ stroke: T.line }} content={<ChartTooltip money={money} />} />
         <Legend verticalAlign="top" height={36} iconType="line" iconSize={12} wrapperStyle={legendStyle} />
         {series.map((s) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} />)}
       </LineChart>

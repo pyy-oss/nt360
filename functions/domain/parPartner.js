@@ -204,6 +204,16 @@ function validatePartner(d) {
   // Plan d'affaires : objectifs (BP) et réalisé (YTD) par axe Pipeline/Booking/Certifications/Growth.
   const businessPlan = validateBusinessPlan(o.businessPlan);
   if (businessPlan) value.businessPlan = businessPlan;
+  // CA RÉALISÉ déclaratif (ADR-P10) : montant XOF ENTIER saisi/importé (le fichier direction en fournit un
+  // par partenaire). MIXTE avec le CA dérivé des BC — le CA effectif prime le dérivé dès qu'il existe, le
+  // déclaratif comble sinon (cf. domain/parRevenue.blendRevenue). Pas de subdivision FCFA → arrondi entier.
+  const caDeclaredXof = numNonNeg(o.caDeclaredXof);
+  if (caDeclaredXof != null) value.caDeclaredXof = Math.round(caDeclaredXof);
+  // Exercice fiscal du partenaire (ADR-P10) : les constructeurs n'ont pas tous la même année fiscale (ex.
+  // Cisco : août→juillet). On stocke le MOIS de début (1–12) ; la fin (mois−1) et la période courante en
+  // sont dérivées. Borne le « réalisé YTD » à l'affichage. 0/absent = calendaire (janvier) par défaut côté vue.
+  const fsm = intNonNeg(o.fiscalStartMonth);
+  if (fsm != null && fsm >= 1 && fsm <= 12) value.fiscalStartMonth = fsm;
   return { ok: true, value };
 }
 

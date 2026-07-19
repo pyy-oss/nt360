@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPartnerPayload, partnerToForm, parSlug, bpAchievement, EMPTY_BP, type PartnerFormState } from "./parPartnerForm";
+import { buildPartnerPayload, partnerToForm, parSlug, bpAchievement, fiscalMonthsLabel, EMPTY_BP, type PartnerFormState } from "./parPartnerForm";
 
 // Formulaire de référentiel partenaire (par_) — prouve : (1) l'id dérive du nom en slug ; (2) les exigences
 // et le catalogue référencent bien le slug de leur cible via la clé locale ; (3) l'aller-retour
@@ -9,6 +9,7 @@ describe("buildPartnerPayload — construction du payload upsertParPartner", () 
   const base: PartnerFormState = {
     name: "Fortinet", programName: "Engage",
     status: "", renewalDate: "", validationStatus: "", bp: { ...EMPTY_BP },
+    caDeclaredXof: "", fiscalStartMonth: "",
     tiers: [{ k: "t1", name: "Gold", rank: "2" }],
     comps: [{ k: "c1", name: "Sécurité réseau" }],
     certs: [{ k: "e1", name: "NSE 7", code: "NSE7", compK: "c1", level: "expert", validityMonths: "24" }],
@@ -87,6 +88,35 @@ describe("buildPartnerPayload — construction du payload upsertParPartner", () 
     const back = partnerToForm({ id: "x", name: "X", ...(r.value as any) });
     expect(back.status).toBe("Platinum");
     expect(back.bp.pipelineYtd).toBe("3000000");
+  });
+
+  it("CA déclaré + exercice fiscal : transmis (entier/1-12) et aller-retour préservé", () => {
+    const f: PartnerFormState = { ...base, caDeclaredXof: "1500000.6", fiscalStartMonth: "8" };
+    const r = buildPartnerPayload(f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.caDeclaredXof).toBe(1500001); // XOF entier
+    expect(r.value.fiscalStartMonth).toBe(8);
+    const back = partnerToForm({ id: "x", name: "X", ...(r.value as any) });
+    expect(back.caDeclaredXof).toBe("1500001");
+    expect(back.fiscalStartMonth).toBe("8");
+  });
+
+  it("mois de début invalide ou CA négatif → champ non transmis", () => {
+    const r = buildPartnerPayload({ ...base, caDeclaredXof: "-5", fiscalStartMonth: "13" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.caDeclaredXof).toBeUndefined();
+    expect(r.value.fiscalStartMonth).toBeUndefined();
+  });
+});
+
+describe("fiscalMonthsLabel", () => {
+  it("mois de début → « début → fin » (fin = mois−1)", () => {
+    expect(fiscalMonthsLabel(8)).toBe("août → juillet");
+    expect(fiscalMonthsLabel(1)).toBe("janvier → décembre");
+    expect(fiscalMonthsLabel("")).toBe("");
+    expect(fiscalMonthsLabel(13)).toBe("");
   });
 });
 

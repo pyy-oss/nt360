@@ -267,3 +267,27 @@ optionnels** — `status` (libellé du niveau atteint à date, distinct des `tie
   reste seul juge. Aucun seed prod, aucun nouvel export/callable.
 Vérif : `test/parPartner.test.js`, `web/src/lib/parPartnerForm.test.ts`, `web/src/lib/parPartnerPresets.test.ts`.
 Statut : **acté (Lot PA-DATA)**.
+
+### ADR-P12 — CA réalisé MIXTE (BC dérivé + déclaratif) et exercice fiscal par partenaire
+**Contexte** : ADR-P02 posait un CA constructeur 100 % **dérivé des BC** (aucune saisie). Or le fichier
+direction porte, par partenaire, un **CA réalisé** déjà exploitable, et le mapping fournisseur→constructeur
+(`config/parPartnerMap`) n'est pas encore fait en prod (20 fournisseurs non rattachés) → le CA dérivé restait
+à 0 alors qu'un réalisé déclaratif existait. Par ailleurs les constructeurs n'ont pas tous la même **année
+fiscale** (ex. Cisco : août→juillet), ce qui borne le « réalisé YTD ». **Décision (validée par l'humain,
+« go A+B » + demande explicite d'un mix BC/déclaratif et de dates fiscales par partenaire)** :
+- **CA effectif = MÉLANGE** BC dérivé + déclaratif, tranché par `domain/parRevenue.blendRevenue` : **le BC
+  prime dès qu'il existe** (fournisseur mappé, montant > 0), **le déclaratif comble sinon** — **jamais
+  additionnés** (règle anti-double-compte ; à mesure que le mapping se complète, les BC prennent le relais).
+  `summaries/par_ca` porte désormais par partenaire `revenueXof` (effectif), `bcXof`, `declaredXof`, `source`.
+- **Champ `caDeclaredXof`** (XOF ENTIER, additif optionnel) sur `par_partners`. **Repli** quand il est absent :
+  le **booking YTD** du plan d'affaires (`businessPlan.bookingYtd`, déjà saisi — ADR-P11) → aucun re-import
+  nécessaire pour que les 20 partenaires existants surfacent un CA. Type ENTIER ici (le champ est une saisie
+  neuve propre au module, pas une reprise du fichier flottant — cohérent avec la règle FCFA sans subdivision).
+- **Champ `fiscalStartMonth`** (1–12, additif optionnel) : mois de début d'exercice ; la fin (mois−1) et la
+  période en sont dérivées (`fiscalMonthsLabel`). Absent = exercice **calendaire** (janvier). Affiché au
+  référentiel ; le bornage du réalisé sur la fenêtre fiscale reste un raffinement ultérieur (non fait ici).
+- **Rafraîchissement** : les imports en masse forçaient un recompute DIFFÉRÉ (`onRecomputeRequest`) non déployé
+  en prod → tableau de bord périmé jusqu'au recompute nocturne. `importParCertifications` fait désormais un
+  recompute **synchrone garanti** ; l'import des 20 partenaires force un recompute scopé après la boucle.
+Vérif : `test/parRevenue.test.js` (blendRevenue), `test/parPartner.test.js`, `web/src/lib/parPartnerForm.test.ts`.
+Statut : **acté (Lot CA-mixte + exercice fiscal, PR #497)**.
