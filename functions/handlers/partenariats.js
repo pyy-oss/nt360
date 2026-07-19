@@ -326,10 +326,13 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   // MAPPING ASSISTÉ (IA) : propose, pour chaque fournisseur NON rattaché du CA, le(s) constructeur(s) qu'il
   // distribue (ADR-P14). L'IA PROPOSE une répartition ; l'humain la valide dans l'éditeur avant setParPartnerMap
   // (gouvernance « l'IA propose, l'humain tranche »). NE MODIFIE RIEN — lecture seule, aucune écriture de mapping.
-  // Snapshot SANS montant CA : le rapprochement porte sur les NOMS (fournisseur ↔ marque), pas sur le volume →
-  // rien de confidentiel (ADR-P07) n'est transmis au modèle. Le résultat re-validé n'admet que des id connus.
+  // Snapshot SANS montant CA : le rapprochement porte sur les NOMS (fournisseur ↔ marque), pas sur le volume.
+  // GARDE (audit adverse #10) : le doc source summaries/par_ca est réservé `rentabilite` (ADR-P07) — même la
+  // LISTE des fournisseurs non rattachés en relève. On exige donc `rentabilite`, comme le second verrou des rules :
+  // pas de fuite de l'identité des distributeurs vers un rôle `partenariats` seul.
   const suggestParPartnerMap = onCallG("suggestParPartnerMap", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     const apiKey = await assertAiReady(req);
+    if (!(await parCanSeeCa(req))) throw new HttpsError("permission-denied", "Le rattachement assisté lit le CA constructeur (confidentiel) — droit « rentabilité » requis.");
     const [caSnap, partSnap] = await Promise.all([
       db.doc("summaries/par_ca").get(),
       db.collection("par_partners").select("name", "programName").get(),
@@ -365,10 +368,20 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     const { plausibleYear } = require("../lib/ids");
     const today = new Date().toISOString().slice(0, 10);
 
-    const [consSnap, partSnap] = await Promise.all([
+    const [consSnap, partSnap, certSnap, assignSnap] = await Promise.all([
       db.collection("consultants").select("name").limit(5000).get(),
       db.collection("par_partners").select("competencies", "certificationCatalog").get(),
+      db.collection("par_certifications").select("source").limit(5000).get(),
+      db.collection("par_assignments").select("source").limit(5000).get(),
     ]);
+    // Propriété des docs existants (audit adverse #8) : un doc dont la `source` N'EST PAS "par_cert_import" a été
+    // créé/édité À LA MAIN (upsertParCertification/Assignment ne pose pas de source) → l'import ne doit PAS
+    // l'écraser (sinon il révoque une correction steward). Les docs import-owned sont rafraîchis sans réécrire
+    // leur createdAt/createdBy (piste d'audit préservée). Map id → source.
+    const certOwner = new Map(certSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const assignOwner = new Map(assignSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const isImportOwned = (owner) => owner === "par_cert_import";
+    const isManual = (map, id) => map.has(id) && !isImportOwned(map.get(id)); // existe ET non import → à préserver
     const consultants = consSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "" }));
     const partners = partSnap.docs.map((d) => ({ id: d.id }));
     const partnerDocs = new Map(partSnap.docs.map((d) => [d.id, d.data() || {}]));
@@ -435,10 +448,12 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
       const expiryDate = computeExpiry(c.obtainedDate, entry.validityMonths);
       const status = computeCertStatus(expiryDate, today);
       const id = `${slug(consultantId) || consultantId}_${c.catalogId}`;
+      if (isManual(certOwner, id)) { plan.skipped.push({ reason: "certif préservée (édition manuelle non écrasée)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      const isNew = !certOwner.has(id); // createdAt/createdBy seulement à la CRÉATION (préserve la piste d'audit)
       await db.doc(`par_certifications/${id}`).set({
         consultantId, partnerId: c.partnerId, certificationCatalogId: c.catalogId, obtainedDate: c.obtainedDate, expiryDate, status, inTraining: false,
         consultantName: String(nameById.get(consultantId) || "").slice(0, 120), competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
-        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp(),
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
       }, { merge: true });
       certsWritten++;
     }
@@ -450,10 +465,12 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
       if (!consultantId || !entry) { plan.skipped.push({ reason: "assignation non écrite (consultant/catalogue non résolu)", detail: `${a.name} / ${a.catalogId}` }); continue; }
       if (!plausibleYear(String(a.targetDate).slice(0, 4))) { plan.skipped.push({ reason: "date cible implausible", detail: `${a.name} / ${a.targetDate}` }); continue; }
       const id = `${slug(consultantId) || consultantId}_${a.catalogId}`;
+      if (isManual(assignOwner, id)) { plan.skipped.push({ reason: "assignation préservée (édition manuelle non écrasée)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      const isNew = !assignOwner.has(id);
       await db.doc(`par_assignments/${id}`).set({
         consultantId, partnerId: a.partnerId, certificationCatalogId: a.catalogId, targetDate: a.targetDate, status: "planifie", reminderOffsets: [],
         consultantName: String(nameById.get(consultantId) || "").slice(0, 120), cert: entry.code || entry.name || a.catalogId, competencyId: entry.competencyId,
-        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp(),
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
       }, { merge: true });
       assignsWritten++;
     }
