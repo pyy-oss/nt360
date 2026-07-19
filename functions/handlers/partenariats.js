@@ -302,8 +302,12 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   const importParCertifications = onCallG("importParCertifications", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     await requireWrite(req, "partenariats");
     await assertParEnabled();
+    // Rate-limit : écriture LOURDE (crée des consultants, écrit dizaines de docs) → 3 imports / 5 min, comme
+    // les autres callables sensibles. Fail-open si rateLimit absent (émulateur).
+    if (rateLimit && !(await rateLimit(req.auth.uid, "parCertImport", 3, 300_000))) throw new HttpsError("resource-exhausted", "Import déjà lancé récemment — patientez quelques minutes.");
     const { planCertImport, normName } = require("../domain/parCertSeed");
     const { validateConsultant } = require("../domain/consultant");
+    const { plausibleYear } = require("../lib/ids");
     const today = new Date().toISOString().slice(0, 10);
 
     const [consSnap, partSnap] = await Promise.all([
@@ -318,6 +322,14 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     const plan = planCertImport(consultants, partners, today);
 
     // 1) Consultants nommés manquants → création marquée (le rapprochement par nom est fait par le planner).
+    //    GARDE RBAC (anti-escalade) : créer une fiche consultant relève du droit `pipeline` (upsertConsultant).
+    //    On ne l'exige QUE s'il y a réellement des consultants à créer — un ré-import (tout déjà en annuaire)
+    //    reste ouvert au seul droit `partenariats`. PLAFOND défensif : au-delà de 300 créations, on refuse
+    //    (un dataset qui exploserait = anomalie, pas un import légitime).
+    if (plan.needConsultants.length) {
+      await requireWrite(req, "pipeline");
+      if (plan.needConsultants.length > 300) throw new HttpsError("failed-precondition", `import anormal : ${plan.needConsultants.length} consultants à créer (> 300) — refusé`);
+    }
     const idxByNorm = new Map();
     for (const c of consultants) { const n = normName(c.name); if (n && !idxByNorm.has(n)) idxByNorm.set(n, c.id); }
     const createdConsultants = [];
@@ -351,6 +363,9 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     for (const c of plan.certs) {
       const consultantId = idxByNorm.get(c.norm), entry = catEntry(c.partnerId, c.catalogId);
       if (!consultantId || !entry) { plan.skipped.push({ reason: "certif non écrite (consultant/catalogue non résolu)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      // Discipline plausibleYear (comme validateCertification) : une date rétro-calculée aberrante fausserait
+      // l'expiration/les alertes — écartée et rapportée plutôt qu'écrite.
+      if (!plausibleYear(String(c.obtainedDate).slice(0, 4))) { plan.skipped.push({ reason: "date d'obtention implausible", detail: `${c.name} / ${c.obtainedDate}` }); continue; }
       const expiryDate = computeExpiry(c.obtainedDate, entry.validityMonths);
       const status = computeCertStatus(expiryDate, today);
       const id = `${slug(consultantId) || consultantId}_${c.catalogId}`;
@@ -367,6 +382,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     for (const a of plan.assignments) {
       const consultantId = idxByNorm.get(a.norm), entry = catEntry(a.partnerId, a.catalogId);
       if (!consultantId || !entry) { plan.skipped.push({ reason: "assignation non écrite (consultant/catalogue non résolu)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      if (!plausibleYear(String(a.targetDate).slice(0, 4))) { plan.skipped.push({ reason: "date cible implausible", detail: `${a.name} / ${a.targetDate}` }); continue; }
       const id = `${slug(consultantId) || consultantId}_${a.catalogId}`;
       await db.doc(`par_assignments/${id}`).set({
         consultantId, partnerId: a.partnerId, certificationCatalogId: a.catalogId, targetDate: a.targetDate, status: "planifie", reminderOffsets: [],
