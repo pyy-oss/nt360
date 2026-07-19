@@ -1462,7 +1462,7 @@ exports.listAstreintes = _maintenance.listAstreintes;
 // d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
 // config/parFeature). Exports déclarés ici (déploiement par nom).
 const { createPartenariats } = require("./handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
+const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, recomputeNow: recomputeSummaries, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
 exports.upsertParCertification = _partenariats.upsertParCertification;

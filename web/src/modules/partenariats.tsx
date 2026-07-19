@@ -321,6 +321,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
           <Tip>Évolution quotidienne du nombre de partenariats conformes, à risque et non conformes (historisé à chaque recalcul).</Tip>
           <MultiLine
             data={trend}
+            money={false}
             series={[{ key: "Conformes", color: T.emerald, name: "Conformes" }, { key: "À risque", color: T.gold, name: "À risque" }, { key: "Non conformes", color: T.clay, name: "Non conformes" }]}
           />
         </Card>
@@ -603,6 +604,11 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
                 await callFn("upsertParPartner", built.value);
               }
               if (errs.length) throw new Error(`Échecs (${errs.length}/${PARTNER_PRESETS.length}) : ${errs.slice(0, 3).join(" ; ")}`);
+              // Rafraîchissement immédiat : les upsert déclenchent un recompute DIFFÉRÉ (non traité en prod),
+              // on force donc un recompute synchrone scopé (comme « Recalculer »). Best-effort : réservé
+              // direction ; si l'appelant n'y a pas droit, l'amorçage reste bon, le tableau se remplira au
+              // prochain recompute nocturne/manuel.
+              try { await callFn("recompute", { only: ["partenariats"] }); } catch { /* droit direction requis — non bloquant */ }
             }} />
         )}
         {/* Amorçage des CERTIFICATIONS par ingénieur (2ᵉ fichier direction). Le callable résout les noms contre
