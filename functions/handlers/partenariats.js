@@ -120,11 +120,26 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     await assertParEnabled();
     const raw = (req.data && req.data.map) || {};
     if (typeof raw !== "object" || Array.isArray(raw)) throw new HttpsError("invalid-argument", "table de correspondance invalide");
+    // Valeur = soit un partnerId (string, un seul constructeur à 100 %), soit une RÉPARTITION pondérée
+    // { partnerId: poids } pour un distributeur multi-marques (ADR-P14). On slugifie les partnerId, écarte les
+    // poids ≤ 0 / non finis, et n'écrit une entrée que si au moins une allocation valide subsiste.
     const map = {};
     for (const [k, val] of Object.entries(raw)) {
       const key = String(k || "").trim().toUpperCase();
-      const partnerId = slug(val);
-      if (key && partnerId) map[key] = partnerId; // paires incomplètes ignorées (pas de coercion silencieuse d'erreur)
+      if (!key) continue;
+      if (typeof val === "string") {
+        const partnerId = slug(val);
+        if (partnerId) map[key] = partnerId;
+      } else if (val && typeof val === "object" && !Array.isArray(val)) {
+        const alloc = {};
+        for (const [pid, w] of Object.entries(val)) {
+          const id = slug(pid); const weight = Number(w);
+          if (id && Number.isFinite(weight) && weight > 0) alloc[id] = weight;
+        }
+        const ids = Object.keys(alloc);
+        if (ids.length === 1) map[key] = ids[0];        // un seul constructeur → forme simple (canonique)
+        else if (ids.length > 1) map[key] = alloc;      // répartition multi-constructeurs
+      }
     }
     await db.doc("config/parPartnerMap").set({ map, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length }, ts: FieldValue.serverTimestamp() });

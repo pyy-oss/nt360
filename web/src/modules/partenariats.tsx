@@ -77,7 +77,7 @@ export const Partenariats: FC<Props> = () => {
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
   const { data: history } = useDocData<QuotaHistory>("summaries/par_quotasHistory");
-  const { data: mapDoc } = useDocData<{ map?: Record<string, string> }>("config/parPartnerMap");
+  const { data: mapDoc } = useDocData<{ map?: Record<string, string | Record<string, number>> }>("config/parPartnerMap");
 
   const partnerName = useMemo(() => { const m: Record<string, string> = {}; for (const p of partners || []) m[p.id] = p.name; return m; }, [partners]);
   const partnerOpts = useMemo(() => (partners || []).map((p) => ({ value: p.id, label: p.name })), [partners]);
@@ -623,8 +623,10 @@ const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label:
 };
 
 // ─────────────────────────────────────────────────────────────────────── Paramétrage (mapping fournisseur → constructeur)
-const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean; openEditId?: string | null; onConsumedEdit?: () => void }> = ({ partners, certifs, assigns, partnerOpts, mapDoc, ca, canWrite, openEditId, onConsumedEdit }) => {
-  const [rows, setRows] = useState<{ supplier: string; partnerId: string }[]>([]);
+const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string | Record<string, number>> } | null; ca: CaSummary; canWrite: boolean; openEditId?: string | null; onConsumedEdit?: () => void }> = ({ partners, certifs, assigns, partnerOpts, mapDoc, ca, canWrite, openEditId, onConsumedEdit }) => {
+  // Un fournisseur (distributeur) peut porter PLUSIEURS constructeurs (ADR-P14) : chaque ligne a une liste
+  // d'allocations { constructeur, poids }. Poids par défaut = 1 (répartition égale à la sauvegarde).
+  const [rows, setRows] = useState<{ supplier: string; allocs: { partnerId: string; weight: string }[] }[]>([]);
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
   // Édition demandée depuis une vue read-only (Plan d'affaires / Conformité) : ouvre le formulaire pour ce
@@ -650,27 +652,58 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
     return `Supprimer le partenaire « ${p.name} » et tout son référentiel (niveaux, compétences, catalogue, exigences, plan d'affaires) ?`
       + (rattache ? ` ⚠️ ${rattache} lui reste(nt) rattachée(s) — elles deviendront orphelines (à supprimer séparément dans les onglets Certifications / Assignations).` : "");
   };
-  useEffect(() => { setRows(Object.entries(mapDoc?.map || {}).map(([supplier, partnerId]) => ({ supplier, partnerId }))); }, [mapDoc]);
+  // Reconstruit les lignes depuis l'overlay : valeur string = 1 constructeur (poids 1) ; objet = répartition.
+  useEffect(() => {
+    setRows(Object.entries(mapDoc?.map || {}).map(([supplier, val]) => ({
+      supplier,
+      allocs: typeof val === "string"
+        ? [{ partnerId: val, weight: "1" }]
+        : Object.entries(val || {}).map(([partnerId, w]) => ({ partnerId, weight: String(w) })),
+    })));
+  }, [mapDoc]);
   const unmapped = ca?.unmapped || [];
   const save = async () => {
-    const map: Record<string, string> = {};
-    for (const r of rows) if (r.supplier.trim() && r.partnerId) map[r.supplier.trim().toUpperCase()] = r.partnerId;
+    // 1 constructeur → forme simple (string) ; plusieurs → { partnerId: poids }. Le backend renormalise.
+    const map: Record<string, string | Record<string, number>> = {};
+    for (const r of rows) {
+      const sup = r.supplier.trim().toUpperCase(); if (!sup) continue;
+      const valid = r.allocs.filter((a) => a.partnerId && (Number(a.weight) || 0) > 0);
+      if (valid.length === 1) map[sup] = valid[0].partnerId;
+      else if (valid.length > 1) { const o: Record<string, number> = {}; for (const a of valid) o[a.partnerId] = Number(a.weight); map[sup] = o; }
+    }
     await callFn("setParPartnerMap", { map });
   };
+  // Mutations d'allocation (ajout/retrait/édition d'un constructeur d'un fournisseur).
+  const setAlloc = (i: number, fn: (a: { partnerId: string; weight: string }[]) => { partnerId: string; weight: string }[]) =>
+    setRows((rs) => rs.map((x, j) => j === i ? { ...x, allocs: fn(x.allocs) } : x));
   return (
     <div className="space-y-4">
       <Card title="Correspondance fournisseur → constructeur" actions={canWrite ? <Busy label="Enregistrer" fn={save} okMsg="Correspondance enregistrée" /> : undefined}>
-        <Tip>Le CA par constructeur est dérivé des BC fournisseurs. Reliez ici chaque <b>nom de fournisseur</b> (tel qu'il figure sur les BC) au <b>constructeur</b> correspondant. Non renseigné ⇒ le BC n'est pas compté.</Tip>
+        <Tip>Le CA par constructeur est dérivé des BC fournisseurs. Un <b>fournisseur</b> (souvent un distributeur) peut porter <b>plusieurs constructeurs</b> : ajoutez-en autant que nécessaire avec un <b>poids</b> — le montant du BC est <b>réparti</b> selon ces poids (jamais additionné). Non renseigné ⇒ le BC n'est pas compté. Un seul constructeur = 100 %.</Tip>
         <div className="space-y-2">
-          {rows.map((r, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input className="field flex-1" value={r.supplier} disabled={!canWrite} placeholder="Nom fournisseur (BC)" onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, supplier: e.target.value } : x))} />
-              <span className="text-faint">→</span>
-              <div className="w-56"><Select value={r.partnerId} onChange={(v) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, partnerId: v } : x))} options={partnerOpts} placeholder="Constructeur…" /></div>
-              {canWrite && <button className="btn-ghost text-clay text-[11px]" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>Retirer</button>}
+          {rows.map((r, i) => {
+            const wsum = r.allocs.reduce((s, a) => s + (Number(a.weight) || 0), 0) || 1;
+            return (
+            <div key={i} className="rounded-lg border border-line p-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <input className="field flex-1" value={r.supplier} disabled={!canWrite} placeholder="Nom fournisseur (BC)" onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, supplier: e.target.value } : x))} />
+                {canWrite && <button className="btn-ghost text-clay text-[11px]" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>Retirer</button>}
+              </div>
+              {r.allocs.map((a, k) => (
+                <div key={k} className="flex items-center gap-2 pl-3">
+                  <span className="text-faint">↳</span>
+                  <div className="flex-1"><Select value={a.partnerId} onChange={(v) => setAlloc(i, (al) => al.map((x, m) => m === k ? { ...x, partnerId: v } : x))} options={partnerOpts} placeholder="Constructeur…" /></div>
+                  {r.allocs.length > 1 && <>
+                    <input className="field tabnum w-20" type="number" min="0" value={a.weight} disabled={!canWrite} aria-label="Poids" placeholder="Poids" onChange={(e) => setAlloc(i, (al) => al.map((x, m) => m === k ? { ...x, weight: e.target.value } : x))} />
+                    <span className="text-faint text-[11px] w-12 text-right tabnum">{pct((Number(a.weight) || 0) / wsum)}</span>
+                  </>}
+                  {canWrite && r.allocs.length > 1 && <button className="btn-ghost text-clay text-[11px]" onClick={() => setAlloc(i, (al) => al.filter((_, m) => m !== k))}>×</button>}
+                </div>
+              ))}
+              {canWrite && <button className="btn-ghost text-[11px] pl-3" onClick={() => setAlloc(i, (al) => [...al, { partnerId: "", weight: "1" }])}><Plus size={12} /> Ajouter un constructeur</button>}
             </div>
-          ))}
-          {canWrite && <button className="btn-ghost text-[12px]" onClick={() => setRows((rs) => [...rs, { supplier: "", partnerId: "" }])}><Plus size={13} /> Ajouter une correspondance</button>}
+          ); })}
+          {canWrite && <button className="btn-ghost text-[12px]" onClick={() => setRows((rs) => [...rs, { supplier: "", allocs: [{ partnerId: "", weight: "1" }] }])}><Plus size={13} /> Ajouter un fournisseur</button>}
           {!rows.length && !canWrite && <EmptyState label="Aucun mapping fournisseur défini." />}
         </div>
         {!!unmapped.length && (
@@ -679,7 +712,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
             <div className="flex flex-wrap gap-1">
               {unmapped.slice(0, 12).map((u) => (
                 <button key={u.supplier} className="text-[11px] px-2 py-0.5 rounded-md bg-panel2 text-muted hover:text-ink" disabled={!canWrite}
-                  onClick={() => setRows((rs) => rs.some((x) => x.supplier.toUpperCase() === u.supplier) ? rs : [...rs, { supplier: u.supplier, partnerId: "" }])}>
+                  onClick={() => setRows((rs) => rs.some((x) => x.supplier.toUpperCase() === u.supplier) ? rs : [...rs, { supplier: u.supplier, allocs: [{ partnerId: "", weight: "1" }] }])}>
                   {u.supplier} ({fmt(u.revenueXof)})
                 </button>
               ))}
