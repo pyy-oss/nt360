@@ -35,7 +35,8 @@ type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | 
 type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; caDeclaredXof?: number; fiscalStartMonth?: number; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
-type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
+type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; bcXof?: number; declaredXof?: number; asOf?: string } | null;
+type CaHistory = { days?: { date: string; totalXof: number; bcXof: number; declaredXof: number }[] } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
@@ -74,6 +75,7 @@ export const Partenariats: FC<Props> = () => {
   const { rows: certifs } = useCollectionData<Certif>("par_certifications");
   const { rows: assigns } = useCollectionData<Assign>("par_assignments");
   const { data: ca } = useDocData<CaSummary>(canSeeCa ? "summaries/par_ca" : null);
+  const { data: caHistory } = useDocData<CaHistory>(canSeeCa ? "summaries/par_caHistory" : null);
   const { data: quotas } = useDocData<QuotaSummary>("summaries/par_quotas");
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
@@ -108,7 +110,7 @@ export const Partenariats: FC<Props> = () => {
         </Card>
       )}
 
-      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+      {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
@@ -323,7 +325,7 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   );
 };
 
-const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, caHistory, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
   // Action de ligne « Éditer le partenaire » depuis une vue read-only → bascule Paramétrage + ouvre le formulaire.
   const editCol = (id: (r: any) => string) => colText("", (r: any) => <button className="btn-ghost text-[11px]" onClick={() => onEditPartner(id(r))}>Éditer</button>);
   const alertItems = alerts?.items || [];
@@ -384,9 +386,27 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEdi
           columns={[colText("Constructeur", (r) => r.name), colNum("CA (FCFA)", (r) => money(r.revenueXof)), colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>), colNum("BC", (r) => String(r.bcCount))]}
           rows={ca?.byPartner || []} rowKey={(r) => r.partnerId} empty="Aucun CA — ni BC rattaché, ni CA déclaré/booking YTD sur les fiches partenaires."
         />
+        {/* Ventilation BC dérivé vs déclaratif (fait voir où le réel a pris le relais du repli). */}
+        {!!(ca?.totalXof) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+            <Dot color={T.emerald} label={<>BC dérivé <b className="tabnum">{money(ca?.bcXof || 0)}</b></>} />
+            <Dot color={T.gold} label={<>Déclaré <b className="tabnum">{money(ca?.declaredXof || 0)}</b></>} />
+            <span className="text-faint tabnum">· total {money(ca?.totalXof || 0)}</span>
+          </div>
+        )}
         {!!(ca?.unmapped || []).length && (
           <div className="mt-2 text-[12px] text-gold">
             {(ca!.unmapped!).length} fournisseur(s) BC non rattaché(s) à un constructeur (à mapper en Paramétrage) — ex. {(ca!.unmapped!).slice(0, 3).map((u) => u.supplier).join(", ")}.
+          </div>
+        )}
+        {/* Tendance du CA (historisé à chaque recalcul) : total + ventilation BC/déclaré. */}
+        {(caHistory?.days || []).length >= 2 && (
+          <div className="mt-3">
+            <MultiLine
+              data={(caHistory!.days!).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Total: d.totalXof, BC: d.bcXof, "Déclaré": d.declaredXof }))}
+              series={[{ key: "Total", color: T.ink, name: "Total" }, { key: "BC", color: T.emerald, name: "BC dérivé" }, { key: "Déclaré", color: T.gold, name: "Déclaré" }]}
+              h={200}
+            />
           </div>
         )}
       </Card>

@@ -830,7 +830,18 @@ async function recomputeCore(db, only) {
         if (Number.isFinite(n) && n > 0) declaredByPartner[p.id] = n;
       }
       const byPartner = blendRevenue(caPartners, declaredByPartner).map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
-      w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof: byPartner.reduce((s, g) => s + g.revenueXof, 0), ...stamp } });
+      const totalXof = byPartner.reduce((s, g) => s + g.revenueXof, 0);
+      const bcXof = byPartner.reduce((s, g) => s + (g.source === "bc" ? g.revenueXof : 0), 0); // part réellement dérivée des BC
+      const declaredXof = totalXof - bcXof; // le reste vient du déclaratif (repli)
+      w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof, bcXof, declaredXof, ...stamp } });
+
+      // Historisation quotidienne du CA (PA+ Lot 2, patron par_quotasHistory) : total + ventilation BC/déclaré,
+      // pour la tendance. CONFIDENTIEL (préfixe par_ca ⇒ verrou `rentabilite` par les rules, comme par_ca).
+      const prevCaHist = (await db.doc("summaries/par_caHistory").get()).data() || {};
+      const caDays = (Array.isArray(prevCaHist.days) ? prevCaHist.days : []).filter((d) => d && d.date !== asOf);
+      caDays.push({ date: asOf, totalXof, bcXof, declaredXof });
+      caDays.sort((a, b) => (a.date < b.date ? -1 : 1));
+      w.push({ path: "summaries/par_caHistory", data: { days: caDays.slice(-90), ...stamp } });
 
       // Quotas de certification (couverture par exigence) + statut de conformité par partenaire (ADR-P04).
       const certsByPartner = {}; for (const c of parCertifs) { (certsByPartner[c.partnerId] = certsByPartner[c.partnerId] || []).push(c); }

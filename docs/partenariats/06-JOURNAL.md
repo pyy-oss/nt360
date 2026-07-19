@@ -749,3 +749,15 @@ non couverte devient une proposition — combien d'ingénieurs manquent (minCoun
 summary (aucune re-dérivation). Front-only, additif, aucun schéma modifié.
 
 **Conception.** Transforme le diagnostic (écarts de quota) en action en un clic. Tests parTraining (3).
+
+---
+
+## Session — analyse du CA constructeur (PA+ Lot 2)
+
+**Fait.** `summaries/par_ca` porte désormais `bcXof` / `declaredXof` (ventilation dérivé BC vs déclaratif).
+Historisation quotidienne `summaries/par_caHistory` (patron par_quotasHistory : total + BC + déclaré, fenêtre
+90 j). Règle Firestore durcie : `par_ca.*` (donc par_caHistory) sous verrou `rentabilite` (ADR-P07).
+Tableau de bord : ventilation BC/déclaré sous la carte CA + courbe de tendance (Total / BC / Déclaré).
+
+**Conception.** Additif, confidentiel (gaté canSeeCa côté front + rules côté serveur). Aucune primitive
+partagée modifiée. Vérifs : functions + web build + bundle au vert.
