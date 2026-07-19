@@ -140,12 +140,13 @@ const EngineersTab: FC<{ certifs: Certif[]; assigns: Assign[]; partnerName: Reco
         columns={[
           colText("Ingénieur", (r) => r.consultantName),
           colText("BU", (r) => r.consultantBu || "—"),
-          colNum("Certifs détenues", (r) => `${r.activeCerts}/${r.certCount}`, (r) => r.certCount),
+          // Détenues VALIDES / total : jauge de fraîcheur des certifs de l'ingénieur (même grammaire que le tableau de bord).
+          colNum("Certifs valides", (r) => r.certCount ? <MiniBar ratio={r.activeCerts / r.certCount} label={`${r.activeCerts}/${r.certCount}`} /> : <span className="text-faint">—</span>, (r) => r.certCount),
           colNum("Assignations", (r) => String(r.assignCount), (r) => r.assignCount),
           colText("Certifications", (r) => certList(r) || "—"),
           colText("À obtenir", (r) => assignList(r) || "—"),
         ]}
-        rows={rows} rowKey={(r) => r.consultantId} searchKeys={[(r) => r.consultantName, (r) => r.consultantBu]}
+        rows={rows} rowKey={(r) => r.consultantId} pageSize={12} searchKeys={[(r) => r.consultantName, (r) => r.consultantBu]}
         empty="Aucune certification ni assignation enregistrée."
       />
     </Card>
