@@ -736,3 +736,16 @@ fournisseur est souvent un distributeur multi-marques → le mapping 1→1 mésa
 déclaratif (ADR-P12) reste le repli pour les fournisseurs non mappés.
 
 **Conception.** Additif, rétro-compatible, cantonné `par_`. ADR-P14. Suites de tests + build au vert.
+
+---
+
+## Session — plan de formation (constat → action) (PA+ Lot 3)
+
+**Fait.** `web/src/lib/parTraining.ts` (PUR, testé) : pour chaque partenariat non conforme, chaque exigence
+non couverte devient une proposition — combien d'ingénieurs manquent (minCount − holders) et QUELS candidats
+(déjà engagés chez le constructeur, ne couvrant pas encore la cible). Résout la certif de catalogue à viser
+(cible = compétence → 1re certif de la compétence). Carte « Plan de formation » au tableau de bord : bouton
+« Assigner N » crée les assignations (upsertParAssignment, échéance 90 j éditable). Réutilise la couverture du
+summary (aucune re-dérivation). Front-only, additif, aucun schéma modifié.
+
+**Conception.** Transforme le diagnostic (écarts de quota) en action en un clic. Tests parTraining (3).

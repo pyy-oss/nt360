@@ -16,6 +16,7 @@ import { ExportBtn } from "../design/bulk";
 import { buildPartnerPayload, partnerToForm, bpAchievement, PAR_LEVELS, BP_AXES, EMPTY_BP, FR_MONTHS, fiscalMonthsLabel, type PartnerFormState, type BpForm } from "../lib/parPartnerForm";
 import { PARTNER_PRESETS, buildPartnerPreset } from "../lib/parPartnerPresets";
 import { tierProgress } from "../lib/parTier";
+import { trainingPlan } from "../lib/parTraining";
 import { byEngineer } from "../lib/parEngineer";
 import { fmt, pct, T } from "../design/tokens";
 import { MultiLine } from "../design/charts";
@@ -107,7 +108,7 @@ export const Partenariats: FC<Props> = () => {
         </Card>
       )}
 
-      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
+      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
@@ -322,7 +323,7 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   );
 };
 
-const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
   // Action de ligne « Éditer le partenaire » depuis une vue read-only → bascule Paramétrage + ouvre le formulaire.
   const editCol = (id: (r: any) => string) => colText("", (r: any) => <button className="btn-ghost text-[11px]" onClick={() => onEditPartner(id(r))}>Éditer</button>);
   const alertItems = alerts?.items || [];
@@ -342,6 +343,10 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEdi
   const tp = (r: { partnerId: string; coverage?: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[] }) =>
     tierProgress(tiersByPartner.get(r.partnerId), r.coverage);
   const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => <MiniBar ratio={r.a[ax]} />, (r: typeof bpRows[number]) => r.a[ax] ?? -1);
+  // Plan de formation (PA+ Lot 3) : transforme les écarts de quota en assignations proposées. PUR (parTraining),
+  // aucune re-dérivation de la conformité — on lit la couverture du summary.
+  const trainRows = useMemo(() => trainingPlan(quotaPartners, partners, certifs, assigns), [quotaPartners, partners, certifs, assigns]);
+  const td90 = () => new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10); // échéance par défaut, éditable
   return (
     <div className="space-y-4">
       <HeroBand partners={partners} ca={ca} canSeeCa={canSeeCa} alerts={alerts} relances={relances} quotaPartners={quotaPartners} asOf={quotas?.asOf} />
@@ -409,6 +414,36 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEdi
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
         />
       </Card>
+
+      {!!trainRows.length && (
+        <Card title="Plan de formation — combler les quotas">
+          <Tip>Pour chaque partenariat <b>non conforme</b>, les ingénieurs à <b>assigner</b> pour atteindre le niveau : des candidats déjà engagés chez le constructeur qui ne détiennent pas encore la cible. « Assigner » crée les assignations (échéance à 90 j, éditable dans l'onglet Assignations).</Tip>
+          <div className="space-y-3">
+            {trainRows.map((p) => (
+              <div key={p.partnerId} className="rounded-lg border border-line p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button className="font-medium hover:underline" onClick={() => onEditPartner(p.partnerId)}>{p.name}</button>
+                  <Badge tone={partnershipTone(p.status)}>{label(PARTNERSHIP_STATUS_LABEL, p.status)}</Badge>
+                </div>
+                {p.gaps.map((g, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+                    <span className="text-clay tabnum font-medium">Manque {g.need}</span>
+                    <span className="text-muted">· {g.targetLabel} ({g.holders}/{g.minCount})</span>
+                    {g.candidates.length
+                      ? <span className="text-faint">— {g.candidates.slice(0, 5).map((c) => c.name).join(", ")}{g.candidates.length > 5 ? "…" : ""}</span>
+                      : <span className="text-faint">— aucun candidat engagé (former un nouvel ingénieur)</span>}
+                    {canWrite && g.assignCertId && g.candidates.length > 0 && (
+                      <Busy variant="ghost" label={`Assigner ${Math.min(g.need, g.candidates.length)}`}
+                        fn={async () => { const picks = g.candidates.slice(0, g.need); const t = td90(); await Promise.all(picks.map((c) => callFn("upsertParAssignment", { consultantId: c.consultantId, partnerId: p.partnerId, certificationCatalogId: g.assignCertId, targetDate: t }))); }}
+                        okMsg={`${Math.min(g.need, g.candidates.length)} assignation(s) créée(s) — échéance à 90 j`} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {trend.length >= 2 && (
         <Card title="Tendance de conformité des partenariats (30 j)">
