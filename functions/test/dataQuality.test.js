@@ -60,6 +60,15 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(bt.bc_fp_inconnu.severity).toBe("medium");
     expect(bt.bc_sans_fp.count).toBe(1);             // BC3 uniquement (aucun chevauchement des deux prédicats)
   });
+  it("doublon BC « à un séparateur/casse près » détecté (N° BC canonique, audit Lot 4)", () => {
+    const bc = [
+      { fp: "FP/2026/1", supplier: "DELL", amountXof: 100, expenseType: "HW", bcNumber: "BC-001" }, // Excel
+      { fp: "FP/2026/1", supplier: "DELL", amountXof: 100, expenseType: "HW", bcNumber: "BC 001" }, // ClickUp (espace)
+      { fp: "FP/2026/1", supplier: "DELL", amountXof: 100, expenseType: "HW", bcNumber: "BC/2026/2" }, // autre BC → pas un doublon
+    ];
+    const bt = Object.fromEntries(dataQuality([{ fp: "FP/2026/1", cas: 100, yearPo: 2026, client: "C", am: "A" }], [], [], bc, []).issues.map((i) => [i.type, i]));
+    expect(bt.bc_doublons.count).toBe(1); // « BC-001 » et « BC 001 » = même clé canonique → 1 groupe de doublon
+  });
   it("commandes P&L au N° FP ILLISIBLE (rawOrders) → anomalie haute (CA autrement perdu)", () => {
     // Lignes P&L brutes : FP illisibles à CAS>0 doivent être signalées ; l'illisible sans CAS ou le FP
     // canonique valide ne le sont pas.
