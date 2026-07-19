@@ -88,6 +88,17 @@ describe("atterrissage (§7)", () => {
     expect(a2.next.pipelinePondere).toBe(500); // pipeline D Prev 2027 (≥90 % → 100 %)
     expect(a2.next.cafProjete).toBe(750);     // 0 facturé N+1 + 250 reporté + 500 pipeline
   });
+  it("amorce N+1 — opp de closing N+1 DÉJÀ commandée en N+1 = exclue du pipeline N+1 (anti double-compte, audit)", () => {
+    const ord = [{ fp: "FP/2027/9", yearPo: 2027, cas: 500, raf: 0 }]; // commande N+1
+    const op = [
+      { fp: "FP/2027/9", stage: 5, probability: 0.95, amount: 500, closingDate: "2027-05-01" }, // MÊME FP → déjà réalisée en N+1
+      { fp: "FP/2027/8", stage: 5, probability: 0.95, amount: 300, closingDate: "2027-06-01" }, // pas de commande → comptée
+    ];
+    const r = atterrissage(ord, [], op, [], 2026, "2026-03-01");
+    expect(r.next.realiseCas).toBe(500);        // FP/2027/9 réalisé
+    expect(r.next.pipelinePondere).toBe(300);   // seule FP/2027/8 ; FP/2027/9 exclue (déjà au carnet N+1)
+    expect(r.next.projete).toBe(800);           // 500 + 300, PAS 500 + 800 (double compte évité)
+  });
   it("jalons = source UNIQUE du report N+1 (Σ jalons après le 31/12) : part in-year reste facturable", () => {
     const ord = [{ fp: "FP/2026/1", yearPo: 2026, cas: 1000, raf: 400, facture: 0, mb: 200 }]; // RAF projetable 400
     const ms = { "FP/2026/1": [{ date: "2026-06-01", amount: 150 }, { date: "2027-02-01", amount: 250 }] };
