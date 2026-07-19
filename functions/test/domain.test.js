@@ -259,6 +259,23 @@ describe("reporting — facturation/rentabilité/entités", () => {
     expect(r.bottomAffaires[0].pmb).toBeLessThanOrEqual(r.bottomAffaires[2].pmb); // trié marge croissante
     expect(r.bottomAffaires[0].pmb).toBeCloseTo(0.20, 4); // FP/2025/2 ou FP/2026/3 (0.20)
   });
+  it("repli marginPct POURCENTAGE (30) normalisé en ratio → pas de marge ×100 (audit P2-1)", () => {
+    const orders = [{ fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 0, mb: 0, marginPct: 30 }]; // 30 = POURCENTAGE (fiche)
+    const fac = rentabilite(orders, [{ fp: "FP/1", amountHt: 100 }], orders).perspectives.facture;
+    expect(fac.mb).toBeCloseTo(30, 6); // 100 × 0,30 (30 % normalisé), PAS 100 × 30 = 3000
+  });
+  it("coût absent : commande à CAS>0 sans costTotal → flag costMissing + compte (audit P1-1)", () => {
+    const orders = [
+      { fp: "FP/1", client: "A", am: "X", cas: 1000, mb: 200, costTotal: 800 }, // coût présent → fiable
+      { fp: "FP/2", client: "B", am: "Y", cas: 500, mb: 500, costTotal: null },  // coût absent → marge non fiable
+      { fp: "FP/3", client: "C", am: "Z", cas: 0, mb: 0, costTotal: null },      // CAS 0 → hors périmètre
+    ];
+    const r = rentabilite(orders);
+    expect(r.costMissingCount).toBe(1); // seul FP/2
+    const cmd = r.perspectives.commande.bottomAffaires;
+    expect(cmd.find((a) => a.fp === "FP/2").costMissing).toBe(true);
+    expect(cmd.find((a) => a.fp === "FP/1").costMissing).toBe(false);
+  });
   it("rentabilité — perspectives Commande (CAS) et Facturé (factures datées × taux de marge)", () => {
     const orders = [
       { fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 1000, mb: 200 }, // taux 20%

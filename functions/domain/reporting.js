@@ -48,7 +48,13 @@ function perspective(orders, baseFn, mbFn) {
 }
 
 // Taux de marge d'une commande (marge P&L / CAS), avec repli sur marginPct quand CAS = 0.
-const marginRate = (o) => ((o && (o.cas || 0) > 0) ? (o.mb || 0) / o.cas : (o && o.marginPct) || 0);
+// marginPct est un POURCENTAGE (0-100, cf. ficheAffaire) ; on le NORMALISE en ratio [0,1] avant emploi —
+// sinon une commande à CAS=0 mais marginPct=20 donnait un taux de 20 (soit 2000 %, marge ×100). Audit P2-1.
+const marginRate = (o) => {
+  if (o && (o.cas || 0) > 0) return (o.mb || 0) / o.cas;
+  const p = Number(o && o.marginPct) || 0;
+  return p > 1 ? p / 100 : p; // > 1 ⇒ pourcentage → ratio ; sinon déjà un ratio (0-1 historique toléré)
+};
 
 // Lignes « affaire » de la perspective Facturé : on part des FACTURES DATÉES dans la période
 // (même assiette que la vue Facturation — source de vérité du facturé), agrégées par FP. La marge
@@ -90,12 +96,22 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
   for (const o of allOrders || []) { const k = fpKey(o.fp) || o.fp; if (k) ordersByFp[k] = o; }
   const commande = perspective(orders, (o) => o.cas || 0, (o) => o.mb || 0);
   const facture = perspective(factureLines(invoices, ordersByFp), (l) => l.base, (l) => l.mb);
+  // COÛT ABSENT (audit P1-1) : une commande à CAS>0 dont le costTotal n'a JAMAIS été importé affiche une marge
+  // (0 % ou 100 % selon le parser) INDISCERNABLE d'un vrai deal → le DF chasse de fausses affaires. On COMPTE
+  // ces affaires et on MARQUE les lignes du bas de tableau (badge « marge non fiable » côté front). costTotal
+  // == null (absent) ≠ costTotal 0 (marge légitimement pleine). Parité avec les flags missingCjm de resourcePnl.
+  const costMissingFps = new Set((orders || []).filter((o) => (o.cas || 0) > 0 && o.costTotal == null).map((o) => fpKey(o.fp) || o.fp).filter(Boolean));
+  const isCostMissing = (fp) => costMissingFps.has(fpKey(fp) || fp);
+  // Marque aussi les lignes de la perspective Commande (celle que lit le front via `perspectives.commande`).
+  // La perspective Facturé (factureLines, sans costTotal) laisse `costMissing` absent → jamais faux positif.
+  commande.bottomAffaires = commande.bottomAffaires.map((o) => ({ ...o, costMissing: isCostMissing(o.fp) }));
   return {
     // Rétro-compat : perspective Commande à plat, assiette nommée `cas`.
     mb: commande.mb, cas: commande.base, pmb: commande.pmb,
+    costMissingCount: costMissingFps.size, // nb d'affaires à marge non fiable (coût absent)
     byBu: commande.byBu.map((b) => ({ bu: b.bu, cas: b.base, mb: b.mb, pmb: b.pmb })),
     byAm: commande.byAm.map((a) => ({ am: a.am, cas: a.base, mb: a.mb, pmb: a.pmb })),
-    bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb })),
+    bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb, costMissing: isCostMissing(o.fp) })),
     topClients: commande.topClients,
     // Perspectives génériques (assiette = `base`) pour le sélecteur Commande / Facturé.
     perspectives: { commande, facture },

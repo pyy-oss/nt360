@@ -89,12 +89,12 @@ export interface RentabPerspective {
   base: number; mb: number; pmb: number;
   byBu: { bu: string; base: number; mb: number; pmb: number }[];
   byAm: { am: string; base: number; mb: number; pmb: number }[];
-  bottomAffaires: { fp?: string; client?: string; am?: string; base: number; mb: number; pmb: number }[];
+  bottomAffaires: { fp?: string; client?: string; am?: string; base: number; mb: number; pmb: number; costMissing?: boolean }[];
   topClients: { key: string; value: number }[];
 }
 export interface RentabiliteSummary {
   // Champs racine = perspective Commande (rétro-compat).
-  period?: string; mb?: number; cas?: number; pmb?: number;
+  period?: string; mb?: number; cas?: number; pmb?: number; costMissingCount?: number;
   byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
   byAm?: { am: string; cas: number; mb: number; pmb: number }[];
   bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number }[];
