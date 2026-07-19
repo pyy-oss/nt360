@@ -9,22 +9,48 @@ const str = (v, max = 300) => String(v == null ? "" : v).trim().slice(0, max);
 const strArr = (v, n = 8, max = 200) => (Array.isArray(v) ? v.map((x) => str(x, max)).filter(Boolean).slice(0, n) : []);
 const PRIORITES = ["haute", "moyenne", "basse"];
 
+// Exercice fiscal du partenaire (ADR-P12) : mois de début 1–12 → libellé « <mois> → <mois−1> ». Les
+// constructeurs n'ont pas tous la même année fiscale (Cisco : août→juillet) — l'IA en tient compte pour
+// juger le RYTHME du CA. Absent/hors bornes = calendaire (janvier→décembre). Miroir back du front fiscalMonthsLabel.
+const FR_MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+function fiscalMonthsLabel(startMonth) {
+  const m = Math.round(Number(startMonth));
+  if (!Number.isFinite(m) || m < 1 || m > 12) return "calendaire (janvier → décembre)";
+  const end = m === 1 ? 12 : m - 1;
+  return `${FR_MONTHS[m - 1]} → ${FR_MONTHS[end - 1]}`;
+}
+// Écart de couverture chiffré : « <cible> : <holders>/<minCount> certifié(s)[ — manque N] ». N = déficit
+// d'ingénieurs (minCount − holders, borné à 0). Rend l'ampleur du trou VISIBLE pour l'IA (un manque de 3
+// n'appelle pas la même action qu'un manque de 1).
+function gapLabel(target, holders, minCount, okSuffix) {
+  const need = Math.max(0, (Number(minCount) || 0) - (Number(holders) || 0));
+  const suf = need ? ` — manque ${need}` : (okSuffix || "");
+  return `${target} : ${Number(holders) || 0}/${Number(minCount) || 0} certifié(s)${suf}`;
+}
+
 // ── Snapshots (PURS) — dérivés des summaries, dé-bruités pour l'IA. Montants en FCFA.
 function actionPlanSnapshot({ dateIso, ca, quotas, relances }) {
-  const revByPartner = {}; for (const p of (ca && ca.byPartner) || []) revByPartner[p.partnerId] = p.revenueXof;
-  const partners = ((quotas && quotas.partners) || []).map((q) => ({
-    nom: str(q.name || q.partnerId, 80),
-    statut_conformite: str(q.status, 20),
-    ca_ytd_fcfa: Number(revByPartner[q.partnerId] || 0),
-    quotas_manquants: ((q.gaps || []).map((g) => `${g.target} : ${g.holders}/${g.minCount} certifié(s)`)).slice(0, 6),
-  }));
+  // CA MIXTE (ADR-P12) : on transmet la ventilation par partenaire — part adossée aux BC (fiable, traçable)
+  // vs part déclarative (à confirmer). L'IA distingue ainsi un CA solide d'un CA à fiabiliser.
+  const caByPartner = {}; for (const p of (ca && ca.byPartner) || []) caByPartner[p.partnerId] = p;
+  const partners = ((quotas && quotas.partners) || []).map((q) => {
+    const c = caByPartner[q.partnerId] || {};
+    return {
+      nom: str(q.name || q.partnerId, 80),
+      statut_conformite: str(q.status, 20),
+      ca_ytd_fcfa: Number(c.revenueXof || 0),
+      ca_dont_bc_fcfa: Number(c.bcXof || 0),
+      ca_dont_declare_fcfa: Number(c.declaredXof || 0),
+      quotas_manquants: ((q.gaps || []).map((g) => gapLabel(g.target, g.holders, g.minCount))).slice(0, 6),
+    };
+  });
   const relancesEnRetard = ((relances && relances.items) || []).filter((r) => r.bucket === "retard")
     .map((r) => `${str(r.consultantName || r.consultantId, 60)} — ${str(r.cert, 40)} (${str(r.partnerId, 20)})`).slice(0, 12);
   return { date: str(dateIso, 10), partners, assignations_en_retard: relancesEnRetard };
 }
 
 function qbrSnapshot({ partnerId, partner, periode, ca, quotas, certifs, relances }) {
-  const rev = ((ca && ca.byPartner) || []).find((p) => p.partnerId === partnerId);
+  const rev = ((ca && ca.byPartner) || []).find((p) => p.partnerId === partnerId) || {};
   const q = ((quotas && quotas.partners) || []).find((p) => p.partnerId === partnerId);
   const recentes = (certifs || []).filter((c) => c.partnerId === partnerId && c.status === "active")
     .map((c) => str(c.certName || c.certificationCatalogId, 60)).slice(0, 8);
@@ -33,9 +59,14 @@ function qbrSnapshot({ partnerId, partner, periode, ca, quotas, certifs, relance
   return {
     partenaire: str((partner && partner.name) || partnerId, 80),
     periode: str(periode, 40),
+    // Exercice fiscal du constructeur (borne le rythme du YTD) — non confidentiel, toujours transmis.
+    exercice_fiscal: fiscalMonthsLabel(partner && partner.fiscalStartMonth),
     statut_conformite: str(q && q.status, 20),
-    ca_realise_ytd_fcfa: Number((rev && rev.revenueXof) || 0),
-    quotas: ((q && q.coverage) || []).map((c) => `${c.target} : ${c.holders}/${c.minCount}${c.ok ? " ✓" : ""}`).slice(0, 10),
+    ca_realise_ytd_fcfa: Number(rev.revenueXof || 0),
+    // Ventilation CA MIXTE (ADR-P12) : part BC (fiable) vs part déclarative (à confirmer). 0 si CA masqué (ADR-P07).
+    ca_dont_bc_fcfa: Number(rev.bcXof || 0),
+    ca_dont_declare_fcfa: Number(rev.declaredXof || 0),
+    quotas: ((q && q.coverage) || []).map((c) => gapLabel(c.target, c.holders, c.minCount, c.ok ? " ✓" : "")).slice(0, 10),
     certifications_actives: recentes,
     assignations: enRetard,
   };
@@ -48,7 +79,9 @@ function buildActionPlanPrompt(snapshot) {
 
 ${JSON.stringify(snapshot, null, 2)}
 
-Génère un plan d'action priorisé pour sécuriser/améliorer les statuts de partenariat sur l'exercice. Concentre-toi sur les leviers réels d'une ESN : combler les quotas de certification (former/certifier les bons profils), accélérer le CA sur les partenaires en retard de rythme, résorber les assignations en retard, sécuriser les niveaux avant audit.
+Lecture des données : pour chaque partenaire, le CA réalisé est VENTILÉ — \`ca_dont_bc_fcfa\` est adossé aux bons de commande fournisseurs (fiable, traçable) tandis que \`ca_dont_declare_fcfa\` est déclaratif (à confirmer). Un CA majoritairement déclaratif est un signal de fiabilisation, pas forcément un vrai retard. Les quotas manquants précisent « manque N » : l'ampleur du déficit d'ingénieurs certifiés doit moduler la priorité.
+
+Génère un plan d'action priorisé pour sécuriser/améliorer les statuts de partenariat sur l'exercice. Concentre-toi sur les leviers réels d'une ESN : combler les quotas de certification (former/certifier les bons profils, en proportion du « manque N »), accélérer le CA sur les partenaires en retard de rythme, fiabiliser le CA déclaratif via les BC, résorber les assignations en retard, sécuriser les niveaux avant audit.
 
 Réponds UNIQUEMENT avec un tableau JSON valide. Format exact :
 [
@@ -84,7 +117,9 @@ function buildQbrPrompt(snapshot) {
 
 ${JSON.stringify(snapshot, null, 2)}
 
-Rédige une synthèse de QBR prête à présenter. Réponds UNIQUEMENT avec un objet JSON valide. Format exact :
+Lecture des données : le CA réalisé est ventilé — \`ca_dont_bc_fcfa\` est adossé aux bons de commande fournisseurs (fiable), \`ca_dont_declare_fcfa\` est déclaratif (à confirmer). L'\`exercice_fiscal\` borne le rythme du YTD (juge l'avancement à l'aune de cet exercice, pas de l'année civile). Les quotas indiquent « manque N » quand une exigence n'est pas couverte.
+
+Rédige une synthèse de QBR prête à présenter, en t'appuyant sur ces éléments : valorise le CA adossé aux BC, situe l'avancement dans l'exercice fiscal du constructeur, et quantifie les écarts de certification (« manque N »). Réponds UNIQUEMENT avec un objet JSON valide. Format exact :
 {
   "titre": "QBR ${snapshot.partenaire} — ${snapshot.periode || "période"}",
   "synthese_executive": "2-3 phrases d'ouverture",
@@ -170,4 +205,4 @@ function normalizeMapSuggest(parsed, validIds) {
   return out.slice(0, 40);
 }
 
-module.exports = { PRIORITES, actionPlanSnapshot, qbrSnapshot, buildActionPlanPrompt, normalizeActionPlan, buildQbrPrompt, normalizeQbr, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest };
+module.exports = { PRIORITES, fiscalMonthsLabel, gapLabel, actionPlanSnapshot, qbrSnapshot, buildActionPlanPrompt, normalizeActionPlan, buildQbrPrompt, normalizeQbr, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest };

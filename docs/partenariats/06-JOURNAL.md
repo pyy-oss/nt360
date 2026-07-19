@@ -778,3 +778,24 @@ humain ; rien n'est enregistré (l'humain valide puis Enregistre — `setParPart
 le modèle ne voit aucun montant CA (rapprochement de NOMS). Additif, aucune primitive partagée modifiée,
 aucun schéma changé. Vérifs : parAi (11 tests dont 4 nouveaux), functions 1158 + web 277, build, bundle
 118.3 KB < 120, guards deploy-targets + no-undef au vert.
+
+---
+
+## Session — QBR / plan d'action IA enrichis (PA+ Lot 4)
+
+**Fait.** Enrichissement des snapshots IA (`domain/parAi`, PUR) pour un raisonnement plus fin, sans changer
+le format de SORTIE (aucune régression front/PPTX) :
+- **CA mixte (ADR-P12)** : `actionPlanSnapshot` + `qbrSnapshot` transmettent la ventilation par partenaire
+  `ca_dont_bc_fcfa` (adossé aux BC, fiable) vs `ca_dont_declare_fcfa` (déclaratif, à confirmer), lue depuis
+  `summaries/par_ca.byPartner`. Masquée à 0 sans droit `rentabilite` (ADR-P07), comme le total.
+- **Exercice fiscal** : `qbrSnapshot.exercice_fiscal` = libellé « <mois> → <mois−1> » dérivé de
+  `partner.fiscalStartMonth` (helper PUR `fiscalMonthsLabel`, miroir back du front). L'IA situe le rythme du
+  YTD dans l'exercice du constructeur, pas l'année civile. Non confidentiel → toujours transmis.
+- **Écarts quota chiffrés** : helper `gapLabel` unifie le format « cible : h/min certifié(s) — manque N »
+  (plan d'action + QBR), rendant l'ampleur du déficit visible (module la priorité IA).
+- Prompts mis à jour (buildActionPlanPrompt / buildQbrPrompt) pour exploiter ces trois signaux.
+- **PPTX + carte QBR** : la ventilation BC/déclaré + l'exercice fiscal s'affichent (additif, sûr).
+
+**Conception.** 100 % additif : entrée du modèle enrichie, sortie inchangée. Aucune primitive partagée
+modifiée, aucun schéma changé. Vérifs : parAi (14 tests, +6), functions 1161 + web 277, build, bundle
+118.3 KB < 120, guards deploy-targets + no-undef au vert.

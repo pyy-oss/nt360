@@ -221,6 +221,12 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
         {qbr && (
           <div className="rounded-lg border border-line p-3 space-y-2 text-[12px]">
             <div className="font-semibold text-[14px]">{qbr.qbr.titre}</div>
+            {(qbr.snapshot?.exercice_fiscal || qbr.snapshot?.ca_dont_bc_fcfa || qbr.snapshot?.ca_dont_declare_fcfa) ? (
+              <div className="text-[11px] text-faint flex flex-wrap gap-x-3 gap-y-0.5">
+                {qbr.snapshot?.exercice_fiscal && <span>Exercice : {qbr.snapshot.exercice_fiscal}</span>}
+                {(qbr.snapshot?.ca_dont_bc_fcfa || qbr.snapshot?.ca_dont_declare_fcfa) ? <span>CA : dont BC {fmt(qbr.snapshot.ca_dont_bc_fcfa || 0)} · déclaré {fmt(qbr.snapshot.ca_dont_declare_fcfa || 0)}</span> : null}
+              </div>
+            ) : null}
             {qbr.qbr.synthese_executive && <div className="italic text-muted">{qbr.qbr.synthese_executive}</div>}
             <QbrList title="Points forts" tone="text-emerald" items={qbr.qbr.points_forts} />
             {qbr.qbr.statut_certifications && <div><span className="text-gold font-semibold">Certifications :</span> {qbr.qbr.statut_certifications}</div>}
