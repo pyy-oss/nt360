@@ -86,6 +86,11 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
     def("opps_agees", "medium", agedOpps, "Opportunités périmées (> 1 an, confiance ≤ 90 %) — considérées PERDUES par la règle source, exclues du pipeline", (o) => o.fp || o.client),
     // Lignes BC
     def("bc_sans_fp", "low", bcLines.filter((b) => !b.fp), "Lignes BC sans N° FP (non rattachables)", (b) => b.bcNumber || b.supplier),
+    // BC dont le N° FP est RENSEIGNÉ mais INCONNU du carnet (symétrie de factures_orphelines) : l'achat n'est
+    // rattaché à AUCUNE affaire → coût/engagement fournisseur non imputable à une marge, silencieux sans ce
+    // prédicat (le filet d'orphelins était asymétrique BC vs factures — audit continuité). FP CANONIQUE (fpKey)
+    // comparé à orderFps (appartenance fraîche, pas un drapeau).
+    def("bc_fp_inconnu", "medium", bcLines.filter((b) => { const k = fpKey(b.fp); return k && !orderFps.has(k); }), "Lignes BC dont le N° FP est inconnu du carnet (achat non rattaché à une affaire)", (b) => b.bcNumber || b.fp),
     def("bc_sans_fournisseur", "low", bcLines.filter((b) => !b.supplier), "Lignes BC sans fournisseur", (b) => b.bcNumber),
     // BC RÉEL (avec N° BC) à montant XOF nul : souvent une devise étrangère non convertie.
     // BC RÉEL à montant XOF nul = HAUT : il compte pour 0 dans le SOLDE/l'engagement fournisseur (SOA) →

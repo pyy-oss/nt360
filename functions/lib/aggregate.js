@@ -254,6 +254,14 @@ async function recomputeCore(db, only) {
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
   const orders = mergeCommandes(pnlOrders, opps, projectSheets, invoices);
+  // CONTINUITÉ (audit) : la DATE DE COMMANDE remontée par la synchro inverse ClickUp (cu.dateCommande, epoch ms)
+  // enrichit `orders` AVANT alerts()/dataQuality — sinon seule la date d'import P&L est vue et l'alerte
+  // « commande signée non facturée » (trou de facturation cash) ignore les commandes datées via ClickUp. Même
+  // règle que les chunks du carnet (ClickUp prime, cf. L~585). Additif : n'affecte QUE dateCommande (jamais cas/raf/marge).
+  {
+    const cuIso = (ms) => (Number.isFinite(Number(ms)) && Number(ms) > 0 ? new Date(Number(ms)).toISOString().slice(0, 10) : null);
+    for (const o of orders) { const cu = clickupSyncMap[safeId(o.fp)] || null; const d = cu && cuIso(cu.dateCommande); if (d) o.dateCommande = d; }
+  }
   // SURCHARGE DU MONTANT (CAS) : la valeur synchronisée depuis l'opportunité PRIME sur P&L/opp/fiche.
   // Le RAF DÉRIVÉ (rafSource='derive' = CAS − facturé) est recalculé sur le nouveau CAS ; le RAF curaté
   // (Excel) est conservé tel quel (source de vérité métier). `casSource='override'` trace la surcharge.

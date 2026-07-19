@@ -48,6 +48,18 @@ describe("dataQuality — hygiène d'ingestion", () => {
     expect(byType.bc_montant_zero.count).toBe(1);
     expect(byType.bc_montant_zero.severity).toBe("high");
   });
+  it("BC au N° FP INCONNU du carnet signalé (symétrie factures orphelines) [audit continuité]", () => {
+    const ord = [{ fp: "FP/2026/1", cas: 100, yearPo: 2026, client: "ACME", am: "AM" }];
+    const bc = [
+      { fp: "FP/2026/1", supplier: "HDF", amountXof: 100, bcNumber: "BC1" }, // FP au carnet → OK
+      { fp: "FP/2026/9", supplier: "DELL", amountXof: 200, bcNumber: "BC2" }, // FP renseigné mais INCONNU → signalé
+      { fp: "", supplier: "X", bcNumber: "BC3" },                            // sans FP → bc_sans_fp, PAS bc_fp_inconnu
+    ];
+    const bt = Object.fromEntries(dataQuality(ord, [], [], bc, []).issues.map((i) => [i.type, i]));
+    expect(bt.bc_fp_inconnu.count).toBe(1);          // seul BC2 (BC1 rattaché, BC3 sans FP)
+    expect(bt.bc_fp_inconnu.severity).toBe("medium");
+    expect(bt.bc_sans_fp.count).toBe(1);             // BC3 uniquement (aucun chevauchement des deux prédicats)
+  });
   it("commandes P&L au N° FP ILLISIBLE (rawOrders) → anomalie haute (CA autrement perdu)", () => {
     // Lignes P&L brutes : FP illisibles à CAS>0 doivent être signalées ; l'illisible sans CAS ou le FP
     // canonique valide ne le sont pas.
