@@ -7,10 +7,14 @@
 
 const { plausibleYear } = require("../lib/ids"); // discipline millésime : [2015..année+3], sinon 0 (jamais brut)
 
-// Clé de rapprochement fournisseur → partenaire : nom en MAJUSCULES sans espaces de bord (comme
-// domain/fournisseurs.js qui agrège par `supplier.toUpperCase()`). Déterministe.
+// Clé de rapprochement fournisseur → partenaire (audit adverse #4) : nom en MAJUSCULES, espaces de bord
+// coupés ET espaces internes COMPACTÉS. La compaction est essentielle : un même fournisseur arrive avec un
+// espacement variable selon la source du BC (ingestion Odoo compacte, import ClickUp non) — sans elle,
+// « DELL  TECHNOLOGIES » (ClickUp, double espace) ≠ « DELL TECHNOLOGIES » (Odoo) et le CA d'un SEUL fournisseur
+// se scinderait entre rattaché et « non rattaché ». Autorité UNIQUE côté module (le mapping applique la MÊME
+// règle, cf. setParPartnerMap) → clé stable quelle que soit la source. Déterministe.
 function normalizeSupplier(s) {
-  return String(s == null ? "" : s).trim().toUpperCase();
+  return String(s == null ? "" : s).replace(/\s+/g, " ").trim().toUpperCase();
 }
 
 // Millésime (année CIVILE) d'une commande fournisseur, dérivé de sa RÉFÉRENCE « BC/AAAA/NNNN » (ADR-P16).

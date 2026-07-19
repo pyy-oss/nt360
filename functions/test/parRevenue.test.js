@@ -1,5 +1,24 @@
 import { describe, it, expect } from "vitest";
-const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor, bcYear } = require("../domain/parRevenue");
+const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor, bcYear, normalizeSupplier } = require("../domain/parRevenue");
+
+// Audit adverse #4 : la clé fournisseur doit être ROBUSTE à l'espacement variable selon la source du BC.
+describe("normalizeSupplier — clé robuste (compacte espaces + MAJUSCULES)", () => {
+  it("compacte les espaces internes, coupe les bords, met en majuscules", () => {
+    expect(normalizeSupplier("  Dell   Technologies ")).toBe("DELL TECHNOLOGIES");
+    expect(normalizeSupplier("dell technologies")).toBe("DELL TECHNOLOGIES");
+  });
+  it("un même fournisseur à espacement variable (Odoo vs ClickUp) résout au MÊME partenaire", () => {
+    const map = { "DELL TECHNOLOGIES": "dell" }; // clé compactée (comme setParPartnerMap la stocke)
+    expect(resolvePartner("DELL  TECHNOLOGIES", map)).toBe("dell"); // double espace (ClickUp) → matche quand même
+    const { partners, unmapped } = revenueByPartner([
+      { supplier: "DELL TECHNOLOGIES", amountXof: 100 }, // Odoo (compacté)
+      { supplier: "DELL  TECHNOLOGIES", amountXof: 50 }, // ClickUp (double espace)
+    ], map);
+    expect(partners).toHaveLength(1); // un seul partenaire, pas de scission
+    expect(partners[0].revenueXof).toBe(150);
+    expect(unmapped).toHaveLength(0);
+  });
+});
 
 // CA partenaire dérivé des BC fournisseurs (ADR-P02). Aucune saisie : somme des BC par constructeur.
 describe("parRevenue — CA dérivé des BC", () => {
