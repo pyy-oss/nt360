@@ -4,7 +4,7 @@
 // est DÉRIVÉ des BC fournisseurs (summaries/par_ca) — aucune saisie. Aucune valeur en dur (tons/libellés
 // via lib/parLabels). Composant LAZY → callables inline (hors chunk d'entrée).
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
@@ -683,6 +683,8 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   // Un fournisseur (distributeur) peut porter PLUSIEURS constructeurs (ADR-P14) : chaque ligne a une liste
   // d'allocations { constructeur, poids }. Poids par défaut = 1 (répartition égale à la sauvegarde).
   const [rows, setRows] = useState<{ supplier: string; allocs: { partnerId: string; weight: string }[] }[]>([]);
+  const toast = useToast();
+  const [suggBusy, setSuggBusy] = useState(false);
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
   // Édition demandée depuis une vue read-only (Plan d'affaires / Conformité) : ouvre le formulaire pour ce
@@ -732,9 +734,39 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   // Mutations d'allocation (ajout/retrait/édition d'un constructeur d'un fournisseur).
   const setAlloc = (i: number, fn: (a: { partnerId: string; weight: string }[]) => { partnerId: string; weight: string }[]) =>
     setRows((rs) => rs.map((x, j) => j === i ? { ...x, allocs: fn(x.allocs) } : x));
+  // Suggestion IA (ADR-P15) : l'IA propose un rattachement fournisseur → constructeur(s) à partir des noms.
+  // On PRÉ-REMPLIT seulement les lignes encore VIDES (allocs sans constructeur) et on AJOUTE les fournisseurs
+  // manquants — jamais d'écrasement d'un choix humain. Rien n'est enregistré : l'utilisateur valide puis Enregistre.
+  const suggest = async () => {
+    if (suggBusy) return; setSuggBusy(true);
+    try {
+      const r = await callFn<{ suggestions: { supplier: string; allocations: { partnerId: string; weight: number }[] }[] }>("suggestParPartnerMap", {});
+      const sugg = r.suggestions || [];
+      if (!sugg.length) { toast("Aucun rattachement proposé — vérifiez à la main", "info"); return; }
+      const byUpper = new Map(sugg.map((s) => [s.supplier.trim().toUpperCase(), s]));
+      let filled = 0;
+      setRows((rs) => {
+        const next = rs.map((row) => {
+          const s = byUpper.get(row.supplier.trim().toUpperCase());
+          const empty = !row.allocs.some((a) => a.partnerId); // ne touche pas un choix déjà posé
+          if (s && empty) { filled++; return { ...row, allocs: s.allocations.map((a) => ({ partnerId: a.partnerId, weight: String(a.weight) })) }; }
+          return row;
+        });
+        // Fournisseurs proposés sans ligne existante → ajoutés (l'IA les a vus dans les BC non rattachés).
+        const known = new Set(next.map((x) => x.supplier.trim().toUpperCase()));
+        for (const s of sugg) { const k = s.supplier.trim().toUpperCase(); if (!known.has(k)) { filled++; next.push({ supplier: s.supplier, allocs: s.allocations.map((a) => ({ partnerId: a.partnerId, weight: String(a.weight) })) }); } }
+        return next;
+      });
+      toast(filled ? `${filled} rattachement(s) proposé(s) — vérifiez puis Enregistrer` : "Propositions déjà présentes (rien à pré-remplir)", "ok");
+    } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setSuggBusy(false); }
+  };
   return (
     <div className="space-y-4">
-      <Card title="Correspondance fournisseur → constructeur" actions={canWrite ? <Busy label="Enregistrer" fn={save} okMsg="Correspondance enregistrée" /> : undefined}>
+      <Card title="Correspondance fournisseur → constructeur" actions={canWrite ? <div className="flex items-center gap-2">
+        {!!unmapped.length && <button className="btn-ghost text-[12px]" disabled={suggBusy} onClick={suggest} title="L'IA propose un rattachement fournisseur → constructeur ; vous validez avant d'enregistrer"><Sparkles size={13} /> {suggBusy ? "Analyse…" : "Suggérer (IA)"}</button>}
+        <Busy label="Enregistrer" fn={save} okMsg="Correspondance enregistrée" />
+      </div> : undefined}>
         <Tip>Le CA par constructeur est dérivé des BC fournisseurs. Un <b>fournisseur</b> (souvent un distributeur) peut porter <b>plusieurs constructeurs</b> : ajoutez-en autant que nécessaire avec un <b>poids</b> — le montant du BC est <b>réparti</b> selon ces poids (jamais additionné). Non renseigné ⇒ le BC n'est pas compté. Un seul constructeur = 100 %.</Tip>
         <div className="space-y-2">
           {rows.map((r, i) => {

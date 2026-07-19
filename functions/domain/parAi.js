@@ -3,6 +3,8 @@
 // sortie brute est TOUJOURS re-validée par normalizeActionPlan / normalizeQbr (structure garantie).
 // Montants en XOF (FCFA) — jamais l'euro du kit. Snapshots construits à partir des summaries par_*.
 
+const { allocationsFor } = require("./parRevenue"); // UNE seule autorité de normalisation des poids (ADR-P14)
+
 const str = (v, max = 300) => String(v == null ? "" : v).trim().slice(0, max);
 const strArr = (v, n = 8, max = 200) => (Array.isArray(v) ? v.map((x) => str(x, max)).filter(Boolean).slice(0, n) : []);
 const PRIORITES = ["haute", "moyenne", "basse"];
@@ -108,4 +110,64 @@ function normalizeQbr(parsed, snapshot) {
   };
 }
 
-module.exports = { PRIORITES, actionPlanSnapshot, qbrSnapshot, buildActionPlanPrompt, normalizeActionPlan, buildQbrPrompt, normalizeQbr };
+// ── Mapping assisté (IA) : proposer, pour chaque fournisseur NON rattaché, le(s) constructeur(s) qu'il
+// distribue (ADR-P14 : un distributeur porte plusieurs marques). L'IA PROPOSE une répartition ; l'humain la
+// valide dans l'éditeur avant setParPartnerMap. Aucun montant CA dans le snapshot — la tâche est un
+// rapprochement de NOMS (fournisseur ↔ marque), pas une analyse de volume → rien de confidentiel n'est transmis.
+function mapSuggestSnapshot({ unmapped, partners }) {
+  const fournisseurs = ((unmapped) || []).map((u) => ({
+    nom: str(u && u.supplier, 120), nb_bc: Number((u && u.bcCount) || 0),
+  })).filter((f) => f.nom).slice(0, 40);
+  const partenaires = ((partners) || []).map((p) => ({
+    id: str(p && p.id, 80), nom: str((p && p.name) || (p && p.id), 120), marque: str((p && p.programName) || (p && p.name), 120),
+  })).filter((p) => p.id).slice(0, 60);
+  return { fournisseurs_non_rattaches: fournisseurs, partenaires_connus: partenaires };
+}
+
+function buildMapSuggestPrompt(snapshot) {
+  const system = "Tu es analyste achats pour une ESN à Abidjan (Côte d'Ivoire, zone FCFA) qui revend et intègre du matériel constructeur (Dell, Cisco, Fortinet, Huawei, etc.). On te donne des FOURNISSEURS (distributeurs) non encore rattachés à un constructeur, et la liste des constructeurs partenaires connus. Ta tâche : dire, pour chaque fournisseur, quel(s) constructeur(s) de la liste il distribue. Un distributeur porte souvent PLUSIEURS marques : tu répartis alors par des poids. Tu réponds en français, uniquement en JSON valide, sans texte ni balises autour.";
+  const user = `Fournisseurs à rattacher et constructeurs partenaires connus :
+
+${JSON.stringify(snapshot, null, 2)}
+
+Pour chaque fournisseur, propose la répartition vers un ou plusieurs constructeurs de la liste "partenaires_connus" (utilise EXACTEMENT les valeurs du champ "id"). N'invente aucun id hors de cette liste. Si tu n'es pas raisonnablement sûr de rattacher un fournisseur, OMETS-LE (mieux vaut aucune proposition qu'une erreur — un humain valide ensuite).
+
+Réponds UNIQUEMENT avec un tableau JSON valide. Format exact :
+[
+  { "fournisseur": "nom exact du fournisseur", "repartition": [ { "id": "id-constructeur", "poids": 0.7 }, { "id": "autre-id", "poids": 0.3 } ], "justification": "raison courte (max 15 mots)" }
+]
+Les poids d'un fournisseur doivent sommer à 1 (un seul constructeur → poids 1). Ne propose que les fournisseurs que tu peux rattacher avec confiance.`;
+  return { system, user };
+}
+
+// Re-validation stricte : ne garde que des id de constructeurs CONNUS et des poids > 0, normalisés à somme 1
+// (via allocationsFor, l'autorité ADR-P14). Une proposition sans allocation valide est écartée. La clé
+// fournisseur reste le nom BRUT (rapproché en MAJUSCULES au moment du setParPartnerMap, comme le CA).
+function normalizeMapSuggest(parsed, validIds) {
+  const known = new Set((validIds || []).map((v) => str(v, 80)).filter(Boolean));
+  const arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.suggestions) ? parsed.suggestions : []);
+  const out = [];
+  const seen = new Set();
+  for (const it of arr) {
+    if (!it || typeof it !== "object") continue;
+    const fournisseur = str(it.fournisseur || it.supplier, 120);
+    if (!fournisseur) continue;
+    const key = fournisseur.toUpperCase();
+    if (seen.has(key)) continue; // une proposition par fournisseur (première gagne)
+    // Construit { id: poids } en n'acceptant QUE des constructeurs connus, puis normalise à somme 1.
+    const raw = {};
+    for (const a of Array.isArray(it.repartition) ? it.repartition : (Array.isArray(it.allocations) ? it.allocations : [])) {
+      if (!a || typeof a !== "object") continue;
+      const id = str(a.id || a.partnerId, 80);
+      const w = Number(a.poids != null ? a.poids : a.weight);
+      if (known.has(id) && Number.isFinite(w) && w > 0) raw[id] = (raw[id] || 0) + w;
+    }
+    const allocations = allocationsFor(raw).map((x) => ({ partnerId: x.partnerId, weight: Math.round(x.weight * 100) / 100 }));
+    if (!allocations.length) continue; // aucun constructeur connu rattaché → proposition inutile
+    seen.add(key);
+    out.push({ supplier: fournisseur, allocations, rationale: str(it.justification || it.rationale, 200) });
+  }
+  return out.slice(0, 40);
+}
+
+module.exports = { PRIORITES, actionPlanSnapshot, qbrSnapshot, buildActionPlanPrompt, normalizeActionPlan, buildQbrPrompt, normalizeQbr, mapSuggestSnapshot, buildMapSuggestPrompt, normalizeMapSuggest };

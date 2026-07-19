@@ -315,6 +315,31 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, qbr: out.qbr, snapshot, model: out.model };
   });
 
+  // MAPPING ASSISTÉ (IA) : propose, pour chaque fournisseur NON rattaché du CA, le(s) constructeur(s) qu'il
+  // distribue (ADR-P14). L'IA PROPOSE une répartition ; l'humain la valide dans l'éditeur avant setParPartnerMap
+  // (gouvernance « l'IA propose, l'humain tranche »). NE MODIFIE RIEN — lecture seule, aucune écriture de mapping.
+  // Snapshot SANS montant CA : le rapprochement porte sur les NOMS (fournisseur ↔ marque), pas sur le volume →
+  // rien de confidentiel (ADR-P07) n'est transmis au modèle. Le résultat re-validé n'admet que des id connus.
+  const suggestParPartnerMap = onCallG("suggestParPartnerMap", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    const apiKey = await assertAiReady(req);
+    const [caSnap, partSnap] = await Promise.all([
+      db.doc("summaries/par_ca").get(),
+      db.collection("par_partners").select("name", "programName").get(),
+    ]);
+    const unmapped = ((caSnap.data() || {}).unmapped) || [];
+    if (!unmapped.length) throw new HttpsError("failed-precondition", "aucun fournisseur à rattacher — le CA est déjà entièrement mappé (ou aucun BC importé).");
+    const partners = partSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || d.id, programName: (d.data() || {}).programName || "" }));
+    if (!partners.length) throw new HttpsError("failed-precondition", "aucun partenaire au référentiel — initialisez le référentiel d'abord.");
+    const { mapSuggestSnapshot } = require("../domain/parAi");
+    const snapshot = mapSuggestSnapshot({ unmapped, partners });
+    const { suggestPartnerMap } = require("../lib/parAi");
+    let out;
+    try { out = await suggestPartnerMap(apiKey, snapshot); }
+    catch (e) { if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter la demande."); throw new HttpsError("internal", "L'assistant IA n'a pas pu proposer de rattachement (réessayez)."); }
+    if (logOps) await logOps({ kind: "ai", action: "parMapSuggest", status: "ok", uid: req.auth.uid, detail: { fournisseurs: snapshot.fournisseurs_non_rattaches.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
+    return { ok: true, suggestions: out.suggestions, model: out.model };
+  });
+
   // Import en MASSE des certifications par ingénieur depuis le fichier direction (domain/parCertSeed). Choix
   // direction : CRÉE les consultants nommés manquants (après rapprochement par nom normalisé contre l'annuaire
   // ESN existant, pour ne PAS dupliquer un salarié présent), COMPLÈTE le catalogue des partenaires (compétences

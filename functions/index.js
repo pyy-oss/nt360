@@ -1474,6 +1474,7 @@ exports.deleteParAssignment = _partenariats.deleteParAssignment;
 exports.pushParAssignmentToClickup = _partenariats.pushParAssignmentToClickup;
 exports.generateParActionPlan = _partenariats.generateParActionPlan;
 exports.generateParQbr = _partenariats.generateParQbr;
+exports.suggestParPartnerMap = _partenariats.suggestParPartnerMap;
 exports.importParCertifications = _partenariats.importParCertifications;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
