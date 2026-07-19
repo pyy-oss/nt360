@@ -35,7 +35,7 @@ type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | 
 type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; caDeclaredXof?: number; fiscalStartMonth?: number; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
-type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; bcXof?: number; declaredXof?: number; asOf?: string } | null;
+type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; bcXof?: number; declaredXof?: number; exerciseYear?: number; offExerciseXof?: number; offExerciseCount?: number; asOf?: string } | null;
 type CaHistory = { days?: { date: string; totalXof: number; bcXof: number; declaredXof: number }[] } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
@@ -289,7 +289,7 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   const risque = aRisque + nonConformes;
   const stats: { label: string; value: string; color?: string }[] = [
     { label: "Partenaires", value: String(partners.length) },
-    ...(canSeeCa ? [{ label: "CA constructeurs", value: fmt(ca?.totalXof || 0), color: T.emerald }] : []),
+    ...(canSeeCa ? [{ label: `CA constructeurs ${ca?.exerciseYear || ""}`.trim(), value: fmt(ca?.totalXof || 0), color: T.emerald }] : []),
     { label: "Certifs à renouveler", value: String(alerts?.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
     { label: "Partenariats à risque", value: String(risque), color: risque > 0 ? T.clay : undefined },
   ];
@@ -397,7 +397,13 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
             <Dot color={T.emerald} label={<>BC dérivé <b className="tabnum">{money(ca?.bcXof || 0)}</b></>} />
             <Dot color={T.gold} label={<>Déclaré <b className="tabnum">{money(ca?.declaredXof || 0)}</b></>} />
-            <span className="text-faint tabnum">· total {money(ca?.totalXof || 0)}</span>
+            <span className="text-faint tabnum">· total {money(ca?.totalXof || 0)}{ca?.exerciseYear ? ` (exercice ${ca.exerciseYear})` : ""}</span>
+          </div>
+        )}
+        {/* CA d'autres millésimes (n° BC/AAAA/N) écarté de l'exercice — remonté, jamais silencieux (ADR-P16). */}
+        {!!(ca?.offExerciseXof) && (
+          <div className="mt-1 text-[11px] text-faint">
+            {money(ca!.offExerciseXof!)} de commandes d'autres millésimes exclues de l'exercice {ca?.exerciseYear || ""} ({ca?.offExerciseCount || 0} BC).
           </div>
         )}
         {!!(ca?.unmapped || []).length && (

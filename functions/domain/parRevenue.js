@@ -5,10 +5,24 @@
 // fpAliases). Aucune collection purchaseOrders parallèle → une seule vérité des achats fournisseurs.
 // Montants en XOF ENTIER (le FCFA n'a pas de subdivision — règle de l'ERP).
 
+const { plausibleYear } = require("../lib/ids"); // discipline millésime : [2015..année+3], sinon 0 (jamais brut)
+
 // Clé de rapprochement fournisseur → partenaire : nom en MAJUSCULES sans espaces de bord (comme
 // domain/fournisseurs.js qui agrège par `supplier.toUpperCase()`). Déterministe.
 function normalizeSupplier(s) {
   return String(s == null ? "" : s).trim().toUpperCase();
+}
+
+// Millésime (année CIVILE) d'une commande fournisseur, dérivé de sa RÉFÉRENCE « BC/AAAA/NNNN » (ADR-P16).
+// Présent sur chaque BC quelle que soit la source (unitaire, Odoo, ClickUp). Repli sur le millésime de
+// l'affaire (« FP/AAAA/N ») si le n° BC n'en porte pas. 0 = non daté (BC sans millésime résoluble). Passé
+// par plausibleYear pour écarter une année aberrante (1900, 20226) — même discipline que le reste de l'ERP.
+function bcYear(bc) {
+  const mBc = String((bc && bc.bcNumber) || "").match(/(\d{4})/);
+  const y = mBc ? plausibleYear(mBc[1]) : 0;
+  if (y) return y;
+  const mFp = String((bc && bc.fp) || "").match(/(\d{4})/);
+  return (mFp ? plausibleYear(mFp[1]) : 0) || 0;
 }
 
 // Normalise la valeur de mapping d'un fournisseur en ALLOCATIONS [{partnerId, weight}] dont les poids SOMMENT
@@ -39,13 +53,24 @@ function resolvePartner(supplier, map) {
  * Agrège le CA par partenaire depuis les lignes BC. Somme amountXof des BC dont le fournisseur résout
  * vers un partenaire ; les fournisseurs NON mappés sont remontés à part (jamais silencieusement ignorés —
  * un BC non rattaché signale une table parPartnerMap à compléter). Montants arrondis XOF entier.
- * @returns { partners: [{partnerId, revenueXof, bcCount}], unmapped: [{supplier, revenueXof, bcCount}] }
+ * @param {object} [opts] opts.year : millésime d'exercice (année civile). Renseigné ⇒ ne retient que les BC de
+ *   CETTE année (millésime du n° « BC/AAAA/N », ADR-P16) — un BC d'un AUTRE millésime valide est ÉCARTÉ et sa
+ *   somme remontée dans offExerciseXof (jamais silencieux). Un BC NON daté (millésime 0) est CONSERVÉ (on ne le
+ *   présume pas hors exercice — l'écarter sous-compterait le CA). Sans opts.year ⇒ cumul all-time (rétro-compat).
+ * @returns { partners, unmapped, offExerciseXof, offExerciseCount }
  */
-function revenueByPartner(bcLines, map) {
+function revenueByPartner(bcLines, map, opts = {}) {
+  const year = Number.isFinite(Number(opts.year)) && Number(opts.year) > 0 ? Number(opts.year) : 0;
   const byPartner = {}, unmapped = {};
+  let offExerciseXof = 0, offExerciseCount = 0;
   for (const b of bcLines || []) {
     const amt = Number(b && b.amountXof) || 0;
     if (!(amt > 0)) continue; // BC à montant nul/négatif : hors CA (déjà signalé par la qualité fournisseurs)
+    if (year) {
+      const y = bcYear(b);
+      if (y && y !== year) { offExerciseXof += amt; offExerciseCount += 1; continue; } // autre millésime → hors exercice
+      // y === 0 (non daté) : conservé dans l'exercice courant (ne pas sous-compter un BC sans millésime).
+    }
     const allocs = allocationsFor((map || {})[normalizeSupplier(b && b.supplier)]);
     if (allocs.length) {
       // Répartition pondérée (ADR-P14) : la somme des parts = amt → aucun double-compte inter-constructeurs.
@@ -62,7 +87,7 @@ function revenueByPartner(bcLines, map) {
   const round = (o) => ({ ...o, revenueXof: Math.round(o.revenueXof) });
   const partners = Object.values(byPartner).map(round).sort((a, b) => b.revenueXof - a.revenueXof);
   const unmappedArr = Object.values(unmapped).map(round).sort((a, b) => b.revenueXof - a.revenueXof);
-  return { partners, unmapped: unmappedArr };
+  return { partners, unmapped: unmappedArr, offExerciseXof: Math.round(offExerciseXof), offExerciseCount };
 }
 
 // Progression du CA vers un objectif (%), bornée à 100. null si pas d'objectif. Entier.
@@ -97,4 +122,4 @@ function blendRevenue(bcPartners, declaredByPartner) {
   return out.sort((a, b) => b.revenueXof - a.revenueXof);
 }
 
-module.exports = { normalizeSupplier, allocationsFor, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };
+module.exports = { normalizeSupplier, bcYear, allocationsFor, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };

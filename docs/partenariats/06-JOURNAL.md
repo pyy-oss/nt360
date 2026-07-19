@@ -845,3 +845,21 @@ CONFIRMÉS solides. Lot A = les 5 correctifs nets et additifs remontés :
 
 **Conception.** Lot A strictement additif/correctif, aucun schéma ni primitive modifié. Vérifs : functions
 1170 (+3), web 277, build, bundle 118.3 KB < 120, guards verts.
+
+---
+
+## Session — audit adverse lot B #1 : CA constructeur scopé à l'exercice (ADR-P16)
+
+**Fait.** Le « CA YTD » constructeur sommait tous les BC de l'histoire (aucun filtre de millésime). Correction
+(option b validée par l'humain — les BC portent une réf `BC/AAAA/N`) : `bcYear(bc)` dérive l'année du n° BC
+(repli millésime d'affaire FP, discipline `plausibleYear`) ; `revenueByPartner(..., { year })` ne retient que
+l'exercice courant, écarte les autres millésimes vers `offExerciseXof` (remonté, jamais ignoré), et conserve
+les BC non datés (pas de sous-compte). `aggregate.js` passe l'année d'`asOf` ; `par_ca` porte `exerciseYear` +
+`offExerciseXof` ; le front étiquette « CA constructeurs <année> » + affiche le hors-exercice.
+
+**Limite assumée (ADR-P16)** : millésime = année CIVILE du n° BC, pas la date d'engagement (absente/non fiable
+sur `bcLines`). L'exercice fiscal par partenaire reste un cadre d'interprétation IA, pas un filtre.
+
+**Conception.** Additif (helper + param optionnel `year`, rétro-compat sans `year` → le filet E2E reste vert).
+Aucun schéma ni primitive modifié. Vérifs : parRevenue (+3 tests), functions 1173, web 277, build, bundle
+118.3 KB < 120, guards verts.

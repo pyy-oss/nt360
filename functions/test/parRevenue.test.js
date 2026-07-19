@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor } = require("../domain/parRevenue");
+const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor, bcYear } = require("../domain/parRevenue");
 
 // CA partenaire dérivé des BC fournisseurs (ADR-P02). Aucune saisie : somme des BC par constructeur.
 describe("parRevenue — CA dérivé des BC", () => {
@@ -102,5 +102,38 @@ describe("blendRevenue — mélange BC + déclaratif", () => {
     const ids = out.map((g) => g.partnerId).sort();
     expect(ids).toEqual(["cisco", "fortinet"]);
     expect(out[0].partnerId).toBe("cisco"); // trié desc
+  });
+});
+
+// Millésime d'exercice (ADR-P16) — le CA « YTD » ne doit plus sommer tous les BC de l'histoire.
+describe("bcYear + revenueByPartner scopé à l'exercice", () => {
+  const YEAR = new Date().getFullYear();
+  it("bcYear : lit AAAA du n° BC/AAAA/N ; repli sur le millésime d'affaire FP/AAAA/N ; 0 sinon", () => {
+    expect(bcYear({ bcNumber: `BC/${YEAR}/42` })).toBe(YEAR);
+    expect(bcYear({ bcNumber: "BC/2019/7" })).toBe(2019);
+    expect(bcYear({ bcNumber: "sans-annee", fp: "FP/2020/3" })).toBe(2020); // repli FP
+    expect(bcYear({ bcNumber: "BC/1900/1" })).toBe(0); // millésime aberrant → plausibleYear écarte
+    expect(bcYear({ bcNumber: "", fp: "" })).toBe(0);   // non daté
+  });
+
+  it("year : écarte les BC d'un AUTRE millésime (remontés dans offExerciseXof), garde l'exercice + les non datés", () => {
+    const map = { "HDF": "cisco" };
+    const bc = [
+      { supplier: "HDF", amountXof: 1000, bcNumber: `BC/${YEAR}/1` },      // exercice courant → compté
+      { supplier: "HDF", amountXof: 500, bcNumber: "BC/2019/9" },          // vieux millésime → écarté
+      { supplier: "HDF", amountXof: 300, bcNumber: "sans-numero", fp: "" }, // non daté → conservé (pas de sous-compte)
+    ];
+    const out = revenueByPartner(bc, map, { year: YEAR });
+    const cisco = out.partners.find((p) => p.partnerId === "cisco");
+    expect(cisco.revenueXof).toBe(1300);      // 1000 (exercice) + 300 (non daté), PAS le 500 de 2019
+    expect(out.offExerciseXof).toBe(500);     // le vieux millésime, remonté et non ignoré
+    expect(out.offExerciseCount).toBe(1);
+  });
+
+  it("sans year : cumul all-time (rétro-compat) — offExerciseXof = 0", () => {
+    const bc = [{ supplier: "HDF", amountXof: 500, bcNumber: "BC/2019/9" }];
+    const out = revenueByPartner(bc, { "HDF": "cisco" });
+    expect(out.partners[0].revenueXof).toBe(500);
+    expect(out.offExerciseXof).toBe(0);
   });
 });

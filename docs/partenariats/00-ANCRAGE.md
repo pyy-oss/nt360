@@ -351,3 +351,27 @@ la saisie est fastidieuse et le rattachement d'un distributeur à ses marques es
 Vérif : `test/parAi.test.js` (mapSuggestSnapshot sans montant, prompt strict, normalizeMapSuggest n'admet que
 des id connus + poids somme 1), suite functions (1158) + web (277), build + bundle 118.3 KB < 120.
 Statut : **acté (PA+ Lot 1 — mapping assisté IA)**.
+
+### ADR-P16 — Le CA constructeur est scopé à l'EXERCICE COURANT (millésime du n° BC/AAAA/N), pas all-time
+**Contexte** (audit adverse) : `revenueByPartner` sommait **tous** les BC de l'histoire (aucun filtre de
+millésime) ; or le chiffre était surfacé comme un **YTD** (`ca_ytd_fcfa`, tuile « CA constructeurs », prompt QBR
+« situe l'avancement dans l'exercice »). Un BC de 2020 gonflait donc le « CA YTD 2026 » → deux définitions du mot
+« YTD ». Constat validé par l'humain ; les commandes fournisseur portent une **référence `BC/AAAA/NNNN`** →
+le millésime est disponible sur chaque BC (toutes sources : unitaire, Odoo, ClickUp).
+**Décision (option b, validée)** : scoper le CA à l'**année civile** dérivée du n° BC.
+- `domain/parRevenue.bcYear(bc)` : lit `AAAA` de `bcNumber` (`BC/AAAA/N`), repli sur le millésime d'affaire
+  (`fp` = `FP/AAAA/N`), le tout passé par `plausibleYear` ([2015..année+3], sinon 0 = **non daté**). Discipline
+  millésime UNIQUE, comme le reste de l'ERP (jamais l'année brute).
+- `revenueByPartner(bcLines, map, { year })` ne retient que les BC du millésime demandé. Un BC d'un **autre**
+  millésime valide est **écarté** et sa somme remontée dans `offExerciseXof`/`offExerciseCount` — **jamais
+  silencieux**. Un BC **non daté** (millésime 0) est **conservé** dans l'exercice courant (l'écarter
+  sous-compterait le CA). Sans `year` ⇒ cumul all-time (rétro-compat, filet E2E inchangé).
+- `aggregate.js` passe `{ year: année de asOf }` ; `summaries/par_ca` porte désormais `exerciseYear` +
+  `offExerciseXof`. Le front étiquette « CA constructeurs `<année>` » et affiche le montant hors exercice.
+- **Limite ASSUMÉE** : le millésime est l'**année civile du n° BC**, PAS la date d'engagement réelle (les
+  `bcLines` n'en portent pas de fiable — `dateIn` absent des BC ClickUp). L'exercice fiscal par partenaire
+  (ADR-P12, `fiscalStartMonth`) reste un **cadre d'interprétation** pour l'IA, non un filtre. Un CA d'exercice
+  fiscal strict exigerait la date d'achat — hors périmètre tant que la donnée n'existe pas.
+Vérif : `test/parRevenue.test.js` (bcYear BC/FP/aberrant/non-daté ; year écarte les autres millésimes vers
+offExerciseXof, garde les non datés ; rétro-compat sans year), functions (1173) + web (277), build + bundle
+118.3 KB < 120. Statut : **acté (audit adverse lot B — #1)**.

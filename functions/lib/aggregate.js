@@ -822,7 +822,10 @@ async function recomputeCore(db, only) {
       // CA par constructeur : MÉLANGE BC dérivé + déclaratif (ADR-P02/P10). Le déclaratif d'un partenaire =
       // caDeclaredXof s'il est renseigné, sinon le réalisé booking YTD du plan d'affaires (repli sur la donnée
       // déjà saisie/importée). blendRevenue tranche : BC prime, déclaratif en repli — jamais additif (anti-double-compte).
-      const { partners: caPartners, unmapped } = revenueByPartner(bcLines, partnerMap);
+      // CA scopé à l'EXERCICE COURANT (année civile du n° BC, ADR-P16) : un BC d'un millésime antérieur ne
+      // gonfle plus le « CA YTD ». Le montant écarté (autres millésimes) est remonté (offExerciseXof), jamais ignoré.
+      const exerciseYear = Number(String(asOf).slice(0, 4)) || new Date().getFullYear();
+      const { partners: caPartners, unmapped, offExerciseXof, offExerciseCount } = revenueByPartner(bcLines, partnerMap, { year: exerciseYear });
       const declaredByPartner = {};
       for (const p of parPartners) {
         const d = p.caDeclaredXof != null ? p.caDeclaredXof : (p.businessPlan && p.businessPlan.bookingYtd);
@@ -833,7 +836,7 @@ async function recomputeCore(db, only) {
       const totalXof = byPartner.reduce((s, g) => s + g.revenueXof, 0);
       const bcXof = byPartner.reduce((s, g) => s + (g.source === "bc" ? g.revenueXof : 0), 0); // part réellement dérivée des BC
       const declaredXof = totalXof - bcXof; // le reste vient du déclaratif (repli)
-      w.push({ path: "summaries/par_ca", data: { asOf, byPartner, unmapped: unmapped.slice(0, 20), totalXof, bcXof, declaredXof, ...stamp } });
+      w.push({ path: "summaries/par_ca", data: { asOf, exerciseYear, byPartner, unmapped: unmapped.slice(0, 20), totalXof, bcXof, declaredXof, offExerciseXof, offExerciseCount, ...stamp } });
 
       // Historisation quotidienne du CA (PA+ Lot 2, patron par_quotasHistory) : total + ventilation BC/déclaré,
       // pour la tendance. CONFIDENTIEL (préfixe par_ca ⇒ verrou `rentabilite` par les rules, comme par_ca).
