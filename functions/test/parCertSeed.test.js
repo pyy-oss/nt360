@@ -55,6 +55,22 @@ describe("planCertImport", () => {
     expect(assign.status).toBe("planifie");
   });
 
+  it("idempotence : si TOUS les noms existent déjà à l'annuaire, aucun consultant à créer (ré-import sûr)", () => {
+    const { ROWS } = require("../domain/parCertSeed");
+    const allNames = new Set();
+    for (const r of ROWS) for (const e of r.eng) allNames.add(e);
+    const consultants = [...allNames].map((name, i) => ({ id: `c${i}`, name }));
+    const plan = planCertImport(consultants, partners, today);
+    expect(plan.needConsultants).toHaveLength(0);
+  });
+
+  it("toutes les dates du plan sont d'années plausibles (rétro-calcul sain)", () => {
+    const plan = planCertImport([], partners, today);
+    const yr = (d) => Number(String(d).slice(0, 4));
+    for (const c of plan.certs) expect(yr(c.obtainedDate)).toBeGreaterThanOrEqual(2015);
+    for (const a of plan.assignments) expect(yr(a.targetDate)).toBeGreaterThanOrEqual(2015);
+  });
+
   it("partenaire absent du référentiel → ligne écartée et rapportée", () => {
     const plan = planCertImport([], [{ id: "fortinet" }], today); // seul fortinet présent
     expect(plan.skipped.some((s) => s.reason.includes("partenaire absent"))).toBe(true);
