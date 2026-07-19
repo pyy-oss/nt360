@@ -291,3 +291,23 @@ fiscale** (ex. Cisco : août→juillet), ce qui borne le « réalisé YTD ». **
   recompute **synchrone garanti** ; l'import des 20 partenaires force un recompute scopé après la boucle.
 Vérif : `test/parRevenue.test.js` (blendRevenue), `test/parPartner.test.js`, `web/src/lib/parPartnerForm.test.ts`.
 Statut : **acté (Lot CA-mixte + exercice fiscal, PR #497)**.
+
+### ADR-P13 — Actions de masse, actions de ligne cross-vue, et refonte sectionnée du formulaire Paramétrage
+**Contexte** : le module s'enrichit d'un besoin d'action à l'échelle (traiter plusieurs certifs/assignations/
+partenaires d'un coup), d'actions depuis les vues d'analyse read-only, et d'un formulaire d'édition plus
+lisible. **Décision (validée par l'humain, « go »)** :
+- **Actions en masse** via la primitive PARTAGÉE `Table.bulk` (aucune primitive modifiée) : Certifs (supprimer),
+  Assignations (changer le statut via `pick`, pousser vers ClickUp, supprimer), Référentiel partenaires
+  (supprimer). Chaque action boucle sur les callables EXISTANTS ; la suppression de partenaires tolère l'échec
+  partiel (`Promise.allSettled`) et RAPPORTE les refus (garde d'intégrité PA3) — jamais de suppression cascade.
+- **Actions de ligne cross-vue** : « Éditer le partenaire » depuis Plan d'affaires et Conformité (vues
+  read-only) bascule sur Paramétrage et ouvre le formulaire (état `editPartnerId` remonté au parent, consommé
+  par `ConfigTab`). Aucune donnée nouvelle, pure navigation.
+- **Pagination** : déjà fournie par `Table` (barème 10/20/30) ; on fixe `pageSize` explicite (12) sur les
+  listes longues (Certifs/Assignations/Référentiel) + `searchKeys`.
+- **Refonte du formulaire** : le modal d'édition partenaire est restructuré en SECTIONS premium (`FormSection`
+  = `Eyebrow` + aide + conteneur bordé) — Identité / Statut & plan d'affaires / Chiffre d'affaires & exercice /
+  Niveaux / Compétences / Catalogue / Exigences. Purement visuel : mêmes champs, même `buildPartnerPayload`,
+  même backend. Tokens uniquement, aucune primitive partagée modifiée.
+Vérif : `web/src/lib/parPartnerForm.test.ts` (inchangé), typecheck + build + bundle.
+Statut : **acté (Lot PA-actions + refonte formulaire, PR #499)**.

@@ -45,6 +45,16 @@ const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) 
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
 
+// Section de formulaire premium — en-tête `Eyebrow` (capitales espacées) + aide courte + conteneur bordé.
+// Refonte Paramétrage (ADR-P13) : donne au modal d'édition une hiérarchie lisible (Identité / Statut & plan /
+// CA & exercice / Catalogue / Exigences), au lieu d'un empilement plat. Réutilise Eyebrow + tokens.
+const FormSection: FC<{ title: string; hint?: ReactNode; children: ReactNode }> = ({ title, hint, children }) => (
+  <div className="rounded-lg border border-line p-3 space-y-3">
+    <div><Eyebrow>{title}</Eyebrow>{hint && <p className="text-[11px] text-faint mt-1">{hint}</p>}</div>
+    {children}
+  </div>
+);
+
 
 export const Partenariats: FC<Props> = () => {
   const canWrite = useCan("partenariats") === "write";
@@ -53,6 +63,10 @@ export const Partenariats: FC<Props> = () => {
   // et le KPI + la carte CA sont masqués — comme MB/%MB ailleurs (useCanSeeMargin).
   const canSeeCa = useCanSeeMargin();
   const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "engineers" | "config" | "ia">("dash");
+  // Édition d'un partenaire depuis une vue read-only (Plan d'affaires / Conformité) : on bascule sur
+  // Paramétrage et on demande l'ouverture du formulaire pour ce partnerId (consommé par ConfigTab).
+  const [editPartnerId, setEditPartnerId] = useState<string | null>(null);
+  const goEditPartner = (id: string) => { setEditPartnerId(id); setTab("config"); };
 
   // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
   const { rows: partners } = useCollectionData<Partner>("par_partners");
@@ -93,11 +107,11 @@ export const Partenariats: FC<Props> = () => {
         </Card>
       )}
 
-      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
+      {tab === "dash" && <Dashboard ca={ca} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} partnerName={partnerName} />}
       {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
       {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
-      {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} />}
+      {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
       {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
     </div>
   );
@@ -307,7 +321,9 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   );
 };
 
-const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, quotas, alerts, relances, history, partners, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, partnerName }) => {
+  // Action de ligne « Éditer le partenaire » depuis une vue read-only → bascule Paramétrage + ouvre le formulaire.
+  const editCol = (id: (r: any) => string) => colText("", (r: any) => <button className="btn-ghost text-[11px]" onClick={() => onEditPartner(id(r))}>Éditer</button>);
   const alertItems = alerts?.items || [];
   const relanceItems = relances?.items || [];
   const quotaPartners = quotas?.partners || [];
@@ -348,6 +364,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
               colNum("% global", (r) => <MiniBar ratio={r.a.global} />, (r) => r.a.global ?? -1),
               colText("Échéance", (r) => r.p.renewalDate ? frDate(r.p.renewalDate) : "—"),
               colText("Validation", (r) => <Badge tone={validationTone(r.p.validationStatus)}>{label(VALIDATION_STATUS_LABEL, r.p.validationStatus)}</Badge>, (r) => r.p.validationStatus || ""),
+              ...(canWrite ? [editCol((r) => r.p.id)] : []),
             ]}
             rows={bpRows} rowKey={(r) => r.p.id} empty="Aucun plan d'affaires saisi."
           />
@@ -386,6 +403,7 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
             colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
             colText("Exigences couvertes", (r) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c: any) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
             colText("Écarts", (r) => (r.gaps || []).length ? (r.gaps as any[]).map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
+            ...(canWrite ? [editCol((r) => r.partnerId)] : []),
           ]}
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
         />
@@ -476,7 +494,10 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
             </span>
           ))] : []),
         ]}
-        rows={certifs} rowKey={(r) => r.id} searchKeys={[(r) => r.consultantName, (r) => r.certName, (r) => r.partnerId]}
+        rows={certifs} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.consultantName, (r) => r.certName, (r) => r.partnerId]}
+        bulk={canWrite ? [
+          { label: "Supprimer", tone: "danger", confirm: "Supprimer les certifications sélectionnées ?", run: (rows) => Promise.all(rows.map((r) => callFn("deleteParCertification", { id: r.id }))), okMsg: (rows) => `${rows.length} certification(s) supprimée(s)` },
+        ] : undefined}
         empty="Aucune certification enregistrée."
       />
       {edit !== undefined && <CertifForm partners={partners} partnerOpts={partnerOpts} edit={edit} onClose={() => setEdit(undefined)} />}
@@ -564,7 +585,13 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
             </span>
           ))] : []),
         ]}
-        rows={assigns} rowKey={(r) => r.id} searchKeys={[(r) => r.consultantName, (r) => r.cert, (r) => r.partnerId]}
+        rows={assigns} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.consultantName, (r) => r.cert, (r) => r.partnerId]}
+        bulk={canWrite ? [
+          { label: "Changer le statut", pick: { options: MANUAL_ASSIGN_STATUSES.map((s) => ({ value: s, label: label(ASSIGNMENT_STATUS_LABEL, s) })), placeholder: "Statut cible" },
+            run: (rows, picked) => { if (!picked) throw new Error("Choisissez un statut cible"); return Promise.all(rows.map((r) => callFn("setParAssignmentStatus", { id: r.id, status: picked }))); }, okMsg: (rows) => `${rows.length} statut(s) mis à jour` },
+          { label: "Pousser vers ClickUp", run: (rows) => Promise.all(rows.map((r) => callFn("pushParAssignmentToClickup", { id: r.id }))), okMsg: (rows) => `${rows.length} tâche(s) synchronisée(s)` },
+          { label: "Supprimer", tone: "danger", confirm: "Supprimer les assignations sélectionnées ?", run: (rows) => Promise.all(rows.map((r) => callFn("deleteParAssignment", { id: r.id }))), okMsg: (rows) => `${rows.length} assignation(s) supprimée(s)` },
+        ] : undefined}
         empty="Aucune assignation."
       />
       {edit !== undefined && <AssignForm partners={partners} partnerOpts={partnerOpts} edit={edit} onClose={() => setEdit(undefined)} />}
@@ -596,10 +623,18 @@ const AssignForm: FC<{ partners: Partner[]; partnerOpts: { value: string; label:
 };
 
 // ─────────────────────────────────────────────────────────────────────── Paramétrage (mapping fournisseur → constructeur)
-const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean }> = ({ partners, certifs, assigns, partnerOpts, mapDoc, ca, canWrite }) => {
+const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerOpts: { value: string; label: string }[]; mapDoc: { map?: Record<string, string> } | null; ca: CaSummary; canWrite: boolean; openEditId?: string | null; onConsumedEdit?: () => void }> = ({ partners, certifs, assigns, partnerOpts, mapDoc, ca, canWrite, openEditId, onConsumedEdit }) => {
   const [rows, setRows] = useState<{ supplier: string; partnerId: string }[]>([]);
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
+  // Édition demandée depuis une vue read-only (Plan d'affaires / Conformité) : ouvre le formulaire pour ce
+  // partenaire une fois l'onglet monté, puis acquitte (évite une réouverture en boucle).
+  useEffect(() => {
+    if (!openEditId) return;
+    const p = partners.find((x) => x.id === openEditId);
+    if (p) setEdit(p);
+    onConsumedEdit?.();
+  }, [openEditId, partners, onConsumedEdit]);
   // Garde d'intégrité (PA3) : compter les certifs/assignations rattachées à un partenaire avant suppression.
   // deleteParPartner ne cascade PAS — supprimer un partenaire pointé laisserait des orphelins : on prévient.
   const links = useMemo(() => {
@@ -714,7 +749,14 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
               </span>
             ))] : []),
           ]}
-          rows={partners} rowKey={(r) => r.id}
+          rows={partners} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.name, (r) => r.programName]}
+          bulk={canWrite ? [
+            // Suppression en masse : la garde d'intégrité serveur (PA3) bloque un partenaire encore rattaché
+            // à des certifs/assignations. On tolère l'échec partiel (allSettled) et on le rapporte honnêtement.
+            { label: "Supprimer", tone: "danger", confirm: "Supprimer les partenaires sélectionnés ? Ceux encore rattachés à des certifications/assignations seront refusés.",
+              run: async (rows) => { const res = await Promise.allSettled(rows.map((r) => callFn("deleteParPartner", { id: r.id }))); const ok = res.filter((x) => x.status === "fulfilled").length; const fail = res.length - ok; if (fail) throw new Error(`${ok} supprimé(s), ${fail} refusé(s) (rattachés à des certifs/assignations)`); return ok; },
+              okMsg: (rows) => `${rows.length} partenaire(s) supprimé(s)` },
+          ] : undefined}
           empty="Aucun partenaire — créez le premier constructeur avec « Nouveau partenaire »."
         />
       </Card>
@@ -765,24 +807,20 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
             ))}
           </div>
         )}
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Field label="Constructeur (nom)"><input className="field" value={f.name} placeholder="Ex. Fortinet" onChange={(e) => set({ name: e.target.value })} /></Field>
-          <Field label="Programme"><input className="field" value={f.programName} placeholder="Ex. Engage (optionnel)" onChange={(e) => set({ programName: e.target.value })} /></Field>
-        </div>
+        <FormSection title="Identité" hint="Le constructeur et son programme partenaire.">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Constructeur (nom)"><input className="field" value={f.name} placeholder="Ex. Fortinet" onChange={(e) => set({ name: e.target.value })} /></Field>
+            <Field label="Programme"><input className="field" value={f.programName} placeholder="Ex. Engage (optionnel)" onChange={(e) => set({ programName: e.target.value })} /></Field>
+          </div>
+        </FormSection>
 
         {/* Statut courant + plan d'affaires (objectif BP vs réalisé YTD par axe) — miroir du tableau de bord
             direction Partners_Status_Tracking. Montants en FCFA entiers via le champ numérique (pas de décimale). */}
-        <div className="space-y-2 rounded-lg border border-line p-3">
-          <span className="text-[11px] font-semibold text-muted">Statut & plan d'affaires</span>
+        <FormSection title="Statut & plan d'affaires" hint="Miroir du tableau de pilotage direction. Objectif (BP) vs réalisé (YTD) — le % d'atteinte apparaît au tableau de bord.">
           <div className="grid sm:grid-cols-3 gap-3">
             <Field label="Statut actuel"><input className="field" value={f.status} placeholder="Ex. Platinum, Silver…" onChange={(e) => set({ status: e.target.value })} /></Field>
             <Field label="Échéance de renouvellement"><DateField value={f.renewalDate} onChange={(v) => set({ renewalDate: v })} /></Field>
             <Field label="Validation du plan"><Select value={f.validationStatus} onChange={(v) => set({ validationStatus: v })} options={[{ value: "", label: "—" }, ...Object.entries(VALIDATION_STATUS_LABEL).map(([value, l]) => ({ value, label: l }))]} placeholder="—" /></Field>
-          </div>
-          {/* CA réalisé déclaratif (mixé au CA dérivé des BC — cf. Tableau de bord) + exercice fiscal du partenaire. */}
-          <div className="grid sm:grid-cols-2 gap-3">
-            <Field label="CA réalisé déclaré (FCFA)"><input className="field tabnum" type="number" value={f.caDeclaredXof} placeholder="Repli = booking YTD" onChange={(e) => set({ caDeclaredXof: e.target.value })} /></Field>
-            <Field label="Début d'exercice fiscal"><Select value={f.fiscalStartMonth} onChange={(v) => set({ fiscalStartMonth: v })} options={FR_MONTHS.map((m, i) => ({ value: i === 0 ? "" : String(i), label: i === 0 ? "Calendaire (janvier)" : m }))} placeholder="Calendaire (janvier)" /></Field>
           </div>
           <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2">
             {BP_AXES.map((ax) => (
@@ -794,8 +832,16 @@ const PartnerForm: FC<{ initial: Partner | null; onClose: () => void }> = ({ ini
               </div>
             ))}
           </div>
-          <Tip>Objectif (BP) vs réalisé (YTD) par axe. Pipeline &amp; Booking en <b>FCFA</b> ; Certifications en nombre ; Croissance en %. Le <b>% d'atteinte</b> par axe et global apparaît au Tableau de bord.</Tip>
-        </div>
+          <p className="text-[11px] text-faint">Pipeline &amp; Booking en FCFA ; Certifications en nombre ; Croissance en %.</p>
+        </FormSection>
+
+        {/* CA réalisé déclaratif (mixé au CA dérivé des BC — ADR-P12) + exercice fiscal du partenaire. */}
+        <FormSection title="Chiffre d'affaires & exercice fiscal" hint="Le CA déclaré comble le CA dérivé des BC tant qu'aucun BC n'est rattaché (repli = booking YTD). L'exercice borne le réalisé.">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="CA réalisé déclaré (FCFA)"><input className="field tabnum" type="number" value={f.caDeclaredXof} placeholder="Repli = booking YTD" onChange={(e) => set({ caDeclaredXof: e.target.value })} /></Field>
+            <Field label="Début d'exercice fiscal"><Select value={f.fiscalStartMonth} onChange={(v) => set({ fiscalStartMonth: v })} options={FR_MONTHS.map((m, i) => ({ value: i === 0 ? "" : String(i), label: i === 0 ? "Calendaire (janvier)" : m }))} placeholder="Calendaire (janvier)" /></Field>
+          </div>
+        </FormSection>
 
         <FormBlock title="Niveaux" onAdd={() => set({ tiers: [...f.tiers, { k: nk(), name: "", rank: "" }] })}>
           {f.tiers.map((t, i) => (
