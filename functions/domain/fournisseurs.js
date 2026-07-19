@@ -8,7 +8,7 @@
 //   • ENGAGEMENT = Σ BC NON facturés (a_emettre / émis / livré) + achat des commandes ouvertes non
 //     encore couvert par un BC (prévisionnel). Consomme le disponible mais NE bouge PAS le solde.
 //   • Disponible = autorisé − solde − engagement.  Exposition = Σ achats prévus par les commandes.
-const { fpKey } = require("../lib/ids");
+const { fpKey, cleanName } = require("../lib/ids");
 
 // Statuts BC : a_emettre → emis → livre → facture → solde. « facture » = facturé non payé (dans le
 // solde) ; « solde » = payé (hors compte) ; les 3 premiers = engagé non facturé.
@@ -35,7 +35,10 @@ function suppliers(orders, bcLines, creditLines) {
   for (const b of bcLines) {
     if (b.source === "fiche") continue; // achats PLANIFIÉS de fiche (a_emettre) : pas des BC commandés → hors SOA/engagement (parité)
     if (b.status === PAID) continue; // payé → hors compte et hors engagement
-    const sup = String(b.supplier || "").toUpperCase();
+    // Clé fournisseur CANONIQUE (cleanName, autorité unique ERP-wide, ADR-P20) : compacte espaces + trim +
+    // MAJUSCULES. Sans compaction, un même fournisseur importé « à un espace près » selon la source (ClickUp/
+    // fiche vs Odoo/logistics) se scindait en deux dans le SOA — alors que par_ca les fusionne déjà. Aligné.
+    const sup = cleanName(b.supplier);
     const a = get(sup);
     const amt = b.amountXof || 0;
     if (b.status === INVOICED) a.facture += amt;       // facturé non payé → SOLDE
@@ -53,7 +56,7 @@ function suppliers(orders, bcLines, creditLines) {
     const openOrder = (o.raf || 0) > 0;
     const fp = fpKey(o.fp) || "";
     for (const s of o.suppliers || []) {
-      const sup = String(s.name || "").toUpperCase();
+      const sup = cleanName(s.name); // même autorité canonique (ADR-P20)
       const a = get(sup);
       a.expo += s.amount || 0;
       if (openOrder) {
@@ -77,7 +80,7 @@ function suppliers(orders, bcLines, creditLines) {
   // à défaut d'openingBalance, on reprend l'ancien champ `outstanding` comme solde d'ouverture.
   const creditById = {};
   for (const c of creditLines) {
-    const id = String(c.id || c._id || c.name || "").toUpperCase();
+    const id = cleanName(c.id || c._id || c.name); // même autorité canonique → appariement stable (ADR-P20)
     if (!id) continue;
     creditById[id] = c;
     get(id); // un fournisseur avec ligne de crédit s'affiche même sans BC/commande (solde d'ouverture)

@@ -2,7 +2,7 @@
 // Lecture CELLULAIRE via SheetJS : aucun correctif dataValidation requis
 // (SheetJS tolère les `sqref` mal formés, contrairement à openpyxl). §18.4.
 const { sheetToJson } = require("../lib/xlsxRead");
-const { fpKey, num, noAcc } = require("../lib/ids");
+const { fpKey, num, noAcc, cleanName } = require("../lib/ids");
 const { safeId, hashId } = require("../lib/sheets");
 
 // Une feuille est une fiche affaire si elle porte le marqueur CELLULAIRE distinctif « N° DE FP »
@@ -137,7 +137,7 @@ function parseFicheSheet(ws) {
       const frn = cF >= 0 ? String(row[cF] || "").trim() : "";
       const xof = cX >= 0 ? num(row[cX]) : 0;
       if ((frn && frn !== "0") || xof > 0) {
-        const supplier = frn.toUpperCase();
+        const supplier = cleanName(frn); // clé fournisseur canonique (compacte espaces, ADR-P20)
         const bcNumber = cB >= 0 ? String(row[cB] || "").trim() : "";
         const description = cD >= 0 ? String(row[cD] || "").trim() : "";
         // ID par CLÉ MÉTIER (fournisseur/n° BC/description) + occurrence, PAS par position de ligne :

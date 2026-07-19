@@ -5,7 +5,7 @@ import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { fpKey } from "../lib/ids";
+import { fpKey, cleanName } from "../lib/ids";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
@@ -84,7 +84,7 @@ export const PnlProjet: FC<Props> = () => {
               </div>
               <div>
                 <div className="text-xs font-semibold text-muted mb-1.5">Coût par fournisseur (top 10)</div>
-                <HBars rows={sumBy(lines, (b) => b.supplier, (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} />
+                <HBars rows={sumBy(lines, (b) => cleanName(b.supplier), (b) => b.amountXof || 0).slice(0, 10)} colorFn={() => T.plum} />
               </div>
             </div>
           </div>

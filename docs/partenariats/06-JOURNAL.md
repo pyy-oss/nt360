@@ -907,3 +907,20 @@ tout l'ERP → session dédiée avec fixtures d'import.
 
 **Bilan audit adverse** : 10/10 constats traités (le seul volet restant, l'unification ERP-wide du #4, est
 documenté hors périmètre module). Vérifs : parRevenue (+2), functions 1177, web 277, bundle 118.3 KB < 120.
+
+---
+
+## Session — unification ERP-wide de la normalisation fournisseur (ADR-P20)
+
+**Fait.** UNE autorité `cleanName` (lib/ids.js + miroir web) pour TOUTE la normalisation/regroupement fournisseur :
+`fournisseurs.js` (SOA : BC + orders + creditLines), `upsertCreditLine`, import ClickUp + parser fiche,
+`dataQuality` (doublons), Top HBars (web), et `parRevenue.normalizeSupplier` qui délègue désormais. Fini les
+4 définitions divergentes ; le SOA est aligné sur par_ca — un fournisseur mal espacé selon la source du BC ne
+se scinde plus. Migration one-shot `migrateCreditLineKeys` pour re-clé les plafonds existants (aucun perdu).
+
+**Assumé (validé humain).** Les chiffres du SOA changent : fusion des fournisseurs mal espacés → moins de lignes,
+totaux par fournisseur recalculés. C'est le fond de la correction.
+
+**Conception.** Additif/correctif + 1 migration. `cleanName` = autorité canonique fournisseur, comme `fpKey`
+pour les FP. Vérifs : fournisseurs (+1 test de fusion), functions 1178, web 277, bundle 118.3 KB < 120, guards
+verts. **Audit adverse : 10/10 + le reliquat ERP-wide du #4 désormais CLÔTURÉ.**

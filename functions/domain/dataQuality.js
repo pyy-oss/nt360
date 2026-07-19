@@ -2,7 +2,7 @@
 // fiabiliser les imports en continu : lignes en quarantaine implicite, champs manquants, ruptures
 // de rattachement, incohérences. Distinct du « Centre d'alertes » (alertes MÉTIER actionnables).
 // Module PUR (testable).
-const { fpKey, num, plausibleYear } = require("../lib/ids");
+const { fpKey, num, plausibleYear, cleanName } = require("../lib/ids");
 const { ALERT_DEFAULTS } = require("./thresholds");
 
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
@@ -38,7 +38,7 @@ function issueDefs(orders, invoices, opps, bcLines, sheets, thr, staleOpps, aged
   // Clé de doublon sur FP CANONIQUE (fpKey) : un même FP zero-paddé/espacé différemment au ré-import
   // ne doit pas échapper à la détection (sinon faux négatifs — deux docs jugés distincts).
   const oppDups = dupGroups(opps, (o) => [o.client, o.amount, o.stage, o.am, fpKey(o.fp), o.closingDate].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
-  const bcDups = dupGroups(bcLines, (b) => [fpKey(b.fp), b.supplier, b.amountXof, b.expenseType, b.bcNumber].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
+  const bcDups = dupGroups(bcLines, (b) => [fpKey(b.fp), cleanName(b.supplier), b.amountXof, b.expenseType, b.bcNumber].map((v) => String(v ?? "")).join("|")).map((grp) => grp[0]);
 
   const def = (type, severity, records, label, ref) => ({ type, severity, records, label, ref });
   return [

@@ -183,5 +183,6 @@ upsertAccount
 upsertActivity
 upsertContact
 upsertCreditLine
+migrateCreditLineKeys
 upsertObjective
 upsertOpportunity
