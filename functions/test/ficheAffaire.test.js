@@ -234,3 +234,38 @@ describe("intégrité du circuit (invariants)", () => {
     expect(CIRCUIT[5].final).toBe(true);
   });
 });
+
+// AUDIT thème ① — vérité FX de la fiche : repli parité fixe légale (EUR) quand le taux manque, flag
+// missing_fx_rate + blocage de validation pour une devise non convertible (USD sans taux), arrondi XOF.
+describe("fiche — vérité FX (repli peg + flag + blocage)", () => {
+  const AC0 = { id: "u1", name: "AC", role: "assistante" };
+  it("EUR sans taux_eur → repli peg légal 655,957 (coût NON nul, marge non gonflée)", () => {
+    const f = normalizeFiche({ taux_eur: 0, prix_vente_ht_xof: 1000000, lignes: [
+      { description: "d", fournisseur: "f", devise: "EUR", montant: 100 },
+    ] });
+    const fin = computeFinancials(f);
+    expect(fin.lignes_xof).toBe(Math.round(100 * 655.957)); // 65596, pas 0
+    expect(fin.missing_fx_rate).toBe(false);                // EUR est valorisable via le peg
+  });
+  it("USD sans taux_usd → missing_fx_rate + validation BLOQUÉE (pas de marge gonflée au P&L)", () => {
+    const f = normalizeFiche({
+      numero_fp: "FP/2026/7", client: "C", affaire: "A", commercial: "X", date_fiche: "2026-01-01", editeur_ac: "AC",
+      taux_usd: 0, prix_vente_ht_xof: 1000000,
+      lignes: [{ description: "d", fournisseur: "f", devise: "USD", montant: 1000 }],
+    });
+    const fin = computeFinancials(f);
+    expect(fin.lignes_xof).toBe(0);          // USD non convertible → 0 (coût sous-évalué)
+    expect(fin.missing_fx_rate).toBe(true);
+    const errs = stepErrors(f);
+    expect(errs.some((e) => /taux de change USD manquant/.test(e))).toBe(true);
+    const r = advance(f, AC0, { nowMs: 1 });
+    expect(r.ok).toBe(false);                 // la fiche ne peut pas être soumise ainsi
+  });
+  it("arrondi à l'entier XOF (le FCFA n'a pas de subdivision)", () => {
+    const f = normalizeFiche({ taux_eur: 655.957, prix_vente_ht_xof: 1000000, lignes: [
+      { description: "d", fournisseur: "f", devise: "EUR", montant: 3 }, // 3 × 655,957 = 1967,871 → 1968
+    ] });
+    expect(computeFinancials(f).lignes_xof).toBe(1968);
+    expect(Number.isInteger(computeFinancials(f).prix_de_revient_ht)).toBe(true);
+  });
+});

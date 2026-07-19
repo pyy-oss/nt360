@@ -5,6 +5,7 @@
 // comme CHEMIN ALTERNATIF à l'import du fichier P&L (cf. mergeCommandes : la fiche enrichit une
 // ligne P&L existante, jamais de création hors P&L). Aucune I/O → testable en isolation.
 const { num, fpKey, cleanName, plausibleYear } = require("../lib/ids");
+const { FIXED_PEG } = require("../lib/fx"); // parité fixe légale (EUR 655,957) — MÊME autorité que la conversion BC
 
 // ── Constantes métier ────────────────────────────────────────────────────────
 const TYPES_CHARGE = ["Materiel", "Licences", "Support", "Logiciel", "Frais_approche", "Prestation", "Marge_arriere"];
@@ -32,27 +33,38 @@ const stepDef = (etape) => CIRCUIT[etape] || null;
 const roleAllowed = (role, etape) => { const s = stepDef(etape); return !!s && String(role || "") === s.role; };
 
 // ── Calculs (prix de revient / marge) ────────────────────────────────────────
-// Taux applicable à une devise (XOF = 1). Tolérant (num()).
+// Taux applicable à une devise (XOF = 1). Tolérant (num()). REPLI parité fixe légale (FIXED_PEG, EUR) quand
+// aucun taux n'est saisi dans la fiche — MÊME règle que la conversion BC (lib/fx.toXof) : sans ce repli, une
+// ligne devise sans taux valait 0 XOF → coût sous-évalué et marge GONFLÉE en silence (audit thème ①). L'USD
+// n'a pas de parité fixe → 0 (« à saisir »), signalé par missing_fx_rate + blocage de validation (stepErrors).
 function rateFor(devise, fiche) {
   const d = String(devise || "XOF").toUpperCase();
-  if (d === "USD") return num(fiche && fiche.taux_usd);
-  if (d === "EUR") return num(fiche && fiche.taux_eur);
-  return 1; // XOF
+  if (d === "XOF") return 1;
+  const manual = d === "USD" ? num(fiche && fiche.taux_usd) : d === "EUR" ? num(fiche && fiche.taux_eur) : 0;
+  if (manual > 0) return manual;         // taux saisi dans la fiche prioritaire
+  return FIXED_PEG[d] || 0;              // repli peg légal (EUR) ; sinon 0 = « à saisir »
 }
 
-// Montant XOF d'une ligne — DÉRIVÉ (jamais persisté comme seule source de vérité : on garde le
-// montant + la devise d'origine pour recalculer si le taux change ou est corrigé).
+// Montant XOF d'une ligne — DÉRIVÉ (jamais persisté comme seule source de vérité : on garde le montant + la
+// devise d'origine pour recalculer si le taux change). Arrondi à l'entier XOF (le FCFA n'a pas de subdivision).
 function ligneXof(ligne, fiche) {
-  return num(ligne && ligne.montant) * rateFor(ligne && ligne.devise, fiche);
+  return Math.round(num(ligne && ligne.montant) * rateFor(ligne && ligne.devise, fiche));
+}
+
+// Vrai si AU MOINS une ligne est en devise étrangère SANS taux exploitable (ni saisi, ni parité fixe) → son
+// montant XOF est 0, le coût est sous-évalué et la marge affichée FAUSSE (gonflée). Sert au flag + au blocage.
+function hasMissingFxRate(fiche) {
+  const lignes = Array.isArray(fiche && fiche.lignes) ? fiche.lignes : [];
+  return lignes.some((l) => { const d = String(l.devise || "XOF").toUpperCase(); return d !== "XOF" && !(rateFor(d, fiche) > 0); });
 }
 
 // Prix de revient = Σ(montant×taux) + provisions + autres frais ; marge = vente − revient.
 function computeFinancials(fiche) {
   const f = fiche || {};
   const lignes = Array.isArray(f.lignes) ? f.lignes : [];
-  const lignesXof = lignes.reduce((s, l) => s + ligneXof(l, f), 0);
-  const prixRevient = lignesXof + num(f.provisions_xof) + num(f.autres_frais_financiers_xof);
-  const prixVente = num(f.prix_vente_ht_xof);
+  const lignesXof = lignes.reduce((s, l) => s + ligneXof(l, f), 0); // déjà arrondi par ligne
+  const prixRevient = Math.round(lignesXof + num(f.provisions_xof) + num(f.autres_frais_financiers_xof));
+  const prixVente = Math.round(num(f.prix_vente_ht_xof));
   const marge = prixVente - prixRevient;
   const pct = prixVente > 0 ? (marge / prixVente) * 100 : 0;
   const seuil = f.seuil_marge_pct == null ? DEFAULT_SEUIL : num(f.seuil_marge_pct);
@@ -64,6 +76,7 @@ function computeFinancials(fiche) {
     pct_marge: pct,
     seuil_marge_pct: seuil,
     below_threshold: prixVente > 0 && pct < seuil, // alerte NON bloquante (vigilance)
+    missing_fx_rate: hasMissingFxRate(f),          // devise étrangère sans taux → marge non fiable (audit ①)
   };
 }
 
@@ -85,6 +98,10 @@ function stepErrors(fiche) {
       if (!String(l.description || "").trim()) errors.push(`Ligne ${i + 1} : description obligatoire`);
       if (!String(l.fournisseur || "").trim()) errors.push(`Ligne ${i + 1} : fournisseur obligatoire`);
       if (!(num(l.montant) > 0)) errors.push(`Ligne ${i + 1} : montant > 0 obligatoire`);
+      // Devise étrangère non convertible (pas de taux saisi ni de parité fixe) → BLOQUE la validation : une
+      // fiche à coût sous-évalué ne doit pas alimenter le P&L avec une marge gonflée (audit thème ①).
+      const dv = String(l.devise || "XOF").toUpperCase();
+      if (dv !== "XOF" && !(rateFor(dv, f) > 0)) errors.push(`Ligne ${i + 1} : taux de change ${dv} manquant (montant non convertible en XOF → marge faussée)`);
     });
   } else if (etape === 2) {
     // DRO définit le N° de DC avant de valider.
