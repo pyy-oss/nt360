@@ -9,7 +9,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
 import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, Modal, Segmented, useToast } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
@@ -35,7 +35,7 @@ type Partner = { id: string; name: string; programName?: string; status?: string
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
 type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; asOf?: string } | null;
-type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[] } | null;
+type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
 type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
@@ -225,11 +225,74 @@ const QbrList: FC<{ title: string; tone: string; items?: string[] }> = ({ title,
 );
 
 // ─────────────────────────────────────────────────────────────────────── Tableau de bord
+// Pastille de légende (rond de couleur + libellé) — même grammaire que les légendes CODIR.
+const Dot: FC<{ color: string; label: ReactNode }> = ({ color, label }) => (
+  <span className="inline-flex items-center gap-1.5 text-faint tabnum">
+    <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />{label}
+  </span>
+);
+
+// HERO du cockpit partenariats — vocabulaire premium CODIR (grand nombre `font-display`, barre de couverture
+// segmentée, tuiles-stats en capitales espacées). Tout par tokens `T.*` (aucune couleur en dur). Remplace la
+// grille de KPI plate en fusionnant : focus sur la CONFORMITÉ (la métrique de pilotage) + stats de tête.
+type QuotaRow = NonNullable<QuotaSummary>["partners"] extends (infer R)[] | undefined ? R : never;
+const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; alerts: AlertSummary; relances: RelanceSummary; quotaPartners: QuotaRow[]; asOf?: string }> = ({ partners, ca, canSeeCa, alerts, relances, quotaPartners, asOf }) => {
+  const conformes = quotaPartners.filter((p) => p.status === "on_track").length;
+  const aRisque = quotaPartners.filter((p) => p.status === "at_risk").length;
+  const nonConformes = quotaPartners.filter((p) => p.status === "non_compliant").length;
+  const nonEval = quotaPartners.filter((p) => p.status === "non_evalue").length;
+  const evalues = conformes + aRisque + nonConformes;
+  const ratio = evalues ? conformes / evalues : null; // 0..1, sur les partenaires ÉVALUÉS (exclut non évalués)
+  const seg = (n: number, color: string) => (evalues && n ? <span style={{ width: `${(n / evalues) * 100}%`, backgroundColor: color }} /> : null);
+  const risque = aRisque + nonConformes;
+  const stats: { label: string; value: string; color?: string }[] = [
+    { label: "Partenaires", value: String(partners.length) },
+    ...(canSeeCa ? [{ label: "CA constructeurs", value: fmt(ca?.totalXof || 0), color: T.emerald }] : []),
+    { label: "Certifs à renouveler", value: String(alerts?.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
+    { label: "Partenariats à risque", value: String(risque), color: risque > 0 ? T.clay : undefined },
+  ];
+  return (
+    <section className="card p-4 sm:p-5 animate-fade-in">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Eyebrow>Cockpit partenariats</Eyebrow>
+          <div className="mt-1.5 flex items-end gap-2">
+            <span className="font-display leading-none tabnum text-[34px] sm:text-[40px]" style={{ color: ratio == null ? "rgb(var(--muted))" : ratio >= 0.999 ? T.emerald : ratio >= 0.5 ? T.gold : T.clay }}>{ratio == null ? "—" : pct(ratio)}</span>
+            <span className="mb-1 text-[12px] text-muted">conformité des quotas{evalues ? ` · ${conformes}/${evalues}` : ""}</span>
+          </div>
+        </div>
+        {asOf && <span className="text-[11px] text-faint tabnum">à jour au {frDate(asOf)}</span>}
+      </div>
+
+      {/* Barre de couverture segmentée (conformes / à risque / non conformes) — proportionnelle aux évalués. */}
+      <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: T.panel2 }}>
+        {seg(conformes, T.emerald)}{seg(aRisque, T.gold)}{seg(nonConformes, T.clay)}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+        <Dot color={T.emerald} label={`${conformes} conformes`} />
+        <Dot color={T.gold} label={`${aRisque} à risque`} />
+        <Dot color={T.clay} label={`${nonConformes} non conformes`} />
+        {!!nonEval && <span className="text-faint tabnum">· {nonEval} non évalués</span>}
+        {!!(relances?.counts?.late) && <span className="text-clay tabnum">· {relances.counts.late} relance(s) en retard</span>}
+      </div>
+
+      {/* Tuiles-stats de tête (capitales espacées, grand chiffre `font-display`). */}
+      <div className="mt-4 grid grid-cols-2 gap-4 border-t pt-4 sm:grid-cols-4" style={{ borderColor: T.line }}>
+        {stats.map((s) => (
+          <div key={s.label} className="min-w-0">
+            <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-faint" title={s.label}>{s.label}</div>
+            <div className="font-display tabnum text-[20px] sm:text-[22px] leading-none mt-1.5" style={{ color: s.color || "rgb(var(--ink))" }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; partnerName: Record<string, string> }> = ({ ca, canSeeCa, quotas, alerts, relances, history, partners, partnerName }) => {
   const alertItems = alerts?.items || [];
   const relanceItems = relances?.items || [];
   const quotaPartners = quotas?.partners || [];
-  const nonConf = quotaPartners.filter((p) => p.status === "non_compliant" || p.status === "at_risk").length;
   // Tendance de conformité (Lot P3) : historique quotidien de la couverture des quotas (30 derniers jours).
   const trend = (history?.days || []).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Conformes: d.conformes, "À risque": d.aRisque, "Non conformes": d.nonConformes }));
   // Plan d'affaires : partenaires portant un BP saisi, avec taux d'atteinte par axe + global (miroir du
@@ -247,13 +310,8 @@ const Dashboard: FC<{ ca: CaSummary; canSeeCa: boolean; quotas: QuotaSummary; al
   const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => pct(r.a[ax]), (r: typeof bpRows[number]) => r.a[ax] ?? -1);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Partenaires" value={String(partners.length)} sub="référentiel" />
-        {/* CA constructeur = donnée confidentielle (droit `rentabilite`) — masquée sinon (ADR-P07). */}
-        {canSeeCa && <Kpi label="CA constructeurs (BC + déclaré)" value={fmt(ca?.totalXof || 0)} sub={`${(ca?.byPartner || []).length} partenaire(s)`} tone="emerald" />}
-        <Kpi label="Certifs à renouveler" value={String(alerts?.total || 0)} sub={`${alerts?.counts?.expired || 0} expirée(s)`} tone={(alerts?.total || 0) > 0 ? "gold" : "ink"} />
-        <Kpi label="Partenariats à risque" value={String(nonConf)} sub={`${relances?.counts?.late || 0} relance(s) en retard`} tone={nonConf > 0 ? "clay" : "ink"} />
-      </div>
+      <HeroBand partners={partners} ca={ca} canSeeCa={canSeeCa} alerts={alerts} relances={relances} quotaPartners={quotaPartners} asOf={quotas?.asOf} />
+
 
       {!!bpRows.length && (
         <Card title="Plan d'affaires par partenaire" actions={<ExportBtn name="plan-affaires-partenaires" cols={[
