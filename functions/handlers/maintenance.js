@@ -563,7 +563,10 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     "aiAnalyzeChurn",
     { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 },
     async (req) => {
-      await requireRead(req, "maintenance");
+      // requireWRITE (et non read) : une analyse churn déclenche des appels Opus (coût). Homogène avec les
+      // autres callables IA du module (aiSuggestMntContrats/aiMntLignees) → un utilisateur en lecture seule
+      // ne peut plus engager de coût IA (audit gouvernance/coût).
+      await requireWrite(req, "maintenance");
       await assertMntEnabled();
       if (rateLimit && !(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
       const apiKey = ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.value();

@@ -53,7 +53,7 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } 
   for (const t of ticks) { const c = t && t.contratId; if (!c) continue; if (!ticksByContrat.has(c)) ticksByContrat.set(c, []); ticksByContrat.get(c).push(t); }
 
   const items = [];
-  const counts = { vert: 0, ambre: 0, rouge: 0, critique: 0 };
+  const counts = { vert: 0, ambre: 0, rouge: 0, critique: 0, incomplet: 0 };
   for (const c of conts) {
     if (!c || !RISK_STATUTS.has(String(c.statut))) continue;
     const fpk = fpKey(c.fp);
@@ -119,7 +119,13 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } 
     if (margeNiveau) { signals.push({ type: "marge_faible", severite: margeNiveau }); score += margeNiveau === "negative" ? 30 : 15; }
 
     score = Math.min(100, Math.round(score));
-    const niveau = score === 0 ? "vert" : score < 30 ? "ambre" : score < 60 ? "rouge" : "critique";
+    // COMPLÉTUDE (R6 — « ne pas mentir par autorité ») : un contrat SANS aucune donnée de pilotage — ni
+    // engagement SLA/quota, ni montant engagé — n'a RIEN à scorer → il paraîtrait « Vert » (sain) à tort. On
+    // distingue « incomplet » (données à compléter) du « vert » (sain, données présentes). Un engagement OU un
+    // montant suffit à rendre le contrat scorable (une dateFin absente = tacite reconduction, pas une lacune).
+    // Un contrat AVEC signaux garde de toute façon son niveau réel (ce garde-fou ne concerne que le score 0).
+    const complet = engagements.length > 0 || (Number(c.montantEngage) || 0) > 0;
+    const niveau = score === 0 ? (complet ? "vert" : "incomplet") : score < 30 ? "ambre" : score < 60 ? "rouge" : "critique";
     counts[niveau] += 1;
     items.push({
       id: c.id, fp: c.fp || null, client: cleanName(c.client) || "", am: cleanPerson(c.am) || "", bu: cleanBu(c.bu) || "",
@@ -131,7 +137,9 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } 
 
   // Tri : le plus à risque d'abord (score décroissant, puis échéance la plus proche).
   items.sort((a, b) => (b.score - a.score) || ((a.joursAvantFin ?? 1e9) - (b.joursAvantFin ?? 1e9)));
-  const atRisk = items.length - counts.vert;
+  // « À risque » = ni sain (vert) NI non scoré (incomplet) — un contrat incomplet est une dette de saisie,
+  // pas un risque avéré ; il ne doit pas gonfler l'indicateur de risque.
+  const atRisk = items.length - counts.vert - counts.incomplet;
   return { items, counts, total: items.length, atRisk, asOf: asOf || null };
 }
 

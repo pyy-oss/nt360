@@ -3,21 +3,24 @@
 // les libellés affichés vivent ici (02-REGLES.md). Palette de risque = ADR-008 (emerald/gold/clay/plum).
 // Pur → testable sans React.
 
-export type Niveau = "vert" | "ambre" | "rouge" | "critique";
+// « incomplet » = NON SCORÉ (données de pilotage insuffisantes) — distinct de « vert » (sain) : un contrat
+// sans engagement/date de fin/montant ne doit pas paraître sain à tort (R6, miroir de mntRisque.js).
+export type Niveau = "vert" | "ambre" | "rouge" | "critique" | "incomplet";
 export type SignalType = "sla_rompu" | "echeance_proche" | "quota_depasse" | "sous_facturation" | "marge_faible";
 
 export const NIVEAU_LABEL: Record<string, string> = {
-  vert: "Vert", ambre: "Ambre", rouge: "Rouge", critique: "Critique",
+  vert: "Vert", ambre: "Ambre", rouge: "Rouge", critique: "Critique", incomplet: "Non scoré",
 };
 
 // Ton de badge du niveau : mêmes teintes que la priorité de ticket (ADR-008/014) — un rouge veut dire
-// « danger » partout. vert=emerald, ambre=gold, rouge=clay, critique=plum.
+// « danger » partout. vert=emerald, ambre=gold, rouge=clay, critique=plum ; incomplet=neutre (donnée à compléter).
 export function niveauTone(n?: string): "emerald" | "gold" | "clay" | "plum" | "neutral" {
   switch (n) {
     case "vert": return "emerald";
     case "ambre": return "gold";
     case "rouge": return "clay";
     case "critique": return "plum";
+    case "incomplet": return "neutral";
     default: return "neutral";
   }
 }
