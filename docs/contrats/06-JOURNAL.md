@@ -1741,3 +1741,27 @@ dans AUCUN calcul (pas de 2ᵉ clé d'affaire). ADR-052.
 
 **Suite :** Lot 3 = bouton « sync-depuis-Odoo » (client sortant xmlrpc/jsonrpc, clé API) — EN ATTENTE des
 précisions : URL instance, nom de base, modèles à tirer, fenêtre delta.
+
+## Fix backlog — « intégrer »/« Solder »/correction FP sur « Commandes à RAF dérivé (suspectes) » — 2026-07-20
+
+**Symptôme (signalé prod).** Sur la carte « Commandes à RAF dérivé (suspectes) », « intégrer » (valider le RAF)
+et « Solder » ne faisaient rien / étaient refusés ; pas de possibilité de corriger le N° FP.
+
+**Cause racine.** Ces lignes ont un RAF DÉRIVÉ précisément parce qu'elles n'ont PAS de ligne P&L curatée :
+source `opp_won`/`fiche` = commande construite virtuellement par `mergeCommandes` depuis l'opp gagnée / la
+fiche, SANS document `orders/{fp}`. Or `patchOrder` (derrière Valider/Solder) lève `failed-precondition —
+commande P&L introuvable` s'il n'y a pas de doc. Les actions s'appliquaient donc à des lignes qu'elles ne
+pouvaient pas écrire.
+
+**Correctif (front seul, `RafValidator` dans backlog.tsx).** Valider/Solder tentent `patchOrder({fp,raf})` ;
+si la commande est introuvable (ligne dérivée), on MATÉRIALISE via `createOrder` (source `manuel`, CAS de la
+ligne + RAF validé) — mécanisme de réconciliation documenté (une ligne P&L Excel du même FP la réécrase au
+prochain import → P&L strict prioritaire préservé). Ajout de la **correction du N° FP** dans le même éditeur :
+re-clé `patchOrder({fp,newFp})` si la commande existe, sinon `createOrder` sous le FP corrigé (chacun a sa garde
+anti-doublon). Réutilise les callables existants ; aucun changement backend.
+
+**Vérifs.** tsc propre ; 293 web au vert ; bundle 120,1 KB (≤ 122).
+
+**Reste à confirmer.** Le 1ᵉʳ signalement (« Inscrire au P&L » sur « opportunités gagnées sans commande »)
+échoue différemment (probable `already-exists` : un `orders/{fp}` annulé/écarté existe) — en attente du toast
+exact pour un correctif ciblé.
