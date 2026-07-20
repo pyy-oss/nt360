@@ -3,6 +3,50 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-050 — Odoo et l'import Excel sont deux sources LIVE de MÊME autorité sur une opportunité (dédup par FP + non-rétrogradation de source)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (re-audit final, constats #3/#4 ; réponse « Odoo = source live égale »)
+
+### Contexte
+Une opportunité peut être alimentée par DEUX flux : l'import Excel Sales_Data (`source:"salesData"`, périodique)
+et le webhook Odoo (`source:"odoo"`, temps réel). Le dédoublonnage par FP de `aggregate.js` (et son miroir
+`overviewCalc.ts`) était scopé à `source==="salesData"` seul. Deux défauts en découlaient :
+- **#3 (HIGH)** : si Odoo écrit une opp AVANT l'import Excel, on obtient DEUX docs pour le même FP
+  (`odoo_<safeId>` source odoo ; `<hashId>` source salesData) → **double-compte du pondéré/funnel/conversion**.
+- **#4 (MEDIUM)** : le handler du webhook réécrivait `source:"odoo"` sur une opp EXISTANTE (créée par l'Excel)
+  → elle sortait du périmètre du marquage FANTÔME de `lib/sync.js` (`where source=="salesData"`) et restait au
+  pipeline indéfiniment même après disparition du fichier LIVE.
+
+### Décision
+**Odoo et l'import Excel sont deux sources LIVE de même autorité** sur une opp. `isLiveSource(o) = o.source ∈
+{salesData, odoo}`.
+1. **Dédup par FP à travers les sources live** (`aggregate.js` + miroir EXACT `overviewCalc.ts`) : on ne garde
+   que le représentant le PLUS RÉCENT (`updatedAt`) par `fpKey`, toutes sources live confondues
+   (`bestLiveByFp`) ; le masquage des opps `saisie` de même FP s'appuie sur `liveFps` (⊇ salesData ∪ odoo).
+   → ferme #3.
+2. **Non-rétrogradation de source** (`index.js`, handler `odooWebhook`) : sur une opp EXISTANTE, le merge ne
+   réécrit PLUS `source` (`delete doc.source`). Une opp co-alimentée créée par l'Excel RESTE `salesData` → elle
+   demeure éligible au marquage fantôme de la synchro Excel ; une opp NOUVELLE créée par Odoo garde `odoo`
+   (Odoo en est l'autorité). → ferme #4.
+
+### Alternative écartée
+« Inclure `odoo` dans le calcul des fantômes de `lib/sync.js` » (option brute du constat) : DANGEREUX — la
+synchro Excel staliserait TOUTE opp `odoo`-only absente du fichier (elle n'y est jamais) à chaque import. La
+non-rétrogradation atteint l'intention (une opp co-alimentée reste soumise à la vivacité Excel) SANS cet effet
+de bord. Documenté ici pour mémoire.
+
+### Conséquences
+- **Strictement additif, aucune donnée supprimée** : dédup = calcul pur (le doc perdant reste en base) ;
+  non-rétrogradation = un champ non réécrit. Réversible.
+- Invariant de cohérence respecté : `overviewCalc.ts` est le miroir EXACT (même `isLiveSource`/`bestLiveByFp`/
+  `liveFps`). Test de parité `overviewCalc.test.ts` (opp Odoo + Excel même FP → 1 représentant ; `saisie`
+  masquée par une opp `odoo`).
+- Ne modifie PAS le mapping commande (ADR-049, déjà en place) ni les factures.
+
+---
+
 ## ADR-049 — Le mapping webhook Odoo → commande est ADDITIF : n'écrire que les champs fournis (merge:true non destructeur)
 
 - **Date :** 2026-07-20

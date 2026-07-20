@@ -1681,3 +1681,25 @@ Backend seul, aucun changement front/bundle.
 **Reste (décision prise, à coder ensuite) — cluster #3/#4 :** « Odoo = source live égale » → dédoublonnage
 par fpKey à travers `{salesData, odoo}` dans `aggregate.js` + inclusion dans le calcul fantôme + miroir
 `overviewCalc.ts` + test de parité + ADR d'autorité inter-sources. Lot suivant.
+
+## Correctif re-audit #3/#4 — Odoo = source live égale (dédup FP + non-rétrogradation source) — 2026-07-20
+
+**Fait.** Décision direction « Odoo = source live égale » appliquée (ADR-050) :
+- **#3 (HIGH)** : le dédoublonnage par FP des opps (`aggregate.js` + miroir EXACT `overviewCalc.ts`) passe de
+  `source==="salesData"` seul à `isLiveSource ∈ {salesData, odoo}` (`bestLiveByFp`/`liveFps`). Une opp écrite
+  par Odoo AVANT l'import Excel ne double-compte plus le pondéré/funnel/conversion — on garde le représentant
+  le plus récent (`updatedAt`) par `fpKey`.
+- **#4 (MEDIUM)** : le handler `odooWebhook` (`index.js`) ne rétrograde plus la `source` d'une opp EXISTANTE
+  (`delete doc.source` si exists) → une opp co-alimentée créée par l'Excel reste `salesData`, donc éligible au
+  marquage fantôme de `lib/sync.js` ; une opp Odoo-only garde `odoo`.
+
+**Alternative écartée** (documentée ADR-050) : « inclure odoo dans le calcul des fantômes de sync.js » →
+staliserait toute opp odoo-only à chaque import Excel. La non-rétrogradation atteint l'intention sans l'effet
+de bord.
+
+**Vérifs.** 1253 functions + 293 web (dont 2 nouveaux tests de parité `overviewCalc` : opp Odoo+Excel même FP
+→ 1 représentant ; `saisie` masquée par une opp `odoo`) au vert ; tsc propre ; bundle 120,1 KB (≤ 122) ;
+no-undef (159) + deploy-targets (189) OK. Strictement additif, aucune donnée supprimée.
+
+**Cluster Odoo↔Excel du re-audit : CLÔTURÉ** (#3 HIGH + #4 + #5 traités ; #1 cosmétique classé).
+**Extension Odoo (BC via Odoo / DC→FP / sync sortant) : en attente de précisions métier** (plan cadré à venir).

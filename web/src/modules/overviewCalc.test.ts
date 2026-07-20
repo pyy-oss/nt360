@@ -59,6 +59,32 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     expect(r.certitudes).toBe(100); // 100, pas 200 (doublon écarté)
   });
 
+  it("dédup LIVE odoo/salesData (ADR-050) : une opp Odoo + une opp Excel de MÊME FP → 1 seul représentant (plus récent)", () => {
+    // Cas #3 du re-audit : Odoo (temps réel) écrit une opp AVANT l'import Excel → deux docs, même FP, deux
+    // sources LIVE. Sans dédup inter-source live, le pondéré/certitudes double-compte l'affaire.
+    const opps2 = [
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 100, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "salesData", updatedAt: 1 },
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 300, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "odoo", updatedAt: 2 }, // plus récent
+    ];
+    const r = computeFilteredOverview([] as any, [] as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.certitudes).toBe(300); // le représentant le PLUS RÉCENT (odoo) — pas 400 (double-compte évité)
+    // ordre inverse (Excel plus récent) → l'Excel l'emporte
+    const opps3 = [
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 100, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "salesData", updatedAt: 5 }, // plus récent
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 300, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "odoo", updatedAt: 2 },
+    ];
+    expect(computeFilteredOverview([] as any, [] as any, opps3 as any, "2026", mkMatch({ bu: "ICT" })).certitudes).toBe(100);
+  });
+
+  it("dédup inter-source : une opp 'saisie' couverte par une opp LIVE 'odoo' (même FP) est écartée", () => {
+    const opps2 = [
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 300, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "odoo" },
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", amount: 999, stage: 3, probability: 0.95, closingDate: "2026-05-01", source: "saisie" }, // masquée par l'odoo
+    ];
+    const r = computeFilteredOverview([] as any, [] as any, opps2 as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.certitudes).toBe(300); // seule l'odoo compte (la 'saisie' de même FP est écartée)
+  });
+
   it("perspective Facturé : marge reconnue = taux × min(facturé, CAS) (plafond surfacturation)", () => {
     const ord = [{ fp: "FP/2026/1", bu: "ICT", am: "X", client: "A", cas: 1000, raf: 0, mb: 200, yearPo: 2026 }]; // taux 20 %
     const inv = [{ fp: "FP/2026/1", bu: "ICT", client: "A", amountHt: 1500, date: "2026-03-01" }]; // surfacturé
