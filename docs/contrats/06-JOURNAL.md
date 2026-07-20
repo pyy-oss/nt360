@@ -1780,3 +1780,20 @@ endpoint HMAC — idempotent, rejouable, aucun doublon. **Aucun code nt360 neuf*
 2 modes). Le Lot 3 « client sortant » est **abandonné** au profit de l'option A.
 
 **Vérifs.** Docs seules (aucun code) ; aucun impact tests/bundle.
+
+## Bouton Admin « Purge des données » (table rase P&L / Opportunités, ADR-053) — 2026-07-20
+
+**Fait.** Callable `purgeCollections` (handler sanitize.js) + carte Admin « Zone dangereuse › Purge des données ».
+- Backend : DIRECTION-only (nt360Role), confirmation « PURGER » obligatoire, rate-limité, audité. Table rase
+  (toutes sources) de orders (P&L) et/ou opportunities, avec satellites + overlays (choix Direction : purger
+  aussi les overlays + l'historique d'étapes). Suppression paginée (400/lot, garde PURGE_MAX). Recompute
+  best-effort. Fonction PURE `purgePlan(targets)` (union dédupliquée de fpAliases partagé) — testée (4 cas).
+- Front : PurgeCard Direction-only, bouton rouge conditionné à (cible cochée + saisie « PURGER ») +
+  re-confirmation DangerBtn. web/src/lib/writes.ts : wrapper purgeCollections (timeout 540 s aligné serveur).
+- deployed-functions.txt : purgeCollections ajouté (190 fns). ADR-053.
+
+**Décisions (Direction) :** table rase toutes sources · purger AUSSI les overlays · purger l'historique.
+Hors périmètre : factures + cancelInvoices (non demandés).
+
+**Vérifs.** 1261 functions au vert (dont 4 purgePlan) ; tsc propre ; bundle ≤ 122 ; no-undef (159) +
+deploy-targets (190) OK.

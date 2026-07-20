@@ -1,6 +1,36 @@
 import { describe, it, expect } from "vitest";
 const { sanitizeForFirestore, coerceNums } = require("../lib/aggregate");
+const { purgePlan } = require("../handlers/sanitize");
 const { FieldValue } = require("firebase-admin/firestore");
+
+describe("purgePlan — plan de purge (table rase, ADR-053)", () => {
+  it("P&L seul → orders + chunks + overlays P&L", () => {
+    const p = purgePlan(["orders"]);
+    expect(p.targets).toEqual(["orders"]);
+    expect(p.collections).toEqual(["orders", "commandesRows", "billingMilestones"]);
+    expect(p.configDocs).toContain("config/cancelOrders");
+    expect(p.configDocs).toContain("config/orderCasOverride");
+    expect(p.configDocs).toContain("config/fpAliases");
+  });
+  it("Opportunités seul → opps + historique d'étapes + fpAliases", () => {
+    const p = purgePlan(["opportunities"]);
+    expect(p.collections).toEqual(["opportunities", "oppHistory", "oppDateHistory"]);
+    expect(p.configDocs).toEqual(["config/fpAliases"]);
+  });
+  it("les deux cibles → union, fpAliases (partagé) DÉDUPLIQUÉ une seule fois", () => {
+    const p = purgePlan(["orders", "opportunities"]);
+    expect(p.targets).toEqual(["orders", "opportunities"]);
+    expect(p.configDocs.filter((c) => c === "config/fpAliases")).toHaveLength(1);
+    expect(p.collections).toContain("orders");
+    expect(p.collections).toContain("opportunities");
+  });
+  it("cibles invalides/inconnues ignorées ; doublons compactés ; entrée vide → plan vide", () => {
+    expect(purgePlan(["invoices", "bidon"]).targets).toEqual([]);
+    expect(purgePlan(["orders", "orders"]).targets).toEqual(["orders"]);
+    expect(purgePlan(null).targets).toEqual([]);
+    expect(purgePlan(undefined).collections).toEqual([]);
+  });
+});
 
 describe("sanitizeForFirestore — garde-fou écriture (NaN/Infinity/undefined refusés en prod)", () => {
   it("remplace NaN et ±Infinity par 0", () => {

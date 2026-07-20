@@ -13,6 +13,22 @@ const CANCELLABLE = { orders: { module: "import", doc: "config/cancelOrders" }, 
 // n'est PAS record-level scopé (cf. modèle), donc absent d'ici.
 const RECORD_SCOPED = new Set(["opportunities"]);
 
+// PURGE (table rase) — chaque cible = sa collection source + satellites dérivés + overlays de correction.
+// commandesRows/summaries dérivés sont régénérés par le recompute qui suit. fpAliases est PARTAGÉ (opp↔P&L)
+// → dédupliqué par l'union. ADR-053.
+const PURGE_TARGETS = {
+  orders: { collections: ["orders", "commandesRows", "billingMilestones"], configDocs: ["config/cancelOrders", "config/orderCasOverride", "config/fpAliases"] },
+  opportunities: { collections: ["opportunities", "oppHistory", "oppDateHistory"], configDocs: ["config/fpAliases"] },
+};
+// PUR (testable) : normalise la liste de cibles demandée → cibles VALIDES + union dédupliquée des collections
+// et overlays à purger. Une cible inconnue est ignorée ; fpAliases (partagé) n'apparaît qu'une fois.
+function purgePlan(rawTargets) {
+  const targets = [...new Set((Array.isArray(rawTargets) ? rawTargets : []).map(String))].filter((t) => PURGE_TARGETS[t]);
+  const cols = new Set(), cfgs = new Set();
+  for (const t of targets) { PURGE_TARGETS[t].collections.forEach((c) => cols.add(c)); PURGE_TARGETS[t].configDocs.forEach((c) => cfgs.add(c)); }
+  return { targets, collections: [...cols], configDocs: [...cfgs] };
+}
+
 function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit }) {
   // SUPPRESSION d'un/plusieurs enregistrement(s) erroné(s)/fantôme(s). Les imports delta n'effacent JAMAIS
   // → seul l'app peut retirer un record obsolète. Le DELTA reste prioritaire (ré-import réintroduit).
@@ -87,7 +103,45 @@ function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, ass
     return { ok: true, id, cancelled };
   });
 
-  return { deleteRecords, setCancellation };
+  const PURGE_MAX = 500_000; // garde-fou anti-boucle (bien au-dessus des volumes réels d'une ESN)
+  async function purgeCol(name) {
+    let total = 0;
+    while (total < PURGE_MAX) {
+      const snap = await db.collection(name).limit(400).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      total += snap.size;
+      if (snap.size < 400) break; // dernière page
+    }
+    return total;
+  }
+  const purgeCollections = onCallG("purgeCollections", { memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+    // DIRECTION uniquement : opération destructive et irréversible (au-delà d'un simple droit « import »).
+    if ((req.auth.token && req.auth.token.nt360Role) !== "direction") throw new HttpsError("permission-denied", "purge réservée à la Direction");
+    const d = req.data || {};
+    // Confirmation explicite obligatoire (anti-clic accidentel / anti-appel programmatique par mégarde).
+    if (String(d.confirm || "") !== "PURGER") throw new HttpsError("failed-precondition", "confirmation « PURGER » requise");
+    const plan = purgePlan(d.targets); // PUR : cibles valides + union collections/overlays (fpAliases dédupliqué)
+    if (!plan.targets.length) throw new HttpsError("invalid-argument", "aucune cible valide (orders/opportunities)");
+    if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 5, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes — patientez un instant.");
+    const targets = plan.targets, cfgs = plan.configDocs;
+    const deleted = {};
+    for (const name of plan.collections) deleted[name] = await purgeCol(name);
+    for (const doc of cfgs) { await db.doc(doc).delete().catch(() => { /* absent = déjà propre */ }); }
+    await db.collection("auditLog").add({
+      uid: req.auth.uid, action: "purge_collections", module: "import", entity: "purge", entityId: targets.join(","),
+      detail: { targets, deleted, configDocs: [...cfgs] }, ts: FieldValue.serverTimestamp(),
+    });
+    // Recompute BEST-EFFORT : la purge est faite (intention) ; un échec du recalcul ne doit pas remonter en
+    // « internal » (le carnet dérivé est déjà vidé via commandesRows). Le recompute se rattrape ensuite.
+    try { await requestRecompute(); } catch (_) { /* dérivés régénérés au prochain recompute */ }
+    return { ok: true, targets, deleted, configDocs: [...cfgs] };
+  });
+
+  return { deleteRecords, setCancellation, purgeCollections };
 }
 
-module.exports = { createSanitize };
+module.exports = { createSanitize, purgePlan, PURGE_TARGETS };
