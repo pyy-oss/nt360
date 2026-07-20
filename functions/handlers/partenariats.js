@@ -485,7 +485,11 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
 
     const report = { createdConsultants: createdConsultants.length, catalogAdded, certsWritten, assignsWritten, skipped: plan.skipped.length };
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_par_certifications", module: "partenariats", entity: "par_certification", entityId: "batch", detail: report, ts: FieldValue.serverTimestamp() });
-    await recomputeParNow(); // recompute SYNCHRONE : quotas (couverture) + relances + actualité à jour dès le retour
+    // Recompute SYNCHRONE (quotas/relances/actualité à jour dès le retour) mais BEST-EFFORT (blindage imports) :
+    // les certifs/assignations sont DÉJÀ écrites — un échec du recompute ne doit pas transformer un import
+    // réussi en erreur. Le prochain recompute (mutation suivante ou planifié) rattrape. Tracé, jamais remonté.
+    try { await recomputeParNow(); }
+    catch (e) { if (logOps) await logOps({ kind: "import", action: "importParCertifications", status: "error", error: (e && e.message) || String(e) }); }
     return { ok: true, ...report, notes: plan.notes, skippedDetail: plan.skipped.slice(0, 40) };
   });
 
