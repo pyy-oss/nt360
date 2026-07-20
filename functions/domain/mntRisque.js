@@ -33,9 +33,11 @@ const round2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
  *  - margeByContrat: { [contratId]: "negative"|"faible" }  PALIER de marge (jamais le montant — ADR-034),
  *      dérivé côté appelant par margeRisqueNiveau(computeContratPnl). Absent = marge saine/inconnue.
  *  - asOf: 'AAAA-MM-JJ' (aujourd'hui) ; nowMs: millisecondes (horloge SLA « maintenant »)
+ *  - calendar: { offMin, holidays:Set, b2b } optionnel (fuseau/fériés/fenêtre B2B — ADR-P23). Absent =
+ *      horloge historique (UTC, Lun–Ven pleins, pas de férié) → aucun changement du score.
  * → { items[], counts{vert,ambre,rouge,critique}, total, atRisk, asOf }
  */
-function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } = {}) {
+function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat, calendar } = {}) {
   const conts = Array.isArray(contrats) ? contrats : [];
   const ticks = Array.isArray(tickets) ? tickets : [];
   const invs = Array.isArray(invoices) ? invoices : [];
@@ -77,7 +79,7 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat } 
         const markMs = e && e.type === "prise_en_compte"
           ? (t.priseEnCompteMs != null ? Number(t.priseEnCompteMs) : (t.resoluMs != null ? Number(t.resoluMs) : null))
           : (t.resoluMs != null ? Number(t.resoluMs) : null);
-        if (slaState(e, openMs, markMs, now).state === "rompu") { rompu = true; break; }
+        if (slaState(e, openMs, markMs, now, calendar).state === "rompu") { rompu = true; break; }
       }
       if (rompu) slaRompus += 1;
     }

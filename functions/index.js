@@ -3142,6 +3142,21 @@ exports.setMntFeature = onCallG("setMntFeature", { memoryMiB: 256, timeoutSecond
   return { ok: true, enabled };
 });
 
+// CALENDRIER SLA (ADR-P23) — fuseau/pays, jours fériés éditables et fenêtre d'heures ouvrées B2B. Config
+// OPÉRATIONNELLE du module (pas un maître-interrupteur) → gouvernée par le droit d'ÉCRITURE `maintenance`
+// (le directeur_contrats la pilote). Document ABSENT ⇒ horloge SLA historique (UTC, Lun–Ven pleins, pas de
+// férié). On stocke la forme NORMALISÉE (bornes sûres, fériés dédupliqués/triés). Recompute maintenance après.
+exports.setMntCalendar = onCallG("setMntCalendar", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "maintenance");
+  const { mntCalendar } = require("./domain/mntCalendar");
+  const d = req.data || {};
+  const norm = mntCalendar({ tzOffsetMinutes: d.tzOffsetMinutes, pays: d.pays, holidays: d.holidays, b2b: d.b2b });
+  await db.doc("config/mntCalendar").set({ tzOffsetMinutes: norm.offMin, pays: norm.pays, holidays: norm.holidays, b2b: norm.b2b, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_mnt_calendar", module: "maintenance", entity: "config", entityId: "mntCalendar", detail: { offMin: norm.offMin, holidays: norm.holidays.length, b2b: norm.b2b }, ts: FieldValue.serverTimestamp() });
+  await requestRecompute(["maintenance"]); // l'horloge SLA change → re-scorer le risque
+  return { ok: true, calendar: norm };
+});
+
 // DRAPEAU du module « Partenariats & Certifications » (ADR-P01) : même maître-interrupteur que
 // setMntFeature. ÉTEINT (défaut) ⇒ l'ERP est STRICTEMENT celui d'avant (aucune surface par_*). Édité en
 // Habilitations, DIRECTION uniquement. Écriture Admin SDK (les rules gardent config/parFeature en

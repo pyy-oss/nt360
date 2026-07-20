@@ -8,7 +8,8 @@ const { fpKey, num, cleanName, cleanBu, cleanPerson, plausibleYear } = require("
 const STATUTS = ["brouillon", "actif", "suspendu", "echu", "resilie"];
 const ECHEANCES = ["mensuel", "trimestriel", "annuel"];
 const SLA_TYPES = ["prise_en_compte", "resolution"];
-const COUVERTURES = ["ouvre_lun_ven", "h24"];
+// Couvertures SLA : jours ouvrés pleins (Lun–Ven 24h), heures ouvrées B2B (fenêtre locale, ADR-P23), ou 24/7.
+const COUVERTURES = ["ouvre_lun_ven", "ouvre_b2b", "h24"];
 // Types de maintenance (ADR-025) : classent tickets ET interventions ; objectifs (max) posés PAR CONTRAT.
 // Code applicatif ; libellés FR à l'affichage (Prédictive / Corrective / Évolutive / Veille technologique).
 const TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"];

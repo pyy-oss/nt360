@@ -801,7 +801,11 @@ async function recomputeCore(db, only) {
       for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp, astreinteByFp)) {
         const lvl = margeRisqueNiveau(row); if (lvl) margeByContrat[row.id] = lvl;
       }
-      const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now(), margeByContrat });
+      // Calendrier SLA (ADR-P23) : fuseau/fériés/fenêtre B2B éditables. Absent ⇒ horloge historique (UTC, Lun–Ven).
+      const { slaCalendar } = require("../domain/mntCalendar");
+      const calCfg = (await db.doc("config/mntCalendar").get()).data();
+      const calendar = slaCalendar(calCfg);
+      const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now(), margeByContrat, calendar });
       w.push({ path: "summaries/mnt_risque", data: { ...risque, ...stamp } });
       // Centre de surveillance (ADR-026) : flux d'événements PROJETÉ du risque (aucun recalcul) → cohérence
       // garantie avec summaries/mnt_risque. Même bloc gaté, même stamp. Lu sous droit `maintenance` + drapeau.

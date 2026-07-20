@@ -3,7 +3,7 @@
 // nouvel appel serveur : le cockpit consolide ce que le module lit déjà. Testable sans React.
 // Convention ERP : dates ISO AAAA-MM-JJ, montants FCFA entiers, statuts en code applicatif.
 
-import { slaState } from "./mntSla";
+import { slaState, type SlaCalendar } from "./mntSla";
 import { TYPES_MAINTENANCE } from "./mntContrat";
 
 export const ECHEANCE_PROCHE_JOURS = 60; // aligné sur le signal « échéance proche » du moteur de risque
@@ -208,8 +208,9 @@ type TicketMs = {
 type Eng = { type?: string; couverture?: string; seuilHeures?: number };
 type ContratEng = { id?: string; engagements?: Eng[] };
 
-/** Échéances SLA en attente des tickets ouverts, triées « rompu d'abord » puis par échéance la plus proche. PUR. */
-export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: number): SlaAgendaItem[] {
+/** Échéances SLA en attente des tickets ouverts, triées « rompu d'abord » puis par échéance la plus proche. PUR.
+ * `cal` = calendrier SLA optionnel (fuseau/fériés/fenêtre B2B — ADR-P23) ; absent = horloge historique. */
+export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: number, cal?: SlaCalendar | null): SlaAgendaItem[] {
   // 1ᵉʳ engagement de chaque type par contrat (la fiche impose au plus un par type utile ici).
   const engByContrat = new Map<string, { prise_en_compte?: Eng; resolution?: Eng }>();
   for (const c of contrats || []) {
@@ -231,7 +232,7 @@ export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: nu
     if (t.priseEnCompteMs == null && engs.prise_en_compte) pending.push({ slaType: "prise_en_compte", eng: engs.prise_en_compte });
     if (t.resoluMs == null && engs.resolution) pending.push({ slaType: "resolution", eng: engs.resolution });
     for (const p of pending) {
-      const s = slaState(p.eng, t.ouvertMs, null, nowMs); // markMs=null → SLA encore en cours (état vivant)
+      const s = slaState(p.eng, t.ouvertMs, null, nowMs, cal); // markMs=null → SLA encore en cours (état vivant)
       out.push({
         ticketId: t.id || "", contratId: t.contratId || "", client: t.client || "", titre: t.titre || "",
         priorite: t.priorite || "moyenne", slaType: p.slaType, dueMs: s.dueMs,

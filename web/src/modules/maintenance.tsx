@@ -17,12 +17,13 @@ import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
+import { slaCalendar, mntCalendar, isPlausibleDay, type MntCalendarDoc } from "../lib/mntCalendar";
 import type { Invoice, Order, AuditLog } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, aiMntContratStatut, revertMntAutoStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
   mntContratPnl, type MntContratPnlRow, aiAnalyzeChurn, type ChurnInput, type ChurnResult, type ChurnAnalysis,
-  aiMntLignees, applyMntLignee, type MntLignee,
+  aiMntLignees, applyMntLignee, type MntLignee, setMntCalendar,
 } from "../lib/writes";
 import type { MntContrat, MntEngagement, MntTicket, MntIntervention, MntWatch } from "../types";
 import { EVENT_TYPE_LABEL, SEVERITY_LABEL, severityTone, watchMatchesEvent, hasAnyWatch, type MntSurveillanceEvent, type MntSurveillanceSummary } from "../lib/mntSurveillance";
@@ -47,6 +48,59 @@ const decimals = (s: string) => s.replace(/[^\d.,]/g, "").replace(",", ".");
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
 );
+
+// Calendrier SLA (ADR-P23) — fuseau/pays, jours fériés éditables, fenêtre d'heures ouvrées B2B. Pilote
+// l'horloge SLA (mntSla) du module. Édition réservée au droit `maintenance` en écriture ; en lecture seule
+// (canWrite=false) la carte reste informative. Vide = horloge historique (UTC, Lun–Ven pleins, pas de férié).
+const SlaCalendarCard: FC<{ doc?: MntCalendarDoc | null; canWrite: boolean }> = ({ doc, canWrite }) => {
+  const cur = useMemo(() => mntCalendar(doc), [doc]);
+  const [tz, setTz] = useState(String(cur.offMin));
+  const [pays, setPays] = useState(cur.pays || "");
+  const [b2bStart, setB2bStart] = useState(String(cur.b2b.start));
+  const [b2bEnd, setB2bEnd] = useState(String(cur.b2b.end));
+  const [holidays, setHolidays] = useState<string[]>(cur.holidays);
+  const [newDay, setNewDay] = useState("");
+  // Recharge l'état local quand l'overlay change (autre éditeur, temps réel).
+  useEffect(() => { setTz(String(cur.offMin)); setPays(cur.pays || ""); setB2bStart(String(cur.b2b.start)); setB2bEnd(String(cur.b2b.end)); setHolidays(cur.holidays); }, [cur]);
+  const addDay = () => { if (isPlausibleDay(newDay) && !holidays.includes(newDay)) { setHolidays([...holidays, newDay].sort()); setNewDay(""); } };
+  const removeDay = (d: string) => setHolidays(holidays.filter((x) => x !== d));
+  const HEURES = Array.from({ length: 25 }, (_, h) => ({ value: String(h), label: `${h} h` }));
+  return (
+    <Card title="Calendrier SLA">
+      <Tip>Règle l'<b>horloge SLA</b> : décalage de <b>fuseau</b> (Abidjan = 0), <b>jours fériés</b> chômés (sautés comme un week-end) et <b>fenêtre d'heures ouvrées</b> (couverture « Heures ouvrées (B2B) »). Vide = <b>Lun–Ven pleins, UTC, sans férié</b> (comportement d'origine). {canWrite ? "Toute modification re-score le risque des contrats." : "Lecture seule — droit « maintenance » en écriture requis pour éditer."}</Tip>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Field label="Fuseau (min. vs UTC)"><input type="number" value={tz} onChange={(e) => setTz(e.target.value)} disabled={!canWrite} className="px-2 py-1 rounded border border-hair bg-transparent" aria-label="Décalage de fuseau en minutes" /></Field>
+        <Field label="Pays / zone"><input type="text" value={pays} onChange={(e) => setPays(e.target.value)} disabled={!canWrite} placeholder="Côte d'Ivoire…" className="px-2 py-1 rounded border border-hair bg-transparent" aria-label="Pays ou zone" /></Field>
+        <Field label="Ouverture B2B"><Select value={b2bStart} onChange={setB2bStart} options={HEURES} ariaLabel="Heure d'ouverture B2B" disabled={!canWrite} /></Field>
+        <Field label="Fermeture B2B"><Select value={b2bEnd} onChange={setB2bEnd} options={HEURES} ariaLabel="Heure de fermeture B2B" disabled={!canWrite} /></Field>
+      </div>
+      <div className="mt-3 border-t border-hair pt-3">
+        <div className="text-[11px] text-muted uppercase tracking-wide mb-1.5">Jours fériés ({holidays.length})</div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {holidays.length === 0 && <span className="text-faint text-[12px]">Aucun férié — l'horloge ne saute que les week-ends.</span>}
+          {holidays.map((d) => (
+            <span key={d} className="inline-flex items-center gap-1 text-[12px] px-1.5 py-0.5 rounded border border-hair">
+              {frDate(d)}
+              {canWrite && <button type="button" onClick={() => removeDay(d)} className="text-clay hover:opacity-70" aria-label={`Retirer ${d}`}>×</button>}
+            </span>
+          ))}
+        </div>
+        {canWrite && (
+          <div className="flex items-end gap-2 mt-2">
+            <Field label="Ajouter un férié"><DateField value={newDay} onChange={setNewDay} ariaLabel="Date du jour férié" /></Field>
+            <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={addDay} disabled={!isPlausibleDay(newDay)}>+ Férié</button>
+          </div>
+        )}
+      </div>
+      {canWrite && (
+        <div className="mt-3">
+          <Busy variant="ghost" label="Enregistrer le calendrier" okMsg="Calendrier SLA enregistré" errMsg="Enregistrement refusé"
+            fn={async () => { await setMntCalendar({ tzOffsetMinutes: Number(tz) || 0, pays: pays.trim() || null, holidays, b2b: { start: Number(b2bStart) || 8, end: Number(b2bEnd) || 18 } }); }} />
+        </div>
+      )}
+    </Card>
+  );
+};
 
 // NB : les ASTREINTES (on-call) ont été déplacées dans la section EXÉCUTION (module `astreintes.tsx`,
 // ADR-037) — imputées par affaire (N° FP), elles sont transverses aux projets ET aux contrats. Même
@@ -156,6 +210,10 @@ export const Maintenance: FC<Props> = () => {
   // hors du filtre de nav, aucun abonnement mnt_ ne partirait drapeau éteint (audit info). Doc minuscule.
   const { data: mntFeature } = useDocData<MntFeature>("config/mntFeature");
   const gate = canRead !== "none" && isMntEnabled(mntFeature);
+  // Calendrier SLA (ADR-P23) : fuseau/fériés/fenêtre B2B. Absent ⇒ horloge historique. Alimente slaState
+  // côté affichage EXACTEMENT comme le recompute alimente summaries/mnt_risque (parité front↔back).
+  const { data: calDoc } = useDocData<MntCalendarDoc>(gate ? "config/mntCalendar" : null);
+  const slaCal = useMemo(() => slaCalendar(calDoc), [calDoc]);
   const { rows: contrats, loading: lc } = useCollectionData<MntContrat>(gate ? "mnt_contrats" : null);
   const { rows: tickets } = useCollectionData<MntTicket>(gate ? "mnt_tickets" : null);
   const { rows: interventions } = useCollectionData<MntIntervention>(gate ? "mnt_interventions" : null);
@@ -274,7 +332,7 @@ export const Maintenance: FC<Props> = () => {
       priseEnCompteMs: t.priseEnCompteLe ? tsMillis(t.priseEnCompteLe) : null,
       resoluMs: t.resoluLe ? tsMillis(t.resoluLe) : null,
     })),
-    vContrats, nowMs), [vTickets, vContrats, nowMs]);
+    vContrats, nowMs, slaCal), [vTickets, vContrats, nowMs, slaCal]);
   // Restant lisible : « 2 j 3 h » ou « En retard de … » (rompu). Zéro dépendance externe (arrondi h).
   const fmtRemaining = (ms: number) => {
     const h = Math.floor(Math.abs(ms) / 3_600_000), d = Math.floor(h / 24);
@@ -335,7 +393,7 @@ export const Maintenance: FC<Props> = () => {
     colText("SLA résolution", (t: MntTicket) => {
       const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
       if (!eng || !t.ouvertLe) return "—";
-      const st = slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs);
+      const st = slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs, slaCal);
       return <Badge tone={slaTone(st.state)}>{SLA_STATE_LABEL[st.state]}</Badge>;
     }),
     colText("", (t: MntTicket) => (
@@ -831,6 +889,8 @@ export const Maintenance: FC<Props> = () => {
         </Card>
       )}
 
+      {tab === "tickets" && gate && <SlaCalendarCard doc={calDoc} canWrite={canWrite} />}
+
       {tab === "tickets" && gate && agenda.length > 0 && (
         <Card title={`Calendrier SLA · ${agenda.length}`}>
           <Tip>Échéances SLA <b>en attente</b> des tickets ouverts (prise en compte / résolution), calculées <b>en direct</b> — <b>rompues d'abord</b>, puis les plus proches. Un ticket dont le contrat n'a pas l'engagement du type n'apparaît pas.</Tip>
@@ -1124,7 +1184,7 @@ export const Maintenance: FC<Props> = () => {
                       <thead className="sticky top-0 bg-panel2 text-muted"><tr className="text-left"><th className="px-2 py-1 font-medium">Titre</th><th className="px-2 py-1 font-medium">Priorité</th><th className="px-2 py-1 font-medium">Statut</th><th className="px-2 py-1 font-medium">SLA résolution</th></tr></thead>
                       <tbody>
                         {vcTickets.map((t) => {
-                          const st = resoEng && t.ouvertLe ? slaState(resoEng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs) : null;
+                          const st = resoEng && t.ouvertLe ? slaState(resoEng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs, slaCal) : null;
                           return (
                             <tr key={t.id} className="border-t border-line/40">
                               <td className="px-2 py-1">{t.titre || "—"}</td>

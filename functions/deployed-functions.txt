@@ -138,6 +138,7 @@ setFxRates
 setInvoiceFp
 setManager
 setMntFeature
+setMntCalendar
 setParFeature
 upsertParPartner
 deleteParPartner
