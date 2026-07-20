@@ -43,9 +43,24 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m.doc.raf).toBe(1000000);
     expect(m.doc.suppliers).toEqual([{ name: "SOUSTRAITANT", amount: 200000 }]); // cleanName MAJUSCULE (comme le parseur P&L)
   });
-  it("commande sans fp → rejet ; raf absent → null (repli dérivé conservé)", () => {
+  it("commande sans fp → rejet ; raf absent → clé OMISE (merge:true préserve le RAF curaté P&L)", () => {
     expect(mapOrder({ client: "X", cas: 1000 }).ok).toBe(false);
-    expect(mapOrder({ fp: "FP/2026/1", cas: 1000 }).doc.raf).toBeNull();
+    // Doc ADDITIF : raf non fourni → clé absente du doc (et non `raf:null`), sinon merge:true écraserait le
+    // RAF figé importé du P&L. « repli dérivé » de mergeCommandes conservé côté carnet (o.raf != null → false).
+    expect("raf" in mapOrder({ fp: "FP/2026/1", cas: 1000 }).doc).toBe(false);
+  });
+  it("commande : update Odoo PARTIEL n'écrase pas les champs curatés P&L (clés omises)", () => {
+    // Odoo n'émet que fp + cas → aucune autre clé posée : merge:true préserve raf/designation/client/bu figés.
+    const d = mapOrder({ fp: "FP/2026/1", cas: 5000 }).doc;
+    expect(d.cas).toBe(5000);
+    expect("raf" in d).toBe(false);
+    expect("designation" in d).toBe(false);
+    expect("client" in d).toBe(false);
+    expect("bu" in d).toBe(false);
+    expect("suppliers" in d).toBe(false);
+    // cas explicitement à 0 → posé (present() distingue 0 fourni d'un cas absent)
+    expect(mapOrder({ fp: "FP/2026/1", cas: 0 }).doc.cas).toBe(0);
+    expect("cas" in mapOrder({ fp: "FP/2026/1", raf: 100 }).doc).toBe(false);
   });
   it("commande : mappe dateCommande + dateCreation ; dérive yearPo de la date si absent", () => {
     const m = mapOrder({ fp: "FP/2026/1", cas: 1000, dateCommande: "2026-03-15", dateCreation: "2026-03-01" });
@@ -54,8 +69,8 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m.doc.yearPo).toBe(2026); // dérivé de dateCommande faute de yearPo explicite
     // yearPo explicite prime sur la date
     expect(mapOrder({ fp: "FP/2026/2", yearPo: "2025", dateCommande: "2026-03-15" }).doc.yearPo).toBe(2025);
-    // date sentinelle rejetée
-    expect(mapOrder({ fp: "FP/2026/3", dateCommande: "1899-12-31" }).doc.dateCommande).toBeNull();
+    // date sentinelle rejetée → clé dateCommande OMISE (doc additif) plutôt qu'écrite à null
+    expect("dateCommande" in mapOrder({ fp: "FP/2026/3", dateCommande: "1899-12-31" }).doc).toBe(false);
   });
 
   it("facture : id déterministe safeId(numero), fp rapproché par fpKey, paid détecté", () => {

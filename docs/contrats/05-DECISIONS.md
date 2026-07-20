@@ -3,6 +3,40 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-049 — Le mapping webhook Odoo → commande est ADDITIF : n'écrire que les champs fournis (merge:true non destructeur)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (re-audit final, constat #5)
+
+### Contexte
+`mapOrder` (`functions/domain/odooSync.js`) façonnait un doc COMPLET (avec `raf:null`, `cas:0`,
+`designation:""`, `suppliers:[]` quand Odoo ne les envoyait pas) et le handler l'upsertait en
+`set(doc,{merge:true})` sur `orders/safeId(fp)` — le MÊME doc que l'import P&L Excel (convergence voulue).
+Conséquence : un update Odoo (temps réel, souvent partiel) **écrasait la valeur curatée du P&L**, en premier
+lieu le **RAF FIGÉ** (`raf:null` remplaçait un RAF importé) → `mergeCommandes` retombait sur le RAF dérivé
+`max(CAS−Σfactures,0)` et le backlog changeait silencieusement. Même risque pour `cas` (→ 0), et pour
+`designation`/`client`/`bu`/`suppliers` sur updates partiels.
+
+### Décision
+`mapOrder` construit un doc **ADDITIF** : chaque champ n'est posé QUE si Odoo l'a réellement fourni
+(`present(v) = v != null && v !== ""`), en distinguant « absent » de « 0/vide » (un `cas:0` explicite est
+posé ; un `cas` absent est omis). `fp` (clé de rapprochement) et `source:"odoo"` restent toujours écrits.
+`merge:true` **préserve** alors la valeur curatée d'un champ qu'Odoo n'envoie pas ; le repli dérivé de
+`mergeCommandes` continue de s'appliquer quand le champ manque partout.
+
+### Conséquences
+- **Strictement additif, aucune donnée inventée** : Odoo n'efface plus par omission. Un effacement
+  volontaire (rare) devrait passer par un `FieldValue.delete` explicite — hors périmètre, non demandé.
+- Contrat inchangé quand Odoo émet une commande COMPLÈTE (cas nominal) : tous les champs présents → doc
+  identique à l'ancien. Seuls les updates partiels changent de comportement (préservation au lieu d'écrasement).
+- Tests `odooSync.test.js` mis à jour : `raf`/`dateCommande` absents → clé OMISE (et non `null`) ; nouveau
+  test « update partiel n'écrase pas les champs curatés ».
+- **Ne couvre PAS** le double-compte opp Odoo/Excel (#3) ni le flip de `source` (#4) : ceux-ci relèvent de
+  l'ADR d'autorité inter-sources (à suivre, décision « Odoo = source live égale »).
+
+---
+
 ## ADR-048 — Un onglet Admin « Intégration » dédié regroupe les branchements externes (webhooks, API, notifications), sorti d'Habilitations
 
 - **Date :** 2026-07-20
