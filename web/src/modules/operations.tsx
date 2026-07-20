@@ -1,14 +1,14 @@
 // Modules opérations : P&L Projet, Crédit Fournisseurs, Exécution BC, Clients/Domaines, FP 360°.
 import { useState, useEffect, useMemo, type FC } from "react";
 import { where } from "firebase/firestore";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { fpKey, cleanName } from "../lib/ids";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, useConfirm, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, useConfirm, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
@@ -333,7 +333,7 @@ const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
 // par le comptage plein-tableau (mémo) ET la colonne « Retard » par ligne, sans recréer de Date.
 const isBcLate = (r: BcLine, today: string) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
 export const BC: FC<Props> = () => {
-  const { rows: allRows } = useCollectionData<BcLine>("bcLines");
+  const { rows: allRows, truncated } = useCollectionData<BcLine>("bcLines");
   // Exécution BC = BC RÉELLEMENT ÉMIS via l'IMPORT BC (Logistics / PDF). Les lignes issues des
   // fiches affaire (source « fiche ») sont des achats PLANIFIÉS au niveau projet — elles restent
   // visibles en P&L Projet / FP 360°, JAMAIS dans le suivi d'exécution (même si elles portent un
@@ -372,6 +372,7 @@ export const BC: FC<Props> = () => {
   }, [rows, flt, today]);
   return (
     <div className="flex flex-col gap-4">
+      <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       {canWrite && <BcImport />}
       <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
         {BC_STAGES.map((s) => (

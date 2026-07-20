@@ -1,10 +1,10 @@
 // Modules finance : Objectifs / R-O, Facturation, liste Factures, Rentabilité.
 import { useState, useEffect, useMemo, type FC } from "react";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
@@ -170,7 +170,7 @@ function InvoiceDateFixer({ inv }: { inv: Invoice }) {
 
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
-  const { rows: allRows, loading } = useCollectionData<Invoice>("invoices");
+  const { rows: allRows, loading, truncated } = useCollectionData<Invoice>("invoices");
   // Overlay des factures ANNULÉES (statut persistant, hors agrégats). La facture reste lisible ici
   // (collection brute) mais est exclue côté serveur de la facturation/cash/créances/qualité.
   const { data: cxl } = useDocData<CancellationsDoc>("config/cancelInvoices");
@@ -206,6 +206,7 @@ export const InvoiceList: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / client" />
+      <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       {orphan.length > 0 && (
         <div className={grid4}>
           <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />

@@ -1,11 +1,11 @@
 // 2 — Pipeline (analytique : funnel pondéré) · Opportunités (liste + top + saisie).
 import { useState, useEffect, useMemo, useCallback, type FC, type ReactNode, type ChangeEvent } from "react";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { p01 } from "../lib/projection";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, Field, FormSection, useToast, cx, colText, colNum, det, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, Field, FormSection, useToast, cx, colText, colNum, det, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
@@ -497,7 +497,7 @@ export const OppList: FC<Props> = () => {
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
   // On DIFFÈRE l'abonnement tant que l'OWD n'est pas résolu (ready) — sinon requête sans `visibleTo`
   // refusée sous OWD « private » (re-audit).
-  const { rows: allRows, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: allRows, loading, truncated } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   const { data: cfDoc } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields"); // champs custom (Lot 7b)
   const customDefs = cfDoc?.fields || [];
   // Exercice courant : borne l'exclusion DORMANTE (D Prev d'un millésime révolu) de Certitudes/Top, comme
@@ -634,6 +634,7 @@ export const OppList: FC<Props> = () => {
   if (loading && !allRows.length) return <CardSkeleton />;
   return (
     <div className="flex flex-col gap-4">
+      <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
           <FilterNote dims="BU / AM / client" />
