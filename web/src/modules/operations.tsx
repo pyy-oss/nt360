@@ -698,6 +698,11 @@ export const Fp360: FC<Props> = () => {
   // Ouverture depuis une cellule FP (maillage) → pré-remplit la recherche avec le N° FP cliqué.
   useEffect(() => { if (intent?.fp) setQ(intent.fp); }, [intent]);
   const canMargin = useCanSeeMargin();
+  // La réconciliation amont lit `supplierInvoices` : firestore.rules exige le droit `fournisseurs` (et non
+  // `rentabilite`). Sans lui, l'abonnement est SILENCIEUSEMENT refusé et « Coût réel » afficherait 0 (faux).
+  // On exige donc les DEUX droits (coût confidentiel = rentabilite ; source = fournisseurs) pour l'abonnement
+  // ET la carte, cohérent avec la règle — sinon on masque plutôt que d'afficher un zéro trompeur.
+  const canFournisseurs = useCan("fournisseurs") !== "none";
   const raw = q.trim();
   // RAPPROCHEMENT PAR fpKey (invariant ERP : rapprocher DEUX FP passe TOUJOURS par fpKey, jamais la casse
   // brute — sinon « FP/2026/007 » ≠ « FP/2026/7 »). `key` = forme canonique ; on interroge Firestore sur
@@ -730,7 +735,7 @@ export const Fp360: FC<Props> = () => {
   // métier — arbitrage humain) ET l'accès Rentabilité (le coût planifié o.costTotal est confidentiel).
   const { data: soaCfg } = useDocData<{ enabled?: boolean }>("config/soaFeature");
   const soaOn = soaCfg?.enabled === true;
-  const { rows: supInv } = useCollectionData<SupplierInvoice>(key && canMargin && soaOn ? "supplierInvoices" : null, cons, key);
+  const { rows: supInv } = useCollectionData<SupplierInvoice>(key && canMargin && canFournisseurs && soaOn ? "supplierInvoices" : null, cons, key);
   const coutReel = supInv.filter((x) => fpKey(x.fp) === key).reduce((s, i) => s + (i.amountXof || 0), 0);
   return (
     <div className="flex flex-col gap-4">
@@ -772,7 +777,7 @@ export const Fp360: FC<Props> = () => {
           )}
           {/* Réconciliation AMONT (coût) — pendant symétrique de l'aval : coût planifié (carnet) ↔ coût réel
               (Σ factures fournisseur, ADR-P21). Gâtée par le drapeau « Vérité du coût » + accès Rentabilité. */}
-          {o && canMargin && soaOn && (
+          {o && canMargin && canFournisseurs && soaOn && (
             <Card title="Réconciliation amont (coût)">
               <div className={grid4}>
                 <Kpi label="Coût planifié (carnet)" value={fmt(o.costTotal || 0)} tone="steel" />

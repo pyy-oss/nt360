@@ -6,9 +6,15 @@
 import { slaState, type SlaCalendar } from "./mntSla";
 import { TYPES_MAINTENANCE } from "./mntContrat";
 
-// ADR-041 : miroir EXACT du seuil back (functions/domain/mntRisque.js) — fenêtre unifiée à 90 j. Parité
-// stricte echeancesProches (front) ↔ signal echeance_proche (back). NE PAS confondre avec les buckets
-// tiérés de mntRenouvellements (30/60/90), qui sont une échelle d'urgence distincte.
+// ADR-041 : miroir EXACT du SEUIL back (functions/domain/mntRisque.js) — fenêtre unifiée à 90 j.
+// ATTENTION — la VALEUR du seuil est identique des deux côtés, mais la POPULATION de `echeancesProches`
+// (ci-dessous) est un SOUS-ENSEMBLE du signal back `echeance_proche` : ici uniquement les contrats ACTIFS
+// dont l'échéance est À VENIR (0 ≤ jours ≤ 90). Le signal back couvre EN PLUS les contrats SUSPENDUS et les
+// échéances DÉJÀ DÉPASSÉES (jours < 0, tier « dépassé »). Ce n'est donc PAS une parité de population stricte :
+// un contrat suspendu ou en retard porte le signal de risque back sans figurer dans cette liste front (il
+// apparaît côté renouvellements/dépassé). Alignement de population = décision produit à arbitrer (ne pas
+// changer les compteurs affichés en silence). NE PAS confondre non plus avec les buckets tiérés de
+// mntRenouvellements (30/60/90), échelle d'urgence distincte.
 export const ECHEANCE_PROCHE_JOURS = 90; // aligné sur le signal « échéance proche » du moteur de risque (ADR-041)
 const DAY = 86400000;
 

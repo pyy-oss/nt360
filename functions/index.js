@@ -143,6 +143,12 @@ if (process.env.RECOMPUTE_REGION) {
       const before = event.data && event.data.before && event.data.before.data();
       const after = event.data && event.data.after && event.data.after.data();
       if (!after) return; // suppression du doc → rien à faire
+      // Étanchéité du drapeau (invariant C10 : drapeau éteint ⇒ AUCUNE écriture mnt_*). Le module peut être
+      // éteint ENTRE la soumission de l'approbation et sa décision → sans cette garde, décider une approbation
+      // mnt_ en attente muterait quand même mnt_astreintes/mnt_contrats + auditLog(module:maintenance).
+      // Cohérent avec submitAstreinte / la décision de contrat, déjà gâtées par le drapeau (ADR-009).
+      const { isMntEnabled } = require("./domain/mntFeature");
+      if (!isMntEnabled((await db.doc("config/mntFeature").get()).data())) return; // module éteint → rien
       // ASTREINTES (ADR-035) — comptabilisation à la décision : approuvée → l'astreinte devient « validee »
       // (elle pèse alors en charge dans la rentabilité), rejetée → « rejetee ». On agit à la TRANSITION vers
       // un état DÉCIDÉ (idempotence : les ré-écritures ultérieures — note, etc. — ne re-mutent pas).
