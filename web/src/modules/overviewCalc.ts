@@ -44,24 +44,26 @@ export function computeFilteredOverview(
   // Assiette d'opps EN MIROIR du serveur (aggregate.js:239-249) : sinon la vue filtrée compte des opps
   // que le cockpit global exclut → certitudes/conversion divergents dès qu'un filtre est actif.
   // FP CANONIQUE (fpKey) partout, comme le serveur — un FP zero-paddé/espacé autrement doit rapprocher.
-  // 1) salesFps calculé AVANT l'exclusion stale/aged (parité serveur) : sinon un FP salesData devenu
+  // 1) liveFps calculé AVANT l'exclusion stale/aged (parité serveur) : sinon un FP live devenu
   //    fantôme/périmé cesserait de masquer son jumeau 'saisie', qui ressusciterait au pipeline.
-  // 0) Dédup INTRA-source 'salesData' par FP (MIROIR EXACT de aggregate.js:214-231) : plusieurs docs
-  //    'salesData' de MÊME FP (ids hérités d'anciens imports) double-comptaient le pondéré/certitudes.
-  //    On ne garde que le PLUS RÉCENT (updatedAt) par FP. Sans ça, la Vue d'ensemble FILTRÉE divergeait
-  //    du summary sur des doublons de FP hérités (violation « filtré = summary »).
+  // 0) Dédup INTER-source LIVE par FP (MIROIR EXACT de aggregate.js) : sources live d'une opp = import Excel
+  //    ('salesData') ET webhook Odoo ('odoo'), de MÊME autorité (ADR-050). Plusieurs docs live de MÊME FP
+  //    (ids hérités OU Odoo écrit avant l'Excel) double-comptaient le pondéré/certitudes. On ne garde que le
+  //    PLUS RÉCENT (updatedAt) par FP, toutes sources live confondues. Sans ça, la Vue d'ensemble FILTRÉE
+  //    divergeait du summary sur des doublons de FP (violation « filtré = summary »).
+  const isLiveSource = (o: (typeof opps)[number]) => o && (o.source === "salesData" || o.source === "odoo");
   const _ts = (o: (typeof opps)[number]) => { const u = (o as { updatedAt?: { toMillis?: () => number } | number }).updatedAt; return u && typeof (u as { toMillis?: () => number }).toMillis === "function" ? (u as { toMillis: () => number }).toMillis() : (Number(u) || 0); };
-  const bestSalesByFp = new Map<string, (typeof opps)[number]>();
-  for (const o of opps) { if (o.source === "salesData") { const k = fpKey(o.fp); if (k) { const prev = bestSalesByFp.get(k); if (!prev || _ts(o) >= _ts(prev)) bestSalesByFp.set(k, o); } } }
-  const oppsDedup = opps.filter((o) => { if (o.source !== "salesData") return true; const k = fpKey(o.fp); if (!k) return true; return bestSalesByFp.get(k) === o; });
-  // 1) salesFps calculé sur oppsDedup AVANT l'exclusion stale/aged (parité serveur).
-  const salesFps = new Set<string>();
-  for (const o of oppsDedup) { if (o.source === "salesData") { const k = fpKey(o.fp); if (k) salesFps.add(k); } }
+  const bestLiveByFp = new Map<string, (typeof opps)[number]>();
+  for (const o of opps) { if (isLiveSource(o)) { const k = fpKey(o.fp); if (k) { const prev = bestLiveByFp.get(k); if (!prev || _ts(o) >= _ts(prev)) bestLiveByFp.set(k, o); } } }
+  const oppsDedup = opps.filter((o) => { if (!isLiveSource(o)) return true; const k = fpKey(o.fp); if (!k) return true; return bestLiveByFp.get(k) === o; });
+  // 1) liveFps calculé sur oppsDedup AVANT l'exclusion stale/aged (parité serveur).
+  const liveFps = new Set<string>();
+  for (const o of oppsDedup) { if (isLiveSource(o)) { const k = fpKey(o.fp); if (k) liveFps.add(k); } }
   // 2) Exclusion des FANTÔMES (stale, retirées de LIVE sans clôture) et des PÉRIMÉES par âge (isAgedLost) —
   //    hors agrégats pipeline actifs, exactement comme le serveur.
   const oppsActive = oppsDedup.filter((o) => o.stale !== true && !isAgedLost(o));
-  // 3) Dédup inter-source : une opp 'saisie' dont le FP est couvert par une 'salesData' est écartée.
-  opps = oppsActive.filter((o) => { if (o.source !== "saisie") return true; const k = fpKey(o.fp); return !(k && salesFps.has(k)); });
+  // 3) Dédup inter-source : une opp 'saisie' dont le FP est couvert par une opp LIVE est écartée.
+  opps = oppsActive.filter((o) => { if (o.source !== "saisie") return true; const k = fpKey(o.fp); return !(k && liveFps.has(k)); });
   // Commandes du périmètre = cohorte par année de PO ; backlog GLISSANT = toutes les commandes
   // ouvertes du périmètre (indépendant de la période).
   // Millésime borné par `plausibleYear` (miroir serveur aggregate.js) — jamais `yearPo` brut (CLAUDE.md) :

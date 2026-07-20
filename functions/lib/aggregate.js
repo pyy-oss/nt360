@@ -216,23 +216,25 @@ async function recomputeCore(db, only) {
   const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
   const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));
 
-  // Dédup INTRA-source 'salesData' par FP (cf. audit cycle de vie) : si l'oppId a dérivé sur d'anciens
-  // imports (formule héritée incluant D Prev/AM/client), plusieurs docs 'salesData' de MÊME FP coexistent
-  // → double-compte du pipeline pondéré. On ne garde que le PLUS RÉCENT (updatedAt) par FP. Filet
-  // complémentaire à l'id désormais dérivé du seul FP : neutralise aussi les orphelins historiques SANS
-  // attendre un passage `dedupe`. (Les opps 'salesData' sans FP ne sont pas dédupliquées — pas de clé.)
+  // Dédup INTER-source LIVE par FP (cf. audit cycle de vie + re-audit #3). Sources LIVE d'une opp = l'import
+  // Excel ('salesData') ET le webhook Odoo ('odoo') : ce sont deux flux temps-réel/périodique de MÊME autorité
+  // (ADR-050). Si l'oppId a dérivé (formule héritée) OU si Odoo a écrit une opp AVANT l'import Excel, plusieurs
+  // docs LIVE de MÊME FP coexistent → double-compte du pondéré/funnel/conversion. On ne garde que le PLUS
+  // RÉCENT (updatedAt) par FP, toutes sources live confondues. (Les opps live sans FP ne sont pas dédupliquées
+  // — pas de clé.) MIROIR EXACT dans web/src/modules/overviewCalc.ts.
+  const isLiveSource = (o) => o && (o.source === "salesData" || o.source === "odoo");
   const _ts = (o) => { const u = o.updatedAt; return u && typeof u.toMillis === "function" ? u.toMillis() : (Number(u) || 0); };
-  const bestSalesByFp = new Map();
+  const bestLiveByFp = new Map();
   for (const o of oppsRaw) {
-    if (o.source !== "salesData") continue;
+    if (!isLiveSource(o)) continue;
     const k = fpKey(o.fp); if (!k) continue;
-    const prev = bestSalesByFp.get(k);
-    if (!prev || _ts(o) >= _ts(prev)) bestSalesByFp.set(k, o);
+    const prev = bestLiveByFp.get(k);
+    if (!prev || _ts(o) >= _ts(prev)) bestLiveByFp.set(k, o);
   }
   const oppsDedup = oppsRaw.filter((o) => {
-    if (o.source !== "salesData") return true;
+    if (!isLiveSource(o)) return true;
     const k = fpKey(o.fp); if (!k) return true;
-    return bestSalesByFp.get(k) === o; // ne garde que le représentant le plus récent du FP
+    return bestLiveByFp.get(k) === o; // ne garde que le représentant le plus récent du FP (toutes sources live)
   });
   // Opportunités FANTÔMES (cf. audit intégral I2) : une opp 'salesData' RETIRÉE de la feuille LIVE
   // (sans clôture 7/9) est marquée `stale:true` NON-DESTRUCTIVEMENT à l'import (lib/apply.js). On
@@ -244,14 +246,14 @@ async function recomputeCore(db, only) {
   const oppsActive = oppsDedup.filter((o) => o.stale !== true && !isAgedLost(o));
   const staleOpps = oppsDedup.filter((o) => o.stale === true); // fantômes (I2) : signalés en Qualité, hors agrégats
   const agedOpps = oppsDedup.filter((o) => o.stale !== true && isAgedLost(o)); // périmées par âge (règle source)
-  // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée en LIVE
-  // (source 'salesData', avec FP) existerait en double → double compte du pipeline. Quand un FP est
-  // couvert par une opp 'salesData', on écarte la/les opps 'saisie' de MÊME FP (la version importée fait foi).
-  // salesFps calculé sur oppsDedup (AVANT exclusion stale/aged), sinon un FP 'salesData' devenu fantôme
-  // (stale) ou périmé (aged) cesserait de masquer son jumeau 'saisie' → l'opp manuelle RESSUSCITERAIT au
-  // pipeline (cf. vérification). La suppression inter-source doit rester stable quel que soit l'état.
-  const salesFps = new Set(oppsDedup.filter((o) => o.source === "salesData" && fpKey(o.fp)).map((o) => fpKey(o.fp)));
-  const opps = oppsActive.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && salesFps.has(fpKey(o.fp))));
+  // Dédup inter-source : une affaire SAISIE manuellement (source 'saisie') puis ré-importée/synchronisée en
+  // LIVE (source 'salesData' OU 'odoo', avec FP) existerait en double → double compte du pipeline. Quand un
+  // FP est couvert par une opp LIVE, on écarte la/les opps 'saisie' de MÊME FP (la version live fait foi).
+  // liveFps calculé sur oppsDedup (AVANT exclusion stale/aged), sinon un FP live devenu fantôme (stale) ou
+  // périmé (aged) cesserait de masquer son jumeau 'saisie' → l'opp manuelle RESSUSCITERAIT au pipeline
+  // (cf. vérification). La suppression inter-source doit rester stable quel que soit l'état.
+  const liveFps = new Set(oppsDedup.filter((o) => isLiveSource(o) && fpKey(o.fp)).map((o) => fpKey(o.fp)));
+  const opps = oppsActive.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && liveFps.has(fpKey(o.fp))));
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.

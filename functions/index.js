@@ -4226,6 +4226,11 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     const exists = (await ref.get()).exists;
     const doc = { ...m.doc, updatedAt: FieldValue.serverTimestamp() };
     if (m.collection === "opportunities") doc.oppId = id;
+    // #4 (ADR-050) : ne PAS rétrograder la source d'une opp EXISTANTE. Si l'Excel a créé l'opp ('salesData'),
+    // Odoo l'ENRICHIT sans lui retirer sa source → elle reste éligible au marquage FANTÔME de la synchro Excel
+    // (une opp co-alimentée retirée du fichier LIVE redevient `stale`, cf. lib/sync.js). Une opp NOUVELLE créée
+    // par Odoo conserve source:"odoo" (Odoo en est l'autorité — non éligible au fantôme Excel, ce qui est voulu).
+    if (exists && m.collection === "opportunities") delete doc.source;
     if (!exists) doc.createdAt = FieldValue.serverTimestamp();
     await ref.set(doc, { merge: true });
     wrote = true;
