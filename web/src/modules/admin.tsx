@@ -82,6 +82,7 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <Rubrique>Sécurité &amp; accès</Rubrique>}
       {isDirection && <MntFeatureCard />}
       {isDirection && <ParFeatureCard />}
+      {isDirection && <SoaFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
 
       {/* Tous les paramètres d'intégration API dans un seul bloc : ClickUp (bidirectionnel), Odoo (webhook
@@ -788,6 +789,34 @@ function ParFeatureCard() {
       <Tip>Maître-interrupteur du module. <b>Éteint</b>, l'ERP est strictement celui d'avant (aucune donnée, aucun calcul, onglet masqué). <b>Allumé</b>, l'onglet « Partenariats » apparaît pour les rôles ayant le droit <code>partenariats</code>. Réversible à tout moment, sans redéploiement.</Tip>
       <div className="flex items-center gap-3 mt-1">
         <Toggle checked={enabled} onChange={toggle} disabled={busy} ariaLabel="Activer le module Partenariats & Certifications" />
+        <span className={cx("text-[13px]", enabled ? "text-emerald" : "text-muted")}>{enabled ? "Activé" : "Désactivé"}</span>
+      </div>
+    </Card>
+  );
+}
+
+// Drapeau « Vérité du coût » (config/soaFeature, ADR-P21). CONTRAIREMENT à Mnt/Par ce N'EST PAS un
+// maître-interrupteur de module (aucun onglet masqué) : il bascule la SOURCE du solde du compte
+// fournisseur (SOA). ÉTEINT (défaut) ⇒ solde piloté par le statut BC « facturé » (ERP d'avant) ;
+// ALLUMÉ ⇒ solde dérivé des FACTURES FOURNISSEUR RÉELLES (collection supplierInvoices). Réservé direction.
+function SoaFeatureCard() {
+  const { data } = useDocData<{ enabled?: boolean }>("config/soaFeature");
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const enabled = data?.enabled === true;
+  const toggle = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    // Callable inline (module lazy) plutôt que dans writes.ts : le chunk d'entrée est au plafond 120 KB.
+    try { await httpsCallable(functions, "setSoaFeature")({ enabled: v }); toast(v ? "Vérité du coût ACTIVÉE — le solde SOA suit les factures fournisseur" : "Vérité du coût désactivée — retour au solde piloté par le statut BC", "ok"); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Vérité du coût — solde fournisseur">
+      <Tip><b>Éteint</b> (défaut), le solde du compte fournisseur (SOA) est piloté par le statut BC « facturé » — l'ERP d'avant. <b>Allumé</b>, le solde dérive des <b>factures fournisseur réelles</b> (saisies dans « Crédit Fournisseurs »). Saisissez d'abord les pièces, <b>puis</b> basculez : à l'activation, le solde repart des factures enregistrées. Réversible sans redéploiement.</Tip>
+      <div className="flex items-center gap-3 mt-1">
+        <Toggle checked={enabled} onChange={toggle} disabled={busy} ariaLabel="Activer la vérité du coût (solde SOA depuis les factures fournisseur)" />
         <span className={cx("text-[13px]", enabled ? "text-emerald" : "text-muted")}>{enabled ? "Activé" : "Désactivé"}</span>
       </div>
     </Card>
