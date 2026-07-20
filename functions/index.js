@@ -2603,6 +2603,7 @@ const { createSanitize } = require("./handlers/sanitize");
 const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
 exports.deleteRecords = _sanitize.deleteRecords;
 exports.setCancellation = _sanitize.setCancellation;
+exports.purgeCollections = _sanitize.purgeCollections;
 
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :

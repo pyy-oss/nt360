@@ -901,6 +901,14 @@ export async function deleteRecords(collection: string, ids: string[]) {
 /** Supprime un seul enregistrement (assainissement). */
 export const deleteRecord = (collection: string, id: string) => deleteRecords(collection, [id]);
 
+/** PURGE (table rase) — réservé à la DIRECTION, IRRÉVERSIBLE. Vide entièrement le P&L (orders + chunks +
+ *  overlays) et/ou les opportunités (+ historique d'étapes). `confirm` doit valoir « PURGER ». Recompute
+ *  derrière (best-effort). Timeout serveur 540 s → client aligné. Voir ADR-053. */
+export async function purgeCollections(targets: Array<"orders" | "opportunities">, confirm: string) {
+  const res = await httpsCallable(functions, "purgeCollections", { timeout: 540_000 })({ targets, confirm });
+  return res.data as { ok: boolean; targets: string[]; deleted: Record<string, number>; configDocs: string[] };
+}
+
 /** ANNULATION — bascule le statut « Annulée » d'une commande / facture. Non destructif : l'objet
  *  reste (historique) mais est EXCLU de tous les agrégats (carnet, CAS, backlog, facturation, cash).
  *  Stocké en overlay (config/cancellations) → survit à un ré-import delta. `id` = DOC ID (commande =

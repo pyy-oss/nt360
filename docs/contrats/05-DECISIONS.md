@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-053 — Bouton Admin « Purge des données » (table rase P&L / Opportunités), Direction-only et irréversible
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« prévoir bouton purger P&L et Opportunité dans l'admin » — anciens fichiers incohérents, ~60% corrigés)
+
+### Contexte
+Les anciens fichiers d'import contiennent beaucoup d'incohérences ; l'import étant un **upsert delta** (n'efface jamais), les enregistrements devenus obsolètes RESTENT après un ré-import du fichier assaini. Un **purge** (table rase) est nécessaire pour repartir propre avant ré-import.
+
+### Décision
+- Callable **`purgeCollections`** (handler `sanitize.js`) — **DIRECTION uniquement** (`nt360Role === "direction"`, au-delà d'un simple droit « import »), **confirmation `« PURGER »`** obligatoire dans le payload, rate-limité, audité.
+- **Périmètre = table rase (toutes sources)** ; deux cibles indépendantes (cases à cocher) : `orders` (P&L) et/ou `opportunities`.
+- **Satellites + overlays purgés avec la cible** (choix Direction) : orders → `commandesRows` (chunks dérivés), `billingMilestones`, overlays `cancelOrders`/`orderCasOverride`/`fpAliases` ; opportunities → `oppHistory`/`oppDateHistory` + `fpAliases`. **`fpAliases` (partagé opp↔P&L) est dédupliqué** par la fonction PURE `purgePlan(targets)` (testée).
+- Suppression **paginée** (400/lot, garde-fou `PURGE_MAX = 500 000`). **Recompute best-effort** derrière (régénère les dérivés ; un échec ne remonte pas en « internal »).
+- Front : carte **« Zone dangereuse › Purge des données »** (Admin), rendue Direction-only, bouton rouge n'apparaissant qu'après sélection d'une cible **et** saisie de `« PURGER »`, avec re-confirmation `DangerBtn`.
+
+### Conséquences
+- **Destructif et irréversible** : trois garde-fous (rôle Direction serveur + jeton `PURGER` + re-confirmation UI) ; tracé au journal d'audit (`purge_collections`).
+- Les **factures** ne sont PAS dans le périmètre (ni leurs overlays `cancelInvoices`) — hors demande.
+- Après purge, un **ré-import** du fichier assaini reconstruit le carnet ; les overlays ayant été effacés, les corrections d'annulation/alias/override seront à re-poser (choix « table rase » assumé).
+
+---
+
 ## ADR-052 — Le « DC » Odoo est un identifiant PROPRE additif (attribut `dc`), le N° FP reste la clé de rapprochement
 
 - **Date :** 2026-07-20

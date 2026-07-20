@@ -109,6 +109,7 @@ pushAllBcToClickup
 pushAllOrdersToClickup
 pushBcToClickup
 pushOrderToClickup
+purgeCollections
 recompute
 reconClient
 revokeApiKey

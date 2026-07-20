@@ -7,7 +7,7 @@ import { Card, Table, ListView, Badge, Tip, Busy, DangerBtn, Toggle, Eyebrow, co
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, purgeCollections, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog } from "../types";
@@ -93,6 +93,9 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <AlertThresholdsCard />}
       {isDirection && <StaffingTargetsCard />}
       {isDirection && <DedupeCard />}
+
+      {isDirection && <Rubrique>Zone dangereuse</Rubrique>}
+      {isDirection && <PurgeCard />}
 
       {/* Normalisation clients (alias + quasi-doublons) : DÉPLACÉE dans l'écran dédié Référentiels >
           Normalisation clients (module clientnorm). Référentiels transverses (Devises/FX, Project Managers,
@@ -453,6 +456,40 @@ function EmailNotifyForm({ initial }: { initial: EmailNotifyConfig }) {
 // Dédoublonnage (admin) : factures / opportunités / BC fournisseurs. Analyse d'abord (aperçu),
 // puis suppression des doublons (le meilleur représentant de chaque groupe est conservé).
 const DEDUPE_LABEL: Record<string, string> = { invoices: "Factures", opportunities: "Opportunités", bcLines: "BC fournisseurs" };
+// PURGE (table rase) — DIRECTION only (rendu gaté en amont). Vide entièrement le P&L (commandes + chunks +
+// overlays) et/ou les opportunités (+ historique). IRRÉVERSIBLE : sélection des cibles + saisie « PURGER »
+// obligatoire AVANT que le bouton (rouge, DangerBtn avec re-confirmation) n'apparaisse. Sert à repartir propre
+// avant un ré-import du fichier assaini. Callable serveur purgeCollections (ADR-053).
+function PurgeCard() {
+  const [orders, setOrders] = useState(false);
+  const [opps, setOpps] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  const targets: Array<"orders" | "opportunities"> = [...(orders ? ["orders" as const] : []), ...(opps ? ["opportunities" as const] : [])];
+  const ready = targets.length > 0 && confirm === "PURGER";
+  const label = targets.map((t) => (t === "orders" ? "P&L (commandes)" : "Opportunités")).join(" + ") || "—";
+  return (
+    <Card title="Purge des données (table rase)">
+      <div className="flex flex-col gap-3">
+        <Tip><b>Irréversible.</b> Efface DÉFINITIVEMENT les enregistrements sélectionnés, toutes sources confondues, avec leurs satellites et overlays de correction (annulations, alias FP, overrides CAS, jalons de facturation, historique d'étapes). À utiliser pour repartir propre avant un ré-import du fichier assaini — un ré-import reconstruit le carnet. Réservé à la Direction, tracé au journal.</Tip>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="accent-gold mt-0.5" checked={orders} onChange={(e) => setOrders(e.target.checked)} aria-label="Purger le P&L" /><span>Purger le <b>P&amp;L</b> — commandes <span className="text-muted">(orders + chunks + overlays cancelOrders / orderCasOverride / fpAliases + jalons de facturation)</span></span></label>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="accent-gold mt-0.5" checked={opps} onChange={(e) => setOpps(e.target.checked)} aria-label="Purger les opportunités" /><span>Purger les <b>opportunités</b> <span className="text-muted">(+ historique d'étapes oppHistory / oppDateHistory)</span></span></label>
+        <label className="flex items-center gap-2 text-sm">Tapez <b>PURGER</b> pour confirmer&nbsp;:
+          <input className="field !py-1 w-40 font-mono" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="PURGER" aria-label="Confirmation de purge" />
+        </label>
+        {ready ? (
+          <div>
+            <DangerBtn label={`Purger définitivement — ${label}`} tone="clay" okMsg="Purge effectuée (recalcul lancé)" errMsg="Purge refusée"
+              confirm={`PURGE IRRÉVERSIBLE de : ${label}. Toutes les données et overlays associés seront effacés, toutes sources confondues. Confirmer ?`}
+              fn={async () => { await purgeCollections(targets, confirm); setConfirm(""); setOrders(false); setOpps(false); }} />
+          </div>
+        ) : (
+          <button className="btn-ghost text-clay opacity-40 cursor-not-allowed w-fit" disabled aria-disabled>Purger définitivement</button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function DedupeCard() {
   const [res, setRes] = useState<DedupeResult | null>(null);
   const totalDup = res ? Object.values(res.result).reduce((s, r) => s + r.duplicates, 0) : 0;
