@@ -1703,3 +1703,24 @@ no-undef (159) + deploy-targets (189) OK. Strictement additif, aucune donnée su
 
 **Cluster Odoo↔Excel du re-audit : CLÔTURÉ** (#3 HIGH + #4 + #5 traités ; #1 cosmétique classé).
 **Extension Odoo (BC via Odoo / DC→FP / sync sortant) : en attente de précisions métier** (plan cadré à venir).
+
+## Extension Odoo Lot 1 — BC fournisseurs via webhook (→ bcLines, ADR-051) — 2026-07-20
+
+**Fait.** 4ᵉ type d'objet `bc` au webhook Odoo → collection `bcLines` (indiscernable des BC PDF/ClickUp).
+- `domain/odooSync.js` : mapper PUR `mapBc` (additif, patron ADR-049) ; `"bc"` ajouté à `OBJECTS` + dispatch.
+- `index.js` (handler `odooWebhook`) : contexte BC chargé une fois (taux `config/fxRates` + `known` de tous les
+  N° BC de source ≠ odoo) ; branche `bc` dans `processOne` : **priorité « comptable/ClickUp prime »** (skip si
+  N° BC déjà connu → pas de double-compte du SOA, `domain/fournisseurs.js` somme toutes les lignes), id
+  déterministe `bc_odoo_<bcKey>`, conversion XOF (contre-valeur saisie prioritaire), **statut d'ENGAGEMENT
+  seulement** (jamais facture/solde — solde = acte comptable, comme ClickUp). Champ `dc` capté (Lot DC à venir).
+- `docs/ODOO_WEBHOOK.md` : section `object = "bc"` documentée (contrat + priorité + statut).
+
+**Gouvernance.** Strictement additif (nouvelle `source:"odoo"` dans bcLines ; aucune ligne existante modifiée ;
+le SOA ne bouge que si un BC Odoo INÉDIT entre). Odoo en plus basse priorité (défère à comptable ET ClickUp) —
+point de revue noté dans l'ADR-051 si Odoo doit un jour superséder ClickUp.
+
+**Vérifs.** 1256 functions au vert (dont 3 tests `mapBc` : cible bcLines + additif + dispatch/amountXof) ;
+no-undef (159) + deploy-targets (189) OK. Backend seul, aucun changement front/bundle.
+
+**Suite (décidé) :** Lot 2 = rattachement DC (champ propre en plus du FP) ; Lot 3 = bouton « sync-depuis-Odoo »
+(client sortant xmlrpc/jsonrpc, clé API) — en attente URL instance / base / modèles / fenêtre.

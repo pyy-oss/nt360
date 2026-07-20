@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { mapOdooRecord, mapOpportunity, mapOrder, mapInvoice } = require("../domain/odooSync");
+const { mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc } = require("../domain/odooSync");
 
 describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
   it("opportunité : canonicalise le FP, dérive stageLabel/weighted, trace odooId + source", () => {
@@ -87,8 +87,40 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(mapInvoice({ numero: "FA-1", date: "1899-12-31" }).doc.date).toBeNull();
   });
 
+  it("BC : cible bcLines, canonicalise fp, doc additif, trace source odoo (ADR-051)", () => {
+    const m = mapBc({ odooId: "purchase.order:55", bcNumber: "BC/2026/9", fp: "FP/2026/012", supplier: "  soustraitant  ", currency: "eur", amount: "1500", status: "emis", eta: "2026-04-10", dc: "DC/2026/77" });
+    expect(m.ok).toBe(true);
+    expect(m.collection).toBe("bcLines");
+    expect(m.object).toBe("bc");
+    expect(m.key.bcNumber).toBe("BC/2026/9");
+    expect(m.key.fp).toBe("FP/2026/12"); // fpKey normalise les zéros de tête
+    expect(m.doc.source).toBe("odoo");
+    expect(m.doc.supplier).toBe("SOUSTRAITANT"); // cleanName (MAJUSCULES) comme les autres sources
+    expect(m.doc.currency).toBe("EUR");
+    expect(m.doc.amount).toBe(1500);
+    expect(m.doc.statusRaw).toBe("emis"); // le handler valide/clampe contre BC_STAGES + fx
+    expect(m.doc.etaReel).toBe("2026-04-10");
+    expect(m.doc.dc).toBe("DC/2026/77"); // capté additivement, FP reste la clé
+  });
+  it("BC : doc ADDITIF — champs absents omis (pas d'écrasement au merge) ; bcNumber requis", () => {
+    expect(mapBc({ supplier: "X", amount: 100 }).ok).toBe(false); // sans N° BC → rejet
+    const d = mapBc({ bcNumber: "BC-1", status: "livre" }).doc; // update partiel (statut seul)
+    expect(d.bcNumber).toBe("BC-1");
+    expect(d.statusRaw).toBe("livre");
+    expect("amount" in d).toBe(false);
+    expect("supplier" in d).toBe(false);
+    expect("fp" in d).toBe(false);
+    expect("currency" in d).toBe(false);
+  });
+  it("BC : dispatch via mapOdooRecord + amountXof (contre-valeur saisie) capté", () => {
+    const m = mapOdooRecord("bc", { bcNumber: "BC-7", amount: 1000, currency: "USD", amountXof: 600000 });
+    expect(m.ok).toBe(true);
+    expect(m.doc.amountXof).toBe(600000);
+  });
+
   it("objet inconnu → rejet explicite", () => {
     expect(mapOdooRecord("contact", {}).ok).toBe(false);
     expect(mapOdooRecord("order", { fp: "FP/2026/1", cas: 1 }).ok).toBe(true);
+    expect(mapOdooRecord("bc", { bcNumber: "BC-1" }).ok).toBe(true);
   });
 });

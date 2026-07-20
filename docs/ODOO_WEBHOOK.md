@@ -36,7 +36,7 @@ requests.post(URL, data=body, headers={"Content-Type": "application/json", "X-Si
 ## Contrat (corps JSON)
 
 ```json
-{ "object": "opportunity" | "order" | "invoice", "records": [ { … } ] }
+{ "object": "opportunity" | "order" | "invoice" | "bc", "records": [ { … } ] }
 ```
 
 `records` : jusqu'à **500** par requête (au-delà : tronqué, signalé par `truncated: true`). `record` (objet
@@ -91,6 +91,30 @@ Rapprochement : id **déterministe** `safeId(numero)`. **`numero` requis** ; `fp
 | `dueDate` | string | Échéance. |
 | `paid` | bool/string | `true` ou libellé (`payé`, `réglé`, `encaissé`…). |
 | `dateCreation` | string | Date de création Odoo (`create_date`), `AAAA-MM-JJ` (alias `createdDate`). |
+
+### object = "bc"  →  collection `bcLines` (bon de commande fournisseur)
+Rapprochement : id **déterministe** par **N° BC canonique** (`bc_odoo_<bcKey>`). **`bcNumber` requis** ; `fp`
+rattache l'affaire. **Priorité « comptable/ClickUp prime » (ADR-051)** : si un BC d'une autre source (saisie,
+PDF, import comptable, ClickUp) porte **déjà** ce N° BC (au séparateur près), le BC Odoo est **ignoré** (`action:
+"skipped"`) — sinon le SOA fournisseur double-compterait l'engagement. Doc **additif** : n'envoyez que les champs
+connus (un `update` partiel ne réécrit pas le reste). Le **statut** ne pose QUE de l'engagement
+(`a_emettre`/`emis`/`livre`) — jamais `facture`/`solde` (le solde du compte fournisseur reste un acte comptable).
+
+| Champ | Type | Notes |
+|---|---|---|
+| `odooId` | string | id Odoo (`purchase.order:55`) — tracé. |
+| `bcNumber` | string | **requis** (N° BC ; canonicalisé `bcKey`). |
+| `fp` | string | N° FP rattaché (`fpKey`). |
+| `supplier` | string | Fournisseur (`cleanName`, MAJUSCULES). |
+| `customer` | string | Client final éventuel. |
+| `country`, `expenseType`, `description` | string | Métadonnées. |
+| `currency` | string | Devise ISO (`XOF` par défaut) ; convertie en XOF via `config/fxRates`. |
+| `amount` | number | Montant en devise. |
+| `amountXof` | number | Contre-valeur XOF **saisie** (prioritaire sur la conversion). |
+| `status` | string | Engagement : `a_emettre`/`emis`/`livre` (autre valeur → `emis`). |
+| `eta` | string | ETA `AAAA-MM-JJ` (alias `etaReel`). |
+| `dateIn` | string | Date d'entrée `AAAA-MM-JJ`. |
+| `dc` | string | Identifiant DC propre (Odoo) — capté additivement ; le FP reste la clé de rapprochement. |
 
 ## Réponse
 
