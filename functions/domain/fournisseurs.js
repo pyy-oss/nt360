@@ -148,12 +148,15 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
     soldeTotal: bySupplier.reduce((s, x) => s + x.solde, 0),
     encoursTotal: bySupplier.reduce((s, x) => s + x.solde, 0), // rétro-compat = soldeTotal
     // Listes COMPLÈTES (non tronquées) des états critiques : les alertes doivent voir TOUS les
-    // fournisseurs saturés/en tension, y compris à faible exposition (hors du top 50 affiché).
+    // fournisseurs saturés/en tension, y compris à faible exposition (hors du top affiché).
     saturated: bySupplier.filter((x) => x.state === "saturation").map((x) => x.name),
     tension: bySupplier.filter((x) => x.state === "tension").map((x) => x.name),
     // Fournisseurs dont le SOA est INDÉTERMINÉ (BC réel non converti) — à fiabiliser avant décision de crédit.
     indeterminate: bySupplier.filter((x) => x.unvalued).map((x) => x.name),
-    bySupplier: bySupplier.slice(0, 50),
+    // Cap relevé à 500 (ADR-044) : le référentiel Fournisseurs édite les lignes de crédit fournisseur
+    // par fournisseur — la liste doit être complète, pas seulement le top exposition. Reste largement
+    // sous la limite Firestore d'1 Mo (≈150 o/ligne). Additif : n'affecte pas les agrégats ci-dessus.
+    bySupplier: bySupplier.slice(0, 500),
   };
 }
 

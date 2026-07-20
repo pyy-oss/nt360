@@ -1467,3 +1467,25 @@ absent** → non-régression byte-identique. Décision structurante validée hum
 **Vérifs.** 1245 functions (dont `mntContratVersion` 4, opposabilité mntRisque, gate C3) + 291 web (dont
 `engagementsForTicket` + slaAgenda opposable) au vert ; bundle 119,4 KB (<= 120) ; check-no-undef (158),
 check-deploy-targets (187, aucun nouvel export), check-firestore-indexes (3 composites) OK ; tsc propre.
+
+## Réf. PR1 — Fournisseurs dans Référentiels (ADR-044) — 2026-07-20
+
+**Fait.** Relocalisation présentationnelle de la SAISIE des lignes de crédit fournisseur (plafond
+autorisé, solde d'ouverture SOA daté, migration des clés canoniques ADR-P20) depuis l'écran de suivi
+« Crédit Fournisseurs » (Rentabilité) vers un nouvel écran **Référentiels › Fournisseurs**
+(`web/src/modules/fournisseursref.tsx`, composant `FournisseursRef`). Même patron qu'ADR-037 (Astreintes).
+
+**Câblage.**
+- `CreditEditor` + `MigrateCreditKeysBtn` déplacés hors de `operations.tsx` → `fournisseursref.tsx`.
+  Imports morts retirés d'`operations.tsx` (`useConfirm`, `trackWrite`, `upsertCreditLine`,
+  `migrateCreditLineKeys`) — vérifiés uniques aux composants déplacés.
+- « Crédit Fournisseurs » reste le suivi SOA (solde/engagement/disponible/factures) ; sa colonne d'édition
+  et le bouton de migration disparaissent ; un `Tip` renvoie vers Référentiels › Fournisseurs.
+- Nav : `MODULES` id `fournisseursref` (key `fournisseurs` → MÊME droit d'écriture, aucun élargissement),
+  ajouté au groupe **Référentiels** ; garde-fou nav (id ⊆ un seul GROUPS) respecté.
+- `functions/domain/fournisseurs.js` : cap `bySupplier` 50 → **500** (le référentiel doit lister TOUS les
+  fournisseurs pour les éditer). Additif : agrégats et listes critiques inchangés (calculés sur l'ensemble).
+
+**Gouvernance.** Strictement additif : aucun callable/droit/schéma/calcul modifié, seul l'emplacement UI
+de l'édition change. ADR-044. Étape 1/3 de la consolidation des référentiels (fournisseurs ; puis
+référentiels Admin ; puis normalisation fournisseurs minimale).
