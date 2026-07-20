@@ -34,7 +34,7 @@ import {
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
+import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, FilterNote, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -248,6 +248,9 @@ export const Maintenance: FC<Props> = () => {
   // Scores de risque MATÉRIALISÉS par le recompute (summaries/mnt_risque, ADR-003) — une seule vérité
   // du score. Le doc est gaté (drapeau + droit maintenance) côté rules ; on ne le lit que si `gate`.
   const { data: risque } = useDocData<RisqueSummary>(gate ? "summaries/mnt_risque" : null);
+  // Snapshot MRR/ARR quotidien (Lot 5b, ADR-043) — historisé par le recompute (summaries/mnt_mrrSnapshot),
+  // gaté drapeau + droit maintenance. Sert la TENDANCE (le MRR live vient de recurringRevenue, ci-dessous).
+  const { data: mrrSnap } = useDocData<{ days?: { date: string; mrr: number; arr: number; contratsActifs: number }[] }>(gate ? "summaries/mnt_mrrSnapshot" : null);
   // Centre de surveillance (Lot 5, ADR-026) : flux d'événements MATÉRIALISÉ (projection du risque) + les
   // abonnements PAR UTILISATEUR (doc mnt_watches/{uid}, lu en direct — chaque utilisateur ne lit que le sien).
   const { user } = useClaims();
@@ -457,12 +460,21 @@ export const Maintenance: FC<Props> = () => {
   ];
 
   // Tableau de bord (Lot 6) — cockpit consolidé en tête du module, dérivé des collections déjà
-  // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 60 j).
+  // chargées (aucun appel serveur). asOf = aujourd'hui (échéances proches ≤ 90 j, ADR-041).
   const asOfIso = new Date().toISOString().slice(0, 10);
   const dash = useMemo(() => computeMntDashboard(vContrats, vTickets, asOfIso), [vContrats, vTickets, asOfIso]);
   // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
   // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
   const recurring = useMemo(() => recurringRevenue(vContrats), [vContrats]);
+  // TENDANCE MRR (Lot 5b, ADR-043) — dérivée du snapshot quotidien historisé. Compare le dernier point au
+  // point ~30 j avant (sinon au plus ancien disponible). Le MRR LIVE reste recurring.totalMrr (même assiette).
+  const mrrTrend = useMemo(() => {
+    const days = (mrrSnap?.days || []).filter((d) => d && typeof d.mrr === "number");
+    if (days.length < 2) return null;
+    const last = days[days.length - 1];
+    const prev = days.length > 30 ? days[days.length - 31] : days[0];
+    return { deltaMrr: last.mrr - prev.mrr, fromDate: prev.date, points: days.length };
+  }, [mrrSnap]);
   // NB : pas de colonne MRR par groupe — l'ARR (entier) somme juste, mais round(ARR/12) par ligne dériverait
   // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
@@ -768,7 +780,7 @@ export const Maintenance: FC<Props> = () => {
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-muted mb-1.5">Échéances proches (≤ 60 j)</div>
+              <div className="text-[11px] text-muted mb-1.5">Échéances proches (≤ {ECHEANCE_PROCHE_JOURS} j)</div>
               {dash.echeancesProches.length === 0 ? <span className="text-[12px] text-muted">Aucune échéance imminente.</span> : (
                 <div className="flex flex-col gap-1 text-[12px]">
                   {dash.echeancesProches.slice(0, 5).map((e) => (
@@ -797,6 +809,14 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub={`revenu mensuel · ${recurring.contratsActifs} contrat(s) actif(s)`} />
             <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
           </div>
+          {mrrTrend && mrrTrend.deltaMrr !== 0 && (
+            <div className="mt-2 text-[12px]">
+              <span className="text-muted">Tendance MRR depuis {frDate(mrrTrend.fromDate)} : </span>
+              <span className={cx("font-medium", mrrTrend.deltaMrr > 0 ? "text-emerald" : "text-clay")}>
+                {mrrTrend.deltaMrr > 0 ? "+" : "−"}{fmt(Math.abs(mrrTrend.deltaMrr))}/mois
+              </span>
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
             <div>
               <div className="text-[11px] text-muted mb-1.5">Par BU</div>
@@ -863,6 +883,20 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Non scoré" value={String(counts.incomplet || 0)} sub="données à compléter" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
+          {/* CONTRAT SANS AFFAIRE (Lot 5b) — contrats dont le N° FP n'est pas au carnet (orphelins, fpKey).
+              À rattacher : sans affaire adossée, ni facturation ni coût ne se rapprochent du contrat. */}
+          {risque.sansAffaire && risque.sansAffaire.count > 0 && (
+            <div className="mt-3 text-[12px]">
+              <span className="text-clay font-medium">Contrats sans affaire au carnet : {risque.sansAffaire.count}</span>
+              <span className="text-muted"> — N° FP absent du carnet (rapproché par fpKey). À rattacher.</span>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {risque.sansAffaire.items.slice(0, 6).map((s) => (
+                  <span key={s.id} className="inline-flex items-center gap-1"><Badge tone="neutral">{s.client || "—"}</Badge><FpLink fp={s.fp || undefined} /></span>
+                ))}
+                {risque.sansAffaire.count > risque.sansAffaire.items.slice(0, 6).length && <span className="text-muted">+{risque.sansAffaire.count - risque.sansAffaire.items.slice(0, 6).length} autre(s)</span>}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 

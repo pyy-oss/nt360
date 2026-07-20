@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { validateMntContrat, validateEngagement, STATUTS, TYPES_MAINTENANCE } = require("../domain/mntContrat");
+const { validateMntContrat, validateEngagement, isContratOrphelin, STATUTS, TYPES_MAINTENANCE } = require("../domain/mntContrat");
 
 const base = {
   fp: "FP/2026/7", client: "ACME", statut: "actif", echeanceType: "mensuel",
@@ -86,5 +86,21 @@ describe("mntContrat — engagements SLA embarqués", () => {
   });
   it("un contrat sans engagement est valide (tableau vide)", () => {
     expect(validateMntContrat({ ...base, engagements: [] }).value.engagements).toEqual([]);
+  });
+});
+
+// CONTRAT SANS AFFAIRE (Lot 5b) — orphelin = N° FP absent du carnet, rapproché par fpKey (jamais brut).
+describe("isContratOrphelin — contrat sans affaire au carnet", () => {
+  const orderFps = new Set(["FP/2026/7", "FP/2026/12"]);
+  it("orphelin quand le fpKey n'est pas au carnet", () => {
+    expect(isContratOrphelin({ fp: "FP/2026/99" }, orderFps)).toBe(true);
+  });
+  it("rattaché quand le fpKey est présent — graphie normalisée (zéros de tête)", () => {
+    expect(isContratOrphelin({ fp: "FP/2026/7" }, orderFps)).toBe(false);
+    expect(isContratOrphelin({ fp: "FP/2026/007" }, orderFps)).toBe(false); // même affaire via fpKey
+  });
+  it("orphelin quand le N° FP est vide/absent (non rattachable)", () => {
+    expect(isContratOrphelin({ fp: "" }, orderFps)).toBe(true);
+    expect(isContratOrphelin({}, orderFps)).toBe(true);
   });
 });

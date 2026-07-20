@@ -74,14 +74,15 @@ describe("C3 — recompute : le bloc maintenance est additif et gaté", () => {
     expect([...paths].some((p) => p.includes("mnt"))).toBe(false);
   });
 
-  it("drapeau ON → seuls summaries/mnt_risque + mnt_surveillance sont nouveaux (tous les autres inchangés)", async () => {
+  it("drapeau ON → seuls summaries mnt_ (risque + surveillance + snapshot MRR) sont nouveaux (tous les autres inchangés)", async () => {
     const off = await pathsWith(false);
     const on = await pathsWith(true);
-    // Différence symétrique = exactement les summaries mnt_ matérialisés (risque + sa PROJECTION surveillance,
-    // ADR-026). Aucun summary existant modifié/retiré : le bloc reste strictement additif et gaté.
+    // Différence symétrique = exactement les summaries mnt_ matérialisés : risque + sa PROJECTION surveillance
+    // (ADR-026) + le snapshot MRR quotidien (Lot 5b, ADR-043). Aucun summary existant modifié/retiré :
+    // le bloc reste strictement additif et gaté (« éteint = ERP d'avant »).
     const added = [...on].filter((p) => !off.has(p)).sort();
     const removed = [...off].filter((p) => !on.has(p));
-    expect(added).toEqual(["summaries/mnt_risque", "summaries/mnt_surveillance"]);
+    expect(added).toEqual(["summaries/mnt_mrrSnapshot", "summaries/mnt_risque", "summaries/mnt_surveillance"]);
     expect(removed).toEqual([]);
   });
 });

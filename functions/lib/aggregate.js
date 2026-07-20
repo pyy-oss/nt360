@@ -806,11 +806,32 @@ async function recomputeCore(db, only) {
       const calCfg = (await db.doc("config/mntCalendar").get()).data();
       const calendar = slaCalendar(calCfg);
       const risque = mntRisque({ contrats: mntContrats, tickets: ticks, invoices, asOf, nowMs: Date.now(), margeByContrat, calendar });
-      w.push({ path: "summaries/mnt_risque", data: { ...risque, ...stamp } });
+      // CONTRAT SANS AFFAIRE (Lot 5b) — champ ADDITIF sur le summary de risque : contrats mnt_ dont le N° FP
+      // n'est pas au carnet (orders), via le prédicat d'orphelin canonique (fpKey — même que factures_orphelines).
+      // orderFps dérivé des orders DÉJÀ en mémoire (aucune I/O nouvelle). Calculé sur TOUT le parc chargé
+      // (indépendant de l'assiette de score), plafonné pour rester loin de la limite 1 Mio.
+      const { isContratOrphelin } = require("../domain/mntContrat");
+      const orderFps = new Set(orders.map((o) => fpKey(o.fp)).filter(Boolean));
+      const orphelins = mntContrats.filter((c) => isContratOrphelin(c, orderFps));
+      const sansAffaire = { count: orphelins.length, items: orphelins.slice(0, 200).map((c) => ({ id: c.id, fp: c.fp || null, client: c.client || "", statut: String(c.statut || "") })) };
+      w.push({ path: "summaries/mnt_risque", data: { ...risque, sansAffaire, ...stamp } });
       // Centre de surveillance (ADR-026) : flux d'événements PROJETÉ du risque (aucun recalcul) → cohérence
       // garantie avec summaries/mnt_risque. Même bloc gaté, même stamp. Lu sous droit `maintenance` + drapeau.
       const { mntSurveillance } = require("../domain/mntSurveillance");
       w.push({ path: "summaries/mnt_surveillance", data: { ...mntSurveillance(risque, asOf), ...stamp } });
+      // SNAPSHOT MRR quotidien (Lot 5b, ADR-043) — un point/jour (clé = asOf), écrase le point du jour, borné
+      // à 90 j. Même patron que summaries/qualityHistory. Assiette = contrats ACTIFS (miroir EXACT du front
+      // recurringRevenue → mêmes nombres). Non sensible (agrégat MRR/ARR), lu sous droit maintenance + drapeau.
+      const mntDay = String(asOf || "").slice(0, 10);
+      if (mntDay) {
+        const { recurringTotals } = require("../domain/mntRecurring");
+        const tot = recurringTotals(mntContrats);
+        const prevMrr = (await db.doc("summaries/mnt_mrrSnapshot").get()).data() || {};
+        const mrrDays = (Array.isArray(prevMrr.days) ? prevMrr.days : []).filter((d) => d && d.date !== mntDay);
+        mrrDays.push({ date: mntDay, mrr: tot.totalMrr, arr: tot.totalArr, contratsActifs: tot.contratsActifs });
+        mrrDays.sort((a, b) => (a.date < b.date ? -1 : 1));
+        w.push({ path: "summaries/mnt_mrrSnapshot", data: { days: mrrDays.slice(-90), ...stamp } });
+      }
     }
   }
 

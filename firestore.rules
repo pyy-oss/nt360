@@ -132,6 +132,8 @@ service cloud.firestore {
         : id.matches('mnt_risque.*') ? 'maintenance'
         // Flux du centre de surveillance (Lot 5, ADR-026) → même module + verrou drapeau que mnt_risque.
         : id.matches('mnt_surveillance.*') ? 'maintenance'
+        // Snapshot MRR/ARR quotidien (Lot 5b, ADR-043) → même module + verrou drapeau que mnt_risque.
+        : id.matches('mnt_mrr.*') ? 'maintenance'
         // FALLBACK = DENY (module inexistant → canRead false pour tout rôle non-direction). Fail-CLOSED :
         // un futur agrégat non explicitement classé (ex. une nouvelle marge) ne fuite pas par défaut.
         : '__deny__';
