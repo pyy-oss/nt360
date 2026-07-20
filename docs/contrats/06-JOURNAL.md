@@ -1489,3 +1489,44 @@ autorisé, solde d'ouverture SOA daté, migration des clés canoniques ADR-P20) 
 **Gouvernance.** Strictement additif : aucun callable/droit/schéma/calcul modifié, seul l'emplacement UI
 de l'édition change. ADR-044. Étape 1/3 de la consolidation des référentiels (fournisseurs ; puis
 référentiels Admin ; puis normalisation fournisseurs minimale).
+
+## Correctif re-audit final — parité chiffres mnt_/coût + étanchéité drapeau — 2026-07-20
+
+**Contexte.** Re-audit final du programme (workflow 5 axes × auditeur/gardien, vérification adverse) :
+24 agents, 8 constats confirmés, **0 high** (chaque high brut ramené à medium en vérification : module
+sous drapeau, déclencheur conditionnel, effet d'affichage sans écriture ni corruption). Correctifs des
+constats **medium** confirmés, tous additifs.
+
+**Fait.**
+- **Étanchéité drapeau (back).** `onMntApprovalDecided` (index.js) : ajout de la garde
+  `isMntEnabled(config/mntFeature)` en tête → drapeau éteint ⇒ AUCUNE écriture mnt_astreintes/mnt_contrats
+  ni auditLog(module:maintenance) même en décidant une approbation mnt_ en attente. Cohérent avec
+  submitAstreinte / la décision de contrat (déjà gâtées, ADR-009). Invariant C10 rétabli sur le dernier
+  chemin d'écriture mnt_ non gardé.
+- **RBAC FP 360° (front).** La réconciliation amont (coût) lit `supplierInvoices` : la règle exige le droit
+  `fournisseurs`, or l'abonnement n'était gâté que sur `rentabilite` → onSnapshot silencieusement refusé,
+  « Coût réel » affichait 0 (faux). Ajout de `canFournisseurs` à l'abonnement ET à la carte (masquer plutôt
+  qu'un zéro trompeur).
+- **Parité fiche contrat (front).** La fiche comptait les factures ANNULÉES (overlay config/cancelInvoices)
+  que le recompute PURGE avant d'agréger la sous-facturation du risque → « écart » contradictoire. Exclusion
+  des annulées côté fiche (miroir aggregate.js). Le rapprochement reste par requête fp canonique — la parité
+  suppose des FP stockés canoniques (garanti à l'écriture) ; résidu legacy documenté, non corrigé (préserve
+  la requête indexée).
+- **fpKey pipeline (front).** `pipeline.tsx isBooked` comparait des FP bruts (fpDocId) au lieu de fpKey, en
+  divergence avec l'autorité miroir `overviewCalc.ts` → risque de double-compte pipeline. Rapprochement par
+  `fpKey` des deux côtés. (Bornage période vs tous-millésimes : question distincte, non traitée.)
+- **Commentaire de parité (front).** `mntDashboard.ts` : l'en-tête revendiquait une « parité stricte »
+  echeancesProches ↔ signal echeance_proche, factuellement fausse (le front exclut suspendus + échéances
+  dépassées). Commentaire corrigé pour décrire le SOUS-ENSEMBLE réel ; l'alignement de population (inclure
+  suspendus/dépassés) est signalé comme décision produit à arbitrer — **non changé en silence**.
+
+**À arbitrer (l'IA propose, l'humain valide).**
+- Population « Échéances proches » (front) : rester le sous-ensemble « actifs à venir » ou s'aligner sur le
+  signal de risque (suspendus + dépassés) ? Change les compteurs affichés → décision humaine.
+
+**Lows documentés, non corrigés (nuance/dette, pas de régression).** churn `joursEcheance` recalculé au jour
+vs `joursAvantFin` matérialisé ; MRR live vs snapshot (assiette identique hors filtre — commentaire) ;
+`supplierCostByFp` (Lot 8b) correct mais non câblé (la marge mnt lit le coût P&L, pas les factures réelles).
+
+**Vérifs.** tsc propre ; 1245 functions + 291 web au vert ; bundle 119,7 KB (≤ 120) ; no-undef (158),
+deploy-targets (187) OK. Additif uniquement, aucun callable/droit/schéma nouveau.

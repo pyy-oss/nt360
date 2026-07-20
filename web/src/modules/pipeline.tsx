@@ -9,7 +9,7 @@ import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, CardSkeleton,
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
-import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, fpDocId, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
+import { upsertOpportunity, deleteOpportunity, patchOpportunity, deleteRecord, exportOpportunities, importOpportunities, downloadBase64, salesVelocity, type OppImportResult, type ForecastCategory, type CustomFieldDef, type OppLine, type SalesVelocity } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, grid5, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, buBadge, ImportButton, FilterNote, FpLink, buildStageFunnel, useCommandesRows, useBusinessUnits, useAmOptions, useClientOptions } from "./_shared";
 import { useFilters } from "../lib/filters";
@@ -17,7 +17,7 @@ import { useClientKey } from "../lib/clientName";
 import { winLossBySegment } from "../lib/winLoss";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { isDormantClosing } from "../lib/ids"; // miroir client de l'exclusion dormante (parité recompute)
+import { isDormantClosing, fpKey } from "../lib/ids"; // miroir client de l'exclusion dormante + clé FP canonique (parité recompute)
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary, OppSlippageSummary } from "../types";
 
 // Libellés courts d'étape pour le funnel de transitions (from→to).
@@ -563,8 +563,12 @@ export const OppList: FC<Props> = () => {
   // React #310) : sinon chaque frappe dans la modale d'édition les rejouait sur toute la collection.
   // Flag « intégré au P&L » : une opp dont le N° FP porte déjà une commande (au carnet). Les FP des
   // commandes viennent de la vue matérialisée (chargée plus haut — accès overview, sinon flag masqué).
-  const bookedFps = useMemo(() => new Set((cmd || []).map((c) => c.fp).filter(Boolean) as string[]), [cmd]);
-  const isBooked = useCallback((o: Opportunity) => !!(o.fp && (bookedFps.has(o.fp) || bookedFps.has(fpDocId(o.fp)))), [bookedFps]);
+  // Rapprochement par FP CANONIQUE (fpKey) des deux côtés — miroir de l'autorité overviewCalc.ts (bookedFps
+  // via fpKey) : un FP zero-paddé/espacé autrement DOIT rapprocher, sinon une opp au carnet resterait comptée
+  // au pipeline (double-compte, invariant « même métrique = même nombre »). (Périmètre : ici tous millésimes
+  // — le bornage à la période d'overviewCalc est une question distincte, non traitée ici.)
+  const bookedFps = useMemo(() => new Set((cmd || []).map((c) => fpKey(c.fp)).filter(Boolean) as string[]), [cmd]);
+  const isBooked = useCallback((o: Opportunity) => { const k = fpKey(o.fp); return !!(k && bookedFps.has(k)); }, [bookedFps]);
   // Assiette PIPELINE (parité Cockpit/Commit) : opp ACTIVE (1..5), PAS encore au carnet P&L (sinon réalisée
   // → double-compte) et NON DORMANTE (D Prev d'un millésime révolu → exclue de la prévision, comme le
   // recompute serveur). Certitudes ET Top s'y adossent, sinon ils sur-comptent vs le cockpit (invariant

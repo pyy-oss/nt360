@@ -18,7 +18,7 @@ import { fpKey } from "../lib/ids";
 import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
 import { slaState, slaTone, SLA_STATE_LABEL, echeancier, echeancierPlan, ECHEANCE_STATUT_LABEL, echeanceStatutTone } from "../lib/mntSla";
 import { slaCalendar, mntCalendar, isPlausibleDay, type MntCalendarDoc } from "../lib/mntCalendar";
-import type { Invoice, Order, AuditLog } from "../types";
+import type { Invoice, Order, AuditLog, CancellationsDoc } from "../types";
 import {
   upsertMntContrat, deleteMntContrat, setMntContratStatut, setMntWatch, aiMntContratStatut, revertMntAutoStatut, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, listConsultants, submitMntDecision,
   importMntContrats, type MntImportResult, aiSuggestMntContrats, type MntAiSuggestion, type MntAiSuggestResult,
@@ -313,7 +313,16 @@ export const Maintenance: FC<Props> = () => {
   // (ech/plan/factureTotal) est partagé, garantissant la parité entre la fiche d'édition et la consultation.
   const openFp = (cOpen || !!viewC) && cForm.fp ? fpKey(cForm.fp) : "";
   const { rows: cInvoices } = useCollectionData<Invoice>(openFp ? "invoices" : null, openFp ? [where("fp", "==", openFp)] : [], openFp || "");
-  const factureTotal = useMemo(() => cInvoices.reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices]);
+  // Factures ANNULÉES (overlay config/cancelInvoices) : le recompute les PURGE avant d'agréger la
+  // sous-facturation du risque (aggregate.js) → on applique la MÊME exclusion ici, sinon la fiche compterait
+  // un facturé > à l'agrégat de risque et afficherait un « écart » contradictoire. Overlay minuscule, lu sous
+  // le droit `facturation` (déjà requis par l'échéancier ci-dessous). NB : le rapprochement reste par requête
+  // fp canonique (openFp) — la parité stricte avec factureByFp du back suppose des factures stockées avec un
+  // FP canonique, ce que garantit la canonicalisation à l'écriture (les factures legacy non canoniques
+  // resteraient hors requête ; documenté, non corrigé ici pour préserver la requête indexée).
+  const { data: cxlInv } = useDocData<CancellationsDoc>(openFp ? "config/cancelInvoices" : null);
+  const cancelledInv = useMemo(() => new Set((cxlInv?.items || []).map((e) => e.id).filter(Boolean)), [cxlInv]);
+  const factureTotal = useMemo(() => cInvoices.filter((i) => !cancelledInv.has(i.id!)).reduce((s, i) => s + (Number(i.amountHt) || 0), 0), [cInvoices, cancelledInv]);
   const ech = useMemo(() => echeancier({ echeanceType: cForm.echeanceType, montantEngage: Number(cForm.montantEngage || 0), dateDebut: cForm.dateDebut, dateFin: cForm.dateFin || null }, factureTotal, new Date().toISOString().slice(0, 10)), [cForm.echeanceType, cForm.montantEngage, cForm.dateDebut, cForm.dateFin, factureTotal]);
   // Échéancier DÉTAILLÉ (liste datée) : chaque échéance marquée facturée (couverte par le facturé cumulé) /
   // dûe (passée non couverte) / à venir. Même assiette que l'agrégat `ech` (parité echeancierPlan/echeancier).
