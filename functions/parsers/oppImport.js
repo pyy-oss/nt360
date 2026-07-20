@@ -39,6 +39,11 @@ const txt = (v) => { const s = (v == null ? "" : String(v)).trim(); return s ===
 // silencieux) au lieu d'être laissé intact. Un vrai « 0 » (nombre ou chaîne « 0 ») contient un chiffre → conservé.
 function numPresent(v) {
   if (v == null || v === "") return undefined;
+  // Cellule DÉJÀ numérique (exceljs) : la renvoyer TELLE QUELLE. Surtout NE PAS la stringifier :
+  // String(286322054.17791206) exposait la décimale complète à num(), qui prenait alors le « . » pour un
+  // séparateur de milliers et le retirait → montant ×10^(décimales) (corruption « ×1 milliard » à l'import
+  // LIVE/Sales). Seules les cellules TEXTE (« 12,5 % », « N/A ») passent par le parsing localisé de num().
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
   if (!/[0-9]/.test(String(v))) return undefined;
   const n = num(String(v).replace(/%/g, ""));
   return Number.isFinite(n) ? n : undefined;

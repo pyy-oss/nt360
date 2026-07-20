@@ -101,6 +101,19 @@ describe("num — parsing tolérant", () => {
     expect(num("1,234,567.89")).toBeCloseTo(1234567.89, 2);
     expect(num("744.96")).toBeCloseTo(744.96, 2);
   });
+  it("float à DÉCIMALES LONGUES : point décimal préservé, pas pris pour un millier (corruption ×10^n)", () => {
+    // Régression import Opportunités LIVE/Sales : String(7906306.3352601165) → num prenait le « . » pour un
+    // séparateur de milliers (car >2 chiffres après) et le RETIRAIT → 79063063352601170 (×1e10). Un GROUPE de
+    // milliers fait EXACTEMENT 3 chiffres → seul « .ddd » reste millier ; 1-2 ou 4+ chiffres = décimale.
+    expect(num("7906306.3352601165")).toBeCloseTo(7906306.3352601165, 4);
+    expect(num("286322054.17791206")).toBeCloseTo(286322054.17791206, 4);
+    expect(num("1974289626.32299")).toBeCloseTo(1974289626.32299, 4);
+    expect(num("22042880.700000003")).toBeCloseTo(22042880.7, 4);
+    // exactement 3 chiffres après le point = MILLIER (comportement conservateur inchangé)
+    expect(num("1.234")).toBe(1234);
+    // un NOMBRE reste intact (jamais re-parsé par l'heuristique locale)
+    expect(num(7906306.3352601165)).toBe(7906306.3352601165);
+  });
   it("négatifs : parenthèses comptables et signe en queue", () => {
     expect(num("(1 000)")).toBe(-1000);
     expect(num("1 000-")).toBe(-1000);
