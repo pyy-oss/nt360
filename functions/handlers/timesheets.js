@@ -190,17 +190,20 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     const { monthsRange } = require("../domain/assignment");
     const { computeConstat } = require("../domain/timesheet");
     const { computeResourcePnl } = require("../domain/resourcePnl");
+    const { structureRate: readStructureRate } = require("../domain/costModel");
     const now = new Date();
     let [cy, cm] = [now.getFullYear(), now.getMonth() + 1];
     const span = Math.min(18, Math.max(1, Number(req.data?.months) || 6));
     let sm = cm - span + 1, sy = cy; while (sm < 1) { sm += 12; sy -= 1; }
     const fromYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth) ? req.data.fromMonth : `${sy}-${String(sm).padStart(2, "0")}`;
     const months = monthsRange(fromYm, `${cy}-${String(cm).padStart(2, "0")}`);
-    const [cSnap, tSnap, aSnap] = await Promise.all([
+    const [cSnap, tSnap, aSnap, cmSnap] = await Promise.all([
       db.collection("consultants").select("name", "bu", "grade", "tjmTarget", "cjm").limit(MAX_SCAN + 1).get(),
       db.collection("timesheets").limit(MAX_SCAN + 1).get(),
       // Affectations : nécessaires pour retenir le TJM CONTRACTUALISÉ couvrant chaque mois (parité pré-facturation).
       db.collection("assignments").select("consultantId", "startMonth", "endMonth", "tjmBilled", "status").limit(MAX_SCAN + 1).get(),
+      // Modèle de coût (frais de structure → marge nette, ADR-P22). Absent ⇒ taux 0 ⇒ nette = brute.
+      db.collection("config").doc("costModel").get(),
     ]);
     const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
     // Valorisation au TJM : on ÉCARTE TOUJOURS la contribution « mnt » (jours couverts par le forfait du
@@ -218,8 +221,9 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       if (!t || !monthSet.has(t.month) || (Number(t.billedDays) || 0) <= 0) continue;
       (byMonth[t.consultantId] || (byMonth[t.consultantId] = [])).push({ month: t.month, billedDays: Number(t.billedDays) || 0 });
     }
-    const pnl = computeResourcePnl(consultants, byId, { byMonth, assignments });
-    return { ok: true, months, ...pnl };
+    const structureRate = readStructureRate(cmSnap.exists ? cmSnap.data() : null);
+    const pnl = computeResourcePnl(consultants, byId, { byMonth, assignments }, { structureRate });
+    return { ok: true, months, structureRate, ...pnl };
   });
 
   // PRÉ-FACTURATION DEPUIS LE CRA (Lot 21) — proposition de facturation mensuelle = jours FACTURÉS au CRA ×
