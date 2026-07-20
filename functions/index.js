@@ -4422,6 +4422,51 @@ exports.migrateCreditLineKeys = onCallG("migrateCreditLineKeys", { memoryMiB: 25
   return { ok: true, moved, merged, skipped: skipped.slice(0, 40) };
 });
 
+// === VÉRITÉ DU COÛT (ADR-P21) — objet FACTURE FOURNISSEUR : quand le drapeau config/soaFeature est actif, le
+// SOLDE du compte fournisseur (SOA) dérive de ces pièces réelles au lieu du statut « facturé » d'un BC posé à la
+// main. Additif + gated : drapeau OFF (défaut) → SOA strictement inchangé.
+exports.setSoaFeature = onCallG("setSoaFeature", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const enabled = req.data?.enabled === true;
+  await db.doc("config/soaFeature").set({ enabled, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_soa_feature", module: "fournisseurs", entity: "config", entityId: "soaFeature", detail: { enabled }, ts: FieldValue.serverTimestamp() });
+  await requestRecompute(["suppliers", "alerts"]);
+  return { ok: true, enabled };
+});
+
+exports.upsertSupplierInvoice = onCallG("upsertSupplierInvoice", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "fournisseurs");
+  const { cleanName, fpKey } = require("./lib/ids");
+  const d = req.data || {};
+  const supplier = cleanName(d.supplier || ""); // clé fournisseur CANONIQUE (autorité unique ADR-P20)
+  if (!supplier) throw new HttpsError("invalid-argument", "fournisseur requis");
+  const amountXof = Number(d.amountXof) || 0;
+  if (!(amountXof > 0)) throw new HttpsError("invalid-argument", "montant XOF > 0 requis");
+  const doc = {
+    supplier, amountXof,
+    date: d.date ? String(d.date).slice(0, 10) : null,
+    bcNumber: d.bcNumber ? String(d.bcNumber).slice(0, 60) : null,
+    fp: fpKey(d.fp) || null, // rapproché par fpKey (autorité N° FP)
+    ref: d.ref ? String(d.ref).slice(0, 80) : null,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  let id = d.id;
+  if (id) { assertPlainId(id, "id facture fournisseur"); await db.doc(`supplierInvoices/${id}`).set(doc, { merge: true }); }
+  else { const ref = await db.collection("supplierInvoices").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_supplier_invoice", module: "fournisseurs", entity: "supplierInvoice", entityId: id, detail: { supplier, amountXof }, ts: FieldValue.serverTimestamp() });
+  await requestRecompute(["suppliers", "alerts"]);
+  return { ok: true, id };
+});
+
+exports.deleteSupplierInvoice = onCallG("deleteSupplierInvoice", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireWrite(req, "fournisseurs");
+  const id = assertPlainId(req.data?.id, "id facture fournisseur");
+  await db.doc(`supplierInvoices/${id}`).delete();
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_supplier_invoice", module: "fournisseurs", entity: "supplierInvoice", entityId: id, ts: FieldValue.serverTimestamp() });
+  await requestRecompute(["suppliers", "alerts"]);
+  return { ok: true };
+});
+
 // --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis
 // mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
 // avant enregistrement via addBcLine. Ne persiste rien. ---

@@ -184,5 +184,8 @@ upsertActivity
 upsertContact
 upsertCreditLine
 migrateCreditLineKeys
+setSoaFeature
+upsertSupplierInvoice
+deleteSupplierInvoice
 upsertObjective
 upsertOpportunity

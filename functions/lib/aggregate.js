@@ -118,12 +118,13 @@ async function recomputeCore(db, only) {
   // agrégats avec objectives=[] → alertes d'écart réelles effacées + faux « objectif absent ». Même
   // classe de piège que needBc/needCredit. Cf. audit P0-D.
   const needObj = need(["atterrissage", "ams", "pipeline", "news", "alerts"]);
-  const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, objectives, sheetsBase, sheetsMargin] = await Promise.all([
+  const [pnlOrders, invoices, oppsRaw, bcLines, creditLines, supplierInvoices, objectives, sheetsBase, sheetsMargin] = await Promise.all([
     readAll(db, "orders"),
     readAll(db, "invoices", true), // id nécessaire pour l'exclusion des factures annulées (overlay)
     readAll(db, "opportunities"),
     needBc ? readAll(db, "bcLines") : Promise.resolve([]),
     needCredit ? readAll(db, "creditLines", true) : Promise.resolve([]),
+    needCredit ? readAll(db, "supplierInvoices") : Promise.resolve([]), // factures fournisseur RÉELLES (ADR-P21) — même gate que creditLines (alimentent suppliers())
     needObj ? readAll(db, "objectives") : Promise.resolve([]),
     readAll(db, "projectSheets"),
     readAll(db, "projectSheetsMargin"), // marge isolée (rules) — le serveur (Admin SDK) la re-fusionne
@@ -139,6 +140,7 @@ async function recomputeCore(db, only) {
   coerceNums(sheetsMargin, ["costTotal", "saleTotal", "margin", "marginPct"]);
   coerceNums(objectives, ["targetCas", "targetInvoiced", "targetMargin", "targetMarginPct", "fiscalYear"]);
   coerceNums(creditLines, ["authorized", "openingBalance", "outstanding"]);
+  coerceNums(supplierInvoices, ["amountXof"]);
 
   // NORMALISATION des noms de clients (règles déterministes + table d'alias config/clientAliases),
   // appliquée EN MÉMOIRE avant tout calcul : tous les regroupements (byClient, concentration,
@@ -346,7 +348,11 @@ async function recomputeCore(db, only) {
     }
   }
 
-  const sup = suppliers(orders, bcLines, creditLines);
+  // VÉRITÉ DU COÛT (ADR-P21) : drapeau config/soaFeature. ACTIF → le solde SOA dérive des factures fournisseur
+  // réelles (supplierInvoices) au lieu du statut BC « facturé ». Défaut OFF (doc absent) → comportement historique.
+  const { isSoaFromInvoices } = require("../domain/soaFeature");
+  const soaFromInvoices = isSoaFromInvoices((await db.doc("config/soaFeature").get()).data());
+  const sup = suppliers(orders, bcLines, creditLines, supplierInvoices, { soaFromInvoices });
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   // Doc GLOBAL = pipeline « Tout » (rétro-compat ; Actualité + export CODIR). MÊME assiette que
