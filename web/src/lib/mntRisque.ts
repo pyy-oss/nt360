@@ -41,7 +41,13 @@ export interface RisqueItem {
   margeNiveau?: "negative" | "faible" | null; // palier de marge (jamais le montant — confidentiel, ADR-034)
   sousFacturation: { engage: number; facture: number; ecart: number };
 }
-export interface RisqueSummary { items: RisqueItem[]; counts: Record<Niveau, number>; total: number; atRisk: number; asOf: string | null }
+// CONTRAT SANS AFFAIRE (Lot 5b) — contrats mnt_ dont le N° FP n'est pas au carnet (orphelins, prédicat
+// dataQuality via fpKey). Champ ADDITIF du summary de risque ; absent sur les summaries antérieurs.
+export interface MntSansAffaireItem { id: string; fp: string | null; client: string; statut: string }
+export interface RisqueSummary {
+  items: RisqueItem[]; counts: Record<Niveau, number>; total: number; atRisk: number; asOf: string | null;
+  sansAffaire?: { count: number; items: MntSansAffaireItem[] };
+}
 
 // Libellé court d'un signal (avec sa valeur) pour la pastille de synthèse.
 export function signalText(s: RisqueSignal): string {

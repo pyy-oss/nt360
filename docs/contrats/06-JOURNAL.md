@@ -1397,3 +1397,36 @@ coût réel (Σ factures fournisseur par **fpKey**, pendant symétrique de l'ava
 
 **Vérifs.** `fournisseursSupplierCost` (4 nouveaux) ; 1233 functions + 287 web au vert ; bundle 119.4 KB
 (<= 120) ; check-deploy-targets (187, aucun nouvel export) + check-no-undef OK ; tsc propre.
+
+
+---
+
+## Lot 5b — Contrats reliquat : seuil échéance 90 j, snapshot MRR, contrat sans affaire
+
+**Trois reliquats additifs sur le module mnt_**, scopés par workflow puis arbitrés par la Direction.
+
+**1. Seuil d'échéance unifié à 90 j (ADR-041).** `ECHEANCE_PROCHE_JOURS` passe de 60 à 90 dans `mntRisque.js`
+(autorité) + son miroir `mntDashboard.ts` + libellés `maintenance.tsx` (interpolés, plus de « 60 j » codé).
+Aligne l'alerte d'échéance sur le rappel de renouvellement (horizon 90 j). Changement de comportement ASSUMÉ
+(les contrats à 60–90 j déclenchent désormais le signal) — caractérisation `mntRisque.test.js` /
+`mntDashboard.test.ts` mise à jour. Les buckets tiérés `mntRenouvellements` (30/60/90) sont une échelle
+distincte, NON touchée.
+
+**2. Snapshot MRR/ARR quotidien (ADR-043).** Nouveau domaine PUR `mntRecurring.js` (`recurringTotals`),
+**miroir back exact** de `recurringRevenue` (front) — assiette contrats actifs, MRR = round(ARR/12) agrégé.
+Historisé dans `summaries/mnt_mrrSnapshot` (1 point/jour, borné 90 j, patron `qualityHistory`), dans le bloc
+mnt déjà doublement gaté. **Test de parité croisé** sur fixture partagée (`mntRecurring.test.js` ↔
+`mntDashboard.test.ts`). Front : tendance MRR (delta ~30 j) sur la carte Revenu récurrent. Rule
+`mnt_mrr.* → maintenance`.
+
+**3. Contrat sans affaire.** Prédicat PUR `isContratOrphelin(contrat, orderFpSet)` (`mntContrat.js`),
+transposition du prédicat d'orphelin canonique de `dataQuality` (fpKey, jamais brut). Champ ADDITIF
+`sansAffaire` sur `summaries/mnt_risque` (parc entier, plafonné 200), surfacé sous la carte Risque.
+
+**Arbitrage — purge des CRA mnt_ : REJETÉE.** La tâche demandait de supprimer les timesheets `source:"mnt"`
+à l'extinction du drapeau. Décision humaine : **ne pas purger** — le read-guard neutralise déjà la
+contribution TACE sans détruire de donnée, l'extinction reste réversible (règle 6). Cf. note ADR-043.
+
+**Vérifs.** 1240 functions (dont `mntRecurring` 3, `isContratOrphelin` 3, échéance 90 j, gate C3 mis à jour) +
+288 web (dont parité back↔front + fenêtre 90 j) au vert ; bundle 119,4 KB (<= 120) ; check-no-undef,
+check-deploy-targets (187, aucun nouvel export), check-firestore-indexes OK ; tsc propre.

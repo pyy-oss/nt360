@@ -6,7 +6,7 @@
 //
 // Les 5 signaux (décision direction, Lot 5 + DO Lot 5) :
 //   1. SLA rompus       — tickets du contrat dont un engagement SLA est en état « rompu » (slaState).
-//   2. Échéance proche  — dateFin du contrat à ≤ 60 jours (ou déjà dépassée) → renouvellement à traiter.
+//   2. Échéance proche  — dateFin du contrat à ≤ 90 jours (ou déjà dépassée) → renouvellement à traiter.
 //   3. Quota dépassé    — tickets ouverts ce mois-ci au-delà du quota d'un engagement.
 //   4. Sous-facturation — engagé (échéancier) > facturé (factures de l'affaire par fpKey), écart > 0.
 //   5. Rentabilité      — marge prudente (revenu engagé − coût total affaire) sous son palier sain (ADR-034).
@@ -20,7 +20,10 @@ const { monthOf } = require("./mntTicket");
 // Seuls les contrats VIVANTS portent un risque : un brouillon n'est pas encore engagé ; un contrat
 // échu/résilié est terminal (plus de pilotage). On score donc `actif` et `suspendu`.
 const RISK_STATUTS = new Set(["actif", "suspendu"]);
-const ECHEANCE_PROCHE_JOURS = 60; // fenêtre d'alerte de renouvellement (décision Lot 5)
+// ADR-041 (décision décideur, remplace la décision Lot 5 à 60 j) : fenêtre d'alerte d'échéance UNIFIÉE à
+// 90 j, alignée sur le rappel de renouvellement (buckets renouvellement 30/60/90). Autorité unique du seuil ;
+// le miroir front (web/src/lib/mntDashboard.ts) DOIT porter la même valeur (invariant « même métrique »).
+const ECHEANCE_PROCHE_JOURS = 90; // fenêtre d'alerte de renouvellement (ADR-041)
 
 const parseDay = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || "")); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null; };
 const round2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
@@ -85,7 +88,7 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat, c
     }
     if (slaRompus > 0) { signals.push({ type: "sla_rompu", count: slaRompus }); score += Math.min(40, slaRompus * 20); }
 
-    // 2. Échéance proche — dateFin à ≤ 60 j (ou passée). Plus c'est proche/dépassé, plus le poids monte.
+    // 2. Échéance proche — dateFin à ≤ 90 j (ou passée, ADR-041). Plus c'est proche/dépassé, plus le poids monte.
     let joursAvantFin = null;
     const finMs = parseDay(c.dateFin);
     if (finMs != null && today != null) {

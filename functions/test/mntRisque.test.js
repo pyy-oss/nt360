@@ -96,10 +96,16 @@ describe("mntRisque — échéance proche", () => {
     expect(r.items[0].signals.some((s) => s.type === "echeance_proche")).toBe(true);
     expect(r.items[0].joursAvantFin).toBe(26);
   });
-  it("dateFin à > 60 j → PAS de signal (jours renseigné informatif)", () => {
+  it("dateFin à > 90 j → PAS de signal (jours renseigné informatif)", () => {
     const r = mntRisque({ contrats: [mk("2026-12-31")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW });
     expect(r.items[0].signals.some((s) => s.type === "echeance_proche")).toBe(false);
     expect(r.items[0].joursAvantFin).toBeGreaterThan(ECHEANCE_PROCHE_JOURS);
+  });
+  it("ADR-041 — seuil unifié à 90 j : dateFin à ~75 j déclenche désormais le signal (n'aurait rien signalé à 60 j)", () => {
+    expect(ECHEANCE_PROCHE_JOURS).toBe(90);
+    const r = mntRisque({ contrats: [mk("2026-09-28")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW }); // +75 j
+    expect(r.items[0].joursAvantFin).toBe(75);
+    expect(r.items[0].signals.some((s) => s.type === "echeance_proche")).toBe(true);
   });
   it("dateFin dépassée → signal + poids maximal (30)", () => {
     const r = mntRisque({ contrats: [mk("2026-07-01")], tickets: [], invoices: [], asOf: ASOF, nowMs: NOW });

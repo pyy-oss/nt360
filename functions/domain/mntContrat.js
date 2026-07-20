@@ -94,4 +94,14 @@ function validateMntContrat(d) {
   };
 }
 
-module.exports = { STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, TYPES_MAINTENANCE, validateEngagement, validateObjectifsMaintenance, validateMntContrat };
+// CONTRAT SANS AFFAIRE (Lot 5b) — un contrat de maintenance dont le N° FP n'existe PAS au carnet (orders).
+// Transposition directe du prédicat d'orphelin canonique de l'ERP (dataQuality : factures_orphelines,
+// bc_fp_inconnu) : comparaison TOUJOURS par fpKey (jamais le FP brut — ADR-001), fp vide = orphelin.
+// PUR : orderFpSet = Set des fpKey présents au carnet, construit côté appelant.
+function isContratOrphelin(contrat, orderFpSet) {
+  const k = fpKey(contrat && contrat.fp);
+  if (!k) return true; // pas de N° FP canonicalisable → non rattachable à une affaire
+  return !(orderFpSet && typeof orderFpSet.has === "function" && orderFpSet.has(k));
+}
+
+module.exports = { STATUTS, ECHEANCES, SLA_TYPES, COUVERTURES, TYPES_MAINTENANCE, validateEngagement, validateObjectifsMaintenance, validateMntContrat, isContratOrphelin };

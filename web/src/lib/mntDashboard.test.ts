@@ -23,21 +23,22 @@ describe("computeMntDashboard", () => {
     expect(d.parStatut).toEqual({ actif: 3, brouillon: 1, resilie: 1 });
   });
 
-  it("repère les échéances proches (0..60 j) des contrats actifs, triées, exclut passées et lointaines", () => {
+  it("repère les échéances proches (0..90 j, ADR-041) des contrats actifs, triées, exclut passées et lointaines", () => {
     const d = computeMntDashboard(
       [
         { id: "a", client: "X", statut: "actif", dateFin: "2026-08-01" }, // +17 j → proche
         { id: "b", client: "Y", statut: "actif", dateFin: "2026-07-20" }, // +5 j → proche
+        { id: "f", client: "U", statut: "actif", dateFin: "2026-10-01" }, // +78 j → proche (dans la fenêtre 90 j, était HORS à 60 j)
         { id: "c", client: "Z", statut: "actif", dateFin: "2026-07-10" }, // passée → exclue
-        { id: "d", client: "W", statut: "actif", dateFin: "2027-01-01" }, // lointaine → exclue
+        { id: "d", client: "W", statut: "actif", dateFin: "2027-01-01" }, // +170 j → exclue (> 90)
         { id: "e", client: "V", statut: "suspendu", dateFin: "2026-07-16" }, // non actif → exclu
       ],
       [],
       asOf,
     );
-    expect(d.echeancesProches.map((e) => e.id)).toEqual(["b", "a"]);
+    expect(d.echeancesProches.map((e) => e.id)).toEqual(["b", "a", "f"]); // f (78 j) inclus depuis ADR-041
     expect(d.echeancesProches[0].jours).toBe(5);
-    expect(ECHEANCE_PROCHE_JOURS).toBe(60);
+    expect(ECHEANCE_PROCHE_JOURS).toBe(90);
   });
 
   it("ne compte comme ouverts que les tickets ouvert|en_cours et les ventile par priorité", () => {
@@ -86,6 +87,24 @@ describe("recurringRevenue — revenu récurrent consolidé (MRR/ARR, DO Lot 4)"
     expect(r.totalArr).toBe(0);
     expect(r.totalMrr).toBe(0);
     expect(r.byBu).toEqual([]);
+  });
+
+  // PARITÉ back↔front (Lot 5b, ADR-043) — la MÊME fixture que functions/test/mntRecurring.test.js
+  // (RECURRING_FIXTURE / RECURRING_EXPECTED) doit donner les MÊMES totaux, sinon le snapshot MRR back
+  // divergerait du MRR affiché front (invariant « même métrique = même nombre »). Si l'un des deux change,
+  // ce test OU son jumeau back casse.
+  it("parité back↔front : totaux identiques à recurringTotals (mntRecurring.js)", () => {
+    const r = recurringRevenue([
+      { statut: "actif", echeanceType: "mensuel", montantEngage: 100_000 },
+      { statut: "actif", echeanceType: "trimestriel", montantEngage: 300_000 },
+      { statut: "actif", echeanceType: "annuel", montantEngage: 2_400_000 },
+      { statut: "brouillon", echeanceType: "mensuel", montantEngage: 999_000 },
+      { statut: "echu", echeanceType: "annuel", montantEngage: 999_000 },
+      { statut: "resilie", echeanceType: "mensuel", montantEngage: 999_000 },
+    ]);
+    // Identique à RECURRING_EXPECTED côté back.
+    expect({ contratsActifs: r.contratsActifs, totalArr: r.totalArr, totalMrr: r.totalMrr })
+      .toEqual({ contratsActifs: 3, totalArr: 4_800_000, totalMrr: 400_000 });
   });
 });
 

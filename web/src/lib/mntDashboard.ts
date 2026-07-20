@@ -6,7 +6,10 @@
 import { slaState, type SlaCalendar } from "./mntSla";
 import { TYPES_MAINTENANCE } from "./mntContrat";
 
-export const ECHEANCE_PROCHE_JOURS = 60; // aligné sur le signal « échéance proche » du moteur de risque
+// ADR-041 : miroir EXACT du seuil back (functions/domain/mntRisque.js) — fenêtre unifiée à 90 j. Parité
+// stricte echeancesProches (front) ↔ signal echeance_proche (back). NE PAS confondre avec les buckets
+// tiérés de mntRenouvellements (30/60/90), qui sont une échelle d'urgence distincte.
+export const ECHEANCE_PROCHE_JOURS = 90; // aligné sur le signal « échéance proche » du moteur de risque (ADR-041)
 const DAY = 86400000;
 
 // Parse une date ISO AAAA-MM-JJ en millis UTC (null si absente/invalide) — même convention que l'ERP.
@@ -27,7 +30,7 @@ export interface MntDashboard {
   ticketsTotal: number;
   ticketsOuverts: number;           // statut ouvert | en_cours
   parPriorite: Record<string, number>; // tickets OUVERTS par priorité
-  echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 60] jours
+  echeancesProches: MntEcheanceProche[]; // contrats actifs dont la fin tombe dans [0 .. 90] jours (ADR-041)
 }
 
 type ContratLike = { id?: string; fp?: string | null; client?: string; bu?: string; statut?: string; echeanceType?: string; montantEngage?: number; dateFin?: string | null; engagements?: unknown[] };

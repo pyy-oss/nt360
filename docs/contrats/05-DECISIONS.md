@@ -3,6 +3,68 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-041 — Fenêtre d'échéance proche unifiée à 90 jours (contrats de maintenance)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (arbitrage explicite « 90 jours »)
+
+### Contexte
+Le moteur de risque signalait une « échéance proche » à **60 j** (`ECHEANCE_PROCHE_JOURS`, décision Lot 5),
+tandis que le rappel de renouvellement travaille sur un horizon de **90 j** (buckets 30/60/90). Deux fenêtres
+pour la même idée « le contrat arrive à échéance » → un contrat à 75 j apparaissait « à renouveler » sans être
+« à risque d'échéance ». Incohérence de pilotage signalée en revue.
+
+### Décision
+- **Seuil unifié à 90 j** : `ECHEANCE_PROCHE_JOURS = 90` dans `functions/domain/mntRisque.js` (autorité unique)
+  et son **miroir** `web/src/lib/mntDashboard.ts` (parité stricte `echeancesProches` front ↔ signal
+  `echeance_proche` back — invariant « même métrique = même nombre »).
+- Les **paliers de poids** du signal restent inchangés (dépassé 30 / ≤30 j 25 / sinon 15) : la fenêtre
+  s'élargit, la gradation reste.
+- Les **buckets tiérés** de `mntRenouvellements` (critique ≤30 / proche ≤60 / à venir ≤90) sont une échelle
+  d'URGENCE distincte, **non** modifiée (ne pas confondre avec le seuil).
+
+### Conséquences
+- **Changement de comportement assumé** (pas purement additif) : un contrat entre 60 et 90 j déclenche
+  désormais le signal → `counts`, `atRisk` et les items de `summaries/mnt_risque` évoluent. Caractérisation
+  mise à jour (`mntRisque.test.js`, `mntDashboard.test.ts`).
+- Alerte d'échéance et rappel de renouvellement parlent enfin du même horizon.
+
+### Ce qu'on saura dans six mois
+Si 90 j sature l'alerte (trop de contrats en fenêtre permanente), la Direction pourra reparamétrer — via
+un overlay config plutôt qu'une constante, nouvel ADR le cas échéant.
+
+## ADR-043 — Snapshot MRR/ARR quotidien des contrats de maintenance (tendance)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (demande de tendance du revenu récurrent)
+
+### Contexte
+Le MRR/ARR récurrent était calculé **uniquement côté front** (`recurringRevenue`, à l'instant) : aucune
+mémoire de son évolution. La Direction veut une **tendance** (le MRR monte-t-il ?).
+
+### Décision
+- **Historisation** dans `summaries/mnt_mrrSnapshot` : un point/jour (clé = `asOf`, écrase le point du jour),
+  borné à **90 jours** — patron **identique** à `summaries/qualityHistory`.
+- Calcul par un domaine **PUR** `functions/domain/mntRecurring.js` (`recurringTotals`), **miroir back exact**
+  de `web/src/lib/mntDashboard.ts → recurringRevenue` : assiette **contrats actifs**, ARR = montant par
+  échéance annualisé, MRR = round(ARR/12) au niveau agrégé. **Test de parité croisé** sur fixture partagée
+  (`mntRecurring.test.js` ↔ `mntDashboard.test.ts`) — verrou de l'invariant « même métrique = même nombre ».
+- Écrit dans le **bloc mnt déjà doublement gaté** (`want("maintenance")` + drapeau) → invariant « éteint =
+  aucune écriture mnt_* » préservé. Rule `mnt_mrr.* → maintenance` + verrou drapeau (comme `mnt_risque`).
+
+### Conséquences
+- Le MRR **live** reste `recurringRevenue` (front) ; le snapshot ne sert que la **tendance** (delta ~30 j).
+- Aucune deuxième vérité : back et front partagent la même règle, testée des deux côtés.
+
+### Note — purge des CRA mnt_ à l'extinction du drapeau : REJETÉE
+La tâche envisageait de **supprimer** les timesheets `source:"mnt"` quand le drapeau s'éteint. **Décision
+humaine (2026-07-20) : ne pas purger.** Le read-guard (`handlers/timesheets.js`) neutralise déjà la
+contribution TACE à drapeau éteint, **sans détruire** de donnée — l'extinction reste **réversible** (règle 6).
+Une suppression aurait rendu l'extinction irréversible (perte de contribution jusqu'au prochain `refreshCra`).
+Pas d'ADR de purge ouvert.
+
 ## ADR-040 — Reconnaissance de revenu à DEUX taux d'avancement (financier + opérationnel) → FAE/PCA, contrats de maintenance exclus
 
 - **Date :** 2026-07-18
