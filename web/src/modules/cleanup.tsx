@@ -18,7 +18,7 @@ import {
   deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
   aiSuggestCorrections,
-  type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type AiSuggestion,
+  type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
 } from "../lib/writes";
 
 // Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
@@ -179,13 +179,27 @@ const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "
 };
 
 // Éditeur générique une valeur → un bouton (texte / nombre).
-function FieldFix({ label, placeholder, kind = "text", save }: { label: string; placeholder?: string; kind?: "text" | "number"; save: (v: string) => Promise<void> }) {
-  const [v, setV] = useState("");
+// `initial` = valeur RECOMMANDÉE pré-remplie (l'IA propose, l'humain vérifie puis enregistre) — jamais
+// d'écriture automatique d'un montant (respecte « n'invente aucune donnée »). L'utilisateur peut modifier.
+function FieldFix({ label, placeholder, kind = "text", save, initial }: { label: string; placeholder?: string; kind?: "text" | "number"; save: (v: string) => Promise<void>; initial?: string }) {
+  const [v, setV] = useState(initial ?? "");
   return (
     <span className="inline-flex items-center gap-1">
       <input className="field w-32 !py-1 text-xs" inputMode={kind === "number" ? "decimal" : undefined} aria-label={label} placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />
       <Busy variant="ghost" label="OK" okMsg="Corrigé (recalcul lancé)" errMsg="Correction refusée" fn={() => save(v)} />
     </span>
+  );
+}
+// Ligne de RECOMMANDATION concrète sous un item (💡) : valeur chiffrée + base de calcul. Pour les champs
+// pré-remplissables, c'est juste la justification ; pour les cas non éditables ici (écart valo, surfacturation),
+// c'est la recommandation elle-même. Rendu neutre, tokens existants.
+function RecNote({ rec }: { rec: CorrectionRec }) {
+  return (
+    <div className="text-[11px] text-muted mt-0.5 pl-1">
+      💡 <span className="text-ink">Recommandation</span>
+      {rec.value != null && <> : <b className="tabnum">{rec.value.toLocaleString("fr-FR")}</b></>}
+      <span className="text-faint"> — {rec.basis}</span>
+    </div>
   );
 }
 function DateFix({ save }: { save: (v: string) => Promise<void> }) {
@@ -312,6 +326,8 @@ function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSugg
         {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
         {control}
       </div>
+      {/* Recommandation concrète déterministe (valeur + base) — pré-remplit le champ ci-dessus ou guide l'action. */}
+      {item.rec && <RecNote rec={item.rec} />}
       {suggestion && <AiSuggestionRow item={item} s={suggestion} canFix={canFix} onDone={onDone} onDismiss={() => onDismissSuggestion?.()} />}
     </div>
   );
@@ -335,11 +351,11 @@ function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSugg
     case "text-order-am": return row(<FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />);
     case "fp-opp": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchOpportunity({ id: item.id!, fp: v.trim() }); await done(); }} />);
     case "date-opp": return row(<DateFix save={async (v) => { await patchOpportunity({ id: item.id!, closingDate: v }); await done(); }} />);
-    case "num-opp-amount": return row(<FieldFix label="Montant" kind="number" placeholder="montant" save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchOpportunity({ id: item.id!, amount: n }); await done(); }} />);
+    case "num-opp-amount": return row(<FieldFix label="Montant" kind="number" placeholder="montant" initial={item.rec?.field === "amount" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchOpportunity({ id: item.id!, amount: n }); await done(); }} />);
     case "fp-bc": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchBcLine({ id: item.id!, fp: v.trim() }); await done(); }} />);
     case "text-bc-supplier": return row(<FieldFix label="Fournisseur" placeholder="Fournisseur" save={async (v) => { if (!v.trim()) throw new Error("fournisseur requis"); await patchBcLine({ id: item.id!, supplier: v.trim() }); await done(); }} />);
     case "amount-bc": return row(<BcConvertFix item={item} onDone={done} />);
-    case "num-sheet-sale": return row(<FieldFix label="Prix de vente" kind="number" placeholder="vente HT" save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchProjectSheet({ fp: item.fp!, saleTotal: n }); await done(); }} />);
+    case "num-sheet-sale": return row(<FieldFix label="Prix de vente" kind="number" placeholder="vente HT" initial={item.rec?.field === "saleTotal" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchProjectSheet({ fp: item.fp!, saleTotal: n }); await done(); }} />);
     case "reconcile-pnl": return row(
       <span className="inline-flex items-center gap-2">
         <Busy variant="ghost" label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée"
@@ -466,11 +482,35 @@ function exportBucketsCsv(buckets: CorrectionBucket[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Plan d'assainissement PRIORISÉ (par impact FCFA) — « par où commencer ». Rend la liste actionnable comme
+// une feuille de route : la catégorie au plus fort impact d'abord. Impact extrapolé signalé (« ~ »).
+function RemediationPlanCard({ plan, onGo }: { plan: RemediationPlan; onGo: (type: string) => void }) {
+  if (!plan.rows.length) return null;
+  const top3 = plan.rows.filter((r) => r.impact > 0).slice(0, 3);
+  if (!top3.length) return null;
+  return (
+    <div className="rounded-md border border-gold/30 bg-gold/5 px-3 py-2.5">
+      <div className="text-[12px] font-medium text-ink mb-1.5">🗺️ Plan d'assainissement — par où commencer <span className="text-faint font-normal">(impact FCFA le plus fort d'abord)</span></div>
+      <ol className="flex flex-col gap-1">
+        {top3.map((r, i) => (
+          <li key={r.type} className="flex items-center gap-2 text-[12px]">
+            <span className="text-faint tabnum">{i + 1}.</span>
+            <button type="button" className="text-gold hover:underline text-left" onClick={() => onGo(r.type)}>{r.label}</button>
+            <span className="text-muted">· {r.count.toLocaleString("fr-FR")} à traiter</span>
+            <span className="text-ink tabnum">· impact {r.estimated ? "~" : ""}{Math.round(r.impact).toLocaleString("fr-FR")} FCFA</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function CorrectionCenter() {
   const [buckets, setBuckets] = useState<CorrectionBucket[] | null>(null);
+  const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" } as const;
-  const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); };
+  const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); setPlan(r.plan || null); };
   const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
   return (
     <Card title="Centre de correction" actions={
@@ -480,8 +520,9 @@ function CorrectionCenter() {
       </div>
     }>
       <div className="flex flex-col gap-2">
-        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…) et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
+        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…), une <b>💡 recommandation chiffrée</b> quand elle est déductible, et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
         {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine. 🎉</div>}
+        {plan && buckets && buckets.length > 0 && <RemediationPlanCard plan={plan} onGo={(t) => setOpen((o) => ({ ...o, [t]: true }))} />}
         {buckets && buckets.map((b) => (
           <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} onDone={load} />
         ))}

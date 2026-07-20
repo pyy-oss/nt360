@@ -1303,8 +1303,16 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // `orders` (P&L BRUTS, avant fusion) passés en dernier → détection des commandes au N° FP illisible.
   const defs = issueDefs(ordersDq, invoicesDq, opps, bcLines, sheets, thr, staleOpps, agedOpps, orders);
   const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
+  // RECOMMANDATIONS CONCRÈTES (au-delà de la détection) : valeur chiffrée déductible d'un enregistrement
+  // rattaché (jamais inventée). ctx = commande fusionnée par fpKey (cas/casPnl) + Σ factures par fpKey.
+  const { recommendCorrection, remediationPlan } = require("./domain/remediation");
+  const orderByFp = new Map(ordersDq.map((o) => [fpKeyCorr(o.fp), o]).filter(([k]) => k));
+  const billedByFp = new Map();
+  for (const i of invoicesDq) { const k = fpKeyCorr(i.fp); if (k) billedByFp.set(k, (billedByFp.get(k) || 0) + (Number(i.amountHt) || 0)); }
+  const recCtx = { orderByFp, billedByFp };
   const buckets = defs.filter((d) => d.records.length).map((d) => ({
-    type: d.type, severity: d.severity, label: d.label, count: d.records.length, items: d.records.slice(0, CAP),
+    type: d.type, severity: d.severity, label: d.label, count: d.records.length,
+    items: d.records.slice(0, CAP).map((it) => { const rec = recommendCorrection(d.type, it, recCtx); return rec ? { ...it, rec } : it; }),
   }));
   // SOURCE UNIQUE — on rapatrie ICI les incohérences ClickUp ↔ app (statut « facturé » sans CAF, « clôturé »
   // avec RAF) : MÊME calcul que le cockpit Qualité (clickupSignals sur l'assiette commandes fusionnée), pour
@@ -1319,7 +1327,10 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
       buckets.push({ type: iss.type, severity: iss.severity, label: iss.label, count: iss.count, items: (iss.refs || []).map((fp) => ({ fp, client: clientByFp.get(fp) || "" })) });
     }
   }
-  return { ok: true, buckets, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
+  // Plan d'assainissement PRIORISÉ (par impact FCFA) — « par où commencer ». Calculé sur les buckets finaux
+  // (y compris les incohérences ClickUp rapatriées ci-dessus) après enrichissement des recommandations.
+  const plan = remediationPlan(buckets);
+  return { ok: true, buckets, plan, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
 // ASSISTANT IA DU CENTRE DE CORRECTION — « l'IA PROPOSE, l'humain VALIDE ». Reçoit un lot d'anomalies
