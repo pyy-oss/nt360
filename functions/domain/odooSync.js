@@ -42,6 +42,7 @@ function mapOpportunity(rec) {
     // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
     dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
+  if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
   return { ok: true, object: "opportunity", collection: "opportunities", key: { fp, odooId: doc.odooId }, doc };
 }
 
@@ -77,6 +78,7 @@ function mapOrder(rec) {
     doc.suppliers = r.suppliers.map((s) => ({ name: cleanName(s && s.name), amount: Math.max(0, num(s && s.amount)) })).filter((s) => s.name && s.amount > 0);
   }
   if (dateCreation) doc.dateCreation = dateCreation; // create_date Odoo — distinct du `createdAt` technique.
+  if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
   return { ok: true, object: "order", collection: "orders", id: safeId(fp), key: { fp, odooId: traceId(r) }, doc };
 }
 
@@ -94,6 +96,7 @@ function mapInvoice(rec) {
     // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
     dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
+  if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
   return { ok: true, object: "invoice", collection: "invoices", id: safeId(numero), key: { fp: doc.fp, odooId: doc.odooId }, doc };
 }
 

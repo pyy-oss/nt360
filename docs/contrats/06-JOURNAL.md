@@ -1724,3 +1724,20 @@ no-undef (159) + deploy-targets (189) OK. Backend seul, aucun changement front/b
 
 **Suite (décidé) :** Lot 2 = rattachement DC (champ propre en plus du FP) ; Lot 3 = bouton « sync-depuis-Odoo »
 (client sortant xmlrpc/jsonrpc, clé API) — en attente URL instance / base / modèles / fenêtre.
+
+## Extension Odoo Lot 2 — rattachement DC (identifiant propre additif, ADR-052) — 2026-07-20
+
+**Fait.** Le « DC » Odoo est un identifiant PROPRE porté EN PLUS du FP (pas un alias, pas un remplaçant).
+- Backend : champ `dc` capté additivement par les 4 mappers (`mapOpportunity`/`mapOrder`/`mapInvoice`/`mapBc`)
+  quand Odoo le fournit ; jamais clé de rapprochement — le N° FP (`fpKey`) reste l'unique clé d'affaire.
+- Front : `dc?` typé sur `Order`/`Invoice`/`Opportunity` ; affiché en lecture dans la modale « Corriger la
+  commande » (backlog) là où le FP est déjà mis en avant. Élargissement à d'autres vues au fil du besoin.
+
+**Gouvernance.** Strictement additif : champ optionnel, aucun agrégat ni rapprochement modifié ; le DC n'entre
+dans AUCUN calcul (pas de 2ᵉ clé d'affaire). ADR-052.
+
+**Vérifs.** 1257 functions (dont test DC sur les 4 mappers) + 293 web au vert ; tsc propre ; bundle 120,1 KB
+(≤ 122) ; no-undef OK.
+
+**Suite :** Lot 3 = bouton « sync-depuis-Odoo » (client sortant xmlrpc/jsonrpc, clé API) — EN ATTENTE des
+précisions : URL instance, nom de base, modèles à tirer, fenêtre delta.

@@ -118,6 +118,16 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m.doc.amountXof).toBe(600000);
   });
 
+  it("DC (ADR-052) : identifiant propre capté additivement sur opp/order/invoice/bc, FP reste la clé", () => {
+    expect(mapOpportunity({ odooId: "crm.lead:1", fp: "FP/2026/1", dc: "DC/2026/5" }).doc.dc).toBe("DC/2026/5");
+    expect(mapOrder({ fp: "FP/2026/1", cas: 100, dc: "DC/2026/6" }).doc.dc).toBe("DC/2026/6");
+    expect(mapInvoice({ numero: "FA-1", dc: "DC/2026/7" }).doc.dc).toBe("DC/2026/7");
+    expect(mapBc({ bcNumber: "BC-1", dc: "DC/2026/8" }).doc.dc).toBe("DC/2026/8");
+    // DC absent → clé omise (doc additif, pas d'écrasement au merge) ; le FP reste la clé de rapprochement
+    expect("dc" in mapOrder({ fp: "FP/2026/1", cas: 100 }).doc).toBe(false);
+    expect(mapOrder({ fp: "FP/2026/1", cas: 100, dc: "DC/2026/6" }).key.fp).toBe("FP/2026/1");
+  });
+
   it("objet inconnu → rejet explicite", () => {
     expect(mapOdooRecord("contact", {}).ok).toBe(false);
     expect(mapOdooRecord("order", { fp: "FP/2026/1", cas: 1 }).ok).toBe(true);
