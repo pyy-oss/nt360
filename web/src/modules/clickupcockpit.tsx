@@ -4,18 +4,22 @@
 // rôle n'a pas le droit de lire son summary (les règles Firestore restent la source d'autorité).
 import { type FC } from "react";
 import { useDocData } from "../lib/hooks";
-import { useCan } from "../lib/rbac";
+import { useCan, useClaims } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { fmt, pct, T } from "../design/tokens";
 import { Card, Kpi, Badge, Tip, Table, colText } from "../design/components";
 import { HBars, Props, grid4 } from "./_shared";
+import { ClickupCard } from "./clickupAdmin"; // config + actions ClickUp — déplacé ici depuis Admin (ADR-047)
 import type { ClickupHealthSummary, ClickupBcSummary, ClickupDelaysSummary } from "../types";
 
 const pill = (on: boolean, onLabel: string, offLabel: string) =>
   on ? <Badge tone="emerald">{onLabel}</Badge> : <Badge tone="steel">{offLabel}</Badge>;
 
 export const ClickupCockpit: FC<Props> = () => {
-  const { go, canGo } = useNav();
+  const { go } = useNav();
+  // Config + actions ClickUp désormais rendues DANS le cockpit (ADR-047), réservées à la direction —
+  // même garde qu'à leur ancien emplacement (Habilitations). Les non-direction gardent la vue de pilotage.
+  const isDirection = useClaims().role === "direction";
   // Abonnement gaté par le droit de lecture du summary (mêmes modules que les règles Firestore) → pas
   // d'erreur permission-denied pour un rôle sans accès ; la carte concernée disparaît proprement.
   const { data: cfg } = useDocData<{ enabled?: boolean; webhookActive?: boolean; defaultListId?: string }>("config/clickup");
@@ -39,16 +43,18 @@ export const ClickupCockpit: FC<Props> = () => {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Bandeau d'état de l'intégration */}
-      <Card title="Intégration ClickUp"
-        actions={canGo("habilitations") ? <button className="btn-ghost !py-1 text-xs" onClick={() => go("habilitations")}>Configurer</button> : undefined}>
+      {/* Bandeau d'état de l'intégration (lecture, tous rôles) */}
+      <Card title="Intégration ClickUp">
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           {pill(enabled, "Intégration active", "Désactivée")}
           {pill(!!cfg?.webhookActive, "Temps réel actif", "Temps réel inactif")}
           <span className="text-muted">Les données ci-dessous proviennent des dernières synchronisations ClickUp (tirage quotidien + temps réel).</span>
         </div>
-        {!cfg?.webhookActive && enabled && <Tip>Active le <b>temps réel</b> (Habilitations → ClickUp) pour refléter les changements ClickUp en secondes plutôt qu'au tirage quotidien.</Tip>}
+        {!cfg?.webhookActive && enabled && !isDirection && <Tip>Active le <b>temps réel</b> (la direction le configure dans la carte ci-dessous) pour refléter les changements ClickUp en secondes plutôt qu'au tirage quotidien.</Tip>}
       </Card>
+
+      {/* Configuration + actions ClickUp (direction) — déplacées ici depuis Habilitations (ADR-047). */}
+      {isDirection && <ClickupCard />}
 
       {/* KPI consolidés */}
       <div className={grid4}>
@@ -63,9 +69,8 @@ export const ClickupCockpit: FC<Props> = () => {
         <Kpi label="BC en retard (ETA ClickUp)" value={fmt(bcOverdue)} sub="ETA ClickUp dépassée, non livré" tone={bcOverdue ? "clay" : "emerald"} />
       </div>
       {dups > 0 && (
-        <Card title={`Doublons ClickUp détectés · ${fmt(dups)} tâche(s) en trop`}
-          actions={canGo("habilitations") ? <button className="btn-ghost !py-1 text-xs" onClick={() => go("habilitations")}>Nettoyer</button> : undefined}>
-          <p className="text-sm text-muted">{fmt(dupFps)} N° FP {dupFps > 1 ? "sont portés" : "est porté"} par plusieurs tâches ClickUp — {fmt(dups)} tâche(s) surnuméraire(s) à supprimer. Va dans <b>Habilitations → Intégration ClickUp → Nettoyer les doublons</b> (aperçu avant suppression ; conserve la tâche liée ou la plus ancienne).</p>
+        <Card title={`Doublons ClickUp détectés · ${fmt(dups)} tâche(s) en trop`}>
+          <p className="text-sm text-muted">{fmt(dupFps)} N° FP {dupFps > 1 ? "sont portés" : "est porté"} par plusieurs tâches ClickUp — {fmt(dups)} tâche(s) surnuméraire(s) à supprimer. {isDirection ? <>Utilise <b>« Nettoyer les doublons »</b> dans la carte de configuration ci-dessus</> : <>La direction peut nettoyer via la carte de configuration ClickUp</>} (aperçu avant suppression ; conserve la tâche liée ou la plus ancienne).</p>
           {(health?.duplicateSample?.length || 0) > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {health!.duplicateSample!.slice(0, 12).map((d, i) => (
@@ -120,10 +125,10 @@ export const ClickupCockpit: FC<Props> = () => {
 
       {!health && !bc && !delays && (
         <Card title="Aucune donnée de synchronisation">
-          <p className="text-sm text-muted">Lance une première synchronisation depuis <b>Habilitations → Intégration ClickUp</b> (« Diagnostic qualité », « Synchroniser depuis ClickUp », « Synchroniser les BC ») pour alimenter ce cockpit.</p>
+          <p className="text-sm text-muted">{isDirection ? <>Lance une première synchronisation via la <b>carte de configuration ClickUp ci-dessus</b> (« Diagnostic qualité », « Synchroniser depuis ClickUp », « Synchroniser les BC ») pour alimenter ce cockpit.</> : <>La direction doit lancer une première synchronisation (carte de configuration ClickUp) pour alimenter ce cockpit.</>}</p>
         </Card>
       )}
-      <Tip>Vue de pilotage en lecture seule. Les actions (rattacher, pousser, enrichir, activer le temps réel, importer les BC) sont dans <b>Habilitations → Intégration ClickUp</b>.</Tip>
+      <Tip>{isDirection ? <>Les KPI ci-dessus sont en lecture ; la <b>configuration et les actions</b> (rattacher, pousser, enrichir, activer le temps réel, importer les BC) sont dans la <b>carte de configuration ClickUp ci-dessus</b>.</> : <>Vue de pilotage en lecture seule. La configuration et les actions ClickUp sont réservées à la direction.</>}</Tip>
     </div>
   );
 };

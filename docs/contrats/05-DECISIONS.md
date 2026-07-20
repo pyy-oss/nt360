@@ -3,6 +3,34 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-047 — La configuration + les actions ClickUp vivent dans le COCKPIT ClickUp, pas dans Habilitations
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« déplacer l'intégration ClickUp dans le cockpit ClickUp »)
+
+### Contexte
+Le cockpit ClickUp (`clickupcockpit`, module `overview`) était 100 % lecture (KPI de pilotage) et renvoyait
+en boucle vers **Habilitations → Intégration ClickUp** pour toute action. La grosse carte de config + actions
+(`ClickupCard` : toggle, listes cibles, synchro/push/rattachement/dédoublonnage commandes & BC, webhooks
+temps réel, diagnostic qualité) vivait dans Habilitations, loin de ses KPI.
+
+### Décision
+- **Relocalisation présentationnelle** (patron ADR-037/044/045) : `ClickupCard` + ses helpers (`ClickupHealthPanel`,
+  `ClickupActionRow`, `CLICKUP_LISTS`, `CLICKUP_WEBHOOK_ENDPOINT`) déménagent de `web/src/modules/admin.tsx` vers
+  un nouveau fichier `web/src/modules/clickupAdmin.tsx` (export `ClickupCard`), rendu DANS le cockpit ClickUp.
+- **Garde direction-only STRICTEMENT conservée** : le cockpit ne rend `<ClickupCard/>` que si
+  `useClaims().role === "direction"` (identique à l'ancien `isDirection` d'Habilitations). Le cockpit reste
+  visible en lecture (module `overview`) aux autres rôles, **sans** la config/les actions. **Aucun
+  élargissement** de qui configure/actionne ClickUp. Callables et droits inchangés.
+- Habilitations : la carte est retirée (renvoi en commentaire) ; les redirections « → Habilitations » du
+  cockpit deviennent « → carte de configuration ci-dessus ».
+
+### Conséquences
+- **Strictement additif** : aucun callable/droit/schéma modifié ; seul l'emplacement de l'UI change. Les
+  deux chunks (admin, clickupcockpit) restent lazy → chunk d'entrée inchangé (119,9 KB).
+- Le pilotage ET la configuration ClickUp sont enfin au même endroit.
+
 ## ADR-046 — Normalisation fournisseurs MINIMALE : clé `cleanName` + alias manuels (config/supplierAliases), consolidée dans le référentiel Fournisseurs
 
 - **Date :** 2026-07-20

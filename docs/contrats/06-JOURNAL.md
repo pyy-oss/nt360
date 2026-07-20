@@ -1573,3 +1573,25 @@ reste l'autorité (ADR-P20). ADR-046.
 
 **Vérifs.** 1252 functions (dont supplierName ×7 + caractérisation fournisseurs) + 291 web au vert ; tsc
 propre ; bundle 119,9 KB (≤ 120) ; no-undef (159), deploy-targets (189), indexes (3 composites) OK.
+
+## #268 — Intégration ClickUp déplacée dans le cockpit ClickUp (ADR-047) — 2026-07-20
+
+**Fait.** La configuration + les actions ClickUp (grosse carte `ClickupCard` : toggle, listes, synchro/push/
+rattachement/dédoublonnage commandes & BC, webhooks temps réel, diagnostic) déménagent d'Habilitations vers
+le cockpit ClickUp, aux côtés de ses KPI de pilotage.
+
+**Câblage.**
+- Extraction de `ClickupCard` + helpers (`ClickupHealthPanel`, `ClickupActionRow`, `CLICKUP_LISTS`,
+  `CLICKUP_WEBHOOK_ENDPOINT`) d'`admin.tsx` vers un nouveau `web/src/modules/clickupAdmin.tsx` (export
+  `ClickupCard`). ~390 lignes déplacées ; imports morts retirés d'`admin.tsx` (15 callables ClickUp +
+  `useConfirm`, `trackWrite`, type `ClickupHealthSummary`).
+- `clickupcockpit.tsx` : rend `<ClickupCard/>` **uniquement pour la direction** (`useClaims().role`),
+  identique à l'ancien `isDirection`. Les redirections « → Habilitations » deviennent « → carte de
+  configuration ci-dessus ». La vue lecture (KPI) reste ouverte au module `overview`.
+- Habilitations garde la rubrique « Intégrations API » (Odoo/outbound/API keys/… — cible de #269) ; la
+  carte ClickUp est retirée (renvoi en commentaire).
+
+**Gouvernance.** Strictement additif : aucun callable/droit/schéma modifié, aucun élargissement de qui
+configure ClickUp. Les deux modules restent lazy → chunk d'entrée inchangé. ADR-047.
+
+**Vérifs.** tsc propre ; bundle 119,9 KB (≤ 120) ; 291 web au vert (backend inchangé).
