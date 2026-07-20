@@ -741,7 +741,11 @@ export async function deleteClickupWebhook() {
  *  déjà présent (Excel curaté prioritaire). Sert la réconciliation d'une opp gagnée sans P&L ou la
  *  saisie manuelle d'une commande. Réservé au droit « import ». Recalcule ensuite. */
 export async function createOrder(data: { fp: string; cas: number; client?: string; designation?: string; bu?: string; am?: string; yearPo?: number; raf?: number }) {
-  const res = await httpsCallable(functions, "createOrder")(data);
+  // Timeout client ALIGNÉ sur le serveur (`timeoutSeconds: 300`) : la commande est écrite PUIS un recompute
+  // synchrone peut tourner ~30 s (repli quand la région de recompute n'est pas configurée). Au timeout par
+  // défaut (70 s), le client abandonnait — faux « internal » — alors que la commande ÉTAIT bien créée. Même
+  // valeur que son jumeau `generateFromInvoices` (crée aussi commande + recompute).
+  const res = await httpsCallable(functions, "createOrder", { timeout: 300_000 })(data);
   return res.data as { ok: boolean; fp: string };
 }
 
