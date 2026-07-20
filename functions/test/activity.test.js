@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { validateActivity, isOverdue, ACTIVITY_TYPES } = require("../domain/activity");
+const { validateActivity, isOverdue, activityVisible, ACTIVITY_TYPES } = require("../domain/activity");
 
 const NOW = "2026-07-08";
 
@@ -47,5 +47,25 @@ describe("isOverdue — tâche ouverte à échéance passée", () => {
     expect(isOverdue({ type: "task", done: false, dueDate: "2026-07-20" }, NOW)).toBe(false);
     expect(isOverdue({ type: "note", dueDate: "2026-07-01" }, NOW)).toBe(false);
     expect(isOverdue({ type: "task", done: false, dueDate: null }, NOW)).toBe(false);
+  });
+});
+
+describe("activityVisible — visibilité par enregistrement (Lot 13)", () => {
+  const a = { visibleTo: ["u1", "u2"] };
+  it("périmètre PUBLIC (priv=false) : tout le monde voit", () => {
+    expect(activityVisible(a, false, false, "u9")).toBe(true);
+    expect(activityVisible({ visibleTo: [] }, false, false, "u9")).toBe(true);
+  });
+  it("admin record-level : voit tout, même privé", () => {
+    expect(activityVisible(a, true, true, "u9")).toBe(true);
+  });
+  it("privé + non-admin : visible SEULEMENT si dans la chaîne visibleTo", () => {
+    expect(activityVisible(a, true, false, "u1")).toBe(true);   // dans la chaîne
+    expect(activityVisible(a, true, false, "u9")).toBe(false);  // hors périmètre → invisible/non supprimable
+  });
+  it("privé + visibleTo absent/non-tableau : invisible pour un non-admin", () => {
+    expect(activityVisible({}, true, false, "u1")).toBe(false);
+    expect(activityVisible({ visibleTo: "u1" }, true, false, "u1")).toBe(false);
+    expect(activityVisible(null, true, false, "u1")).toBe(false);
   });
 });
