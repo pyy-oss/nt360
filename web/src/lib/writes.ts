@@ -55,7 +55,9 @@ export async function deleteOpportunity(id: string) {
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
 export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string }) {
-  await httpsCallable(functions, "patchOpportunity")(data);
+  // Timeout client aligné sur le serveur (timeoutSeconds: 120) : l'écriture déclenche un recompute
+  // synchrone (repli) qui peut dépasser le défaut de 70 s → faux « internal » alors que le patch a réussi.
+  await httpsCallable(functions, "patchOpportunity", { timeout: 120_000 })(data);
 }
 
 // PRÉVISION COMMERCIALE GOUVERNABLE (Lot 5) — roll-up des catégories de prévision sur le périmètre visible.
@@ -565,17 +567,17 @@ export async function runAutomations() {
 /** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
  *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
 export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {
-  await httpsCallable(functions, "patchInvoice")(data);
+  await httpsCallable(functions, "patchInvoice", { timeout: 300_000 })(data); // aligné serveur (300 s) — cf. createOrder
 }
 
 /** Corrige une commande P&L : année/CAS/RAF/N° FP + client/AM/BU/désignation (onCall : recalcule). */
 export async function patchOrder(data: { fp: string; yearPo?: number; newFp?: string; cas?: number; raf?: number; client?: string; am?: string; bu?: string; designation?: string }) {
-  await httpsCallable(functions, "patchOrder")(data);
+  await httpsCallable(functions, "patchOrder", { timeout: 300_000 })(data); // aligné serveur (300 s)
 }
 
 /** Affecte (ou désaffecte, pm vide) un Project Manager à une commande. Overlay persistant, recalcul. */
 export async function setOrderPm(fp: string, pm: string) {
-  await httpsCallable(functions, "setOrderPm")({ fp, pm });
+  await httpsCallable(functions, "setOrderPm", { timeout: 300_000 })({ fp, pm }); // aligné serveur (300 s)
 }
 
 /** Synchronise le montant (CA Signé) entre une commande et son opportunité liée (même N° FP).
@@ -751,13 +753,13 @@ export async function createOrder(data: { fp: string; cas: number; client?: stri
 
 /** Fait évoluer le statut d'une ligne BC (onCall : recalcule ensuite exposition + alertes). */
 export async function setBcStatus(id: string, status: string) {
-  await httpsCallable(functions, "setBcStatus")({ id, status });
+  await httpsCallable(functions, "setBcStatus", { timeout: 120_000 })({ id, status }); // aligné serveur (120 s)
 }
 
 /** Fiabilise une ligne BC : N° FP, montant XOF, fournisseur, type de dépense, description, date
  *  d'entrée (onCall : recalcule exposition + alertes + décaissements). */
 export async function patchBcLine(data: { id: string; fp?: string; amountXof?: number; fxRate?: number; supplier?: string; expenseType?: string; description?: string; dateIn?: string | null }) {
-  await httpsCallable(functions, "patchBcLine")(data);
+  await httpsCallable(functions, "patchBcLine", { timeout: 120_000 })(data); // aligné serveur (120 s)
 }
 
 /** Remonte une erreur client (observabilité). Réservé aux sessions authentifiées côté serveur. */
@@ -904,7 +906,7 @@ export const deleteRecord = (collection: string, id: string) => deleteRecords(co
  *  Stocké en overlay (config/cancellations) → survit à un ré-import delta. `id` = DOC ID (commande =
  *  fpDocId(fp)). meta = libellé/nom non monétaires pour l'affichage de la liste des annulées. */
 export async function setCancellation(collection: "orders" | "invoices", id: string, cancelled: boolean, meta?: { label?: string; client?: string }) {
-  const res = await httpsCallable(functions, "setCancellation")({ collection, id, cancelled, ...(meta || {}) });
+  const res = await httpsCallable(functions, "setCancellation", { timeout: 300_000 })({ collection, id, cancelled, ...(meta || {}) }); // aligné serveur (300 s)
   return res.data as { ok: boolean; id: string; cancelled: boolean };
 }
 
@@ -982,7 +984,7 @@ export async function callParseBcPdf(pdf: File): Promise<BcLineFields> {
 /** Ajoute un BC fournisseur unitaire (mode « Unitaire / PDF ») + PDF joint optionnel. */
 export async function callAddBcLine(fields: BcLineFields, pdf?: File | null) {
   const pdfB64 = pdf ? await fileToBase64(pdf) : undefined;
-  const res = await httpsCallable(functions, "addBcLine")({ fields, pdfB64, filename: pdf?.name });
+  const res = await httpsCallable(functions, "addBcLine", { timeout: 120_000 })({ fields, pdfB64, filename: pdf?.name }); // aligné serveur (120 s)
   return res.data as { ok: boolean; id: string; pdfStored: boolean };
 }
 
