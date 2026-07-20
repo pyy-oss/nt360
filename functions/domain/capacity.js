@@ -25,12 +25,12 @@ function avgTjm(consultants, fallback = 250000) {
   return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : fallback;
 }
 
-// Demande pipeline en jours de delivery : pondéré ÷ TJM moyen. On privilégie `pw` (pondéré TIÉRÉ, source
-// unique du « pondéré » — CLAUDE.md) fourni par l'appelant ; repli `weighted` linéaire puis montant×proba.
+// Demande pipeline en jours de delivery : pondéré ÷ TJM moyen. `pw` = pondéré TIÉRÉ (projectionWeight),
+// SOURCE UNIQUE du « pondéré » (CLAUDE.md) fourni par l'appelant. On NE réintroduit PAS le champ linéaire
+// persisté `o.weighted` (deux vérités du pondéré) : repli ultime montant×IdC seulement si pw non fourni.
 function demandDaysOf(opp, tjm) {
   const pw = Number(opp.pw);
-  const weighted = Number(opp.weighted);
-  const w = Number.isFinite(pw) ? pw : Number.isFinite(weighted) ? weighted : (Number(opp.amount) || 0) * p01(opp.probability);
+  const w = Number.isFinite(pw) ? pw : (Number(opp.amount) || 0) * p01(opp.probability);
   return tjm > 0 ? w / tjm : 0;
 }
 

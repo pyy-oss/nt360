@@ -23,6 +23,7 @@ const { dataQuality } = require("../domain/dataQuality");
 const { isAgedLost, isDormantClosing } = require("../domain/oppLifecycle");
 const { relances } = require("../domain/relances");
 const { mergeCommandes } = require("../domain/commandes");
+const { resolveBcFp } = require("../domain/odooSync");
 const { enrichBu, enrichLinks } = require("./enrich");
 const { fpKey, plausibleYear, num, buildFpAliasResolver } = require("./ids");
 const { safeId } = require("./sheets");
@@ -165,6 +166,17 @@ async function recomputeCore(db, only) {
     const canonFp = buildFpAliasResolver(fpAliasMap);
     for (const rows of [pnlOrders, invoices, oppsRaw, sheetsBase, bcLines]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
+    }
+  }
+
+  // RÉCONCILIATION DC → N° FP (overlay config/dcAliases, ADR-054) : un BC INGÉRÉ sans FP résoluble mais
+  // portant un DC connu est rattaché à l'affaire AU RECOMPUTE — RÉTROACTIF (l'ingestion webhook ne voyait
+  // pas encore l'alias). Symétrique de fpAliases ; resolveBcFp garde la primauté d'un fp existant, donc on
+  // n'agit que sur les bcLines réellement sans fp. Sans effet si l'overlay est vide.
+  const dcAliasMap = ((await db.doc("config/dcAliases").get()).data() || {}).map || {};
+  if (Object.keys(dcAliasMap).length) {
+    for (const b of bcLines) {
+      if (b && (b.fp == null || b.fp === "") && b.dc) { const fp = resolveBcFp(b, dcAliasMap); if (fp) b.fp = fp; }
     }
   }
 

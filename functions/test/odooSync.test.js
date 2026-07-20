@@ -82,9 +82,13 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m.doc.amountHt).toBe(750000);
     expect(m.doc.paid).toBe(true);
   });
-  it("facture sans numero → rejet ; date sentinelle 1899 → null", () => {
+  it("facture sans numero → rejet ; date sentinelle 1899 → clé OMISE (additif, pas d'écrasement au merge)", () => {
     expect(mapInvoice({ fp: "FP/2026/3", amountHt: 100 }).ok).toBe(false);
-    expect(mapInvoice({ numero: "FA-1", date: "1899-12-31" }).doc.date).toBeNull();
+    expect("date" in mapInvoice({ numero: "FA-1", date: "1899-12-31" }).doc).toBe(false);
+    // fp illisible → clé omise (n'écrase pas une correction setInvoiceFp au merge) ; key.fp = null
+    const mBadFp = mapInvoice({ numero: "FA-2", fp: "FP/2026/0000" });
+    expect("fp" in mBadFp.doc).toBe(false);
+    expect(mBadFp.key.fp).toBe(null);
   });
 
   it("BC : cible bcLines, canonicalise fp, doc additif, trace source odoo (ADR-051)", () => {
@@ -138,8 +142,10 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect("etaContrat" in d).toBe(false);
     expect("updateDate" in d).toBe(false);
     expect("comment" in d).toBe(false);
-    // date invalide → null (isoDay), pas de valeur aberrante persistée
-    expect(mapBc({ bcNumber: "BC-4", etaContrat: "pas-une-date" }).doc.etaContrat).toBe(null);
+    // date invalide → clé OMISE (isoDay null gaté sur le résultat) : n'écrase pas une valeur curatée au merge
+    expect("etaContrat" in mapBc({ bcNumber: "BC-4", etaContrat: "pas-une-date" }).doc).toBe(false);
+    // fp placeholder illisible → clé fp OMISE (H2 : n'écrase pas un bon FP au merge sur ré-envoi Odoo)
+    expect("fp" in mapBc({ bcNumber: "BC-5", fp: "FP/2026/0000" }).doc).toBe(false);
   });
 
   it("objet inconnu → rejet explicite", () => {

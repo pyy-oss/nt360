@@ -1207,7 +1207,10 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
     if (Object.values(map).includes(from)) throw new HttpsError("failed-precondition", `le N° FP ${from} est déjà la cible d'une réconciliation — il ne peut pas devenir une source`);
     map[from] = to;
   }
-  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // merge:FALSE (audit intégrité) : `map` est un OBJET ; avec merge:true Firestore fusionne récursivement et
+  // les clés retirées en mémoire SURVIVENT en base — un alias « supprimé » continuait d'être appliqué au
+  // recompute. Le doc ne contient que {map, updatedAt} → remplacement complet, la suppression prend effet.
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
@@ -1238,7 +1241,8 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
   } else {
     map[from] = to;
   }
-  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // merge:FALSE (audit intégrité, cf. setFpAlias) : sinon la clé retirée survivrait au merge récursif du champ map.
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
@@ -1262,16 +1266,22 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits. Scans BORNÉS
   // (R1) sur les TROIS collections (orders/invoices désormais plafonnés comme opps) → mémoire/latence
   // bornées même sur gros volumes ; `capped` remonté pour l'observabilité (troncature JAMAIS silencieuse).
-  const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
+  const { isAgedLost } = require("./domain/oppLifecycle");
+  const { safeId } = require("./lib/sheets");
+  const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc, cxlODoc, cxlIDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").limit(MAX_SCAN + 1).get(),
-    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").limit(MAX_SCAN + 1).get(),
+    // stale/source/ageDays/probability : requis pour exclure fantômes/périmées et dédupliquer inter-source
+    // (assiette ALIGNÉE sur le recompute/correctionQueue — sinon le Dossier client sur-compterait, audit intégrité).
+    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo", "stale", "source", "ageDays", "probability").limit(MAX_SCAN + 1).get(),
     db.doc("config/fpAliases").get(),
     db.doc("config/clientAliases").get(),
+    db.doc("config/cancelOrders").get(),
+    db.doc("config/cancelInvoices").get(),
   ]);
   const oCap = sliceCapped(ordSnap.docs), iCap = sliceCapped(invSnap.docs), pCap = sliceCapped(oppSnap.docs);
-  const orders = oCap.docs.map((d) => d.data());
-  const invoices = iCap.docs.map((d) => d.data());
+  let orders = oCap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let invoices = iCap.docs.map((d) => ({ id: d.id, ...d.data() }));
   let opps = pCap.docs.map((d) => d.data());
   const capped = oCap.capped || iCap.capped || pCap.capped;
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne rapproche
@@ -1283,6 +1293,17 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const aliasResolver = buildFpAliasResolver((aliasDoc.data() || {}).map || {});
   const fpKeyOf = (fp) => fpKey(aliasResolver(fp)); // clé FP canonique, alias de réconciliation appliqués
   const normClient = buildClientResolver((clientDoc.data() || {}).pairs || []);
+  // ASSIETTE ALIGNÉE sur le recompute (aggregate.js) / le Centre de correction (correctionQueue) — sinon le
+  // Dossier client proposait de rapprocher vers un FP ANNULÉ et comptait des opps fantômes/périmées/doublons
+  // que le reste du système ignore (audit intégrité, systèmes de correction). Ordre identique : dédup inter-
+  // source, puis exclusion fantômes(stale)/périmées(aged), puis annulations (commandes par safeId(fp), factures par id).
+  const salesFps = new Set(opps.filter((o) => o.source === "salesData" && fpKeyOf(o.fp)).map((o) => fpKeyOf(o.fp)));
+  opps = opps.filter((o) => !(o.source === "saisie" && fpKeyOf(o.fp) && salesFps.has(fpKeyOf(o.fp))));
+  opps = opps.filter((o) => o.stale !== true && !isAgedLost(o));
+  const itemsOf = (snap) => new Set((((snap.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
+  const cancelledOrders = itemsOf(cxlODoc), cancelledInvoices = itemsOf(cxlIDoc);
+  orders = orders.filter((o) => !cancelledOrders.has(safeId(o.fp)));
+  invoices = invoices.filter((i) => !cancelledInvoices.has(i.id));
 
   const wanted = String(req.data?.client || "").trim();
   if (wanted) {
@@ -1320,14 +1341,15 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
   // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
   // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
-  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc] = await Promise.all([
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc, dcAliasDoc] = await Promise.all([
     // raf/designation : requis par mergeCommandes (RAF curaté + affaire) pour aligner l'assiette « commandes ».
     db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "raf", "designation", "source").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").limit(MAX_SCAN + 1).get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
     db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
-    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
+    // dc : requis pour le rapprochement DC → N° FP (ADR-054), aligné sur le recompute (aggregate.js).
+    db.collection("bcLines").select("fp", "dc", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
     // commercial : mergeCommandes en dérive l'AM d'une commande enrichie par fiche (sinon commandes_sans_am divergerait).
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal", "commercial").limit(MAX_SCAN + 1).get(),
     db.doc("config/alerts").get(),
@@ -1335,6 +1357,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     db.doc("config/cancelOrders").get(),
     db.doc("config/cancelInvoices").get(),
     db.doc("config/orderCasOverride").get(),
+    db.doc("config/dcAliases").get(),
   ]);
   let scanCapped = false;
   const withId = (snap) => { const s = sliceCapped(snap.docs); if (s.capped) scanCapped = true; return s.docs.map((d) => ({ id: d.id, ...d.data() })); };
@@ -1351,6 +1374,14 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
     }
+  }
+  // RAPPROCHEMENT DC → N° FP (overlay config/dcAliases, ADR-054) — MÊME résolution que le recompute : un BC
+  // sans FP mais portant un DC connu est rattaché à l'affaire, sinon il compterait à tort « bc_fp_inconnu »
+  // DANS LE CENTRE DE CORRECTION alors que le cockpit Qualité (aggregate) l'aura rattaché → divergence.
+  const dcAliasMap = ((dcAliasDoc.data() || {}).map) || {};
+  if (Object.keys(dcAliasMap).length) {
+    const { resolveBcFp } = require("./domain/odooSync"); // require LOCAL (module fn-scoped, cf. buildFpAliasResolver)
+    for (const b of bcLines) { if (b && (b.fp == null || b.fp === "") && b.dc) { const fp = resolveBcFp(b, dcAliasMap); if (fp) b.fp = fp; } }
   }
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
   // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).

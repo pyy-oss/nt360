@@ -3,6 +3,30 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-055 — Remédiation audit intégrité FP + systèmes de correction (6 correctifs H1→M4)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« audit d'intégrité, continuité, cohérence, unicité du FP + audit des systèmes de correction » → « tout corriger, HAUTE→MOYENNE »)
+
+### Contexte
+Audit transverse (5 auditeurs lecture seule + vérification). Le cœur de calcul FP est sain (fpKey + fpAliases appliqués partout, miroir front fidèle). Les défauts étaient dans les **systèmes de correction** et l'**ingestion Odoo**, pas dans l'agrégation.
+
+### Décisions (correctifs)
+- **H1 — Suppression d'alias FP/DC réellement effective.** `setFpAlias`/`setDcAlias` écrivaient `{map}` en `merge:true` → Firestore fusionne récursivement le champ `map` et la clé retirée SURVIVAIT (alias « supprimé » toujours appliqué au recompute — irrémédiable via l'UI). Passés en **`merge:false`** (ces docs ne portent que `{map, updatedAt}` → remplacement complet). Bug de prod PRÉ-EXISTANT sur `setFpAlias`.
+- **H2 + M1 — Ingestion Odoo ADDITIVE STRICTE.** `mapBc`/`mapOpportunity`/`mapInvoice` gataient sur l'**input brut** (`present`) alors que `fpKey`/`isoDay` renvoient `null` (placeholder FP, date hors regex/plausibleYear). Le `null` écrasait au merge une valeur curatée (BC orphelin → coût SOA perdu ; date/`fp` de facture corrigés par `setInvoiceFp` écrasés). Désormais **gate sur le RÉSULTAT** (clé omise si null) — patron déjà en place dans `mapOrder`. Champs : `fp`, `etaReel`, `etaContrat`, `dateIn`, `updateDate` (BC) ; `closingDate`, `dateCreation` (opp) ; `fp`, `date`, `dueDate`, `dateCreation` (facture).
+- **M2 — `dcAliases` RÉTROACTIF.** L'overlay n'agissait qu'à l'ingestion webhook → un BC déjà stocké sans FP n'était jamais rattaché. Désormais appliqué **au recompute** (`aggregate.js`, symétrique de `fpAliases`) ET dans `correctionQueue` (parité cockpit Qualité ↔ Centre de correction). `resolveBcFp` garde la primauté d'un FP existant.
+- **M3 — `reconClient` (Dossier client) : assiette alignée.** Exclut désormais annulations (commandes par `safeId(fp)`, factures par id), fantômes (`stale`), périmées (`isAgedLost`) et déduplique inter-source (salesData > saisie) — MÊME population que `aggregate`/`correctionQueue`. Ne proposait plus de rapprocher vers un FP annulé ni de compter des opps que le reste du système ignore.
+- **M4 — `capacity.js` : plus de `weighted` linéaire persisté.** Le repli de `demandDaysOf` réintroduisait `o.weighted` (interdit CLAUDE.md — deux vérités du pondéré). Retiré : `pw` (projectionWeight tiéré, toujours fourni par l'appelant) puis repli ultime `montant × IdC`.
+
+### Conséquences
+- H1 change un comportement de prod (la suppression d'alias devient effective) — surveiller qu'aucun alias légitimement présent ne disparaisse (le remplacement complet est fidèle à la map en mémoire, qui part de l'existant).
+- H2/M1 : les docs Odoo n'écrivent plus de clés `null` → au merge, les valeurs curatées survivent. Tests mis à jour (assertions « clé omise » au lieu de « null »).
+- M2 : un BC rétro-rattaché alimente le carnet coût/SOA au recompute suivant.
+- Tests : `resolveBcFp`, gating additif (fp/date), `demandDaysOf` (weighted ignoré). Suite functions 1265/1265.
+
+---
+
 ## ADR-054 — BC Odoo : champs additifs (etaContrat / updateDate / comment) + rapprochement DC → N° FP (overlay `config/dcAliases`)
 
 - **Date :** 2026-07-20

@@ -1835,3 +1835,31 @@ par « additif uniquement ». Overlay vide par défaut → comportement strictem
 
 **Vérifs.** odooSync.test.js au vert (19 tests, dont resolveBcFp 3 cas + champs additifs) ; no-undef (159) +
 deploy-targets (191) OK. tsc + bundle : à valider en CI.
+
+## Remédiation audit intégrité FP + systèmes de correction (ADR-055) — 2026-07-20
+
+**Audit (5 auditeurs lecture seule + vérification manuelle).** Cœur de calcul FP SAIN : fpKey + fpAliases
+appliqués partout (mergeCommandes, aggregate, dataQuality/alerts, miroir front overviewCalc), plausibleYear
+discipliné, parité fpKey/plausibleYear back↔front identique au caractère près. Défauts concentrés dans les
+overlays de correction et l'ingestion Odoo.
+
+**Corrigé (choix Direction « tout, HAUTE→MOYENNE ») :**
+- **H1** setFpAlias/setDcAlias : `merge:true` → `merge:false` — la suppression d'un alias (map) était
+  silencieusement inopérante (clé préservée au merge récursif → alias « supprimé » toujours appliqué). Bug
+  de prod pré-existant sur setFpAlias. Vérifié en lecture directe du code.
+- **H2 + M1** mapBc/mapOpportunity/mapInvoice : gate sur le RÉSULTAT de fpKey/isoDay (clé omise si null) au
+  lieu de l'input brut `present` — un fp placeholder / une date invalide écrivaient `null` qui écrasait au
+  merge une valeur curatée (BC orphelin, correction setInvoiceFp perdue). Patron déjà en place dans mapOrder.
+- **M2** dcAliases rendu RÉTROACTIF : appliqué au recompute (aggregate.js) + correctionQueue, pas seulement à
+  l'ingestion webhook. resolveBcFp garde la primauté d'un FP existant.
+- **M3** reconClient : exclut annulés (safeId(fp)/id) + fantômes(stale) + périmées(aged) + dédup salesData/
+  saisie — assiette alignée sur aggregate/correctionQueue (ne proposait plus de rapprocher vers un FP annulé).
+- **M4** capacity.demandDaysOf : retrait du repli `o.weighted` linéaire persisté (interdit CLAUDE.md) — pw
+  tiéré puis repli montant×IdC.
+
+**Tests.** Assertions mises à jour (clé omise vs null ; weighted ignoré) + nouveaux cas (fp placeholder omis,
+resolveBcFp). Suite functions **1265/1265**. no-undef (159) + deploy-targets (191) + firestore-indexes OK.
+
+**Non corrigé (FAIBLE/INFO, signalés) :** parité buildFpAliasResolver undefined/null (inoffensif, non testé
+front) ; fiscalYearFromOrders non borné (défense en profondeur) ; RBAC config/dcAliases import vs bc ;
+hypothèse 1 DC→1 FP ; dedupe/reconClient recompute direct ; trous de test parité croisée front/back.
