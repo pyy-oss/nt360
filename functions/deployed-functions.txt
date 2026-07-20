@@ -187,5 +187,6 @@ migrateCreditLineKeys
 setSoaFeature
 upsertSupplierInvoice
 deleteSupplierInvoice
+setCostModel
 upsertObjective
 upsertOpportunity

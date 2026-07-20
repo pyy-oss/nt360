@@ -309,6 +309,9 @@ service cloud.firestore {
     match /config/mntFeature     { allow read: if isNt360(); allow write: if false; }
     // Drapeau « Vérité du coût » (ADR-P21) : SOA depuis factures fournisseur réelles. Même patron que mntFeature.
     match /config/soaFeature     { allow read: if isNt360(); allow write: if false; }
+    // Modèle de coût « marge nette » (ADR-P22) : frais de structure (SG&A) en % du CA. Lecture gouvernée
+    // rentabilite (donnée sensible : révèle la structure de coût). Écrit via callable setCostModel (direction).
+    match /config/costModel      { allow read: if canRead('rentabilite'); allow write: if false; }
     // Drapeau du module Partenariats & Certifications (ADR-P01) : même patron que config/mntFeature.
     match /config/parFeature     { allow read: if isNt360(); allow write: if false; }
     // Overlay de rapprochement fournisseur → constructeur (ADR-P02) : lu par le module (édition/affichage

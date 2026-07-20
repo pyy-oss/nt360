@@ -8,7 +8,7 @@ import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, det, 
 import { PctLine } from "../design/charts";
 import { T } from "../design/tokens";
 import { Select } from "../design/inputs";
-import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, preBillingFromCra, taceHistory, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type PreBilling, type PreBillingLine, type TaceTrend } from "../lib/writes";
+import { listConsultants, upsertConsultant, deleteConsultant, staffingPlan, upsertAssignment, deleteAssignment, activityKpis, capacityPlan, timesheetKpis, upsertTimesheet, importTimesheets, syncClickupTimesheets, listCandidates, upsertCandidate, deleteCandidate, resourcePnl, setCostModel, preBillingFromCra, taceHistory, type Consultant, type ConsultantGrade, type ConsultantStatus, type StaffingPlan, type Assignment, type ActivityKpis, type CapacityPlan, type TimesheetKpis, type Recruitment, type Candidate, type CandidateStatus, type ResourcePnl, type ResourcePnlRow, type ResourcePnlGroup, type PreBilling, type PreBillingLine, type TaceTrend } from "../lib/writes";
 import type { Props } from "./_shared";
 import { useBusinessUnits } from "./_shared";
 
@@ -127,18 +127,25 @@ function ActivityCockpit() {
 function ResourcePnlCard() {
   const [p, setP] = useState<ResourcePnl | null>(null);
   const [loading, setLoading] = useState(true);
-  const { nonce } = useStaffingRefresh();
+  const { nonce, bump } = useStaffingRefresh();
+  const canSetModel = useCan("rentabilite") === "write"; // seul un droit rentabilite en écriture pilote le taux
   useEffect(() => { resourcePnl().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, [nonce]);
   if (loading) return <Card title="Rentabilité par ressource (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!p || !p.global.headcount) return <Card title="Rentabilité par ressource (6 mois)"><Tip>Saisissez des CRA (jours facturés) et renseignez TJM/CJM des consultants pour obtenir le P&L par ressource.</Tip></Card>;
   const g = p.global;
+  // Marge NETTE (ADR-P22) : n'est distincte de la marge brute que si un taux de structure a été saisi (> 0).
+  // À taux 0 (défaut), on masque les colonnes nettes — elles seraient identiques et ne feraient que du bruit.
+  const netOn = (p.structureRate || 0) > 0;
   return (
-    <Card title="Rentabilité par ressource (6 mois)">
+    <Card title="Rentabilité par ressource (6 mois)" actions={canSetModel && <StructureRateEditor rate={p.structureRate || 0} onDone={bump} />}>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         {stat("CA réel", money(g.caReal))}
-        {g.cost != null && stat("Coût", money(g.cost))}
-        {g.margin != null && stat("Marge", money(g.margin), g.margin >= 0 ? "text-emerald" : "text-clay")}
-        {g.marginPct != null && stat("Taux de marge", `${g.marginPct}%`, g.marginPct >= 20 ? "text-emerald" : g.marginPct >= 0 ? "text-gold" : "text-clay")}
+        {g.cost != null && stat("Coût M-O", money(g.cost))}
+        {g.margin != null && stat(netOn ? "Marge brute" : "Marge", money(g.margin), g.margin >= 0 ? "text-emerald" : "text-clay")}
+        {g.marginPct != null && stat(netOn ? "Taux brut" : "Taux de marge", `${g.marginPct}%`, g.marginPct >= 20 ? "text-emerald" : g.marginPct >= 0 ? "text-gold" : "text-clay")}
+        {netOn && g.structureCost != null && stat(`Frais struct. (${Math.round((p.structureRate || 0) * 100)}%)`, money(g.structureCost), "text-clay")}
+        {netOn && g.marginNette != null && stat("Marge nette", money(g.marginNette), g.marginNette >= 0 ? "text-emerald" : "text-clay")}
+        {netOn && g.marginNettePct != null && stat("Taux net", `${g.marginNettePct}%`, g.marginNettePct >= 15 ? "text-emerald" : g.marginNettePct >= 0 ? "text-gold" : "text-clay")}
         {stat("Jours facturés", String(g.billedDays))}
       </div>
       {p.byGrade.length > 1 && (
@@ -148,8 +155,12 @@ function ResourcePnlCard() {
             colText("Grade", (b) => b.key),
             colNum("Effectif", (b) => String(b.headcount), (b) => b.headcount),
             colNum("CA réel", (b) => money(b.caReal), (b) => b.caReal),
-            colNum("Marge", (b) => (b.margin != null ? money(b.margin) : "—"), (b) => b.margin ?? 0),
-            colNum("Taux", (b) => (b.marginPct != null ? `${b.marginPct}%` : "—"), (b) => b.marginPct ?? 0),
+            colNum(netOn ? "Marge brute" : "Marge", (b) => (b.margin != null ? money(b.margin) : "—"), (b) => b.margin ?? 0),
+            colNum(netOn ? "Taux brut" : "Taux", (b) => (b.marginPct != null ? `${b.marginPct}%` : "—"), (b) => b.marginPct ?? 0),
+            ...(netOn ? [
+              colNum("Marge nette", (b: ResourcePnlGroup) => (b.marginNette != null ? money(b.marginNette) : "—"), (b: ResourcePnlGroup) => b.marginNette ?? 0),
+              colNum("Taux net", (b: ResourcePnlGroup) => (b.marginNettePct != null ? `${b.marginNettePct}%` : "—"), (b: ResourcePnlGroup) => b.marginNettePct ?? 0),
+            ] : []),
           ]} rows={p.byGrade} />
         </div>
       )}
@@ -169,12 +180,32 @@ function ResourcePnlCard() {
           colText("BU", (r) => r.bu || "—"),
           colNum("J. fact.", (r) => String(r.billedDays), (r) => r.billedDays),
           colNum("CA réel", (r) => (r.missingTjm ? "—" : money(r.caReal)), (r) => r.caReal),
-          colNum("Marge", (r) => (r.margin != null ? money(r.margin) : "—"), (r) => r.margin ?? 0),
-          colNum("Taux", (r) => (r.marginPct != null ? `${r.marginPct}%` : "—"), (r) => r.marginPct ?? 0),
+          colNum(netOn ? "Marge brute" : "Marge", (r) => (r.margin != null ? money(r.margin) : "—"), (r) => r.margin ?? 0),
+          colNum(netOn ? "Taux brut" : "Taux", (r) => (r.marginPct != null ? `${r.marginPct}%` : "—"), (r) => r.marginPct ?? 0),
+          ...(netOn ? [
+            colNum("Marge nette", (r: ResourcePnlRow) => (r.marginNette != null ? money(r.marginNette) : "—"), (r: ResourcePnlRow) => r.marginNette ?? 0),
+            colNum("Taux net", (r: ResourcePnlRow) => (r.marginNettePct != null ? `${r.marginNettePct}%` : "—"), (r: ResourcePnlRow) => r.marginNettePct ?? 0),
+          ] : []),
         ]} rows={p.rows} />
       </div>
-      <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM — <b>taux contractualisé</b> de l'affectation couvrant chaque mois en priorité (identique à la <b>Pré-facturation</b>), à défaut le TJM cible. Coût = jours ouvrés × CJM (coût de banc inclus). « <span className="text-gold">TJM/CJM à définir</span> » = donnée manquante à compléter dans l'<b>annuaire</b>. Donnée <b>confidentielle</b> — droit « rentabilité ».</Tip>
+      <Tip>CA réel = jours <b>facturés</b> (CRA) × TJM — <b>taux contractualisé</b> de l'affectation couvrant chaque mois en priorité (identique à la <b>Pré-facturation</b>), à défaut le TJM cible. Coût M-O = jours ouvrés × CJM (coût de banc inclus). {netOn ? <>Marge <b>nette</b> = marge brute − <b>frais de structure</b> ({Math.round((p.structureRate || 0) * 100)}% du CA, SG&A).</> : <>Renseignez un <b>taux de frais de structure</b> pour obtenir la marge <b>nette</b>.</>} « <span className="text-gold">TJM/CJM à définir</span> » = donnée manquante à compléter dans l'<b>annuaire</b>. Donnée <b>confidentielle</b> — droit « rentabilité ».</Tip>
     </Card>
+  );
+}
+
+// Éditeur du taux de frais de structure (ADR-P22) — direction/rentabilité en écriture. Saisi en % (0..100),
+// converti en fraction [0..1] pour le callable. Recharge la carte (bump) pour re-dériver la marge nette.
+function StructureRateEditor({ rate, onDone }: { rate: number; onDone: () => void }) {
+  const [pct, setPct] = useState(String(Math.round((rate || 0) * 100)));
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12px]">
+      <span className="text-muted">Frais de structure</span>
+      <input type="number" min={0} max={100} step={1} value={pct} onChange={(e) => setPct(e.target.value)}
+        className="w-14 px-1.5 py-0.5 rounded border border-hair bg-transparent text-right" aria-label="Taux de frais de structure (%)" />
+      <span className="text-muted">%</span>
+      <Busy variant="ghost" label="Appliquer" okMsg="Taux enregistré" errMsg="Enregistrement refusé"
+        fn={async () => { const v = Math.min(100, Math.max(0, Number(pct) || 0)); await setCostModel(v / 100); onDone(); }} />
+    </span>
   );
 }
 

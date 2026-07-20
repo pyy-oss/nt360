@@ -205,16 +205,23 @@ export async function listCandidates() {
 }
 
 // RENTABILITÉ PAR RESSOURCE (Lot 17) — P&L par consultant (confidentiel, droit « rentabilité »).
-export type ResourcePnlRow = { id: string; name: string | null; bu: string | null; grade: string | null; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null; missingTjm: boolean; missingCjm: boolean };
-export type ResourcePnlGroup = { key: string; headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+// Marge NETTE (ADR-P22) : structureCost/marginNette/marginNettePct présents dès que la marge brute l'est ;
+// à taux 0 (défaut), marginNette === margin (aucun impact tant que la direction n'a pas saisi un taux).
+export type ResourcePnlRow = { id: string; name: string | null; bu: string | null; grade: string | null; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null; structureCost: number | null; marginNette: number | null; marginNettePct: number | null; missingTjm: boolean; missingCjm: boolean };
+export type ResourcePnlGroup = { key: string; headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null; structureCost: number | null; marginNette: number | null; marginNettePct: number | null };
 export type ResourcePnl = {
-  ok: boolean; months: string[];
-  global: { headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null };
+  ok: boolean; months: string[]; structureRate: number;
+  global: { headcount: number; billedDays: number; caReal: number; cost: number | null; margin: number | null; marginPct: number | null; structureCost: number | null; marginNette: number | null; marginNettePct: number | null };
   byBu: ResourcePnlGroup[]; byGrade: ResourcePnlGroup[]; rows: ResourcePnlRow[];
 };
 export async function resourcePnl(fromMonth?: string, months?: number) {
   const res = await httpsCallable(functions, "resourcePnl")({ fromMonth, months });
   return res.data as ResourcePnl;
+}
+// Modèle de coût « marge nette » (ADR-P22) : frais de structure (SG&A) en % du CA, borné [0..1]. Direction seule.
+export async function setCostModel(structureRate: number) {
+  const res = await httpsCallable(functions, "setCostModel")({ structureRate });
+  return res.data as { ok: boolean; structureRate: number };
 }
 
 // PRÉ-FACTURATION DEPUIS LE CRA (Lot 21) — proposition de facturation = jours facturés × TJM. Lecture seule.

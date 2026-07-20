@@ -4467,6 +4467,18 @@ exports.deleteSupplierInvoice = onCallG("deleteSupplierInvoice", { memoryMiB: 25
   return { ok: true };
 });
 
+// === MARGE NETTE (ADR-P22) — modèle de coût config/costModel { structureRate }. `structureRate` = frais de
+// STRUCTURE (SG&A) en % du CA, borné [0..1] : transforme la marge BRUTE de Rentabilité par ressource en marge
+// NETTE. Additif + gated : taux 0 (défaut, doc absent) → marge nette = marge brute (aucun impact). Direction seule.
+exports.setCostModel = onCallG("setCostModel", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  const r = Number(req.data?.structureRate);
+  if (!Number.isFinite(r) || r < 0 || r > 1) throw new HttpsError("invalid-argument", "structureRate ∈ [0..1] requis");
+  await db.doc("config/costModel").set({ structureRate: r, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_cost_model", module: "rentabilite", entity: "config", entityId: "costModel", detail: { structureRate: r }, ts: FieldValue.serverTimestamp() });
+  return { ok: true, structureRate: r };
+});
+
 // --- Analyse d'un BC fournisseur PDF (mode « Unitaire ») : extrait le texte (pdfjs) puis
 // mappe les champs (best-effort) pour PRÉ-REMPLIR le formulaire. L'utilisateur confirme
 // avant enregistrement via addBcLine. Ne persiste rien. ---
