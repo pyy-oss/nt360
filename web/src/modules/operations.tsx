@@ -8,14 +8,13 @@ import { useRecordScope } from "../lib/scope";
 import { fpKey, cleanName } from "../lib/ids";
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
-import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, useConfirm, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
-import { setBcStatus, patchBcLine, upsertCreditLine, migrateCreditLineKeys, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
+import { setBcStatus, patchBcLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
-import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, useSupplierOptions, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
@@ -175,7 +174,6 @@ export const Fournisseurs: FC<Props> = () => {
     colNum("Disponible", (s: SupplierRow) => (s.authorized ? <span className={cx((s.disponible ?? 0) < 0 && "text-clay font-medium")}>{money(s.disponible)}</span> : "—"), (s: SupplierRow) => s.disponible ?? 0),
     det(colNum("Util. %", (s: SupplierRow) => (s.authorized ? pct(s.util) : "—"), (s: SupplierRow) => s.util || 0)),
     colNum("État", (s: SupplierRow) => <Badge tone={(badge[s.state || ""] || "neutral") as any}>{SUP_LABEL[s.state || ""] || s.state}</Badge>, (s: SupplierRow) => s.state || ""),
-    ...(canWrite ? [colNum("Crédit (autorisé · ouverture)", (s: SupplierRow) => <CreditEditor name={s.name} authorized={s.authorized || 0} opening={s.opening || 0} openingDate={s.openingDate || ""} />)] : []),
   ];
   return (
     <div className="flex flex-col gap-4">
@@ -186,9 +184,9 @@ export const Fournisseurs: FC<Props> = () => {
         <Kpi label="Achat comm. ouvertes" value={fmt(data.openTotal)} tone="steel" />
       </div>
       <Card title="Top exposition"><HBars rows={(data.bySupplier || []).slice(0, 8).map((s) => ({ name: s.name, v: s.expo || 0 }))} colorFn={() => T.steel} /></Card>
-      <Card title="Par fournisseur" actions={canWrite ? <MigrateCreditKeysBtn /> : undefined}>
+      <Card title="Par fournisseur">
         <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
-        <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
+        <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement. La saisie des <b>plafonds</b> et <b>soldes d'ouverture</b> se fait désormais dans <b>Référentiels › Fournisseurs</b> (ADR-044).</Tip>
       </Card>
       <SupplierInvoiceCard canWrite={canWrite} />
     </div>
@@ -239,50 +237,6 @@ function SupplierInvoiceCard({ canWrite }: { canWrite: boolean }) {
     </Card>
   );
 }
-function CreditEditor({ name, authorized, opening, openingDate }: { name: string; authorized: number; opening: number; openingDate: string }) {
-  const [a, setA] = useState(String(authorized || ""));
-  const [o, setO] = useState(String(opening || ""));
-  const [d, setD] = useState(openingDate || "");
-  return (
-    <span className="inline-flex gap-1.5 items-center flex-wrap justify-end">
-      <input className="field w-24 !py-1" aria-label={`Crédit autorisé ${name}`} value={a} onChange={(e) => setA(e.target.value)} placeholder="autorisé" />
-      <input className="field w-24 !py-1" aria-label={`Solde d'ouverture ${name}`} value={o} onChange={(e) => setO(e.target.value)} placeholder="ouverture" />
-      <DateField className="w-36 !py-1" ariaLabel={`Date d'ouverture ${name}`} value={d} onChange={setD} placeholder="date SOA" />
-      <Busy label="OK" fn={() => upsertCreditLine(name, { authorized: Number(a) || 0, openingBalance: Number(o) || 0, openingDate: d || null })} />
-    </span>
-  );
-}
-
-// MES ADR-P20 — action ponctuelle de réconciliation : ré-appareille les lignes de crédit sur la clé
-// fournisseur CANONIQUE (cleanName). À lancer une fois après le déploiement de l'unification, pour que
-// les plafonds saisis « à un espace/casse près » (selon la source du BC) retrouvent leur fournisseur du
-// SOA. Idempotent (relançable sans effet). Même patron qu'un backfill admin (confirmation + compteurs).
-function MigrateCreditKeysBtn() {
-  const [ask, confirmNode] = useConfirm();
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  const run = async () => {
-    if (!(await ask(
-      <>Ré-appareiller les lignes de crédit fournisseur sur leur clé canonique (espaces internes et casse normalisés) ?
-        <p className="mt-2 text-faint">Réconcilie les plafonds saisis « à un espace/casse près » selon la source. <b>Additif et sans perte</b> : le plafond est conservé sur la clé canonique, puis le SOA est recalculé. Opération unique, relançable sans effet.</p></>,
-      { title: "Migrer les clés fournisseur (ADR-P20)", confirmLabel: "Migrer", tone: "steel" }))) return;
-    setBusy(true);
-    try {
-      const r = await trackWrite(migrateCreditLineKeys(), "Migration des clés fournisseur");
-      toast(`${r.moved} clé(s) migrée(s)${r.merged ? `, ${r.merged} fusionnée(s)` : ""}${r.skipped ? `, ${r.skipped} déjà canonique(s)` : ""}`, "ok");
-    } catch (e: any) {
-      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
-      toast(detail ? `Migration refusée — ${detail}` : "Migration refusée", "err");
-    } finally { setBusy(false); }
-  };
-  return (
-    <>
-      <button className="btn-ghost hover:opacity-80 text-steel" disabled={busy} onClick={run}>{busy ? "…" : "Migrer les clés fournisseur"}</button>
-      {confirmNode}
-    </>
-  );
-}
-
 // Import BC fournisseurs — 2 modes : Batch (Excel « Logistics / PO List ») ou Unitaire (PDF).
 const EMPTY_BC = { bcNumber: "", supplier: "", fp: "", expenseType: "Hardware", currency: "XOF", amount: "", amountXof: "", status: "a_emettre", description: "", dateIn: "" };
 function BcImport() {

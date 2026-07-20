@@ -3,6 +3,39 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-044 — La saisie des lignes de crédit fournisseur vit dans RÉFÉRENTIELS (écran dédié), pas dans « Crédit Fournisseurs »
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (demande explicite : « consolider ici la création / normalisation des fournisseurs et clients »)
+
+### Contexte
+Le paramétrage fournisseur (plafond de crédit autorisé, solde d'ouverture SOA daté, migration des clés
+canoniques) était **saisi** depuis l'écran de **suivi** « Crédit Fournisseurs » (Rentabilité › Fournisseurs).
+Or les référentiels analogues (clients, normalisation clients, domaines) sont regroupés sous **Référentiels**.
+Un référentiel qui s'édite dans un écran de pilotage crée deux endroits où « gérer un fournisseur » — friction
+et incohérence de rangement signalées par l'utilisateur.
+
+### Décision
+- **Relocalisation présentationnelle** (patron ADR-037, Astreintes) : l'édition (`CreditEditor`) et la migration
+  des clés (`MigrateCreditKeysBtn`) déménagent de `web/src/modules/operations.tsx` (`Fournisseurs`) vers un
+  **nouvel écran** `web/src/modules/fournisseursref.tsx` (`FournisseursRef`), rangé dans le groupe **Référentiels**.
+- **Callables inchangés** (`upsertCreditLine`, `migrateCreditLineKeys`) et **même droit d'écriture** `fournisseurs` :
+  aucun élargissement de qui peut éditer. L'écran « Crédit Fournisseurs » **reste** (suivi SOA : solde, engagement,
+  disponible, factures fournisseur) mais en **lecture seule** côté édition des lignes de crédit — il renvoie vers
+  Référentiels › Fournisseurs via un `Tip`.
+- **Cap `bySupplier` relevé à 500** (`functions/domain/fournisseurs.js`) : un référentiel doit lister TOUS les
+  fournisseurs (pas seulement le top exposition), pour pouvoir éditer chaque ligne. Additif — n'affecte aucun
+  agrégat (les totaux et listes critiques restent calculés sur l'ensemble). Reste très en deçà de la limite
+  Firestore d'1 Mo.
+
+### Conséquences
+- **Strictement additif** : aucun callable, droit, schéma ou calcul modifié. Seul l'emplacement de l'UI d'édition
+  change + le nombre de lignes remontées dans `summaries/suppliers`.
+- La saisie fournisseur rejoint la saisie client sous une frontière visible (« Référentiels »).
+- Étape 1/3 de la consolidation des référentiels (fournisseurs ; puis référentiels Admin ; puis normalisation
+  fournisseurs minimale).
+
 ## ADR-041 — Fenêtre d'échéance proche unifiée à 90 jours (contrats de maintenance)
 
 - **Date :** 2026-07-20
