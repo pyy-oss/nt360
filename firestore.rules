@@ -222,6 +222,8 @@ service cloud.firestore {
     // Écriture INTERDITE au client : toute mutation passe par le callable upsertCreditLine (valide +
     // journalise auditLog). Une écriture SDK directe contournerait la traçabilité opposable. Cf. audit.
     match /creditLines/{id}   { allow read: if canRead('fournisseurs'); allow write: if false; }
+    // Factures fournisseur RÉELLES (ADR-P21) — source du solde SOA sous drapeau. Écriture via callable (upsert/deleteSupplierInvoice).
+    match /supplierInvoices/{id} { allow read: if canRead('fournisseurs'); allow write: if false; }
     // Jalons de facturation (échéancier prévisionnel par projet) : lisibles par qui voit le backlog ;
     // écrits uniquement par la Cloud Function setBillingMilestones (direction/PMO).
     match /billingMilestones/{id} { allow read: if canRead('backlog');  allow write: if false; }
@@ -305,6 +307,8 @@ service cloud.firestore {
     // Drapeau du module Contrats de maintenance : booléen NON sensible, lu par tout utilisateur
     // provisionné (App décide la visibilité de l'onglet). Écrit via callable (jamais en direct).
     match /config/mntFeature     { allow read: if isNt360(); allow write: if false; }
+    // Drapeau « Vérité du coût » (ADR-P21) : SOA depuis factures fournisseur réelles. Même patron que mntFeature.
+    match /config/soaFeature     { allow read: if isNt360(); allow write: if false; }
     // Drapeau du module Partenariats & Certifications (ADR-P01) : même patron que config/mntFeature.
     match /config/parFeature     { allow read: if isNt360(); allow write: if false; }
     // Overlay de rapprochement fournisseur → constructeur (ADR-P02) : lu par le module (édition/affichage

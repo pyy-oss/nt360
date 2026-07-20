@@ -20,6 +20,22 @@ describe("suppliers — clé fournisseur canonique (ADR-P20)", () => {
   });
 });
 
+// ADR-P21 — « Vérité du coût » : sous drapeau, le SOLDE du compte fournisseur dérive des FACTURES FOURNISSEUR
+// RÉELLES (pièce comptable), et le statut « facturé » d'un BC posé à la main ne meut plus le solde.
+describe("suppliers — vérité du coût (facture fournisseur, ADR-P21)", () => {
+  it("drapeau OFF (défaut) : le solde vient du statut BC « facture » (comportement historique inchangé)", () => {
+    const r = suppliers([], [{ bcNumber: "BC1", supplier: "DELL", amountXof: 50_000, status: "facture" }], [{ id: "DELL", authorized: 100_000, openingBalance: 0 }]);
+    expect(sup(r, "DELL").facture).toBe(50_000); // statut BC → solde (inchangé)
+  });
+  it("drapeau ON : le solde = Σ FACTURES fournisseur ; le statut BC « facture » ne compte plus (fin du pilotage manuel)", () => {
+    const bc = [{ bcNumber: "BC1", supplier: "DELL", amountXof: 999_000, status: "facture" }]; // ne DOIT pas gonfler le solde
+    const inv = [{ supplier: "DELL", amountXof: 30_000 }, { supplier: "dell  ", amountXof: 20_000 }]; // casse/espaces → même clé canonique
+    const r = suppliers([], bc, [{ id: "DELL", authorized: 100_000, openingBalance: 0 }], inv, { soaFromInvoices: true });
+    expect(sup(r, "DELL").facture).toBe(50_000);   // 30k + 20k (factures réelles) ; le BC « facture » 999k est SUPERSEDÉ
+    expect(sup(r, "DELL").solde).toBe(50_000);     // ouverture 0 + factures 50k
+  });
+});
+
 describe("suppliers — BC en devise non convertie (SOA indéterminé)", () => {
   it("BC réel (N° BC) à montant XOF nul → fournisseur `unvalued` + état « indetermine » (pas « ok » à tort)", () => {
     const orders = [];

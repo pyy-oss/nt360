@@ -20,8 +20,16 @@ const COMMITTED = new Set(["a_emettre", "emis", "livre"]);
  * @param {object[]} orders commandes (avec suppliers[])
  * @param {object[]} bcLines lignes BC (status, amountXof, fp, supplier)
  * @param {object[]} creditLines lignes de crédit saisies {id/_id, authorized, openingBalance, openingDate}
+ * @param {object[]} [supplierInvoices] factures fournisseur RÉELLES {supplier, amountXof, ...} — Lot 8 (ADR-P21)
+ * @param {object} [opts] { soaFromInvoices } : drapeau (défaut FALSE = comportement historique inchangé)
  */
-function suppliers(orders, bcLines, creditLines) {
+function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
+  supplierInvoices = Array.isArray(supplierInvoices) ? supplierInvoices : [];
+  // VÉRITÉ DU COÛT (audit Exécution P0-1, ADR-P21) : quand le drapeau est actif, le SOLDE du compte fournisseur
+  // (a.facture) dérive des FACTURES FOURNISSEUR RÉELLES (pièce comptable), et NON plus du statut « facturé » d'un
+  // BC posé à la main. Le statut BC « facture » n'impacte alors plus le solde (il est SUPERSEDÉ par la facture) ;
+  // les BC engagés (a_emettre/emis/livre) restent l'engagement. Drapeau OFF (défaut) → comportement historique.
+  const soaFromInvoices = !!(opts && opts.soaFromInvoices);
   const acc = {}; // name → agrégat par fournisseur
   const get = (name) => (acc[name] = acc[name] || {
     name, expo: 0, open: 0, engagementBc: 0, facture: 0,
@@ -41,7 +49,9 @@ function suppliers(orders, bcLines, creditLines) {
     const sup = cleanName(b.supplier);
     const a = get(sup);
     const amt = b.amountXof || 0;
-    if (b.status === INVOICED) a.facture += amt;       // facturé non payé → SOLDE
+    // Drapeau ACTIF : le solde vient des factures fournisseur réelles (plus bas) → un BC « facture »/« solde »
+    // ne meut plus le solde (superséedé par la pièce). Drapeau OFF : comportement historique (statut BC → solde).
+    if (!soaFromInvoices && b.status === INVOICED) a.facture += amt; // facturé non payé → SOLDE
     else if (COMMITTED.has(b.status)) a.engagementBc += amt; // commandé non facturé → ENGAGEMENT
     // BC RÉEL (N° BC émis) non payé mais à montant XOF nul = devise étrangère non convertie : il compte
     // pour 0 → le solde/l'engagement du fournisseur est SOUS-estimé, le disponible SURévalué. On le
@@ -50,6 +60,16 @@ function suppliers(orders, bcLines, creditLines) {
     const fpk = fpKey(b.fp) || "";
     bcByKey[fpk + "|" + sup] = (bcByKey[fpk + "|" + sup] || 0) + amt;
     if (!fpk) bcNoFpBySup[sup] = (bcNoFpBySup[sup] || 0) + amt; // BC sans FP → pool fournisseur
+  }
+
+  // SOLDE = Σ FACTURES FOURNISSEUR RÉELLES (drapeau actif, ADR-P21) : pièce comptable, autorité du solde.
+  // Un fournisseur n'ayant qu'une facture (sans BC ni commande) apparaît quand même dans le SOA.
+  if (soaFromInvoices) {
+    for (const inv of supplierInvoices) {
+      const sup = cleanName(inv && inv.supplier);
+      if (!sup) continue;
+      get(sup).facture += Number(inv.amountXof) || 0;
+    }
   }
 
   for (const o of orders) {
