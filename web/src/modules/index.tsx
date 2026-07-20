@@ -54,6 +54,7 @@ const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
 const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
 const FournisseursRef = from(() => import("./fournisseursref"), "FournisseursRef");
+const ReferentielsAdmin = from(() => import("./referentielsadmin"), "ReferentielsAdmin");
 // Module Contrats de maintenance (mnt_) — chargé en lazy comme les autres ; masqué tant que le
 // drapeau config/mntFeature est éteint (voir champ `flag` ci-dessous et App.tsx).
 const Maintenance = from(() => import("./maintenance"), "Maintenance");
@@ -98,6 +99,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "clients", key: "clients", label: "Clients", icon: Users, Component: Clients },
   { id: "clientnorm", key: "import", label: "Normalisation clients", icon: Users, Component: ClientNorm },
   { id: "fournisseursref", key: "fournisseurs", label: "Fournisseurs", icon: Truck, Component: FournisseursRef },
+  { id: "referentielsadmin", key: "habilitations", label: "Devises & référentiels", icon: SlidersHorizontal, Component: ReferentielsAdmin },
   { id: "domaines", key: "domaines", label: "Domaines", icon: Boxes, Component: Domaines },
   { id: "fp360", key: "overview", label: "FP 360°", icon: Search, Component: Fp360 },
   // Astreintes : transverse affaires + contrats (imputées en charge par N° FP), rangées en Exécution.
@@ -124,7 +126,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Revenu", ids: ["facturation", "invoicelist", "relances", "objectifs"] },
   { label: "Exécution", ids: ["orderlist", "fiches", "staffing", "backlog", "prevision", "simulator", "fp360", "astreintes"] },
   { label: "Rentabilité", ids: ["rentabilite", "pnlprojet", "fournisseurs", "bc"] },
-  { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "fournisseursref", "domaines"] },
+  { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "fournisseursref", "referentielsadmin", "domaines"] },
   { label: "Contrats", ids: ["maintenance"] },
   { label: "Partenariats", ids: ["partenariats"] },
   { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },

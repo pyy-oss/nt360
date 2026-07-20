@@ -1530,3 +1530,20 @@ vs `joursAvantFin` matérialisé ; MRR live vs snapshot (assiette identique hors
 
 **Vérifs.** tsc propre ; 1245 functions + 291 web au vert ; bundle 119,7 KB (≤ 120) ; no-undef (158),
 deploy-targets (187) OK. Additif uniquement, aucun callable/droit/schéma nouveau.
+
+## Réf. PR2 — Référentiels transverses dans Référentiels (ADR-045) — 2026-07-20
+
+**Fait.** Relocalisation présentationnelle des référentiels transverses (taux de change/devises, Project
+Managers, Business Units, Territoires, Équipes) depuis Habilitations vers un nouvel écran **Référentiels ›
+Devises & référentiels** (`web/src/modules/referentielsadmin.tsx`, `ReferentielsAdmin`).
+
+**Câblage.**
+- `FxRatesCard` + `RefListCard` (×4) déplacés hors d'`admin.tsx` → `referentielsadmin.tsx`. Imports morts
+  retirés d'`admin.tsx` (`setFxRates`, `setRefList`, `listClickupMembers` — vérifiés uniques aux composants
+  déplacés). Rubrique « Référentiels » d'Habilitations retirée (renvoi en commentaire).
+- Garde `useClaims().role === "direction"` conservée à l'identique (état « Réservé à la Direction » sinon) ;
+  clé de module `habilitations` (visibilité admin). **Aucun élargissement** de qui édite (FX surtout).
+- Nav : `MODULES` id `referentielsadmin`, ajouté au groupe **Référentiels** ; garde-fou nav respecté.
+- Callables et règles Firestore inchangés (config/* déjà lisibles, écriture réservée aux Functions).
+
+**Gouvernance.** Strictement additif. ADR-045. Étape 2/3 de la consolidation des référentiels.

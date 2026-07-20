@@ -3,6 +3,36 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-045 — Les référentiels transverses (devises/FX, PM, BU, territoires, équipes) vivent dans RÉFÉRENTIELS, pas dans Habilitations
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« à transférer dans Référentiels aussi »)
+
+### Contexte
+Les référentiels transverses — **taux de change** (config/fxRates), **Project Managers**, **Business Units**,
+**Territoires**, **Équipes** (config/*) — s'éditaient depuis la page **Habilitations** (rubrique « Référentiels »,
+gâtée `isDirection`). Or les autres référentiels (clients, normalisation clients, fournisseurs — ADR-044) sont
+regroupés sous **Référentiels**. Deux endroits pour « paramétrer un référentiel » : friction et rangement
+incohérent, signalés par l'utilisateur.
+
+### Décision
+- **Relocalisation présentationnelle** (patron ADR-037/ADR-044) : `FxRatesCard` + `RefListCard` (×4) déménagent
+  de `web/src/modules/admin.tsx` vers un **nouvel écran** `web/src/modules/referentielsadmin.tsx`
+  (`ReferentielsAdmin`), rangé dans le groupe **Référentiels**.
+- **Garde direction-only STRICTEMENT conservée** : l'écran est gâté `useClaims().role === "direction"`
+  (identique à l'ancien `isDirection`) et sa clé de module est `habilitations` (visibilité admin) → **aucun
+  élargissement** de qui peut voir ou éditer ces référentiels, **le taux de change en particulier** (contrainte
+  de gouvernance explicite). Un non-direction voit un état « Réservé à la Direction ».
+- **Callables inchangés** (`setFxRates`, `setRefList`, `listClickupMembers`) ; **règles Firestore inchangées**
+  (les docs config/* étaient déjà lisibles, l'écriture reste réservée aux Functions).
+
+### Conséquences
+- **Strictement additif** : aucun callable, droit, schéma ou règle modifié ; seul l'emplacement de l'UI change.
+  Habilitations perd sa rubrique « Référentiels » (renvoi en commentaire).
+- Étape 2/3 de la consolidation des référentiels (fournisseurs ADR-044 ; **référentiels Admin** ; puis
+  normalisation fournisseurs minimale).
+
 ## ADR-044 — La saisie des lignes de crédit fournisseur vit dans RÉFÉRENTIELS (écran dédié), pas dans « Crédit Fournisseurs »
 
 - **Date :** 2026-07-20
