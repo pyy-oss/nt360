@@ -4,7 +4,7 @@
 export const STATUTS = ["brouillon", "actif", "suspendu", "echu", "resilie"] as const;
 export const ECHEANCES = ["mensuel", "trimestriel", "annuel"] as const;
 export const SLA_TYPES = ["prise_en_compte", "resolution"] as const;
-export const COUVERTURES = ["ouvre_lun_ven", "h24"] as const;
+export const COUVERTURES = ["ouvre_lun_ven", "ouvre_b2b", "h24"] as const;
 // Types de maintenance (ADR-025) — miroir de functions/domain/mntContrat.js. Classent tickets ET
 // interventions ; objectifs (max) posés PAR CONTRAT. Libellés FR à l'affichage.
 export const TYPES_MAINTENANCE = ["predictive", "corrective", "evolutive", "veille"] as const;
@@ -22,7 +22,7 @@ export const SLA_TYPE_LABEL: Record<string, string> = {
   prise_en_compte: "Prise en compte", resolution: "Résolution",
 };
 export const COUVERTURE_LABEL: Record<string, string> = {
-  ouvre_lun_ven: "Jours ouvrés (Lun–Ven)", h24: "24/7",
+  ouvre_lun_ven: "Jours ouvrés (Lun–Ven)", ouvre_b2b: "Heures ouvrées (B2B)", h24: "24/7",
 };
 
 // Ton de badge du statut (palette existante : emerald=actif, steel=brouillon, gold=attention, clay=fin).

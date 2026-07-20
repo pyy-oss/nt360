@@ -307,6 +307,9 @@ service cloud.firestore {
     // Drapeau du module Contrats de maintenance : booléen NON sensible, lu par tout utilisateur
     // provisionné (App décide la visibilité de l'onglet). Écrit via callable (jamais en direct).
     match /config/mntFeature     { allow read: if isNt360(); allow write: if false; }
+    // Calendrier SLA (ADR-P23) : fuseau/fériés/fenêtre B2B. Lu par le module maintenance (horloge SLA),
+    // écrit via callable setMntCalendar (droit maintenance en écriture) → write:false ici.
+    match /config/mntCalendar    { allow read: if canRead('maintenance'); allow write: if false; }
     // Drapeau « Vérité du coût » (ADR-P21) : SOA depuis factures fournisseur réelles. Même patron que mntFeature.
     match /config/soaFeature     { allow read: if isNt360(); allow write: if false; }
     // Modèle de coût « marge nette » (ADR-P22) : frais de structure (SG&A) en % du CA. Lecture gouvernée

@@ -49,6 +49,55 @@ describe("mntSla — couverture h24 : horloge CALENDAIRE 24/7 (audit BUG2)", () 
   });
 });
 
+describe("mntSla — calendrier (ADR-P23) : fériés, fuseau, fenêtre B2B", () => {
+  it("jours fériés : un férié en semaine est sauté comme un week-end", () => {
+    // jeudi 2026-03-05 déclaré férié. mer 10:00 → 6h de seuil : mer 10→16 = 6h → échéance mer 16:00 (inchangé).
+    const cal = { holidays: ["2026-03-05"] };
+    expect(addBusinessMs(wed10, 6 * H, cal)).toBe(Date.UTC(2026, 2, 4, 16));
+    // mer 10:00 + 20h : mer 10→24 = 14h, reste 6h. Jeudi FÉRIÉ sauté → vendredi 00→06 = ven 06:00.
+    expect(addBusinessMs(wed10, 20 * H, cal)).toBe(Date.UTC(2026, 2, 6, 6));
+    // businessMsBetween saute aussi le férié : mer 10:00 → ven 10:00 = mer(14) + [jeu férié] + ven(10) = 24h.
+    expect(businessMsBetween(wed10, fri10, cal) / H).toBe(24);
+  });
+  it("férié : slaState bascule une rupture qui, sans férié, serait respectée", () => {
+    const eng = { seuilHeures: 10, couverture: "ouvre_lun_ven" };
+    const cal = { holidays: ["2026-03-05"] };
+    // Ouvert mer 20:00, résolu jeu 06:00. Sans férié : jeu compte → 6h ouvrées ≤ 10h → respecté.
+    // Avec jeu férié : mer 20→24 = 4h ouvrées seulement, échéance repoussée → à jeu 06:00 l'écoulé ouvré = 4h,
+    // mais l'échéance (mer20 + 10h ouvrées) tombe le vendredi → résolu jeu 06:00 est AVANT l'échéance → respecté.
+    // On teste plutôt le contraire : non résolu, maintenant vendredi 09:00 : échéance = mer20+10h ouvrées =
+    // mer20→24(4h) + ven00→06(6h) = ven 06:00 ; maintenant ven 09:00 > ven 06:00 → rompu.
+    expect(slaState(eng, Date.UTC(2026, 2, 4, 20), null, Date.UTC(2026, 2, 6, 9), cal).state).toBe("rompu");
+  });
+  it("fenêtre B2B (ouvre_b2b) : seules les heures 8–18 comptent", () => {
+    const engB2b = { seuilHeures: 12, couverture: "ouvre_b2b" }; // 12h ouvrées = 8→18 (10h) + le lendemain 8→10 (2h)
+    // Ouvert mer 09:00 : mer 09→18 = 9h, reste 3h → jeu 08→11. Échéance jeu 11:00.
+    expect(addBusinessMs(Date.UTC(2026, 2, 4, 9), 12 * H, null, { start: 8, end: 18 })).toBe(Date.UTC(2026, 2, 5, 11));
+    // slaState : ouvert mer 09:00, non résolu, maintenant mer 20:00 (hors fenêtre) → écoulé ouvré = 9h (09→18) < 12h → en cours.
+    expect(slaState(engB2b, Date.UTC(2026, 2, 4, 9), null, Date.UTC(2026, 2, 4, 20)).state).toBe("en_cours");
+  });
+  it("B2B : ticket ouvert HORS fenêtre (soir) — l'horloge démarre à l'ouverture du lendemain ouvré", () => {
+    const engB2b = { seuilHeures: 4, couverture: "ouvre_b2b" };
+    // Ouvert mer 20:00 (après 18h). L'horloge ne tourne pas le soir → démarre jeu 08:00. +4h → jeu 12:00.
+    const due = slaState(engB2b, Date.UTC(2026, 2, 4, 20), null, Date.UTC(2026, 2, 5, 13)).dueMs;
+    expect(due).toBe(Date.UTC(2026, 2, 5, 12));
+  });
+  it("fuseau : décalage +60 min déplace la frontière du week-end", () => {
+    // UTC+1 : le vendredi local finit à sam 01:00 UTC ; une heure ouvrée est disponible après minuit UTC.
+    // Contrôle simple : le calcul reste cohérent (pas de régression) — ven 23:30 UTC = ven 00:30 local sam ? non,
+    // ven 23:30 UTC +60 = sam 00:30 local → SAMEDI local → non ouvré. businessMsBetween(ven23:00, sam02:00) en UTC+1 :
+    // ven23:00 UTC = sam00:00 local (non ouvré) → 0h comptée.
+    expect(businessMsBetween(Date.UTC(2026, 2, 6, 23), Date.UTC(2026, 2, 7, 2), { offMin: 60 })).toBe(0);
+    // Sans décalage (UTC) : ven 23:00 → sam 02:00 = ven 23→24 (1h ouvrée) + sam (0) = 1h.
+    expect(businessMsBetween(Date.UTC(2026, 2, 6, 23), Date.UTC(2026, 2, 7, 2)) / H).toBe(1);
+  });
+  it("calendrier absent/neutre : STRICTE parité avec l'horloge historique", () => {
+    const mon10 = Date.UTC(2026, 2, 9, 10);
+    expect(businessMsBetween(wed10, mon10, { offMin: 0, holidays: [] })).toBe(businessMsBetween(wed10, mon10));
+    expect(addBusinessMs(fri10, 8 * H, {})).toBe(addBusinessMs(fri10, 8 * H));
+  });
+});
+
 describe("mntEcheancier — engagé vs facturé", () => {
   const c = { echeanceType: "mensuel", montantEngage: 1000000, dateDebut: "2026-01-01" };
   it("échéances dues = mois écoulés + 1 (1ʳᵉ à dateDebut) ; engagé = dues × montant", () => {

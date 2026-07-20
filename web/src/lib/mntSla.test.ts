@@ -21,6 +21,15 @@ describe("mntSla (front, miroir) — horloge jours ouvrés + état SLA", () => {
     expect(slaState({ seuilHeures: 8, couverture: "h24" }, sat00, null, sat00 + 12 * H).state).toBe("rompu");
     expect(slaState({ seuilHeures: 8, couverture: "ouvre_lun_ven" }, sat00, null, sat00 + 12 * H).state).toBe("en_cours");
   });
+  it("calendrier (ADR-P23) : férié sauté, fenêtre B2B, parité neutre — miroir back", () => {
+    const cal = { holidays: ["2026-03-05"] }; // jeudi férié
+    expect(addBusinessMs(wed10, 20 * H, cal)).toBe(Date.UTC(2026, 2, 6, 6)); // jeu sauté → ven 06:00
+    expect(businessMsBetween(wed10, Date.UTC(2026, 2, 6, 10), cal) / H).toBe(24); // mer(14)+ven(10)
+    // Fenêtre B2B 8–18 : ouvre_b2b, ouvert mer 09:00, +12h → jeu 11:00 (échéance).
+    expect(slaState({ seuilHeures: 12, couverture: "ouvre_b2b" }, Date.UTC(2026, 2, 4, 9), null, Date.UTC(2026, 2, 5, 13)).dueMs).toBe(Date.UTC(2026, 2, 5, 11));
+    // Calendrier neutre : stricte parité avec l'horloge historique.
+    expect(businessMsBetween(wed10, Date.UTC(2026, 2, 9, 10), {})).toBe(businessMsBetween(wed10, Date.UTC(2026, 2, 9, 10)));
+  });
 });
 
 describe("mntSla (front, miroir) — échéancier", () => {

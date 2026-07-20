@@ -653,6 +653,11 @@ export async function setMntFeature(enabled: boolean) {
   const res = await httpsCallable(functions, "setMntFeature")({ enabled });
   return res.data as { ok: boolean; enabled: boolean };
 }
+/** Calendrier SLA (ADR-P23) : fuseau/pays, jours fériés éditables, fenêtre d'heures ouvrées B2B. Droit maintenance en écriture. */
+export async function setMntCalendar(input: { tzOffsetMinutes?: number; pays?: string | null; holidays?: string[]; b2b?: { start: number; end: number } }) {
+  const res = await httpsCallable(functions, "setMntCalendar")(input);
+  return res.data as { ok: boolean; calendar: { offMin: number; pays: string | null; holidays: string[]; b2b: { start: number; end: number } } };
+}
 /** Diagnostic qualité de l'intégration ClickUp (couverture, orphelines, écarts CAF…). Admin. */
 export async function clickupHealth(opts?: { listId?: string }) {
   const res = await httpsCallable(functions, "clickupHealth", { timeout: 300_000 })({ listId: opts?.listId });
