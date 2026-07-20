@@ -35,6 +35,7 @@ aiSuggestClientMerges
 capacityPlan
 dedupe
 dedupeClickupTasks
+dedupeBcTasks
 deleteActivity
 deliveryMarginByAffaire
 generateFromInvoices

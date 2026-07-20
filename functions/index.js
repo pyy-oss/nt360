@@ -3420,6 +3420,53 @@ exports.dedupeClickupTasks = onCallG("dedupeClickupTasks", { secrets: [CLICKUP_T
   return { ok: true, dryRun: !apply, groups: plan.groups.length, duplicates: plan.duplicates, deletable: plan.deletable, deleted, failed, windowHours, samples };
 });
 
+// dedupeBcTasks (Lot 4b) : NETTOYAGE des tâches ClickUp de BC DUPLIQUÉES — même N° BC CANONIQUE (et non le
+// N° FP, où plusieurs BC distincts partagent légitimement un FP). Complète dedupeClickupTasks, qui refuse
+// justement les listes BC. Même sûreté : apply=false → aperçu (ne supprime rien) ; conserve la tâche LIÉE
+// (config/clickupBcLinks) ou la plus ancienne ; ne supprime que les doublons de la fenêtre (défaut 24 h).
+exports.dedupeBcTasks = onCallG("dedupeBcTasks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
+  await requireWrite(req, "bc"); // gouverné par le module BC (comme les push BC), pas « direction » global
+  const cfg = (await db.doc("config/clickup").get()).data() || {};
+  if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
+  const token = CLICKUP_TOKEN.value();
+  if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
+  const clickup = require("./lib/clickup");
+  const bc = require("./lib/clickupBc");
+  const { safeId } = require("./lib/sheets");
+  const { planDedupe } = require("./domain/clickupDedupe");
+  const listId = bcListIdOf(cfg, req.data?.listId);
+  const apply = req.data?.apply === true;
+  // Même politique de fenêtre que dedupeClickupTasks : défaut 24 h, 0 EXPLICITE = toutes les époques, borné 1 an.
+  let windowHours = 24;
+  const rawWH = req.data?.windowHours;
+  if (rawWH != null && rawWH !== "") { const n = Number(rawWH); if (Number.isFinite(n)) windowHours = Math.min(8760, Math.max(0, n)); }
+  const sinceMs = windowHours > 0 ? Date.now() - windowHours * 3600_000 : 0;
+  // Scan SANS swallow : un scan tronqué/illisible prendrait des doublons pour des uniques → on ANNULE.
+  let t;
+  try { t = await clickup.listTasks(token, listId, { includeClosed: true }); }
+  catch (e) { throw new HttpsError("unavailable", `ClickUp : liste BC ${listId} illisible — dédoublonnage annulé (aucune suppression). ${(e && e.message) || ""}`); }
+  if (t.truncated) throw new HttpsError("failed-precondition", `Liste BC ClickUp ${listId} tronquée (> 5000 tâches) — dédoublonnage annulé pour éviter des suppressions à tort.`);
+  // Regroupement par N° BC CANONIQUE : on place la clé BC dans le champ `fp` attendu par le planificateur
+  // générique (planDedupe groupe par `t.fp` = « clé de regroupement », peu importe sa sémantique).
+  const tasks = [];
+  for (const task of t) { const n = bc.taskBcNumber(task); const k = n ? bc.bcKey(n, safeId) : null; if (k) tasks.push({ id: task.id, fp: k, dateCreatedMs: Number(task.date_created) || 0 }); }
+  const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
+  const linkedIds = new Set(Object.values(links));
+  const plan = planDedupe(tasks, linkedIds, sinceMs);
+  const samples = plan.groups.slice(0, 50).map((g) => ({ bcKey: g.fp, keptId: g.keepId, toDelete: g.deleteIds.length }));
+  let deleted = 0, failed = 0;
+  if (apply) {
+    for (const g of plan.groups) {
+      for (const id of g.deleteIds) {
+        try { await clickup.deleteTask(token, id); deleted++; }
+        catch (e) { failed++; logger.warn("dedupe BC ClickUp: suppression échouée", { id, msg: e && e.message }); }
+      }
+    }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_dedupe", module: "bc", entity: "config", entityId: "clickupBcTasks", detail: { deleted, failed, groups: plan.groups.length, duplicates: plan.duplicates, windowHours, listId }, ts: FieldValue.serverTimestamp() });
+  }
+  return { ok: true, dryRun: !apply, groups: plan.groups.length, duplicates: plan.duplicates, deletable: plan.deletable, deleted, failed, windowHours, samples };
+});
+
 // Diagnostic ClickUp RÉUTILISABLE (callable ET planifié) : scanne la liste une fois, croise commandes +
 // overlays, RE-VÉRIFIE la santé du webhook (ClickUp le désactive après échecs répétés — jamais recontrôlé
 // jusqu'ici → dérive silencieuse), écrit summaries/clickupHealth (horodaté `at`). Throw en cas d'échec

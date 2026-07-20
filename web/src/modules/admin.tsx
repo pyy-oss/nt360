@@ -8,7 +8,7 @@ import { trackWrite } from "../lib/activity";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { Select } from "../design/inputs";
-import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
+import { updateMatrix, callSetUserRole, callSetUserTeam, callCreateUser, callAttachUser, callSetUserActive, callDedupe, callSetAlertThresholds, callSetNotificationConfig, callSetProjectionConfig, setFxRates, setRefList, setClickupConfig, listClickupMembers, syncClickupCaf, syncFromClickup, pushAllOrdersToClickup, reconcileClickupLinks, dedupeClickupTasks, dedupeBcTasks, clickupHealth, pushAllBcToClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, setupClickupWebhook, deleteClickupWebhook, enrichClickup, callSetManager, callSetRecordAccess, callSetSecurityConfig, callReindexVisibility, setAutomations, runAutomations, createApiKey, revokeApiKey, listApiKeys, setCustomFields, setOutboundWebhook, setOdooWebhook, odooWebhookStatus, setStaffingTargets, setMntFeature, type ApiKeyInfo, type CustomFieldDef, type RecordAccess, type AutomationRule, type AutomationRuleType, type DedupeResult, type AlertThresholds, type NotificationConfig, type ProjectionConfigInput, type StaffingTargets } from "../lib/writes";
 import { Props, DataImportCard, relTime } from "./_shared";
 import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../lib/emailNotifyWrites";
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClickupHealthSummary } from "../types";
@@ -824,6 +824,7 @@ function ClickupCard() {
   const [bcBulkBusy, setBcBulkBusy] = useState(false);
   const [bcPullBusy, setBcPullBusy] = useState(false);
   const [bcImportBusy, setBcImportBusy] = useState(false);
+  const [bcDedupeBusy, setBcDedupeBusy] = useState(false);
   const [whBusy, setWhBusy] = useState(false);
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const { data: health } = useDocData<ClickupHealthSummary>("summaries/clickupHealth");
@@ -957,6 +958,26 @@ function ClickupCard() {
       toast(detail ? `Synchro BC refusée — ${detail}` : "Synchro BC : échec", "err");
     } finally { setBcPullBusy(false); }
   };
+  // Dédoublonnage des tâches BC ClickUp (Lot 4b) : groupé par N° BC CANONIQUE (pas par FP — plusieurs BC
+  // partagent un FP). Aperçu (toutes époques) → confirmation → suppression. La tâche liée/la plus ancienne
+  // est conservée par N° BC. Mêmes garanties que le dédoublonnage des commandes.
+  const bcDedupe = async () => {
+    if (bcDedupeBusy) return;
+    setBcDedupeBusy(true);
+    try {
+      const preview = await dedupeBcTasks({ windowHours: 0 });
+      if (!preview.deletable) { toast(`Aucun doublon BC à nettoyer (${preview.duplicates} doublon(s) détecté(s)).`, "ok"); return; }
+      const ok = await ask(
+        <>Supprimer <b>{preview.deletable}</b> tâche(s) BC ClickUp <b>dupliquée(s)</b> (toutes époques), sur <b>{preview.groups}</b> N° BC ?<p className="mt-2 text-faint">La tâche <b>liée</b> (ou la plus ancienne) est <b>conservée</b> pour chaque N° BC. Action tracée et irréversible côté ClickUp.</p></>,
+        { title: "Nettoyer les doublons BC ClickUp", confirmLabel: `Supprimer ${preview.deletable}`, tone: "clay" });
+      if (!ok) return;
+      const r = await trackWrite(dedupeBcTasks({ apply: true, windowHours: 0 }), "Nettoyage doublons BC ClickUp");
+      toast(`Doublons BC nettoyés — ${r.deleted} supprimée(s)${r.failed ? `, ${r.failed} échec(s)` : ""} sur ${r.groups} N° BC.`, r.failed ? "err" : "ok");
+    } catch (e: any) {
+      const detail = String(e?.message || e?.code || "").replace(/^functions\//, "");
+      toast(detail.includes("deadline") || detail.includes("timeout") ? "Nettoyage BC lancé — traitement en cours côté serveur (voir ClickUp)" : (detail ? `Nettoyage BC refusé — ${detail}` : "Nettoyage BC : échec"), detail.includes("deadline") ? "ok" : "err");
+    } finally { setBcDedupeBusy(false); }
+  };
   const bcBulkPush = async (force: boolean) => {
     if (bcBulkBusy) return;
     const label = force ? "Resynchroniser TOUTES les tâches BC liées ?" : "Créer les tâches ClickUp de tous les BC non liés ? (les tâches existantes sont adoptées par N° de Commande, pas dupliquées)";
@@ -1058,6 +1079,9 @@ function ClickupCard() {
           </button>
           <button type="button" className="btn-ghost !py-1.5" disabled={bcImportBusy} onClick={bcImport} title="Créer dans l'app les BC saisis directement dans ClickUp (dédup par N° BC, statut « émis », conversion XOF). L'import Logistics/PDF reste prioritaire.">
             {bcImportBusy ? "Import…" : "Importer les BC depuis ClickUp"}
+          </button>
+          <button type="button" className="btn-ghost !py-1.5" disabled={bcDedupeBusy} onClick={bcDedupe} title="Supprimer les tâches BC ClickUp dupliquées (regroupées par N° BC canonique). Aperçu avant suppression ; la tâche liée/la plus ancienne est conservée par N° BC.">
+            {bcDedupeBusy ? "Nettoyage…" : "Dédoublonner les BC"}
           </button>
           {bcCu && <span className="text-[12px] text-muted">{bcCu.linkedCount || 0}/{bcCu.totalBc || 0} BC liés{(bcCu.overdueCount || 0) > 0 ? <> · <span className="text-clay">{bcCu.overdueCount} en retard (ETA ClickUp)</span></> : null}</span>}
         </div>
