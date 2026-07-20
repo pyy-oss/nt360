@@ -56,6 +56,10 @@ export interface PipelineSummary {
   byAmConv?: { am: string; won: number; lost: number; conv: number; activeCount: number; weighted: number }[];
   topOpps?: Opportunity[];
   closing?: ClosingAnalysis | null;
+  // Confidentialité record-level (ADR summaries record-scopés) : true quand l'OWD opportunités est « private »
+  // → le détail nominatif (topOpps/byAmConv/closing.staleTop) est VIDÉ côté serveur. Le front l'explique
+  // (« masqué en mode privé ») au lieu d'afficher « aucune donnée ». Absent/false sous OWD public (défaut).
+  scopedPrivate?: boolean;
   // ÂGE des opps actives — périmètre DATÉ (opps portant dateCreation, càd issues d'Odoo). `withDate`/`total`
   // = couverture (le front dit honnêtement « mesuré sur X opps datées »). Tranches ≤30 / 31-90 / 91-180 / >180 j.
   aging?: {

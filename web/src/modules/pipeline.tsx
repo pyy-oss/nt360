@@ -159,7 +159,7 @@ export const Pipeline: FC<Props> = ({ period }) => {
                   colNum("Pondéré", (o) => money(o.weighted), (o) => o.weighted),
                   colText("D Prev", (o) => o.closingDate || "—", (o) => o.closingDate || ""),
                 ]} rows={data.closing.staleTop || []} />
-              ) : <EmptyState label="Aucune opportunité en retard de closing." />}
+              ) : <EmptyState label={data.scopedPrivate ? "Détail nominatif masqué (mode privé)" : "Aucune opportunité en retard de closing."} />}
             </Card>
           </div>
           {(data.closing.staleCount ?? 0) > 0 && data.closing.overdueAge && (
@@ -1014,7 +1014,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
             colText("Étape", (o) => (o.stage ? `${o.stage}·${STAGE_SHORT[o.stage] || o.stage}` : "—"), (o) => o.stage || 0),
             colNum("Brut", (o) => money(o.amount || 0), (o) => o.amount || 0),
             colNum("Pondéré", (o) => money(o.weighted || 0), (o) => o.weighted || 0),
-          ]} rows={(data.topOpps || []).slice(0, 8)} /> : <EmptyState label="Aucune opportunité projetée." />}
+          ]} rows={(data.topOpps || []).slice(0, 8)} /> : <EmptyState label={data.scopedPrivate ? "Détail nominatif masqué (mode privé)" : "Aucune opportunité projetée."} />}
         </Card>
         <Card title="Conversion par commercial (période)" actions={canGo("am360") ? <button onClick={() => jump("am360")} className="text-gold text-xs underline">AM 360°</button> : undefined}>
           {(data.byAmConv || []).length ? <Table columns={[
@@ -1023,7 +1023,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
             colNum("Perdu", (r) => r.lost, (r) => r.lost),
             colNum("Transfo.", (r) => (r.won + r.lost > 0 ? pct(r.conv) : "—"), (r) => r.conv),
             colNum("Pondéré", (r) => money(r.weighted), (r) => r.weighted),
-          ]} rows={(data.byAmConv || []).slice(0, 8)} /> : <EmptyState label="Aucune conversion sur la période." />}
+          ]} rows={(data.byAmConv || []).slice(0, 8)} /> : <EmptyState label={data.scopedPrivate ? "Détail nominatif masqué (mode privé)" : "Aucune conversion sur la période."} />}
         </Card>
       </div>
       {/* Le glissement (bandeau ci-dessus) VENTILÉ par commercial — même doc summaries/oppSlippage.byAm,

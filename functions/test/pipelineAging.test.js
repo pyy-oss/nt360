@@ -67,8 +67,33 @@ describe("agingAnalysis — âge des opps actives (périmètre daté)", () => {
   });
 });
 
-const { closingAnalysis } = require("../domain/pipeline");
+const { closingAnalysis, scopePrivateSummary } = require("../domain/pipeline");
 const pwOne = (o) => o.amount || 0; // pondération neutre pour le test
+
+describe("scopePrivateSummary — confidentialité record-level (audit P1-a)", () => {
+  const base = () => ({
+    tot: { weighted: 100 }, byStage: { 3: { count: 1 } }, byAM: { X: 50 },
+    topOpps: [{ oppId: "a", client: "ACME", am: "X" }],
+    byAmConv: [{ am: "X", won: 1, lost: 0 }],
+    closing: { staleCount: 2, staleTop: [{ oppId: "b", client: "BETA", am: "Y" }] },
+  });
+  it("OWD public → summary INCHANGÉ (no-op, référence identique)", () => {
+    const s = base();
+    expect(scopePrivateSummary(s, false)).toBe(s);
+  });
+  it("OWD private → détail NOMINATIF vidé, AGRÉGATS conservés, original non muté", () => {
+    const src = base();
+    const s = scopePrivateSummary(src, true);
+    expect(s.topOpps).toEqual([]);                 // deals nommés retirés
+    expect(s.byAmConv).toEqual([]);                // conversion par commercial retirée
+    expect(s.closing.staleTop).toEqual([]);        // retards nommés retirés
+    expect(s.closing.staleCount).toBe(2);          // agrégat conservé
+    expect(s.tot.weighted).toBe(100);              // agrégats conservés (vue équipe)
+    expect(s.byAM).toEqual({ X: 50 });             // distribution agrégée conservée
+    expect(s.scopedPrivate).toBe(true);
+    expect(src.topOpps).toHaveLength(1);           // l'objet source n'est PAS muté (réutilisé par l'Actualité)
+  });
+});
 
 describe("closingAnalysis — millésime de closing borné (audit)", () => {
   it("closing ABERRANT (« 20226-… » trie AVANT today en chaîne) → seau « sans », PAS « retard »", () => {

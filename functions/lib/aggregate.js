@@ -6,7 +6,7 @@ const { overview } = require("../domain/chaine");
 const { normalizeTiers } = require("../domain/projection");
 const { billingTrend } = require("../domain/billing");
 const { backlogFy } = require("../domain/backlog");
-const { pipeline, dormantSummary } = require("../domain/pipeline");
+const { pipeline, dormantSummary, scopePrivateSummary } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
 const { atterrissage, projetableBacklog } = require("../domain/atterrissage");
@@ -354,7 +354,11 @@ async function recomputeCore(db, only) {
   // de l'export CODIR divergerait du Cockpit « Tout » (violation « même métrique = même nombre »).
   const plOpps = excludeDormant ? opps.filter((o) => !isDormantClosing(o, currentFy)) : opps;
   const plSummary = pipeline(plOpps, asOf, tiers, orders, geleMonths); // réutilisé par l'Actualité ; `orders` → pondéré NET du carnet (parité overview)
-  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...plSummary, dormant, excludeDormant, ...stamp } }); // global (rétro-compat)
+  // CONFIDENTIALITÉ record-level (audit P1-a) : sous OWD opportunités « private », le summary pipeline (doc
+  // GLOBAL) ne divulgue plus le détail NOMINATIF (topOpps/byAmConv/staleTop). `scopePrivateSummary` renvoie un
+  // NOUVEL objet → `plSummary` reste intact pour l'Actualité (buildNews, agrégats). No-op sous OWD « public » (défaut).
+  const owdPrivate = ((((await db.doc("config/recordAccess").get()).data()) || {}).opportunities) === "private";
+  if (want("pipeline")) w.push({ path: "summaries/pipeline", data: { ...scopePrivateSummary(plSummary, owdPrivate), dormant, excludeDormant, ...stamp } }); // global (rétro-compat)
   let trendForNews = null; // tendance de facturation capturée pour l'Actualité (défini dans le bloc atterrissage)
   if (want("suppliers")) w.push({ path: "summaries/suppliers", data: { ...sup, ...stamp } });
   // Suivi BC ⇄ ClickUp : avancement achat + retards remontés de la liste « Commandes Fournisseurs »
@@ -680,7 +684,7 @@ async function recomputeCore(db, only) {
     // `dormant` (global, indépendant de la période) embarqué dans CHAQUE summary pipeline → la tuile
     // « Opportunité dormante » s'affiche quelle que soit la période choisie. `excludeDormant` tracé pour
     // que le front libelle correctement (exclu du pondéré vs simple signal).
-    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...pipeline(oppP, asOf, tiers, ord, geleMonths), dormant, excludeDormant, ...stamp } });
+    if (want("pipeline")) w.push({ path: `summaries/pipeline_${period}`, data: { period, ...scopePrivateSummary(pipeline(oppP, asOf, tiers, ord, geleMonths), owdPrivate), dormant, excludeDormant, ...stamp } });
     if (want("facturation")) w.push({ path: `summaries/facturation_${period}`, data: { period, ...facturation(inv), ...stamp } });
     if (want("rentabilite")) w.push({ path: `summaries/rentabilite_${period}`, data: { period, ...rentabilite(ord, inv, orders), ...stamp } });
     // Clients/Domaines : la MARGE (mb/pmb) est isolée dans un doc *Margin_* lisible seulement avec
