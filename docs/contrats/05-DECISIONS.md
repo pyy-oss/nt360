@@ -3,6 +3,39 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-046 — Normalisation fournisseurs MINIMALE : clé `cleanName` + alias manuels (config/supplierAliases), consolidée dans le référentiel Fournisseurs
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« consolider la normalisation des fournisseurs » ; profondeur « minimale : inventaire + alias manuels déterministes »)
+
+### Contexte
+Aucune infrastructure de normalisation fournisseur n'existait (contrairement aux clients : règles + alias + IA).
+Seul `cleanName` (ADR-P20) regroupait déjà les graphies « à un espace/casse près » au recompute du SOA. La
+Direction veut un **inventaire** des fournisseurs distincts et la possibilité de **fusionner manuellement** les
+graphies que `cleanName` ne rattrape pas (ex. « SAMSUNG ELECTRONICS » ↔ « SAMSUNG »), **sans IA**.
+
+### Décision
+- **Clé canonique inchangée = `cleanName`** (ADR-P20). PAS de retrait de forme juridique / pays / bruit
+  (ce serait un changement de sémantique du SOA — hors périmètre). La normalisation minimale n'ajoute QU'UN
+  étage : une table d'**alias manuels déterministes** `config/supplierAliases` (overlay, survit aux ré-imports).
+- **Domaine PUR** `functions/domain/supplierName.js` (`buildSupplierResolver`, `groupSupplierNames`), testé.
+  Sans alias, `resolve(x) === cleanName(x)` — **identité**.
+- **SOA additif** : `suppliers()` (`domain/fournisseurs.js`) accepte `opts.resolveSupplier` (défaut `cleanName`).
+  `aggregate.js` lit `config/supplierAliases`, construit le résolveur, le passe. **Sans alias, sortie SOA
+  byte-identique** (invariant de non-régression prouvé par la caractérisation `fournisseurs.test.js`, 9 tests
+  au vert inchangés). L'édition d'alias déclenche un recompute.
+- **Callables** : `setSupplierAliases` (droit `fournisseurs`, PAS direction-only — ne touche que des noms, pas
+  de coût confidentiel) + `supplierNames` (inventaire, lecture `fournisseurs`). Rule `config/supplierAliases`
+  lisible `fournisseurs`, écriture réservée aux Functions.
+- **UI consolidée dans le référentiel Fournisseurs** (`fournisseursref`), en **section** — PAS un onglet séparé
+  (évite un doublon de nav et respecte le budget bundle). Inventaire + table d'alias.
+
+### Conséquences
+- **Strictement additif** : le SOA ne change QUE si un alias est posé (décision humaine). `cleanName` reste
+  l'autorité fournisseur (ADR-P20) ; ADR-046 ne fait qu'ajouter des fusions manuelles au-dessus.
+- Étape 3/3 (dernière) de la consolidation des référentiels.
+
 ## ADR-045 — Les référentiels transverses (devises/FX, PM, BU, territoires, équipes) vivent dans RÉFÉRENTIELS, pas dans Habilitations
 
 - **Date :** 2026-07-20

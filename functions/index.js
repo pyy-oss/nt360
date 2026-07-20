@@ -496,6 +496,60 @@ exports.setClientAliases = onCallG("setClientAliases", { memoryMiB: 512, timeout
   return { ok: true, count: pairs.length };
 });
 
+// --- Alias FOURNISSEURS (config/supplierAliases) — normalisation MINIMALE (ADR-046). Fusionne au recompute
+// les graphies fournisseur que `cleanName` ne rattrape pas (alias manuels déterministes, PAS d'IA). Overlay
+// (survit aux ré-imports). Gâté sur le droit `fournisseurs` (même droit que le référentiel fournisseur) —
+// PAS direction-only : la normalisation ne touche que des NOMS (aucune donnée confidentielle de coût).
+exports.setSupplierAliases = onCallG("setSupplierAliases", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "fournisseurs");
+  const raw = Array.isArray(req.data && req.data.pairs) ? req.data.pairs : [];
+  const pairs = [];
+  for (const p of raw.slice(0, 500)) {
+    const from = String((p && p.from) || "").trim();
+    const to = String((p && p.to) || "").trim();
+    if (from && to) pairs.push({ from, to });
+  }
+  await db.doc("config/supplierAliases").set({ pairs, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "supplier_aliases", module: "fournisseurs", entity: "config", entityId: "supplierAliases",
+    detail: { count: pairs.length }, ts: FieldValue.serverTimestamp(),
+  });
+  await requestRecompute(); // le SOA regroupe les fournisseurs par clé canonique (alias inclus) → summaries/suppliers
+  return { ok: true, count: pairs.length };
+});
+
+// Inventaire des noms de FOURNISSEURS (atelier de normalisation) : comptes par nom brut regroupés par clé
+// canonique effective (`cleanName` + alias). Lecture bornée (MAX_SCAN). Gâté `fournisseurs` (lecture).
+exports.supplierNames = onCallG("supplierNames", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+  await requireRead(req, "fournisseurs");
+  const { groupSupplierNames } = require("./domain/supplierName");
+  const [ord, bc, inv, aliasDoc] = await Promise.all([
+    db.collection("orders").select("suppliers").limit(MAX_SCAN + 1).get(),
+    db.collection("bcLines").select("supplier").limit(MAX_SCAN + 1).get(),
+    db.collection("supplierInvoices").select("supplier").limit(MAX_SCAN + 1).get(),
+    db.doc("config/supplierAliases").get(),
+  ]);
+  const capped = ord.size > MAX_SCAN || bc.size > MAX_SCAN || inv.size > MAX_SCAN;
+  // Comptes par nom BRUT (orders.suppliers[].name + bcLines.supplier + supplierInvoices.supplier).
+  // Les noms fournisseurs ne sont pas record-level scopés (contrairement aux clients/opps).
+  const counts = new Map();
+  const bump = (raw) => { const c = String(raw || "").trim(); if (c) counts.set(c, (counts.get(c) || 0) + 1); };
+  sliceCapped(ord.docs).docs.forEach((d) => { for (const s of (d.data().suppliers || [])) bump(s && s.name); });
+  sliceCapped(bc.docs).docs.forEach((d) => bump(d.data().supplier));
+  sliceCapped(inv.docs).docs.forEach((d) => bump(d.data().supplier));
+  const names = [...counts.entries()].map(([name, count]) => ({ name, count }));
+  const pairs = ((aliasDoc.data() || {}).pairs) || [];
+  const groups = groupSupplierNames(names, pairs);
+  return {
+    ok: true, capped,
+    distinctNames: names.length,
+    distinctCanon: groups.length,
+    toReview: groups.filter((g) => g.hasVariants).length, // groupes à ≥ 2 graphies (déjà fusionnées)
+    aliasCount: pairs.length,
+    groups: groups.slice(0, 400),
+  };
+});
+
 // --- Jalons de facturation par projet (billingMilestones/{safeId(fp)}) : échéancier prévisionnel
 // (≤ 15 jalons {date, montant}), SOURCE UNIQUE du report N+1 (Σ jalons après le 31/12). Édité par
 // direction/PMO. La règle « Σ jalons = RAF » est validée à l'éditeur ; le serveur normalise (≤ 15,

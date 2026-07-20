@@ -352,7 +352,13 @@ async function recomputeCore(db, only) {
   // réelles (supplierInvoices) au lieu du statut BC « facturé ». Défaut OFF (doc absent) → comportement historique.
   const { isSoaFromInvoices } = require("../domain/soaFeature");
   const soaFromInvoices = isSoaFromInvoices((await db.doc("config/soaFeature").get()).data());
-  const sup = suppliers(orders, bcLines, creditLines, supplierInvoices, { soaFromInvoices });
+  // NORMALISATION des noms de FOURNISSEURS (alias manuels déterministes config/supplierAliases, ADR-046) —
+  // fusionne au recompute les graphies que `cleanName` ne rattrape pas. Overlay (survit aux ré-imports).
+  // Sans paire, le résolveur EST `cleanName` → SOA byte-identique (non-régression). Cf. clientAliases.
+  const { buildSupplierResolver } = require("../domain/supplierName");
+  const supAliasPairs = ((await db.doc("config/supplierAliases").get()).data() || {}).pairs || [];
+  const resolveSupplier = buildSupplierResolver(supAliasPairs);
+  const sup = suppliers(orders, bcLines, creditLines, supplierInvoices, { soaFromInvoices, resolveSupplier });
   const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   // Doc GLOBAL = pipeline « Tout » (rétro-compat ; Actualité + export CODIR). MÊME assiette que

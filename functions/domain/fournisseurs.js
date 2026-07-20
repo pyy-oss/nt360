@@ -21,10 +21,16 @@ const COMMITTED = new Set(["a_emettre", "emis", "livre"]);
  * @param {object[]} bcLines lignes BC (status, amountXof, fp, supplier)
  * @param {object[]} creditLines lignes de crédit saisies {id/_id, authorized, openingBalance, openingDate}
  * @param {object[]} [supplierInvoices] factures fournisseur RÉELLES {supplier, amountXof, ...} — Lot 8 (ADR-P21)
- * @param {object} [opts] { soaFromInvoices } : drapeau (défaut FALSE = comportement historique inchangé)
+ * @param {object} [opts] { soaFromInvoices, resolveSupplier } : `soaFromInvoices` drapeau (défaut FALSE =
+ *   comportement historique) ; `resolveSupplier` résolveur nom brut → clé canonique (alias fournisseur,
+ *   ADR-046) — défaut `cleanName` (identité de la clé canonique → SOA byte-identique, non-régression).
  */
 function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
   supplierInvoices = Array.isArray(supplierInvoices) ? supplierInvoices : [];
+  // Clé fournisseur CANONIQUE : `cleanName` par défaut (autorité ADR-P20). Un résolveur d'ALIAS optionnel
+  // (config/supplierAliases, ADR-046) fusionne en plus des graphies déterministes ; sans alias il EST
+  // `cleanName` → aucun changement de regroupement (invariant de non-régression du SOA, prouvé par les tests).
+  const keySup = (opts && typeof opts.resolveSupplier === "function") ? opts.resolveSupplier : cleanName;
   // VÉRITÉ DU COÛT (audit Exécution P0-1, ADR-P21) : quand le drapeau est actif, le SOLDE du compte fournisseur
   // (a.facture) dérive des FACTURES FOURNISSEUR RÉELLES (pièce comptable), et NON plus du statut « facturé » d'un
   // BC posé à la main. Le statut BC « facture » n'impacte alors plus le solde (il est SUPERSEDÉ par la facture) ;
@@ -46,7 +52,7 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
     // Clé fournisseur CANONIQUE (cleanName, autorité unique ERP-wide, ADR-P20) : compacte espaces + trim +
     // MAJUSCULES. Sans compaction, un même fournisseur importé « à un espace près » selon la source (ClickUp/
     // fiche vs Odoo/logistics) se scindait en deux dans le SOA — alors que par_ca les fusionne déjà. Aligné.
-    const sup = cleanName(b.supplier);
+    const sup = keySup(b.supplier);
     const a = get(sup);
     const amt = b.amountXof || 0;
     // Drapeau ACTIF : le solde vient des factures fournisseur réelles (plus bas) → un BC « facture »/« solde »
@@ -66,7 +72,7 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
   // Un fournisseur n'ayant qu'une facture (sans BC ni commande) apparaît quand même dans le SOA.
   if (soaFromInvoices) {
     for (const inv of supplierInvoices) {
-      const sup = cleanName(inv && inv.supplier);
+      const sup = keySup(inv && inv.supplier);
       if (!sup) continue;
       get(sup).facture += Number(inv.amountXof) || 0;
     }
@@ -76,7 +82,7 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
     const openOrder = (o.raf || 0) > 0;
     const fp = fpKey(o.fp) || "";
     for (const s of o.suppliers || []) {
-      const sup = cleanName(s.name); // même autorité canonique (ADR-P20)
+      const sup = keySup(s.name); // même autorité canonique (ADR-P20) + alias éventuels (ADR-046)
       const a = get(sup);
       a.expo += s.amount || 0;
       if (openOrder) {
@@ -100,7 +106,7 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
   // à défaut d'openingBalance, on reprend l'ancien champ `outstanding` comme solde d'ouverture.
   const creditById = {};
   for (const c of creditLines) {
-    const id = cleanName(c.id || c._id || c.name); // même autorité canonique → appariement stable (ADR-P20)
+    const id = keySup(c.id || c._id || c.name); // même autorité canonique + alias → appariement stable (ADR-P20/046)
     if (!id) continue;
     creditById[id] = c;
     get(id); // un fournisseur avec ligne de crédit s'affiche même sans BC/commande (solde d'ouverture)

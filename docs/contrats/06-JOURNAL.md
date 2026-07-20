@@ -1547,3 +1547,29 @@ Devises & référentiels** (`web/src/modules/referentielsadmin.tsx`, `Referentie
 - Callables et règles Firestore inchangés (config/* déjà lisibles, écriture réservée aux Functions).
 
 **Gouvernance.** Strictement additif. ADR-045. Étape 2/3 de la consolidation des référentiels.
+
+## Réf. PR3 — Normalisation fournisseurs minimale (ADR-046) — 2026-07-20
+
+**Fait.** Infrastructure MINIMALE de normalisation fournisseur : inventaire + alias manuels déterministes
+(sans IA), consolidée en SECTION du référentiel Fournisseurs. Dernière étape (3/3) de la consolidation.
+
+**Câblage (back).**
+- Domaine PUR `functions/domain/supplierName.js` (`buildSupplierResolver`, `groupSupplierNames`) + test
+  (7 cas). Clé = `cleanName` (ADR-P20), PAS de règles juridiques/pays. Sans alias, resolve = identité.
+- `suppliers()` (`domain/fournisseurs.js`) : nouvel `opts.resolveSupplier` (défaut `cleanName`) — les 4 sites
+  de clé fournisseur passent par `keySup`. **Caractérisation** : `fournisseurs.test.js` (9 tests) au vert
+  inchangé → SOA byte-identique sans alias (non-régression prouvée AVANT modification).
+- `aggregate.js` lit `config/supplierAliases`, construit le résolveur, le passe à `suppliers()`.
+- Callables `setSupplierAliases` (droit `fournisseurs`) + `supplierNames` (inventaire, lecture) ; ajoutés à
+  `deployed-functions.txt` ; rule `config/supplierAliases` (lecture `fournisseurs`, write Functions).
+
+**Câblage (front).**
+- `web/src/lib/supplierNormWrites.ts` (isolé du chunk d'entrée) + `web/src/modules/suppliernorm.tsx`
+  (inventaire + table d'alias, sans IA/fuzzy). Rendu comme **section** dans `fournisseursref` (pas un onglet
+  séparé → budget bundle 119,9 KB respecté ; regroupe la gestion fournisseur).
+
+**Gouvernance.** Strictement additif : le SOA ne bouge QUE si un alias est posé (l'humain valide). `cleanName`
+reste l'autorité (ADR-P20). ADR-046.
+
+**Vérifs.** 1252 functions (dont supplierName ×7 + caractérisation fournisseurs) + 291 web au vert ; tsc
+propre ; bundle 119,9 KB (≤ 120) ; no-undef (159), deploy-targets (189), indexes (3 composites) OK.

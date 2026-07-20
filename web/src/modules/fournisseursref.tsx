@@ -13,14 +13,12 @@ import { DateField } from "../design/inputs";
 import { Props, SUP_LABEL } from "./_shared";
 import { upsertCreditLine, migrateCreditLineKeys } from "../lib/writes";
 import { trackWrite } from "../lib/activity";
+import { SupplierNorm } from "./suppliernorm";
 import type { SuppliersSummary, SupplierRow } from "../types";
 
 export const FournisseursRef: FC<Props> = () => {
   const { data, loading, error } = useDocData<SuppliersSummary>("summaries/suppliers");
   const canWrite = useCan("fournisseurs") === "write";
-  if (error) return <ErrorState error={error} />;
-  if (loading && !data) return <CardSkeleton />;
-  if (!data) return <EmptyState label="Aucun fournisseur au référentiel (les fournisseurs apparaissent depuis les BC, les commandes et les lignes de crédit)." />;
   const badge: Record<string, string> = { saturation: "clay", tension: "gold", ok: "emerald", non_suivi: "neutral" };
   const cols = [
     colText("Fournisseur", (s: SupplierRow) => s.name, (s: SupplierRow) => s.name),
@@ -34,10 +32,18 @@ export const FournisseursRef: FC<Props> = () => {
   ];
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Fournisseurs — lignes de crédit (SOA)" actions={canWrite ? <MigrateCreditKeysBtn /> : undefined}>
-        <Tip>Référentiel fournisseur : renseignez le <b>plafond de crédit autorisé</b> et le <b>solde d'ouverture</b> daté (SOA) de chaque fournisseur. Le <b>solde</b>, l'<b>engagement</b> et le <b>disponible</b> sont recalculés automatiquement (voir « Crédit Fournisseurs » en Rentabilité pour le suivi). « Migrer les clés fournisseur » ré-appareille les plafonds sur la clé canonique (espaces/casse normalisés, ADR-P20).</Tip>
-        <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseursRef" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
-      </Card>
+      {error ? <ErrorState error={error} />
+        : (loading && !data) ? <CardSkeleton />
+        : !data ? <EmptyState label="Aucun fournisseur au référentiel (les fournisseurs apparaissent depuis les BC, les commandes et les lignes de crédit)." />
+        : (
+          <Card title="Fournisseurs — lignes de crédit (SOA)" actions={canWrite ? <MigrateCreditKeysBtn /> : undefined}>
+            <Tip>Référentiel fournisseur : renseignez le <b>plafond de crédit autorisé</b> et le <b>solde d'ouverture</b> daté (SOA) de chaque fournisseur. Le <b>solde</b>, l'<b>engagement</b> et le <b>disponible</b> sont recalculés automatiquement (voir « Crédit Fournisseurs » en Rentabilité pour le suivi). « Migrer les clés fournisseur » ré-appareille les plafonds sur la clé canonique (espaces/casse normalisés, ADR-P20).</Tip>
+            <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseursRef" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
+          </Card>
+        )}
+      {/* Normalisation fournisseurs (ADR-046) : inventaire + alias manuels déterministes, consolidés ICI dans
+          le référentiel Fournisseurs (pas un onglet séparé — évite un doublon de nav et regroupe la gestion). */}
+      <SupplierNorm />
     </div>
   );
 };

@@ -134,6 +134,7 @@ setCancellation
 setClickupConfig
 setClientAliases
 setCustomFields
+setSupplierAliases
 setFpAlias
 setFxRates
 setInvoiceFp
@@ -189,6 +190,7 @@ migrateCreditLineKeys
 setSoaFeature
 upsertSupplierInvoice
 deleteSupplierInvoice
+supplierNames
 setCostModel
 upsertObjective
 upsertOpportunity
