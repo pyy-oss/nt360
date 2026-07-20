@@ -1923,6 +1923,17 @@ exports.upsertActivity = onCallG("upsertActivity", { memoryMiB: 256, timeoutSeco
 exports.deleteActivity = onCallG("deleteActivity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
   const id = assertPlainId(req.data?.id, "id activité");
+  const snap = await db.doc(`activities/${id}`).get();
+  if (!snap.exists) return { ok: true }; // idempotent : déjà supprimée
+  const a = snap.data() || {};
+  // Visibilité par enregistrement (parité listActivities/upsertActivity, Lot 13) : sous OWD privé, on ne
+  // supprime que les activités de SON périmètre — sinon un tiers efface une activité hors de sa ligne.
+  const { activityVisible } = require("./domain/activity");
+  const relColl = a.relatedType === "account" ? "accounts" : "opportunities";
+  const priv = (await recordAccessOwd(relColl)) === "private";
+  if (!activityVisible(a, priv, await isRecordAdmin(req), req.auth.uid)) {
+    throw new HttpsError("permission-denied", "activité hors de votre périmètre");
+  }
   await db.doc(`activities/${id}`).delete();
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_activity", module: "pipeline", entity: "activity", entityId: id, ts: FieldValue.serverTimestamp() });
   return { ok: true };
@@ -1951,10 +1962,8 @@ exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeco
   const oppPrivate = (await recordAccessOwd("opportunities")) === "private";
   const accPrivate = (await recordAccessOwd("accounts")) === "private";
   if ((oppPrivate || accPrivate) && !(await isRecordAdmin(req))) {
-    rows = rows.filter((a) => {
-      const priv = a.relatedType === "account" ? accPrivate : oppPrivate;
-      return !priv || (Array.isArray(a.visibleTo) && a.visibleTo.includes(req.auth.uid));
-    });
+    const { activityVisible } = require("./domain/activity"); // même prédicat que deleteActivity (source unique)
+    rows = rows.filter((a) => activityVisible(a, a.relatedType === "account" ? accPrivate : oppPrivate, false, req.auth.uid));
   }
   if (d.openTasksOnly) rows = rows.filter((a) => a.type === "task" && a.done !== true);
   const { isOverdue } = require("./domain/activity");

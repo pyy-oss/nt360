@@ -43,4 +43,15 @@ function isOverdue(a, todayISO) {
   return String(a.dueDate) < String(todayISO);
 }
 
-module.exports = { ACTIVITY_TYPES, RELATED_TYPES, validateActivity, isOverdue };
+// VISIBILITÉ par enregistrement d'une activité (Lot 13) — prédicat PUR, source unique du filtre appliqué
+// en lecture (listActivities) ET en suppression (deleteActivity). `priv` = l'OWD du type de rattachement
+// est « private » ; `isAdmin` = admin record-level ; `uid` = appelant. Une activité est visible si le
+// périmètre n'est pas privé, OU si l'appelant est admin, OU s'il figure dans la chaîne `visibleTo`.
+// Sans ce prédicat partagé, la suppression ne vérifiait PAS le périmètre : un tiers effaçait une activité
+// hors de sa ligne hiérarchique sous OWD privé (fuite d'intégrité/confidentialité).
+function activityVisible(a, priv, isAdmin, uid) {
+  if (!priv || isAdmin) return true;
+  return !!(a && Array.isArray(a.visibleTo) && a.visibleTo.includes(uid));
+}
+
+module.exports = { ACTIVITY_TYPES, RELATED_TYPES, validateActivity, isOverdue, activityVisible };
