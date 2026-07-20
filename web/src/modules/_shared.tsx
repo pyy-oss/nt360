@@ -124,7 +124,7 @@ export function useCommandesRows(enabled = true) {
   if (canMargin && mchunks.length) {
     const mBy = new Map<string, any>();
     for (const c of mchunks) for (const m of (c.rows as any[]) || []) if (m.fp) mBy.set(m.fp, m);
-    rows = base.map((r) => { const m = r.fp ? mBy.get(r.fp) : null; return m ? { ...r, mb: m.mb, costTotal: m.costTotal, marginPct: m.marginPct } : r; });
+    rows = base.map((r) => { const m = r.fp ? mBy.get(r.fp) : null; return m ? { ...r, mb: m.mb, costTotal: m.costTotal, marginPct: m.marginPct, mbSource: m.mbSource ?? null } : r; });
   }
   return { rows, count: meta?.count ?? rows.length, loading: l1 || l2 };
 }

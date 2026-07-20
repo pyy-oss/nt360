@@ -5,7 +5,7 @@
 // normalisée → un aller-retour SANS édition ne produit AUCUN changement (cf. domain/oppImport sameField).
 // Seules les cellules RENSEIGNÉES peuplent `values` (mise à jour non effaçante côté domaine).
 const { sheetToJson } = require("../lib/xlsxRead");
-const { fpKey, num, cleanBu, cleanName, cleanPerson } = require("../lib/ids");
+const { fpKey, num, cleanBu, cleanName, cleanPerson, noAcc } = require("../lib/ids");
 const { headerKeys, val, valLabel, toISO } = require("../lib/sheets");
 const { normalizeStage } = require("./salesData");
 
@@ -99,7 +99,13 @@ function parseOpportunitiesImport(wb) {
     put("amount", numPresent(val(r, keys, "montant (ht)", "montant ht", "montant", "amount")));
     put("stage", parseStage(val(r, keys, "étape (1-9)", "étape", "etape", "statut", "stage")));
     put("probability", parseProba(val(r, keys, "idc (0-1)", "idc", "id c", "proba", "probabilité", "probabilite")));
-    put("mbPrev", parsePct(val(r, keys, "mb prév. (%)", "mb prév", "mb prev", "mb prévisionnel", "mb previsionnel")));
+    // MB (marge brute prév., en %) : l'onglet LIVE l'intitule « MB » nu, l'export « MB prév. (%) », d'autres
+    // sources « MB TOTAL ». Les libellés EXPLICITES passent par val() (inclusion sûre) ; le « MB » NU se
+    // matche par ÉGALITÉ exacte car « mb » en sous-chaîne capterait « Nombre… » (nombre ⊇ mb) → faux positif.
+    // La valeur est déjà en points de % (ex. 20 = 20 %), bornée [0,100] par parsePct.
+    const mbExactKey = keys.find((k) => noAcc(k).trim() === "mb");
+    const mbLabelled = val(r, keys, "mb prév. (%)", "mb prév", "mb prev", "mb prévisionnel", "mb previsionnel", "mb total");
+    put("mbPrev", parsePct((mbLabelled != null && mbLabelled !== "") ? mbLabelled : (mbExactKey ? r[mbExactKey] : undefined)));
     put("dr", parseDr(val(r, keys, "dr (oui/non)", "dr")));
     put("closingDate", parseDate(val(r, keys, "d prev", "closing", "date prev", "clôture", "cloture")));
     put("nextStep", txt(val(r, keys, "prochaine action", "next step")));

@@ -342,7 +342,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
     base: data.cas || 0, mb: data.mb || 0, pmb: data.pmb || 0,
     byBu: (data.byBu || []).map((b: any) => ({ bu: b.bu, base: b.cas, mb: b.mb, pmb: b.pmb ?? (b.cas > 0 ? b.mb / b.cas : 0) })),
     byAm: (data.byAm || []).map((a) => ({ am: a.am, base: a.cas, mb: a.mb, pmb: a.pmb })),
-    bottomAffaires: (data.bottomAffaires || []).map((o) => ({ fp: o.fp, client: o.client, am: o.am, base: o.cas, mb: o.mb, pmb: o.pmb, costMissing: (o as { costMissing?: boolean }).costMissing })),
+    bottomAffaires: (data.bottomAffaires || []).map((o) => ({ fp: o.fp, client: o.client, am: o.am, base: o.cas, mb: o.mb, pmb: o.pmb, costMissing: (o as { costMissing?: boolean }).costMissing, mbEstimated: (o as { mbEstimated?: boolean }).mbEstimated })),
     topClients: data.topClients || [],
   };
   const p = data.perspectives ? data.perspectives[view] : fallback;
@@ -359,6 +359,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
       </div>
       {filterActive && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client) ne s'applique pas ici (agrégat pré-calculé). La marge filtrée est lisible dans la Vue d'ensemble.</div>}
       {view === "commande" && (data.costMissingCount || 0) > 0 && <div className="text-[11px] text-clay">⚠ {data.costMissingCount} affaire(s) à <b>marge non fiable</b> — coût de revient absent (CAS &gt; 0 sans prix de revient importé). Complétez la fiche/le P&amp;L pour fiabiliser la marge.</div>}
+      {view === "commande" && (data.mbEstimatedCount || 0) > 0 && <div className="text-[11px] text-gold">ℹ {data.mbEstimatedCount} affaire(s) à <b>marge estimée</b> — dérivée du MB prévisionnel de l'opportunité (faute de MB TOTAL au P&amp;L et de fiche affaire). À confirmer par le P&amp;L / la fiche.</div>}
       <div className={grid4}>
         <Kpi label={view === "commande" ? "Marge brute (commande)" : "Marge brute (facturé)"} value={fmt(p.mb)} tone="gold" sub={baseSub} />
         <Kpi label={baseLbl} value={fmt(p.base)} />
@@ -377,7 +378,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
       <MarginWaterfall byBu={p.byBu || []} />
       <Card title="Affaires à faible marge (à surveiller)">
         <Table columns={[
-          colText("FP", (a) => <span className="inline-flex items-center gap-1"><FpLink fp={a.fp} />{a.costMissing && <Badge tone="clay">coût absent</Badge>}</span>, (a) => a.fp || ""),
+          colText("FP", (a) => <span className="inline-flex items-center gap-1"><FpLink fp={a.fp} />{a.costMissing && <Badge tone="clay">coût absent</Badge>}{(a as { mbEstimated?: boolean }).mbEstimated && <Badge tone="gold">marge estimée</Badge>}</span>, (a) => a.fp || ""),
           colText("Client", (a) => a.client || "—", (a) => a.client || ""),
           colText("Commercial", (a) => a.am || "—", (a) => a.am || ""),
           colNum(baseLbl, (a) => money(a.base), (a) => a.base),

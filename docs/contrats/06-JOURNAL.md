@@ -1863,3 +1863,33 @@ resolveBcFp). Suite functions **1265/1265**. no-undef (159) + deploy-targets (19
 **Non corrigé (FAIBLE/INFO, signalés) :** parité buildFpAliasResolver undefined/null (inoffensif, non testé
 front) ; fiscalYearFromOrders non borné (défense en profondeur) ; RBAC config/dcAliases import vs bc ;
 hypothèse 1 DC→1 FP ; dedupe/reconClient recompute direct ; trous de test parité croisée front/back.
+
+## Colonne MB des opportunités reconnue + repli marge du carnet (ADR-056) — 2026-07-20
+
+**Demande.** « Confirmer la colonne MB à l'import des opportunités » puis « MB sera considéré en l'absence de
+MB TOTAL (à ramener en %) dans P&L et en l'absence de fiche affaire ».
+
+**Fait (constat data).** Le fichier LIVE réel (`Opps.xlsx`, 3537 lignes) a une dernière colonne **`MB`** (pas
+« MB TOTAL » comme la capture) = un **%** (3, 20, 23.42…). Elle était **ignorée** (parseur n'acceptait que
+`MB prév…`). Côté P&L, `MB TOTAL` est au contraire un **montant absolu** (FCFA). Piège d'échelle central.
+
+**Fait (2 briques, 1 PR).**
+- **A — parseur opps** : `MB` (nu, ÉGALITÉ EXACTE — « mb » en sous-chaîne capterait « Nombre… ») + `MB TOTAL`
+  alimentent `mbPrev` (%). Round-trip export inchangé.
+- **B — autorité marge (`mergeCommandes`)** : repli `marginPct` fiche > `MB TOTAL/CAS` P&L > `mbPrev` opp.
+  Levier = **`mb` (montant)**, PAS `marginPct` : dès `CAS>0` tous les consommateurs font `mb/CAS` et ignorent
+  `marginPct` (piège appris : `Order.marginPct` est un RATIO côté fiche mais atterrissage/backlog ne le
+  normalisent pas → injecter un % brut = bug ×100, audit P2-1). On pose `mb = round(mbPrev% × CAS)`,
+  flag `mbSource="opp"`. Repli seulement si **pas de fiche** ET **`mbPresent=false`** (nouveau flag P&L,
+  distingue MB TOTAL absent d'un 0 réel) ET `CAS>0` ET opp du FP porteuse d'un `mbPrev`.
+- **Honnêteté** : `mbSource` porté du carnet au front (overlay `_shared` + chunk marge) ; badge « marge
+  estimée » + note + compteur `mbEstimatedCount` en Rentabilité ; ces affaires EXCLUES du flag « coût absent »
+  (un seul signal). Aucune donnée réécrite ; s'applique au prochain recompute / ré-import.
+
+**Tests.** Reconnaissance MB/MB TOTAL (+ non-capture « Nombre ») ; repli (fiche/P&L/opp, mbPresent, legacy
+mb>0, multi-opps stage). Suite functions **1275/1275**. no-undef (159) + deploy-targets (191) OK. Web build +
+bundle d'entrée 120.7 KB ≤ 122.
+
+**Appris.** La capture (« MB TOTAL ») mentait sur l'en-tête réel (« MB ») — toujours ouvrir le fichier. Et
+`Order.marginPct` a une échelle ambiguë par conception (ratio canonique + tolérance pourcentage) : ne jamais
+y injecter un nouveau %, passer par `mb` absolu.

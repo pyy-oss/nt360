@@ -86,6 +86,33 @@ function mergeCommandes(orders, opps, sheets, invoices) {
     });
   }
 
+  // 4. REPLI MARGE (ADR-056) : une commande adossée au P&L SANS « MB TOTAL » et SANS fiche n'a aucune
+  //    marge → le taux mb/CAS vaut 0 partout (Rentabilité, atterrissage N+1, backlog). On dérive alors la
+  //    marge du MB PRÉVISIONNEL de l'opp du même FP (mbPrev, en %) : mb = mbPrev% × CAS. DERNIER rang
+  //    d'autorité (fiche > MB TOTAL P&L > opp). Le levier est `mb` (montant) et non `marginPct` car, dès
+  //    que CAS>0, tous les consommateurs calculent le taux via mb/CAS et IGNORENT marginPct. Flag
+  //    `mbSource="opp"` = marge ESTIMÉE (jamais confondue avec une marge P&L réelle) ; coût laissé inconnu
+  //    (costTotal non posé) → le flag « coût absent » subsiste. mbPrev est un %, jamais mélangé à un montant.
+  const oppMbByFp = new Map(); // FP → mbPrev (%) : opp la plus avancée (stage) d'abord, puis mbPrev le + élevé (déterministe)
+  for (const o of opps || []) {
+    const fp = fpKey(o && o.fp);
+    const p = Number(o && o.mbPrev);
+    if (!fp || !Number.isFinite(p) || p <= 0) continue;
+    const st = Number(o.stage) || 0;
+    const cur = oppMbByFp.get(fp);
+    if (!cur || st > cur.st || (st === cur.st && p > cur.p)) oppMbByFp.set(fp, { p, st });
+  }
+  for (const [fp, cmd] of byFp) {
+    if (cmd.pnlSource === "fiche") continue; // la fiche fait autorité sur la marge
+    if (cmd.mbPresent === true) continue;    // MB TOTAL renseigné (même 0) → marge P&L réelle, on n'y touche pas
+    if (Number(cmd.mb) > 0) continue;        // legacy sans mbPresent : un mb>0 est déjà une marge P&L à conserver
+    const cas = Number(cmd.cas) || 0;
+    if (cas <= 0) continue;                  // CAS 0 = hors périmètre rentabilité (taux via marginPct, non concerné)
+    const est = oppMbByFp.get(fp);
+    if (!est) continue;                      // aucune opp porteuse de MB pour ce FP → marge laissée vide
+    merge(fp, { mb: Math.round((est.p / 100) * cas), mbSource: "opp" });
+  }
+
   // RAF : toute commande a désormais une base P&L. On garde le « RAF total » CURATÉ de l'Excel dès
   // qu'il est renseigné (o.raf, issu de la ligne P&L) — MÊME si une opp gagnée / fiche a écrasé le
   // CAS. Ligne P&L sans RAF Excel → dérivé max(CAS − Σfactures du FP, 0).

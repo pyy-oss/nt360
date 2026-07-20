@@ -147,6 +147,63 @@ describe("mergeCommandes — désignation d'affaire (description)", () => {
   });
 });
 
+describe("mergeCommandes — repli marge : MB de l'opp quand ni MB TOTAL ni fiche (ADR-056)", () => {
+  const base = { client: "A", bu: "ICT", am: "X", yearPo: 2026, source: "pnl" };
+  const one = (orders, opps, sheets) => mergeCommandes(orders, opps, sheets || [], [])[0];
+
+  it("P&L sans MB TOTAL + opp portant mbPrev → mb dérivé = mbPrev% × CAS, flag mbSource=opp", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/10", cas: 1000, mb: 0, mbPresent: false }],
+      [{ fp: "FP/2026/10", mbPrev: 20, stage: 4 }],
+    );
+    expect(c.mb).toBe(200);          // 20 % × 1000
+    expect(c.mbSource).toBe("opp");
+  });
+
+  it("MB TOTAL renseigné (même 0) → marge P&L RÉELLE conservée, aucun repli (mbSource absent)", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/11", cas: 1000, mb: 0, mbPresent: true }],
+      [{ fp: "FP/2026/11", mbPrev: 20, stage: 4 }],
+    );
+    expect(c.mb).toBe(0);
+    expect(c.mbSource).toBeUndefined();
+  });
+
+  it("fiche présente → autorité marge fiche, le repli opp est ignoré", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/12", cas: 1000, mb: 0, mbPresent: false }],
+      [{ fp: "FP/2026/12", mbPrev: 50, stage: 4 }],
+      [{ fp: "FP/2026/12", saleTotal: 1000, margin: 300, costTotal: 700, marginPct: 0.3 }],
+    );
+    expect(c.source).toBe("fiche");
+    expect(c.mb).toBe(300);          // marge de la fiche, pas 50 % × 1000
+    expect(c.mbSource).toBeUndefined();
+  });
+
+  it("aucune opp porteuse de MB pour le FP → marge laissée vide (aucune invention)", () => {
+    const c = one([{ ...base, fp: "FP/2026/13", cas: 1000, mb: 0, mbPresent: false }], []);
+    expect(c.mb).toBe(0);
+    expect(c.mbSource).toBeUndefined();
+  });
+
+  it("legacy sans mbPresent : un mb>0 (marge P&L existante) n'est jamais écrasé par l'opp", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/15", cas: 1000, mb: 150 }], // mbPresent absent (données antérieures)
+      [{ fp: "FP/2026/15", mbPrev: 40, stage: 4 }],
+    );
+    expect(c.mb).toBe(150);          // marge P&L conservée
+    expect(c.mbSource).toBeUndefined();
+  });
+
+  it("plusieurs opps d'un même FP : la plus avancée (stage) prime, puis le mbPrev le plus élevé", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/14", cas: 1000, mb: 0, mbPresent: false }],
+      [{ fp: "FP/2026/14", mbPrev: 40, stage: 3 }, { fp: "FP/2026/14", mbPrev: 10, stage: 6 }],
+    );
+    expect(c.mb).toBe(100);          // stage 6 (10 %) prime sur stage 3 (40 %)
+  });
+});
+
 describe("mergeCommandes — garde-fous", () => {
   it("opp gagnée SANS montant n'écrase pas le CAS P&L existant", () => {
     const orders = [{ fp: "FP/2026/1", client: "PNL", cas: 500, raf: 200, mb: 120, yearPo: 2026, source: "pnl" }];

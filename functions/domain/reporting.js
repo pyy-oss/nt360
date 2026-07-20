@@ -100,18 +100,26 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
   // (0 % ou 100 % selon le parser) INDISCERNABLE d'un vrai deal → le DF chasse de fausses affaires. On COMPTE
   // ces affaires et on MARQUE les lignes du bas de tableau (badge « marge non fiable » côté front). costTotal
   // == null (absent) ≠ costTotal 0 (marge légitimement pleine). Parité avec les flags missingCjm de resourcePnl.
-  const costMissingFps = new Set((orders || []).filter((o) => (o.cas || 0) > 0 && o.costTotal == null).map((o) => fpKey(o.fp) || o.fp).filter(Boolean));
+  // MARGE ESTIMÉE (ADR-056) : une commande dont la marge a été DÉRIVÉE du MB prév. de l'opportunité (mbSource
+  // "opp", faute de MB TOTAL P&L et de fiche). Ce n'est ni une vraie marge P&L, ni un « coût absent 0/100 » :
+  // c'est une ESTIMATION pipeline → on la compte et on la marque à part (badge « estimé » côté front).
+  const mbEstimatedFps = new Set((orders || []).filter((o) => o.mbSource === "opp").map((o) => fpKey(o.fp) || o.fp).filter(Boolean));
+  const isMbEstimated = (fp) => mbEstimatedFps.has(fpKey(fp) || fp);
+  // Coût absent : CAS>0 sans costTotal. On EXCLUT les marges estimées (mbSource "opp") — leur provenance est
+  // connue (pipeline), elles portent déjà leur propre signal → pas de double flag « non fiable » + « estimée ».
+  const costMissingFps = new Set((orders || []).filter((o) => (o.cas || 0) > 0 && o.costTotal == null && o.mbSource !== "opp").map((o) => fpKey(o.fp) || o.fp).filter(Boolean));
   const isCostMissing = (fp) => costMissingFps.has(fpKey(fp) || fp);
   // Marque aussi les lignes de la perspective Commande (celle que lit le front via `perspectives.commande`).
   // La perspective Facturé (factureLines, sans costTotal) laisse `costMissing` absent → jamais faux positif.
-  commande.bottomAffaires = commande.bottomAffaires.map((o) => ({ ...o, costMissing: isCostMissing(o.fp) }));
+  commande.bottomAffaires = commande.bottomAffaires.map((o) => ({ ...o, costMissing: isCostMissing(o.fp), mbEstimated: isMbEstimated(o.fp) }));
   return {
     // Rétro-compat : perspective Commande à plat, assiette nommée `cas`.
     mb: commande.mb, cas: commande.base, pmb: commande.pmb,
     costMissingCount: costMissingFps.size, // nb d'affaires à marge non fiable (coût absent)
+    mbEstimatedCount: mbEstimatedFps.size, // nb d'affaires à marge ESTIMÉE depuis le pipeline (MB de l'opp)
     byBu: commande.byBu.map((b) => ({ bu: b.bu, cas: b.base, mb: b.mb, pmb: b.pmb })),
     byAm: commande.byAm.map((a) => ({ am: a.am, cas: a.base, mb: a.mb, pmb: a.pmb })),
-    bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb, costMissing: isCostMissing(o.fp) })),
+    bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb, costMissing: isCostMissing(o.fp), mbEstimated: isMbEstimated(o.fp) })),
     topClients: commande.topClients,
     // Perspectives génériques (assiette = `base`) pour le sélecteur Commande / Facturé.
     perspectives: { commande, facture },

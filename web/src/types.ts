@@ -93,15 +93,15 @@ export interface RentabPerspective {
   base: number; mb: number; pmb: number;
   byBu: { bu: string; base: number; mb: number; pmb: number }[];
   byAm: { am: string; base: number; mb: number; pmb: number }[];
-  bottomAffaires: { fp?: string; client?: string; am?: string; base: number; mb: number; pmb: number; costMissing?: boolean }[];
+  bottomAffaires: { fp?: string; client?: string; am?: string; base: number; mb: number; pmb: number; costMissing?: boolean; mbEstimated?: boolean }[];
   topClients: { key: string; value: number }[];
 }
 export interface RentabiliteSummary {
   // Champs racine = perspective Commande (rétro-compat).
-  period?: string; mb?: number; cas?: number; pmb?: number; costMissingCount?: number;
+  period?: string; mb?: number; cas?: number; pmb?: number; costMissingCount?: number; mbEstimatedCount?: number;
   byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
   byAm?: { am: string; cas: number; mb: number; pmb: number }[];
-  bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number }[];
+  bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number; costMissing?: boolean; mbEstimated?: boolean }[];
   // Deux perspectives : Commande (CAS) et Facturé (CAF).
   perspectives?: { commande: RentabPerspective; facture: RentabPerspective };
 }
@@ -232,6 +232,7 @@ export interface RelanceBc { asOf?: string; count?: number; total?: number; item
 export interface RelanceJalons { asOf?: string; count?: number; total?: number; items?: JalonItem[]; byResp?: RelanceResp[] }
 
 export type Order = { id?: string; fp?: string; client?: string; bu?: string; am?: string; pm?: string | null; cas?: number; raf?: number; facture?: number; mb?: number; yearPo?: number; affaire?: string | null; costTotal?: number | null; marginPct?: number | null; source?: string | null; pnlSource?: string | null;
+  mbSource?: string | null; // 'opp' = marge ESTIMÉE (mbPrev% × CAS) faute de MB TOTAL P&L et de fiche — à signaler comme estimée
   casSource?: string | null; // 'override' = CAS surchargé depuis l'opportunité liée (syncOrderAmount)
   // Synchro inverse ClickUp (overlay config/clickupSync) : statut projet + dates (ISO yyyy-mm-dd).
   clickupStatus?: string | null; dateCommande?: string | null; dateContractuelle?: string | null; dateFinPrev?: string | null; clickupTaskId?: string | null;
