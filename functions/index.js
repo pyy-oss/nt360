@@ -1130,8 +1130,17 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
     detail: { kinds, rowsOk, files: files.length }, ts: FieldValue.serverTimestamp(),
   });
 
-  if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-  await recomputeSummaries();
+  // Post-traitement BEST-EFFORT (blindage imports) : les données sont DÉJÀ écrites (applyWrites ci-dessus) —
+  // un échec du fisc/recompute ne doit PAS transformer un import RÉUSSI en « internal » (même piège que
+  // createOrder, cf. recompute best-effort). Recompute DIFFÉRÉ (requestRecompute) comme les autres actions
+  // → la réponse revient en quelques secondes quelle que soit la taille du classeur (plus de faux timeout
+  // client), les agrégats se rafraîchissent via onRecomputeRequest. Un échec est journalisé, pas remonté.
+  try {
+    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+    await requestRecompute();
+  } catch (e) {
+    logger.error("importDelta : post-traitement (fisc/recompute) échoué — données importées, agrégats au prochain recompute", { message: e && e.message, stack: e && e.stack });
+  }
   // `files` = détail PAR fichier (kinds reconnus, lignes OK, erreur éventuelle, byKind) — permet à
   // l'UI d'afficher précisément ce qui a été reconnu et la cause d'un éventuel échec par classeur.
   return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, fileCount: files.length, files };
