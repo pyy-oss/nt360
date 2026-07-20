@@ -398,14 +398,20 @@ export async function reconClient(client?: string): Promise<ReconResult> {
 }
 
 // CENTRE DE CORRECTION (Assainissement). Lecture seule, gouverné « import ».
+// `rec` = recommandation CONCRÈTE (valeur chiffrée + base) calculée côté serveur depuis un enregistrement
+// rattaché (jamais inventée). field=null ⇒ recommandation textuelle (pas de pré-remplissage).
+export type CorrectionRec = { field: string | null; value: number | null; basis: string };
 export type CorrectionItem = {
   id?: string; fp?: string; client?: string; am?: string; numero?: string; amountHt?: number; amount?: number;
   cas?: number; yearPo?: number; date?: string; dueDate?: string; stage?: number; stageLabel?: string;
   designation?: string; supplier?: string; bcNumber?: string; currency?: string; amountXof?: number;
-  saleTotal?: number; affaire?: string; source?: string;
+  saleTotal?: number; affaire?: string; source?: string; rec?: CorrectionRec;
 };
 export type CorrectionBucket = { type: string; severity: "high" | "medium" | "low"; label: string; count: number; items: CorrectionItem[] };
-export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; cap: number; total: number };
+// `plan` = plan d'assainissement priorisé (par impact FCFA) — « par où commencer ».
+export type RemediationRow = { type: string; label: string; severity: "high" | "medium" | "low"; count: number; impact: number; estimated: boolean };
+export type RemediationPlan = { rows: RemediationRow[]; totalImpact: number; totalCount: number; top: RemediationRow | null };
+export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; plan?: RemediationPlan; cap: number; total: number };
 /** File de correction : par type d'anomalie, les enregistrements concrets à corriger (plafonnés). */
 export async function correctionQueue(): Promise<CorrectionQueueResult> {
   const res = await withTransientRetry(() => httpsCallable(functions, "correctionQueue", { timeout: 120_000 })({}));
