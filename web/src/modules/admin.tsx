@@ -14,12 +14,21 @@ import { setEmailNotifyConfig, sendTestEmail, type EmailNotifyConfig } from "../
 import type { PermissionsConfig, UserRow, OpsLog, ErrorLog, ClickupHealthSummary } from "../types";
 
 // Les 6 profils opposables (source : functions/domain/authz.js ROLES / web/src/lib/rbac Role).
-const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
+const ROLE_LIST = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture", "finance", "directeur_contrats", "data_steward"];
+// Préréglages de matrice par persona (audit P2-5) — proposés dans l'éditeur pour un rôle encore absent de
+// config/permissions. Reproduisent l'usage attendu ; la Direction les REVOIT et ENREGISTRE (jamais auto-écrits).
+// Modules : clés de MODULE_LABEL. Un rôle non listé/non enregistré reste « none » partout (sûr).
+const DEFAULT_ROLE_PRESET: Record<string, Record<string, string>> = {
+  finance: { facturation: "write", rentabilite: "write", objectifs: "write", prevision: "read", overview: "read", clients: "read" },
+  directeur_contrats: { maintenance: "write", clients: "read", overview: "read" },
+  data_steward: { import: "write", qualite: "write", clients: "read", overview: "read" },
+};
 // Libellés humains (matrice des droits) : codes techniques → présentation FR. Repli sur le code brut
 // pour un rôle/module non répertorié (rien n'est masqué). Aligné sur guide.ROLE_LABEL.
 const ROLE_LABEL: Record<string, string> = {
   direction: "Direction", commercial_dir: "Directeur commercial", commercial: "Commercial",
   pmo: "PMO", achats: "Achats", assistante: "Assistante", lecture: "Lecture",
+  finance: "Finance (DF)", directeur_contrats: "Directeur contrats", data_steward: "Data-steward",
 };
 const MODULE_LABEL: Record<string, string> = {
   overview: "Vue d'ensemble", pipeline: "Pipeline", backlog: "Backlog", import: "Imports",
@@ -50,7 +59,12 @@ export const Habilitations: FC<Props> = () => {
   // boutons visibles qui échouent). Cohérent avec le durcissement de setPermissions.
   const isDirection = useClaims().role === "direction";
   const [draft, setDraft] = useState<Record<string, Record<string, string>> | null>(null);
-  const matrix = draft || data?.matrix || {};
+  const stored = draft || data?.matrix || {};
+  // Rôles connus encore ABSENTS de config/permissions → proposés dans l'éditeur avec leur préréglage
+  // (audit P2-5). La Direction les REVOIT et clique « Enregistrer » : rien n'est écrit tant qu'aucune
+  // cellule n'est modifiée. Un rôle non enregistré reste « none » partout côté serveur (sûr).
+  const matrix: Record<string, Record<string, string>> = { ...stored };
+  for (const r of Object.keys(DEFAULT_ROLE_PRESET)) if (!matrix[r]) matrix[r] = { ...DEFAULT_ROLE_PRESET[r] };
   const roles = Object.keys(matrix);
   // Union des modules CONNUS + de ceux réellement stockés sur TOUS les rôles → chaque module gouvernable a
   // une ligne, même sans entrée stockée (sinon `maintenance` & co. restent invisibles/inaccordables).
@@ -58,7 +72,7 @@ export const Habilitations: FC<Props> = () => {
   const cyc: Record<string, string> = { none: "read", read: "write", write: "none" };
   const glyph: Record<string, string> = { write: "W", read: "R", none: "–" };
   const tone: Record<string, string> = { write: "bg-emerald text-bg", read: "bg-steel text-bg", none: "bg-panel2 text-muted" };
-  const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
+  const setCell = (r: string, m: string) => { const b = JSON.parse(JSON.stringify(matrix)); b[r] = b[r] || {}; b[r][m] = cyc[b[r][m]] || "read"; setDraft(b); };
   return (
     <div className="flex flex-col gap-4">
       <Rubrique>Mon compte</Rubrique>
