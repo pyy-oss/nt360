@@ -642,6 +642,11 @@ export async function dedupeClickupTasks(opts?: { apply?: boolean; listId?: stri
   const res = await httpsCallable(functions, "dedupeClickupTasks", { timeout: 540_000 })({ apply: opts?.apply, listId: opts?.listId, windowHours: opts?.windowHours });
   return res.data as { ok: boolean; dryRun: boolean; groups: number; duplicates: number; deletable: number; deleted: number; failed: number; windowHours: number; samples: { fp: string; keptId: string; toDelete: number }[] };
 }
+/** Dédoublonnage des tâches ClickUp de BC (par N° BC canonique, Lot 4b). apply=false = aperçu. Droit BC. Long. */
+export async function dedupeBcTasks(opts?: { apply?: boolean; listId?: string; windowHours?: number }) {
+  const res = await httpsCallable(functions, "dedupeBcTasks", { timeout: 540_000 })({ apply: opts?.apply, listId: opts?.listId, windowHours: opts?.windowHours });
+  return res.data as { ok: boolean; dryRun: boolean; groups: number; duplicates: number; deletable: number; deleted: number; failed: number; windowHours: number; samples: { bcKey: string; keptId: string; toDelete: number }[] };
+}
 /** Enrichit les tâches ClickUp liées : commentaire de synthèse idempotent (CA/RAF, jalons, BC, qualité)
  *  + tag « à risque ». Admin. Peut être long. */
 export async function enrichClickup() {
