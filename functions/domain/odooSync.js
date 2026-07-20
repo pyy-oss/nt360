@@ -14,7 +14,7 @@ const { safeId } = require("../lib/sheets");
 const { clampStage, oppWeighted } = require("./mutations");
 const { DEFAULT_PROBA, STAGE_LABEL } = require("../parsers/salesData");
 
-const OBJECTS = ["opportunity", "order", "invoice"];
+const OBJECTS = ["opportunity", "order", "invoice", "bc"];
 const str = (v) => String(v == null ? "" : v).trim();
 const isoDay = (v) => { const s = str(v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && plausibleYear(s.slice(0, 4)) ? s : null; };
 const traceId = (rec) => { const t = str(rec.odooId || rec.odoo_id || rec.id); return t || null; };
@@ -97,6 +97,33 @@ function mapInvoice(rec) {
   return { ok: true, object: "invoice", collection: "invoices", id: safeId(numero), key: { fp: doc.fp, odooId: doc.odooId }, doc };
 }
 
+// --- BC fournisseur (ligne de bon de commande) → collection bcLines (ADR-051). Le webhook reçoit un JSON
+// nt360-shaped (le Server Action Odoo mappe purchase.order → ces champs, cf. docs/ODOO_WEBHOOK.md), comme pour
+// les 3 autres objets. PUR : ni conversion FX (taux = I/O) ni id de stockage (bcKey+safeId) — le handler les
+// pose et applique la priorité « comptable prime » (skip si un BC comptable/ClickUp de MÊME N° BC existe déjà),
+// exactement comme l'import ClickUp. Doc ADDITIF (patron ADR-049) : n'écrire que les champs fournis. ---
+function mapBc(rec) {
+  const r = rec || {};
+  const bcNumber = str(r.bcNumber || r.numero || r.number);
+  if (!bcNumber) return { ok: false, error: "BC : 'bcNumber' (N° BC) requis" };
+  const doc = { source: "odoo", bcNumber };
+  if (present(traceId(r))) doc.odooId = traceId(r);
+  if (present(r.fp)) doc.fp = fpKey(r.fp);
+  if (present(r.supplier)) doc.supplier = cleanName(r.supplier);
+  if (present(r.customer)) doc.customer = cleanName(r.customer);
+  if (present(r.country)) doc.country = str(r.country);
+  if (present(r.expenseType)) doc.expenseType = str(r.expenseType);
+  if (present(r.description || r.designation)) doc.description = str(r.description || r.designation);
+  if (present(r.currency)) doc.currency = str(r.currency).toUpperCase();
+  if (present(r.amount)) doc.amount = Math.max(0, num(r.amount));
+  if (present(r.amountXof)) doc.amountXof = Math.max(0, num(r.amountXof)); // contre-valeur SAISIE prioritaire
+  if (present(r.status)) doc.statusRaw = str(r.status); // le handler valide contre BC_STAGES (défaut « emis »)
+  if (present(r.eta || r.etaReel)) doc.etaReel = isoDay(r.eta || r.etaReel);
+  if (present(r.dateIn)) doc.dateIn = isoDay(r.dateIn);
+  if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre (Odoo) — capté additivement, FP reste la clé (Lot DC)
+  return { ok: true, object: "bc", collection: "bcLines", key: { bcNumber, fp: doc.fp || null, odooId: doc.odooId || null }, doc };
+}
+
 /**
  * Mappe UN enregistrement du contrat Odoo vers un doc nt360. PUR.
  * @returns {{ok:true, object, collection, id?, key:{fp,odooId}, doc} | {ok:false, error}}
@@ -106,8 +133,9 @@ function mapOdooRecord(object, rec) {
     case "opportunity": return mapOpportunity(rec);
     case "order": return mapOrder(rec);
     case "invoice": return mapInvoice(rec);
+    case "bc": return mapBc(rec);
     default: return { ok: false, error: `objet inconnu « ${object} » (attendu : ${OBJECTS.join(", ")})` };
   }
 }
 
-module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice };
+module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc };

@@ -3,6 +3,49 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-051 — Le webhook Odoo alimente les BC fournisseurs (collection `bcLines`) avec priorité « comptable/ClickUp prime »
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« BC fournisseurs via Odoo → bcLines »)
+
+### Contexte
+Le webhook Odoo gérait 3 objets (opportunity/order/invoice). La Direction veut qu'Odoo alimente aussi les
+**BC fournisseurs**. Les BC vivent dans `bcLines`, déjà alimentée par la saisie/PDF (`addBcLine`,
+`source:"bc_unitaire"`) et l'import ClickUp (`source:"clickup"`). **Piège** : `domain/fournisseurs.js`
+`suppliers()` **somme TOUTES les lignes** `bcLines` par fournisseur (engagement/solde du SOA) — deux docs de
+MÊME N° BC mais de sources différentes **double-compteraient** l'engagement (chiffre P&L sensible). L'import
+ClickUp évite déjà ce piège en n'important pas un BC dont le N° BC est **déjà** connu d'une source comptable
+(« import comptable prime »).
+
+### Décision
+- **4ᵉ type d'objet `bc`** au contrat webhook → collection `bcLines`. Payload nt360-shaped (le Server Action
+  Odoo mappe `purchase.order` → champs nt360, comme les 3 autres objets). Mapper PUR `mapBc` (additif, patron
+  ADR-049) ; la conversion FX (taux I/O) et l'id de stockage sont posés par le handler.
+- **Id déterministe par N° BC canonique** : `bcLines/bc_odoo_<bcKey(bcNumber, safeId)>` → un renvoi Odoo du
+  même BC converge (idempotent).
+- **Priorité « comptable/ClickUp prime »** : avant d'écrire, le handler charge le `known` de tous les
+  `bcNumber` de source **≠ odoo** (deux clés : stockage `bcKey`+safeId ET logique `idBcKey` sans séparateur).
+  Si le N° BC y figure, le BC Odoo est **ignoré** (`action:"skipped"`) — pas de doublon d'engagement SOA.
+  MÊME logique que l'import ClickUp.
+- **Statut = ENGAGEMENT seulement** (`a_emettre`/`emis`/`livre`, défaut `emis`) : un BC Odoo ne pose **jamais**
+  `facture`/`solde` — le solde du compte fournisseur reste un acte comptable (MÊME règle que ClickUp).
+- Champ **`dc`** (identifiant DC propre Odoo) capté additivement ; le FP reste la clé de rapprochement (Lot DC).
+
+### Conséquences
+- **Strictement additif** : nouvelle valeur de `source` (`odoo`) dans `bcLines` ; aucune ligne existante
+  modifiée ; le SOA ne bouge que si un BC Odoo **inédit** (N° BC jamais vu) entre. Réversible (kill-switch
+  `config/odooWebhook.enabled`).
+- **Zéro double-compte** de l'engagement fournisseur : la priorité amont garantit l'unicité par N° BC.
+- Coût : un scan `bcLines` (bcNumber+source) par requête webhook `bc` (borné, comme l'import ClickUp).
+
+### Point de revue
+Odoo est placé en **plus basse priorité** (défère à comptable ET ClickUp). Si l'on veut au contraire qu'Odoo
+supersède ClickUp (Odoo = PO source de vérité), inverser le filtre du `known` (exclure aussi `source:"clickup"`)
+— à trancher en revue si le besoin émerge.
+
+---
+
 ## ADR-050 — Odoo et l'import Excel sont deux sources LIVE de MÊME autorité sur une opportunité (dédup par FP + non-rétrogradation de source)
 
 - **Date :** 2026-07-20

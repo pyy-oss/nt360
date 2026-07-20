@@ -4185,9 +4185,10 @@ exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, t
 // === WEBHOOK ENTRANT ODOO (docs/ODOO_WEBHOOK.md) — reçoit les MàJ Odoo sur opportunités / commandes / factures.
 // Auth : signature HMAC-SHA256 (hex) du corps BRUT via le secret partagé config/odooWebhook.secret (en-tête
 // X-Signature) — même schéma que clickupWebhook. Contrat JSON façonné côté Odoo (docs/ODOO_WEBHOOK.md) :
-//   POST { object: "opportunity"|"order"|"invoice", records: [ {…} ] }
+//   POST { object: "opportunity"|"order"|"invoice"|"bc", records: [ {…} ] }
 // Upsert idempotent : commandes/factures par id déterministe (safeId(fp) / safeId(numero)), opportunités par
-// rapprochement fp puis odooId (création odoo_… sinon). Odoo est source AUTORITAIRE (create + update).
+// rapprochement fp puis odooId (création odoo_… sinon), BC par N° BC canonique (bc_odoo_<bcKey>, ADR-051 :
+// « comptable/ClickUp prime » → skip si déjà connu). Odoo est source AUTORITAIRE (create + update).
 const ODOO_MAX_RECORDS = 500;
 exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
   if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
@@ -4208,12 +4209,64 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
   const batch = records.slice(0, ODOO_MAX_RECORDS);
   const results = [], errors = [];
   let wrote = false;
+  // Contexte BC (ADR-051) : Odoo alimente `bcLines` comme l'import ClickUp. Priorité « comptable/ClickUp prime »
+  // → on IGNORE un BC Odoo dont le N° BC est DÉJÀ porté par une source non-odoo (comptable ou ClickUp), sinon
+  // le SOA fournisseur (domain/fournisseurs.js somme TOUTES les lignes) double-compterait l'engagement. Le
+  // `known` porte deux clés par BC (stockage `bc.bcKey`+safeId ET logique `idBcKey` sans séparateur) → reconnu
+  // « à un séparateur près ». Chargé UNE fois par requête.
+  let bcCtx = null;
+  if (object === "bc") {
+    const bcDom = require("./domain/clickupBc");
+    const { bcKey: idBcKey } = require("./lib/ids");
+    const { normCur } = require("./parsers/bcPdf");
+    const { toXof } = require("./lib/fx");
+    const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
+    const known = new Set();
+    (await db.collection("bcLines").select("bcNumber", "source").get()).forEach((d) => {
+      const v = d.data() || {};
+      if (v.bcNumber && v.source !== "odoo") { known.add(bcDom.bcKey(v.bcNumber, safeId)); known.add(idBcKey(v.bcNumber)); }
+    });
+    bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known };
+  }
+  // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT (jamais « facture »/« solde » — le solde SOA reste un acte
+  // comptable, MÊME règle que l'import ClickUp `mapBcStatus`). Défaut « emis » (un BC Odoo est une commande émise).
+  const BC_COMMIT_ONLY = ["a_emettre", "emis", "livre"];
   // Traitement d'UN enregistrement (résolution d'id + upsert + audit). Les ids cibles sont DÉTERMINISTES
   // (safeId(fp)/safeId(numero) pour commande/facture ; odoo_+safeId(odooId||fp) pour une opp non rapprochée),
   // donc deux écritures concurrentes sur le même doc CONVERGENT (upsert idempotent) — parallélisation sûre.
   const processOne = async (rec) => {
     const m = mapOdooRecord(object, rec);
     if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
+    // --- BC fournisseur → bcLines (ADR-051) : priorité comptable/ClickUp + conversion XOF + statut d'engagement ---
+    if (m.object === "bc") {
+      const key = bcCtx.bcDom.bcKey(m.key.bcNumber, safeId);
+      if (bcCtx.known.has(key) || bcCtx.known.has(bcCtx.idBcKey(m.key.bcNumber))) {
+        // Un BC comptable/ClickUp de MÊME N° BC existe déjà → il PRIME ; on n'écrit pas de doublon Odoo (évite le
+        // double engagement du SOA). Idempotent : un renvoi Odoo reste sans effet tant que la source amont existe.
+        results.push({ id: null, object: "bc", action: "skipped", fp: m.key.fp || null, bcNumber: m.key.bcNumber });
+        return;
+      }
+      const id = "bc_odoo_" + key; // id stable par N° BC canonique → ré-envoi = même doc (idempotent)
+      const ref = db.doc(`bcLines/${id}`);
+      const exists = (await ref.get()).exists;
+      const doc = { ...m.doc, _id: id, updatedAt: FieldValue.serverTimestamp() };
+      // Statut d'ENGAGEMENT seulement (jamais facture/solde) ; défaut « emis » à la création.
+      if (BC_COMMIT_ONLY.includes(doc.statusRaw)) doc.status = doc.statusRaw;
+      else if (!exists) doc.status = "emis";
+      // Conversion XOF : uniquement si Odoo a fourni un montant (sinon on ne recalcule pas — doc additif). Contre-
+      // valeur SAISIE (amountXof) prioritaire, sinon taux config/fxRates ; sans taux, amountXof=0 (« à saisir »).
+      if (doc.amount !== undefined) {
+        const cur = bcCtx.normCur(doc.currency || "XOF");
+        const conv = bcCtx.toXof(cur, doc.amount || 0, doc.amountXof, bcCtx.rates);
+        doc.currency = cur; doc.amountXof = conv.amountXof; doc.fxRate = conv.fxRate; doc.fxSource = conv.fxSource;
+      }
+      if (!exists) doc.createdAt = FieldValue.serverTimestamp();
+      await ref.set(doc, { merge: true });
+      wrote = true;
+      results.push({ id, object: "bc", action: exists ? "updated" : "created", fp: m.key.fp || null, bcNumber: m.key.bcNumber });
+      await db.collection("auditLog").add({ uid: "odoo:webhook", action: exists ? "odoo_update" : "odoo_create", module: "bc", entity: "bc", entityId: id, detail: { bcNumber: m.key.bcNumber, fp: m.key.fp || null, odooId: m.key.odooId || null }, ts: FieldValue.serverTimestamp() });
+      return;
+    }
     let id = m.id; // commandes/factures : déterministe
     if (!id) {
       // opportunités : rapprocher par fp CANONIQUE puis par odooId ; sinon créer un id déterministe.
