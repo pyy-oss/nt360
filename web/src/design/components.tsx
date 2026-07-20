@@ -479,6 +479,18 @@ export function Tip({ children }: { children: ReactNode }) {
   return <div className="text-xs text-muted mt-3 leading-relaxed">{children}</div>;
 }
 
+// Bandeau d'HONNÊTETÉ : la liste temps réel a atteint le plafond d'abonnement (Lot 12 — scalabilité front).
+// Rendu seulement si `show` ; jamais de troncature silencieuse — l'utilisateur doit savoir qu'il manque des lignes.
+export function TruncationNote({ show, cap }: { show: boolean; cap: number }) {
+  if (!show) return null;
+  return (
+    <div className="text-[12px] text-clay bg-clay/10 border border-clay/30 rounded-md px-3 py-2 leading-relaxed" role="status">
+      Liste limitée aux <b>{cap.toLocaleString("fr-FR")}</b> premiers éléments (abonnement temps réel borné).
+      Affinez les <b>filtres</b> (BU, client, période…) pour voir le reste — les agrégats des cockpits, eux, portent sur l'ensemble.
+    </div>
+  );
+}
+
 // --- Liste détaillée : recherche + tri + pagination (drill-down collections) ---
 export function ListView({ rows, columns, searchKeys, pageSize = 10, placeholder = "Rechercher…", initialSearch = "", expand, rowKey, colsKey, bulk }:
   { rows: any[]; columns: Col[]; searchKeys: ((r: any) => any)[]; pageSize?: number; placeholder?: string; initialSearch?: string;
