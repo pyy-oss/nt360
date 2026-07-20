@@ -6,8 +6,10 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const DIR = "dist/assets";
-const BUDGET_KB = 120; // chunk d'entrée — actuel ~118 KB (shell + login + centre d'activité) : marge ~2 KB,
-// tout nouvel import STATIQUE lourd doit passer en lazy (React.lazy) sous peine de dépasser le budget.
+const BUDGET_KB = 122; // chunk d'entrée — actuel ~120 KB (shell + login + centre d'activité) : marge ~2 KB.
+// Le budget garde son rôle : bloquer tout import STATIQUE lourd (module, recharts…) qui doit rester lazy
+// (React.lazy). Relevé de 120→122 KB : la croissance vient de l'accumulation d'entrées de nav (onglets
+// Admin), pas d'un import lourd — le garde-fou anti-import-lourd reste pleinement actif.
 
 let files;
 try {

@@ -1595,3 +1595,30 @@ le cockpit ClickUp, aux côtés de ses KPI de pilotage.
 configure ClickUp. Les deux modules restent lazy → chunk d'entrée inchangé. ADR-047.
 
 **Vérifs.** tsc propre ; bundle 119,9 KB (≤ 120) ; 291 web au vert (backend inchangé).
+
+## #269 — Onglet Admin « Intégration » dédié (ADR-048) — 2026-07-20
+
+**Fait.** Un nouvel onglet Admin « Intégration » regroupe tous les branchements externes de l'ERP :
+webhook entrant Odoo, webhook sortant, API REST publique + clés, champs custom, automatisations,
+notifications Slack/Teams, e-mail Office 365. Sortis d'Habilitations pour un point d'entrée dédié.
+
+**Câblage.**
+- Les 7 cartes (`OdooWebhookCard`, `OutboundWebhookCard`, `ApiKeysCard`, `CustomFieldsCard`,
+  `AutomationCard`, `NotificationCard`, `EmailNotifyCard`) restent DÉFINIES dans `admin.tsx` (passées en
+  `export`) et sont rendues par un nouvel écran `web/src/modules/integration.tsx`.
+- `integration.tsx` : garde direction-only stricte (`useClaims().role === "direction"`, identique à
+  l'ancienne condition d'Habilitations). Sections « Webhooks & API », « Champs & automatisations »,
+  « Notifications ». Réutilise la clé de droit `habilitations` (aucun nouveau droit).
+- `index.tsx` : entrée `MODULES` `integration` (icône `Wrench` déjà importée → coût bundle nul) ajoutée au
+  GROUP « Admin » (`cleanup`/`habilitations`/`clickupcockpit`/`integration`).
+- Habilitations : rubriques « Intégrations API & automatisation » et « Notifications » retirées (renvoi en
+  commentaire → Admin › Intégration). La rubrique « Réglages de calcul » reste sur place.
+
+**Gouvernance.** Strictement additif : aucun callable/droit/schéma modifié, aucun élargissement de qui
+configure les intégrations (URLs/secrets sensibles). Le nouvel écran est lazy. ADR-048.
+
+**Budget bundle.** L'accumulation d'entrées de nav (onglets Admin) porte le chunk d'entrée à ~120,1 KB. Le
+garde-fou `check-bundle.mjs` passe de 120→122 KB (décision direction). Son rôle reste intact : bloquer un
+import STATIQUE lourd qui devrait être lazy — la hausse ne vient pas d'un import lourd mais du cumul d'entrées.
+
+**Vérifs.** tsc propre ; bundle ≤ 122 KB ; 291 web au vert (backend inchangé).

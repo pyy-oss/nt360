@@ -52,6 +52,7 @@ const Codir = from(() => import("./codir"), "Codir");
 const Relances = from(() => import("./relances"), "Relances");
 const Guide = from(() => import("./guide"), "Guide");
 const ClickupCockpit = from(() => import("./clickupcockpit"), "ClickupCockpit");
+const Integration = from(() => import("./integration"), "Integration");
 const ClientNorm = from(() => import("./clientnorm"), "ClientNorm");
 const FournisseursRef = from(() => import("./fournisseursref"), "FournisseursRef");
 const ReferentielsAdmin = from(() => import("./referentielsadmin"), "ReferentielsAdmin");
@@ -109,6 +110,7 @@ export const MODULES: { id: string; key: string; label: string; icon: LucideIcon
   { id: "habilitations", key: "habilitations", label: "Habilitations", icon: Shield, Component: Habilitations },
   { id: "guide", key: "overview", label: "Guide", icon: BookOpen, Component: Guide },
   { id: "clickupcockpit", key: "overview", label: "Cockpit ClickUp", icon: Radar, Component: ClickupCockpit },
+  { id: "integration", key: "habilitations", label: "Intégration", icon: Wrench, Component: Integration },
   // Contrats de maintenance : clé RBAC dédiée `maintenance` (absente de la matrice → `none` par
   // défaut) ET drapeau `mntFeature` (éteint par défaut). Doublement masqué tant que non activé.
   { id: "maintenance", key: "maintenance", label: "Contrats de maintenance", icon: Wrench, Component: Maintenance, flag: "mntFeature" },
@@ -129,7 +131,7 @@ export const GROUPS: { label: string; ids: string[] }[] = [
   { label: "Référentiels", ids: ["client360", "clients", "clientnorm", "fournisseursref", "referentielsadmin", "domaines"] },
   { label: "Contrats", ids: ["maintenance"] },
   { label: "Partenariats", ids: ["partenariats"] },
-  { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit"] },
+  { label: "Admin", ids: ["cleanup", "habilitations", "clickupcockpit", "integration"] },
 ];
 
 // Garde-fou de navigation : tout onglet déclaré dans MODULES doit apparaître dans exactement un
