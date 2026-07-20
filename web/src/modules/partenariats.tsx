@@ -165,6 +165,7 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
   const toast = useToast();
   const [plan, setPlan] = useState<PlanItem[] | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  const [planPartnerId, setPlanPartnerId] = useState(""); // "" = tous les partenaires (défaut)
   const [partnerId, setPartnerId] = useState("");
   const [periode, setPeriode] = useState("");
   const [qbr, setQbr] = useState<{ qbr: any; snapshot: any } | null>(null);
@@ -172,7 +173,7 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
 
   const genPlan = async () => {
     if (planBusy) return; setPlanBusy(true);
-    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", {}); setPlan(r.plan || []); }
+    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", { partnerId: planPartnerId || undefined }); setPlan(r.plan || []); }
     catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
     finally { setPlanBusy(false); }
   };
@@ -190,8 +191,13 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
 
   return (
     <div className="space-y-4">
-      <Card title="Plan d'action business (IA)" actions={<button className="btn" disabled={planBusy} onClick={genPlan}>{planBusy ? "Génération…" : "Générer le plan"}</button>}>
-        <Tip>Génère, à partir des données du module (statuts, quotas, CA, retards), un plan d'action priorisé — combler les quotas, accélérer le CA, sécuriser les niveaux avant audit. Recommandations proposées par l'IA, à valider.</Tip>
+      <Card title="Plan d'action business (IA)" actions={
+        <div className="flex items-center gap-2">
+          {/* Portée : tous les partenaires (défaut) ou un partenaire ciblé — même liste que la QBR. */}
+          <div className="w-52"><Select value={planPartnerId} onChange={setPlanPartnerId} options={[{ value: "", label: "Tous les partenaires" }, ...partnerOpts]} ariaLabel="Portée du plan (partenaire)" /></div>
+          <button className="btn" disabled={planBusy} onClick={genPlan}>{planBusy ? "Génération…" : "Générer le plan"}</button>
+        </div>}>
+        <Tip>Génère, à partir des données du module (statuts, quotas, CA, retards), un plan d'action priorisé — combler les quotas, accélérer le CA, sécuriser les niveaux avant audit. Choisissez <b>un partenaire</b> pour un plan ciblé, ou <b>Tous les partenaires</b>. Recommandations proposées par l'IA, à valider.</Tip>
         {plan == null ? <div className="text-[12px] text-faint py-4">Cliquez « Générer le plan » pour obtenir des recommandations.</div> : plan.length === 0 ? <EmptyState label="Aucune recommandation générée." /> : (
           <div className="space-y-2 mt-1">
             {plan.map((it, i) => (

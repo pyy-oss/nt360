@@ -1250,8 +1250,11 @@ export const Maintenance: FC<Props> = () => {
       {tOpen && (
         <Modal open={tOpen} onClose={() => setTOpen(false)} title={tForm.id ? "Ticket" : "Nouveau ticket"} size="form"
           actions={canWrite ? <Busy label="Enregistrer" variant={tValid ? "gold" : "ghost"} fn={async () => { if (!tValid) throw new Error("Contrat et titre requis"); const r = await upsertMntTicket(tForm); setTForm((f) => ({ ...f, id: r.id })); }} okMsg="Ticket enregistré" errMsg="Enregistrement refusé" /> : undefined}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Contrat"><Select value={tForm.contratId || ""} onChange={pickContrat} options={contrats.map((c) => ({ value: c.id!, label: `${c.client || "—"} · ${c.fp || ""}` }))} ariaLabel="Contrat" placeholder="Choisir un contrat…" /></Field>
+          {/* Formulaire PLAT : un champ par ligne (colonne unique) — saisie linéaire du ticket. */}
+          <div className="grid grid-cols-1 gap-3">
+            {/* Sélecteur de contrat : client · N° FP · désignation de l'affaire (rapprochée par fpKey — le
+                contrat ne stocke pas l'affaire, ADR-001) pour distinguer plusieurs contrats d'un même client. */}
+            <Field label="Contrat"><Select value={tForm.contratId || ""} onChange={pickContrat} options={contrats.map((c) => { const aff = affaireOf(c.fp); return { value: c.id!, label: `${c.client || "—"} · ${c.fp || ""}${aff ? " · " + aff : ""}` }; })} ariaLabel="Contrat" placeholder="Choisir un contrat…" /></Field>
             <Field label="Titre"><input className="field" value={tForm.titre || ""} onChange={(e) => setT("titre", e.target.value)} /></Field>
             <Field label="Priorité"><Select value={tForm.priorite || "moyenne"} onChange={(v) => setT("priorite", v)} options={opt(PRIORITE_LABEL, PRIORITES)} ariaLabel="Priorité" /></Field>
             <Field label="Statut"><Select value={tForm.statut || "ouvert"} onChange={(v) => setT("statut", v)} options={opt(TICKET_STATUT_LABEL, TICKET_STATUTS)} ariaLabel="Statut" /></Field>
