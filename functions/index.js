@@ -4222,7 +4222,16 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     const { toXof } = require("./lib/fx");
     const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
     const known = new Set();
-    (await db.collection("bcLines").select("bcNumber", "source").get()).forEach((d) => {
+    // Lecture BORNÉE (MAX_SCAN) : le `known` garantit l'absence de double-compte du SOA (ADR-051). Si bcLines
+    // dépasse le plafond, on REFUSE l'ingestion BC (fail-safe, jamais silencieux) plutôt que de bâtir un `known`
+    // tronqué → un BC comptable au-delà du cap deviendrait invisible et un BC Odoo de même N° le doublonnerait.
+    const bcSnap = await db.collection("bcLines").select("bcNumber", "source").limit(MAX_SCAN + 1).get();
+    if (bcSnap.size > MAX_SCAN) {
+      logger.error("odooWebhook BC : bcLines dépasse MAX_SCAN — ingestion refusée (risque de double-compte SOA)", { size: bcSnap.size });
+      res.status(503).json({ error: "bcLines trop volumineux pour garantir l'unicité des BC — contactez l'administrateur" });
+      return;
+    }
+    bcSnap.forEach((d) => {
       const v = d.data() || {};
       if (v.bcNumber && v.source !== "odoo") { known.add(bcDom.bcKey(v.bcNumber, safeId)); known.add(idBcKey(v.bcNumber)); }
     });
