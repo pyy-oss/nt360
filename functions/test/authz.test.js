@@ -37,6 +37,15 @@ describe("authz — validation de matrice (anti-DoS RBAC)", () => {
   it("accepte une matrice bien formée", () => {
     expect(validateMatrix(M).ok).toBe(true);
   });
+  it("accepte les rôles personas (finance/directeur_contrats/data_steward) — audit P2-5", () => {
+    expect(validateMatrix({ finance: { facturation: "write", rentabilite: "write" } }).ok).toBe(true);
+    expect(validateMatrix({ directeur_contrats: { maintenance: "write" } }).ok).toBe(true);
+    expect(validateMatrix({ data_steward: { import: "write" } }).ok).toBe(true);
+    // Sûr par défaut : un rôle sans ligne de matrice résout à « none » partout.
+    expect(resolveLevel({}, "finance", "facturation")).toBe("none");
+    expect(resolveLevel({ finance: { facturation: "write" } }, "finance", "facturation")).toBe("write");
+    expect(resolveLevel({ finance: { facturation: "write" } }, "finance", "rentabilite")).toBe("none");
+  });
   it("rejette rôle inconnu / niveau invalide / structure invalide / vide", () => {
     expect(validateMatrix({ intrus: { overview: "read" } }).ok).toBe(false);
     expect(validateMatrix({ commercial: { overview: "admin" } }).ok).toBe(false);

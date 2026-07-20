@@ -24,6 +24,7 @@ const canWrite = (can: (m: string) => Level, m: string) => can(m) === "write";
 const ROLE_LABEL: Record<string, string> = {
   direction: "Direction", commercial_dir: "Directeur commercial", commercial: "Commercial",
   pmo: "PMO", achats: "Achats", lecture: "Lecture seule",
+  assistante: "Assistante", finance: "Finance (DF)", directeur_contrats: "Directeur contrats", data_steward: "Data-steward",
 };
 
 const PARCOURS: Parcours[] = [

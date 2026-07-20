@@ -284,7 +284,7 @@ async function rateLimit(uid, kind, maxPerWindow, windowMs) {
 }
 
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
-const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
+const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture", "finance", "directeur_contrats", "data_steward"];
 
 exports.setUserRole = onCallG("setUserRole", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");

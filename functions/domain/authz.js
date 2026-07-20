@@ -2,7 +2,10 @@
 // MIROIR de web/src/lib/perm.ts (garder aligné) : direction = write partout ; sinon valeur de la
 // matrice, `none` par défaut. Rend l'autorisation des callables gouvernée par la MÊME source que les
 // Security Rules et le front (matrice éditable via Habilitations), au lieu de listes de rôles figées.
-const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture"];
+// Rôles nommés par persona (audit P2-5) : + finance (DF), directeur_contrats, data_steward — retire le
+// réflexe « direction » sur-privilégié. Additif : un rôle absent de la matrice résout à « none » partout
+// (aucun accès accidentel ; `direction` inchangé). Les permissions se posent via Habilitations (matrice).
+const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture", "finance", "directeur_contrats", "data_steward"];
 const LEVELS = ["none", "read", "write"];
 
 function resolveLevel(matrix, role, module) {
