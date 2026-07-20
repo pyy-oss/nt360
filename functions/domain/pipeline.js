@@ -242,4 +242,22 @@ function pipeline(opps, asOf, tiers, orders, geleMonths = 6) {
   };
 }
 
-module.exports = { pipeline, closingAnalysis, agingAnalysis, dormantSummary, isActive, isEligible, isoWeek, classifyPhase0, CONFIANCE_MIN };
+// CONFIDENTIALITÉ record-level (audit P1-a, ADR summaries record-scopés) : le summary pipeline est un doc
+// GLOBAL lu par tout rôle habilité « pipeline ». Sous OWD `opportunities === "private"` (isolement attendu),
+// il ne doit PAS divulguer le DÉTAIL NOMINATIF — affaires nommées et conversion d'AUTRES commerciaux : on
+// retire `topOpps` (deals nommés projetés), `byAmConv` (conversion par commercial) et `closing.staleTop`
+// (deals nommés en retard). Les AGRÉGATS anonymes (tot/byStage/byAM/byBU/byMonth…) restent — vue d'équipe.
+// Le détail PROPRE à l'utilisateur passe par les callables record-scopés (forecastRollup/scoreOpportunities).
+// PUR (aucune I/O) → l'appelant (aggregate) fournit `isPrivate` lu depuis config/recordAccess.
+function scopePrivateSummary(s, isPrivate) {
+  if (!isPrivate || !s) return s;
+  return {
+    ...s,
+    topOpps: [],
+    byAmConv: [],
+    closing: s.closing ? { ...s.closing, staleTop: [] } : s.closing,
+    scopedPrivate: true, // le front explique « détail masqué (mode privé) » au lieu de « aucune donnée »
+  };
+}
+
+module.exports = { pipeline, scopePrivateSummary, closingAnalysis, agingAnalysis, dormantSummary, isActive, isEligible, isoWeek, classifyPhase0, CONFIANCE_MIN };
