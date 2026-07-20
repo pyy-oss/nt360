@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 const { wbFromAoa: mkWb } = require("./_wb");
 const { buildTemplateAoa, parseOpportunitiesImport, TEMPLATE_HEADERS } = require("../parsers/oppImport");
-const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("../domain/oppImport");
+const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc, importDateChange } = require("../domain/oppImport");
 
 // Classeur en mémoire depuis une matrice (aoa) — feuille « Opportunités ».
 const wbFromAoa = (aoa) => mkWb("Opportunités", aoa);
@@ -165,5 +165,31 @@ describe("oppImport — dérivations (finalize + create)", () => {
     expect(doc.fp).toBe("FP/2027/2");
     expect(doc.dr).toBe(false);
     expect(doc.weighted).toBe(0);          // montant absent → 0
+  });
+});
+
+describe("importDateChange (Lot 11 — slippage à l'import)", () => {
+  it("closingDate absente du patch (cellule non fournie) → pas de journal", () => {
+    expect(importDateChange({ id: "o1", closingDate: "2026-06-30" }, { amount: 5 }, "u")).toBeNull();
+  });
+  it("closingDate inchangée (même jour) → pas de journal", () => {
+    expect(importDateChange({ id: "o1", closingDate: "2026-06-30" }, { closingDate: "2026-06-30" }, "u")).toBeNull();
+  });
+  it("glissement de date → événement complet (from/to + montant/étape/AM/catégorie hérités)", () => {
+    const cur = { id: "o1", closingDate: "2026-06-30", amount: 100, am: "Awa", stage: 3, forecastCategory: "commit", client: "ACME" };
+    const dc = importDateChange(cur, { closingDate: "2026-09-30" }, "u1");
+    expect(dc).toEqual({ oppId: "o1", from: "2026-06-30", to: "2026-09-30", amount: 100, am: "Awa", stage: 3, forecastCategory: "commit", client: "ACME", uid: "u1" });
+  });
+  it("les champs modifiés par le patch priment sur la valeur courante", () => {
+    const cur = { id: "o1", closingDate: "2026-06-30", amount: 100, am: "Awa", stage: 3 };
+    const dc = importDateChange(cur, { closingDate: "2026-09-30", amount: 200, stage: 4, am: "Ben" }, "u1");
+    expect(dc.amount).toBe(200);
+    expect(dc.stage).toBe(4);
+    expect(dc.am).toBe("Ben");
+  });
+  it("passage à sans-date (closingDate vidée) est un glissement journalisé", () => {
+    const dc = importDateChange({ id: "o1", closingDate: "2026-06-30" }, { closingDate: null }, "u");
+    expect(dc).not.toBeNull();
+    expect(dc.to).toBeNull();
   });
 });

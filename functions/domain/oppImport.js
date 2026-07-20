@@ -107,4 +107,29 @@ function buildCreateDoc(values, fp, id, srcOppId) {
   };
 }
 
-module.exports = { MUTABLE_KEYS, sameField, planOpportunityImport, finalizeUpdatePatch, buildCreateDoc };
+/**
+ * Décide s'il faut JOURNALISER un glissement de D Prev (closingDate) pour une mise à jour d'import → alimente
+ * le slippage (summaries/oppSlippage), à PARITÉ avec patchOpportunity/upsertOpportunity. Renvoie l'événement
+ * à écrire (mêmes champs que recordOppDateChange) ou `null` si la date n'a pas changé. PUR (aucun I/O).
+ * Lot 11 : sans ce journal, le slippage était aveugle aux mouvements de date issus des imports (voie dominante).
+ * @param {object} cur   opp courante (Firestore)
+ * @param {object} patch patch finalisé appliqué (contient closingDate/amount/am/stage/forecastCategory si modifiés)
+ * @param {string} uid   auteur de l'import
+ */
+function importDateChange(cur, patch, uid) {
+  const c = cur || {}, p = patch || {};
+  if (p.closingDate === undefined) return null; // la cellule n'était pas dans le fichier → date jamais touchée
+  const toD = String(p.closingDate || "").slice(0, 10);
+  const fromD = String(c.closingDate || "").slice(0, 10);
+  if (toD === fromD) return null; // même jour → pas un glissement
+  return {
+    oppId: c.id || c.oppId || null, from: c.closingDate || null, to: p.closingDate || null,
+    amount: p.amount !== undefined ? p.amount : (Number(c.amount) || 0),
+    am: p.am !== undefined ? p.am : (c.am || null),
+    stage: p.stage !== undefined ? p.stage : (Number(c.stage) || 0),
+    forecastCategory: p.forecastCategory !== undefined ? p.forecastCategory : (c.forecastCategory || null),
+    client: c.client || null, uid: uid || null,
+  };
+}
+
+module.exports = { MUTABLE_KEYS, sameField, planOpportunityImport, finalizeUpdatePatch, buildCreateDoc, importDateChange };
