@@ -3,6 +3,44 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-048 — Un onglet Admin « Intégration » dédié regroupe les branchements externes (webhooks, API, notifications), sorti d'Habilitations
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« un sous-onglet Intégration dédié dans Admin »)
+
+### Contexte
+La page Habilitations portait deux rubriques hétérogènes à sa vocation (rôles/droits) : « Intégrations API &
+automatisation » (webhook entrant Odoo, webhook sortant, API REST publique + clés, champs custom,
+automatisations) et « Notifications » (Slack/Teams, e-mail Office 365). Après le départ de ClickUp vers son
+cockpit (ADR-047), ces cartes gagnent à vivre dans un point d'entrée dédié aux intégrations.
+
+### Décision
+- **Relocalisation présentationnelle** (patron ADR-037/044/045/047) : les 7 cartes (`OdooWebhookCard`,
+  `OutboundWebhookCard`, `ApiKeysCard`, `CustomFieldsCard`, `AutomationCard`, `NotificationCard`,
+  `EmailNotifyCard`) restent DÉFINIES dans `web/src/modules/admin.tsx` (désormais `export`) et sont rendues
+  par un nouvel écran `web/src/modules/integration.tsx` (onglet Admin « Intégration »).
+- **Garde direction-only STRICTEMENT conservée** : `integration.tsx` ne rend les cartes que si
+  `useClaims().role === "direction"` (identique à l'ancienne garde d'Habilitations, qui portait déjà ces
+  cartes sous condition direction). **Aucun élargissement** de qui configure les intégrations (URLs/secrets
+  sensibles : webhooks Odoo/sortant, clés API). Callables et droits inchangés — l'onglet réutilise la clé de
+  droit `habilitations`.
+- Habilitations : les deux rubriques sont retirées (renvoi en commentaire vers Admin › Intégration). La
+  rubrique « Réglages de calcul » (projection, seuils d'alerte, staffing, dédoublonnage) reste sur place.
+
+### Conséquences
+- **Strictement additif** : aucun callable/droit/schéma modifié ; seul l'emplacement de l'UI change. Le
+  nouvel écran est lazy → le chunk d'entrée ne porte que l'entrée de nav.
+- Budget bundle : l'accumulation d'entrées de nav (onglets Admin) porte le chunk d'entrée à ~120,1 KB. Le
+  garde-fou `check-bundle.mjs` passe de 120→122 KB — **son rôle reste intact** (bloquer un import STATIQUE
+  lourd qui devrait être lazy) ; la hausse ne vient pas d'un import lourd mais du cumul d'entrées de nav.
+
+### Ce qu'on saura dans six mois
+Si l'onglet « Intégration » se remplit de configs supplémentaires, le cumul d'entrées de nav pourrait
+re-tendre le budget → surveiller `check-bundle.mjs` et découper si nécessaire.
+
+---
+
 ## ADR-047 — La configuration + les actions ClickUp vivent dans le COCKPIT ClickUp, pas dans Habilitations
 
 - **Date :** 2026-07-20

@@ -84,25 +84,15 @@ export const Habilitations: FC<Props> = () => {
       {isDirection && <SoaFeatureCard />}
       {isDirection && <SecurityCard users={users} />}
 
-      {/* Paramètres d'intégration API : Odoo (webhook entrant), webhook sortant, API REST publique (clés),
-          champs custom, automatisations. La configuration + les actions ClickUp sont DÉPLACÉES dans le
-          cockpit ClickUp (ADR-047) — même garde direction-only. */}
-      {isDirection && <Rubrique>Intégrations API &amp; automatisation</Rubrique>}
-      {isDirection && <OdooWebhookCard />}
-      {isDirection && <OutboundWebhookCard />}
-      {isDirection && <ApiKeysCard />}
-      {isDirection && <CustomFieldsCard />}
-      {isDirection && <AutomationCard />}
+      {/* Intégrations API (Odoo/webhook sortant/API publique/champs custom/automatisations) + Notifications
+          (Slack/Teams, e-mail Office 365) : DÉPLACÉES dans l'onglet dédié Admin › Intégration (ADR-048) —
+          même garde direction-only. La config ClickUp est dans le cockpit ClickUp (ADR-047). */}
 
       {isDirection && <Rubrique>Réglages de calcul</Rubrique>}
       {isDirection && <ProjectionConfigCard />}
       {isDirection && <AlertThresholdsCard />}
       {isDirection && <StaffingTargetsCard />}
       {isDirection && <DedupeCard />}
-
-      {isDirection && <Rubrique>Notifications</Rubrique>}
-      {isDirection && <NotificationCard />}
-      {isDirection && <EmailNotifyCard />}
 
       {/* Normalisation clients (alias + quasi-doublons) : DÉPLACÉE dans l'écran dédié Référentiels >
           Normalisation clients (module clientnorm). Référentiels transverses (Devises/FX, Project Managers,
@@ -345,7 +335,7 @@ function AlertThresholdsForm({ initial }: { initial: AlertThresholds }) {
 
 // Notifications d'alerte (config/notifications) : pousse les alertes ≥ seuil vers un webhook
 // entrant Slack/Teams (digest quotidien 07:00). L'URL n'est visible que des habilitations.
-function NotificationCard() {
+export function NotificationCard() {
   const { data, loading } = useDocData<NotificationConfig & { lastSentAt?: any }>("config/notifications");
   if (loading && !data) return null;
   return <NotificationForm key={JSON.stringify({ e: data?.enabled, s: data?.minSeverity, u: data?.webhookUrl })}
@@ -390,7 +380,7 @@ const EMAIL_TRIGGERS: { key: keyof EmailNotifyConfig["triggers"]; label: string 
   { key: "alerts", label: "Alertes critiques (à la direction)" },
   { key: "codir", label: "Bulletin CODIR (hebdomadaire)" },
 ];
-function EmailNotifyCard() {
+export function EmailNotifyCard() {
   const { data, loading } = useDocData<EmailNotifyConfig>("config/emailNotify");
   if (loading && !data) return null;
   return <EmailNotifyForm key={JSON.stringify({ e: data?.enabled, s: data?.sender, t: data?.tenantId })} initial={{
@@ -744,7 +734,7 @@ const AUTOMATION_META: Record<AutomationRuleType, string> = {
   opp_no_nextstep: "Opportunité ouverte sans prochaine action → tâche « Définir la prochaine action »",
   opp_stale: "Opportunité dormante (fantôme) → tâche « Requalifier »",
 };
-function AutomationCard() {
+export function AutomationCard() {
   const { data } = useDocData<{ rules?: AutomationRule[] }>("config/automations");
   const types = Object.keys(AUTOMATION_META) as AutomationRuleType[];
   const [draft, setDraft] = useState<Record<AutomationRuleType, { enabled: boolean; dueInDays: number }> | null>(null);
@@ -776,7 +766,7 @@ function AutomationCard() {
 
 // Clés API (direction) : gestion des clés d'accès à l'API REST publique (/v1). La clé brute n'est
 // affichée QU'UNE fois à la création (le serveur n'en garde que le hash). Scopes read/write.
-function ApiKeysCard() {
+export function ApiKeysCard() {
   const toast = useToast();
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [label, setLabel] = useState("");
@@ -821,7 +811,7 @@ function ApiKeysCard() {
 
 // Champs custom d'opportunité (direction) : définitions sans code (clé dérivée du libellé, type
 // text/number/select). Rendues dans la fiche opportunité. Le serveur valide les valeurs saisies.
-function CustomFieldsCard() {
+export function CustomFieldsCard() {
   const { data } = useDocData<{ fields?: CustomFieldDef[] }>("config/customFields");
   const [draft, setDraft] = useState<CustomFieldDef[] | null>(null);
   const rows = draft || data?.fields || [];
@@ -886,7 +876,7 @@ function StaffingTargetsCard() {
 
 // Webhook sortant (direction) : diffuse les événements métier (opp gagnée, approbation décidée) vers
 // un endpoint tiers. L'URL est sensible (lecture réservée aux habilitations côté rules).
-function OutboundWebhookCard() {
+export function OutboundWebhookCard() {
   const { data } = useDocData<{ url?: string; events?: string[]; enabled?: boolean }>("config/outboundWebhooks");
   const [url, setUrl] = useState<string | null>(null);
   const [ev, setEv] = useState<string[] | null>(null);
@@ -915,7 +905,7 @@ function OutboundWebhookCard() {
 // Webhook ENTRANT Odoo (opportunités / commandes / factures). `config/odooWebhook` n'est PAS lisible côté
 // client (il porte le secret) : l'état est lu via le callable `odooWebhookStatus` (jamais le secret). Le
 // secret partagé est écrit seul (≥ 16 car.) ; laisser vide conserve l'existant. `enabled` = interrupteur (gate).
-function OdooWebhookCard() {
+export function OdooWebhookCard() {
   const [status, setStatus] = useState<{ enabled: boolean; hasSecret: boolean } | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [secret, setSecret] = useState("");
