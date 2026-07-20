@@ -3,6 +3,33 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-052 — Le « DC » Odoo est un identifiant PROPRE additif (attribut `dc`), le N° FP reste la clé de rapprochement
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« DC = identifiant propre en plus du FP »)
+
+### Contexte
+Odoo porte un identifiant « DC/AAAA/NNNN » (ex. n° de commande client Odoo). La demande initiale parlait de
+« rattachement DC → FP ». Après clarification, le DC **n'est pas** un alias ni un remplaçant du FP : c'est une
+**référence externe propre** que chaque objet Odoo porte **en plus** de son N° FP.
+
+### Décision
+- Champ **`dc`** (string) capté **additivement** par les 4 mappers du webhook (`mapOpportunity`, `mapOrder`,
+  `mapInvoice`, `mapBc`) quand Odoo le fournit ; **jamais** utilisé comme clé de rapprochement — le **N° FP
+  (`fpKey`) reste l'unique clé d'affaire**, `plausibleYear`/dédup inchangés.
+- Typé côté front (`Order`/`Invoice`/`Opportunity`.`dc?`) et **affiché en lecture** là où le FP est déjà mis
+  en avant (modale « Corriger la commande » du backlog). Élargissement de l'affichage à d'autres vues au fil
+  du besoin (non deviné).
+
+### Conséquences
+- **Strictement additif** : nouveau champ optionnel ; aucune logique de calcul/rapprochement modifiée ; à
+  drapeau Odoo éteint, rien ne change. Le DC n'entre dans **aucun** agrégat (pas de 2ᵉ clé d'affaire).
+- Si un jour un objet n'a QU'un DC sans FP, ce serait une décision distincte (cf. option écartée « le DC
+  remplace le FP » → ADR dédié requis).
+
+---
+
 ## ADR-051 — Le webhook Odoo alimente les BC fournisseurs (collection `bcLines`) avec priorité « comptable/ClickUp prime »
 
 - **Date :** 2026-07-20

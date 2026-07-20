@@ -687,6 +687,8 @@ function OrderEditor({ row }: { row: Order }) {
       <Modal open={open} onClose={() => setOpen(false)} size="form"
         title={<>Corriger la commande <span className="text-gold">{fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
+        {/* N° DC (réf. externe Odoo, ADR-052) — lecture seule ; le FP reste la clé d'affaire. */}
+        {row.dc && <p className="text-[12px] text-muted mb-2">N° DC (Odoo) : <span className="tabnum text-ink">{row.dc}</span></p>}
         <div className="grid grid-cols-2 gap-3 mt-1">
           <Fld label="CAS"><input className="field !py-1.5" inputMode="decimal" aria-label={`CAS ${fp}`} placeholder="montant" value={cas} onChange={(e) => setCas(e.target.value)} /></Fld>
           <Fld label="RAF"><input className="field !py-1.5" inputMode="decimal" aria-label={`RAF ${fp}`} placeholder="reste à facturer" value={raf} onChange={(e) => setRaf(e.target.value)} /></Fld>
