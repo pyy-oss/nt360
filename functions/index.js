@@ -87,8 +87,15 @@ async function ingestHandler(event) {
       report, ts: FieldValue.serverTimestamp(),
     });
 
-    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-    await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    // Post-traitement BEST-EFFORT (blindage imports) : les données sont DÉJÀ écrites (applyWrites) — un échec
+    // du fisc/recompute ne doit PAS marquer l'ingestion en erreur (le prochain recompute — trigger différé,
+    // mutation, ou planifié — rattrape). Un échec d'ÉCRITURE des données, lui, reste remonté par le catch externe.
+    try {
+      if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+      await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    } catch (re) {
+      logger.error("ingest : recompute post-écriture échoué — données ingérées, agrégats au prochain recompute", { name, message: re && re.message });
+    }
     await logOps({ kind: "ingest", action: "ingest", status: "ok", detail: { name, kinds, rowsOk: report.rowsOk ?? 0 } });
   } catch (e) {
     logger.error("ingest a échoué", { name, message: e && e.message, stack: e && e.stack });
@@ -1059,8 +1066,15 @@ async function runSalesSync(objectKey) {
   const [buf] = await file.download();
   const wb = await readWorkbook(buf);
   const res = await applySalesSync(db, wb);
-  const { recomputeAll } = require("./lib/aggregate");
-  await recomputeAll(db); // recalcul complet : une opp gagnée peut devenir commande (CAS/backlog/rentabilité)
+  // Recompute BEST-EFFORT (blindage) : la synchro (applySalesSync) a DÉJÀ écrit les opps — un échec du
+  // recalcul ne doit pas faire échouer la synchro (le prochain recompute rattrape). Recalcul complet car une
+  // opp gagnée peut devenir commande (CAS/backlog/rentabilité).
+  try {
+    const { recomputeAll } = require("./lib/aggregate");
+    await recomputeAll(db);
+  } catch (re) {
+    logger.error("syncSalesData : recompute post-synchro échoué — opps synchronisées, agrégats au prochain recompute", { message: re && re.message });
+  }
   logger.info("syncSalesData", res);
   return res;
 }
@@ -4830,7 +4844,10 @@ exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, asyn
       uid: req.auth.uid, action: "dedupe", module: "habilitations", entity: "collections",
       entityId: only.join(","), detail: result, ts: FieldValue.serverTimestamp(),
     });
-    await recomputeSummaries();
+    // Recompute BEST-EFFORT (blindage) : les doublons sont DÉJÀ supprimés (batch.commit) — un échec du
+    // recalcul ne doit pas remonter en erreur (le prochain recompute rattrape).
+    try { await recomputeSummaries(); }
+    catch (re) { logger.error("dedupe : recompute post-suppression échoué — doublons supprimés, agrégats au prochain recompute", { message: re && re.message }); }
   }
   return { ok: true, applied: apply, result };
 });
@@ -4934,8 +4951,14 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
     uid: req.auth.uid, action: "import_legacy", module: "import", entity: "backup", entityId: String(writes.length),
     detail: { written: writes.length, force: req.data?.force === true }, ts: FieldValue.serverTimestamp(),
   });
-  const { recomputeAll } = require("./lib/aggregate");
-  await recomputeAll(db);
+  // Recompute BEST-EFFORT (blindage) : la restauration a DÉJÀ écrit les docs — un échec du recalcul ne doit
+  // pas faire échouer l'import legacy (le prochain recompute rattrape).
+  try {
+    const { recomputeAll } = require("./lib/aggregate");
+    await recomputeAll(db);
+  } catch (re) {
+    logger.error("importLegacyBackup : recompute post-restauration échoué — docs restaurés, agrégats au prochain recompute", { message: re && re.message });
+  }
   return { ok: true, written: writes.length };
 });
 
