@@ -41,8 +41,12 @@ const num = (v) => {
   const c = s.lastIndexOf(","), d = s.lastIndexOf(".");
   let dec = ""; // séparateur décimal retenu ("" = aucun, tout est millier)
   if (c > -1 && d > -1) dec = c > d ? "," : "."; // le séparateur le plus à droite = décimal
-  else if (c > -1) dec = ((s.match(/,/g) || []).length === 1 && /,\d{1,2}$/.test(s)) ? "," : "";
-  else if (d > -1) dec = ((s.match(/\./g) || []).length === 1 && /\.\d{1,2}$/.test(s)) ? "." : "";
+  // Séparateur UNIQUE : décimal si 1-2 chiffres (ex. « 12,5 ») OU 4+ chiffres (float calculé, ex.
+  // « 7906306.3352601165 ») — un GROUPE de milliers fait EXACTEMENT 3 chiffres, donc seul le cas « .ddd »
+  // reste ambigu et est traité comme millier. Sans le « 4+ », un montant Excel à décimales longues voyait son
+  // « . » pris pour un séparateur de milliers et RETIRÉ → montant ×10^(décimales) (corruption « ×1 milliard »).
+  else if (c > -1) dec = ((s.match(/,/g) || []).length === 1 && /(,\d{1,2}|,\d{4,})$/.test(s)) ? "," : "";
+  else if (d > -1) dec = ((s.match(/\./g) || []).length === 1 && /(\.\d{1,2}|\.\d{4,})$/.test(s)) ? "." : "";
   if (dec) s = s.replace(dec === "," ? /\./g : /,/g, "").replace(dec, ".");
   else s = s.replace(/[.,]/g, ""); // aucun décimal ⇒ tous les séparateurs sont des milliers
   const n = parseFloat(s);
