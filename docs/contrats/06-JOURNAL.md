@@ -1797,3 +1797,17 @@ Hors périmètre : factures + cancelInvoices (non demandés).
 
 **Vérifs.** 1261 functions au vert (dont 4 purgePlan) ; tsc propre ; bundle ≤ 122 ; no-undef (159) +
 deploy-targets (190) OK.
+
+## Purge — extension anti-orphelins : activités & approbations (post-audit ADR-053) — 2026-07-20
+
+**Constat (audit inline).** Le purge des opportunités vidait opps + historique + overlays mais PAS les
+satellites top-level rattachés par enregistrement : `activities` (timeline) et `approvals` (workflow). Ids
+déterministes → au ré-import, ces orphelins se ré-attachaient à l'opp fraîche (timeline/approbations périmées).
+
+**Fait.** Suppression FILTRÉE (jamais toute la collection) : opportunités → activities(relatedType=opportunity)
++ approvals(entityType=opportunity) ; P&L → approvals(entityType=order). Comptes/BC/contrats/astreintes
+PRÉSERVÉS. `purgePlan` étendu (champ `filtered`, dédup par collection|field|value) + helper `purgeColWhere`
+(query bornée). Front : libellés de la carte Purge mis à jour. Tests purgePlan étendus (3 cas). ADR-053 complété.
+
+**Vérifs.** 1261 functions au vert ; no-undef (159) + firestore-indexes (les `where` mono-champ n'exigent aucun
+index composite) ; tsc propre ; bundle ≤ 122.

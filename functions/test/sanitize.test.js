@@ -4,25 +4,36 @@ const { purgePlan } = require("../handlers/sanitize");
 const { FieldValue } = require("firebase-admin/firestore");
 
 describe("purgePlan — plan de purge (table rase, ADR-053)", () => {
-  it("P&L seul → orders + chunks + overlays P&L", () => {
+  it("P&L seul → orders + chunks + overlays P&L + approbations de commandes (filtré)", () => {
     const p = purgePlan(["orders"]);
     expect(p.targets).toEqual(["orders"]);
     expect(p.collections).toEqual(["orders", "commandesRows", "billingMilestones"]);
     expect(p.configDocs).toContain("config/cancelOrders");
     expect(p.configDocs).toContain("config/orderCasOverride");
     expect(p.configDocs).toContain("config/fpAliases");
+    // approbations de commandes uniquement ; PAS d'activités (elles ne concernent pas les commandes)
+    expect(p.filtered).toEqual([{ collection: "approvals", field: "entityType", value: "order" }]);
   });
-  it("Opportunités seul → opps + historique d'étapes + fpAliases", () => {
+  it("Opportunités seul → opps + historique + fpAliases + activités & approbations d'opp (filtré)", () => {
     const p = purgePlan(["opportunities"]);
     expect(p.collections).toEqual(["opportunities", "oppHistory", "oppDateHistory"]);
     expect(p.configDocs).toEqual(["config/fpAliases"]);
+    expect(p.filtered).toEqual([
+      { collection: "activities", field: "relatedType", value: "opportunity" },
+      { collection: "approvals", field: "entityType", value: "opportunity" },
+    ]);
   });
-  it("les deux cibles → union, fpAliases (partagé) DÉDUPLIQUÉ une seule fois", () => {
+  it("les deux cibles → union, fpAliases DÉDUPLIQUÉ, filtres distincts (opp + order) conservés", () => {
     const p = purgePlan(["orders", "opportunities"]);
     expect(p.targets).toEqual(["orders", "opportunities"]);
     expect(p.configDocs.filter((c) => c === "config/fpAliases")).toHaveLength(1);
     expect(p.collections).toContain("orders");
     expect(p.collections).toContain("opportunities");
+    // 3 suppressions filtrées distinctes : approvals/order + activities/opp + approvals/opp
+    expect(p.filtered).toHaveLength(3);
+    expect(p.filtered).toContainEqual({ collection: "approvals", field: "entityType", value: "order" });
+    expect(p.filtered).toContainEqual({ collection: "activities", field: "relatedType", value: "opportunity" });
+    expect(p.filtered).toContainEqual({ collection: "approvals", field: "entityType", value: "opportunity" });
   });
   it("cibles invalides/inconnues ignorées ; doublons compactés ; entrée vide → plan vide", () => {
     expect(purgePlan(["invoices", "bidon"]).targets).toEqual([]);

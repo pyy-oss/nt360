@@ -17,6 +17,12 @@ Les anciens fichiers d'import contiennent beaucoup d'incohérences ; l'import é
 - **Périmètre = table rase (toutes sources)** ; deux cibles indépendantes (cases à cocher) : `orders` (P&L) et/ou `opportunities`.
 - **Satellites + overlays purgés avec la cible** (choix Direction) : orders → `commandesRows` (chunks dérivés), `billingMilestones`, overlays `cancelOrders`/`orderCasOverride`/`fpAliases` ; opportunities → `oppHistory`/`oppDateHistory` + `fpAliases`. **`fpAliases` (partagé opp↔P&L) est dédupliqué** par la fonction PURE `purgePlan(targets)` (testée).
 - Suppression **paginée** (400/lot, garde-fou `PURGE_MAX = 500 000`). **Recompute best-effort** derrière (régénère les dérivés ; un échec ne remonte pas en « internal »).
+- **Satellites rattachés par enregistrement — suppression FILTRÉE** (anti-orphelins, ajout post-audit) : les
+  `activities` (`relatedType == "opportunity"`) et `approvals` (`entityType == "opportunity"`) sont vidées avec
+  les opportunités ; les `approvals` (`entityType == "order"`) avec le P&L. **Jamais** toute la collection : les
+  activités de comptes et les approbations d'autres entités (`bcLine`/`mnt_contrat`/`astreinte`) sont préservées.
+  Motif : les ids d'enregistrement étant déterministes, des activités/approbations orphelines se ré-attacheraient
+  à un ré-import (timeline/approbations périmées sur une donnée fraîche).
 - Front : carte **« Zone dangereuse › Purge des données »** (Admin), rendue Direction-only, bouton rouge n'apparaissant qu'après sélection d'une cible **et** saisie de `« PURGER »`, avec re-confirmation `DangerBtn`.
 
 ### Conséquences
