@@ -43,6 +43,11 @@ function mapOpportunity(rec) {
   // une date curatée (closingDate = bucket période ; dateCreation = create_date Odoo, distinct du `createdAt`).
   { const d = isoDay(r.closingDate); if (d) doc.closingDate = d; }
   { const d = isoDay(r.dateCreation || r.createdDate); if (d) doc.dateCreation = d; }
+  // MB prévisionnelle (marge brute en %) : Odoo sait la fournir — miroir de la colonne « MB » du LIVE Excel
+  // (mbPrev). Écrite SEULEMENT si présente ET numérique (garde-chiffre, comme numPresent) → n'écrase pas un
+  // mbPrev déjà saisi et n'y met pas 0 sur un « N/A ». Bornée [0,100] (échelle canonique du % de marge).
+  { const mb = r.mbPrev != null ? r.mbPrev : (r.mb != null ? r.mb : (r.margin != null ? r.margin : r.marge));
+    if (present(mb) && (typeof mb === "number" || /[0-9]/.test(String(mb)))) doc.mbPrev = Math.min(100, Math.max(0, num(mb))); }
   if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
   return { ok: true, object: "opportunity", collection: "opportunities", key: { fp, odooId: doc.odooId }, doc };
 }

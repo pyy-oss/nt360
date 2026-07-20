@@ -57,6 +57,7 @@ Rapprochement : par **N° FP** (canonicalisé), sinon par **odooId**, sinon cré
 | `amount` | number | Montant HT (entier XOF). |
 | `stage` | number | Étape 1–6 (bornée). |
 | `probability` | number | IdC en **%** (0–100) ; défaut selon l'étape. |
+| `mbPrev` | number | **MB prévisionnel** = marge brute en **%** (0–100, bornée). Alias acceptés : `mb`, `margin`, `marge`. Miroir de la colonne « MB » du LIVE Excel — sert de repli de marge au carnet (ADR-056). Écrit **seulement si fourni ET numérique** (n'écrase pas une valeur saisie ; « N/A » ignoré). |
 | `closingDate` | string | `AAAA-MM-JJ` (dates sentinelles rejetées). |
 | `dateCreation` | string | Date de création Odoo (`create_date`), `AAAA-MM-JJ` (alias `createdDate`). |
 
@@ -241,6 +242,7 @@ def map_lead(l):
         "amount": l.expected_revenue or 0,
         "stage": STAGE_MAP.get(l.stage_id.name, 1),
         "probability": l.probability or 0,                # IdC en % (0-100)
+        "mbPrev": l.margin_percent or None,               # MB prévisionnel = marge brute en % (0-100), optionnel
         "closingDate": _iso(l.date_deadline),
         "dc": _dc(l),                                     # réf. externe DC (optionnel, en plus du FP)
         "dateCreation": _iso(l.create_date),              # date de création Odoo

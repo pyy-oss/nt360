@@ -24,6 +24,14 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(m2.doc.designation).toBe("TMA");
     expect(m2.doc.dateCreation).toBe("2026-02-01");
   });
+  it("opportunité : mappe le MB prévisionnel (% de marge) fourni par Odoo → mbPrev borné [0,100]", () => {
+    expect(mapOpportunity({ odooId: "crm.lead:10", client: "X", mbPrev: 23.42 }).doc.mbPrev).toBeCloseTo(23.42, 2);
+    // alias tolérés + bornage + garde-chiffre (« N/A » ≠ 0)
+    expect(mapOpportunity({ odooId: "crm.lead:11", client: "X", mb: 20 }).doc.mbPrev).toBe(20);
+    expect(mapOpportunity({ odooId: "crm.lead:12", client: "X", margin: 150 }).doc.mbPrev).toBe(100); // borné haut
+    expect(mapOpportunity({ odooId: "crm.lead:13", client: "X", mbPrev: "N/A" }).doc).not.toHaveProperty("mbPrev");
+    expect(mapOpportunity({ odooId: "crm.lead:14", client: "X" }).doc).not.toHaveProperty("mbPrev"); // absent → non écrit
+  });
   it("opportunité sans fp NI odooId → rejet (clé de rapprochement manquante)", () => {
     expect(mapOpportunity({ client: "ACME", amount: 500 }).ok).toBe(false);
   });
