@@ -1811,3 +1811,55 @@ PRÉSERVÉS. `purgePlan` étendu (champ `filtered`, dédup par collection|field|
 
 **Vérifs.** 1261 functions au vert ; no-undef (159) + firestore-indexes (les `where` mono-champ n'exigent aucun
 index composite) ; tsc propre ; bundle ≤ 122.
+
+## Webhook BC entrant — champs additifs + rapprochement DC → N° FP (ADR-054) — 2026-07-20
+
+**Contexte.** « Mettre à jour le webhook entrant pour les BC » — 3 axes retenus par la Direction : champs
+manquants, doc Odoo (mapping), rôle du DC dans le rapprochement.
+
+**Fait.**
+- **Champs (grounded, non inventés — issus du type `BcLine` déjà consommé en aval)** : `mapBc` capte désormais
+  `etaContrat` (ETA contractuelle ≠ `etaReel`, utilisée par `clickupBc.js`), `updateDate`, `comment`. Additif
+  (patron ADR-049) : date invalide → `null`, champ absent → omis (pas d'écrasement au merge).
+- **Rapprochement DC → N° FP** : helper PUR `resolveBcFp(doc, dcAliasMap)` (le FP explicite d'Odoo PRIME ;
+  l'overlay n'agit que si le FP manque). Handler `odooWebhook` charge `config/dcAliases` dans `bcCtx` et
+  l'applique avant l'upsert BC. Callable `setDcAlias` (miroir `setFpAlias`, droit « import », audité, recompute).
+  Front : carte *Assainissement → Rapprochement DC → N° FP* (miroir `FpReconcileCard`) + wrapper `setDcAlias`.
+  Règle Firestore `config/dcAliases` lisible sous `canRead('import')`. `deployed-functions.txt` : +`setDcAlias`.
+- **Doc** `docs/ODOO_WEBHOOK.md` : lignes du contrat BC (etaContrat/updateDate/comment) + section rapprochement
+  DC + exemple `map_bc` mis à jour.
+
+**Décision de modèle (ADR-054).** DC = overlay curé `dcAliases` (additif, réversible, humain dans la boucle),
+PAS un changement de modèle (lien BC↔commande client par DC, ou DC = sous-affaire) — écartés faute de donnée et
+par « additif uniquement ». Overlay vide par défaut → comportement strictement inchangé (cas normal Odoo FP+DC).
+
+**Vérifs.** odooSync.test.js au vert (19 tests, dont resolveBcFp 3 cas + champs additifs) ; no-undef (159) +
+deploy-targets (191) OK. tsc + bundle : à valider en CI.
+
+## Remédiation audit intégrité FP + systèmes de correction (ADR-055) — 2026-07-20
+
+**Audit (5 auditeurs lecture seule + vérification manuelle).** Cœur de calcul FP SAIN : fpKey + fpAliases
+appliqués partout (mergeCommandes, aggregate, dataQuality/alerts, miroir front overviewCalc), plausibleYear
+discipliné, parité fpKey/plausibleYear back↔front identique au caractère près. Défauts concentrés dans les
+overlays de correction et l'ingestion Odoo.
+
+**Corrigé (choix Direction « tout, HAUTE→MOYENNE ») :**
+- **H1** setFpAlias/setDcAlias : `merge:true` → `merge:false` — la suppression d'un alias (map) était
+  silencieusement inopérante (clé préservée au merge récursif → alias « supprimé » toujours appliqué). Bug
+  de prod pré-existant sur setFpAlias. Vérifié en lecture directe du code.
+- **H2 + M1** mapBc/mapOpportunity/mapInvoice : gate sur le RÉSULTAT de fpKey/isoDay (clé omise si null) au
+  lieu de l'input brut `present` — un fp placeholder / une date invalide écrivaient `null` qui écrasait au
+  merge une valeur curatée (BC orphelin, correction setInvoiceFp perdue). Patron déjà en place dans mapOrder.
+- **M2** dcAliases rendu RÉTROACTIF : appliqué au recompute (aggregate.js) + correctionQueue, pas seulement à
+  l'ingestion webhook. resolveBcFp garde la primauté d'un FP existant.
+- **M3** reconClient : exclut annulés (safeId(fp)/id) + fantômes(stale) + périmées(aged) + dédup salesData/
+  saisie — assiette alignée sur aggregate/correctionQueue (ne proposait plus de rapprocher vers un FP annulé).
+- **M4** capacity.demandDaysOf : retrait du repli `o.weighted` linéaire persisté (interdit CLAUDE.md) — pw
+  tiéré puis repli montant×IdC.
+
+**Tests.** Assertions mises à jour (clé omise vs null ; weighted ignoré) + nouveaux cas (fp placeholder omis,
+resolveBcFp). Suite functions **1265/1265**. no-undef (159) + deploy-targets (191) + firestore-indexes OK.
+
+**Non corrigé (FAIBLE/INFO, signalés) :** parité buildFpAliasResolver undefined/null (inoffensif, non testé
+front) ; fiscalYearFromOrders non borné (défense en profondeur) ; RBAC config/dcAliases import vs bc ;
+hypothèse 1 DC→1 FP ; dedupe/reconClient recompute direct ; trous de test parité croisée front/back.

@@ -136,6 +136,7 @@ setClickupConfig
 setClientAliases
 setCustomFields
 setSupplierAliases
+setDcAlias
 setFpAlias
 setFxRates
 setInvoiceFp

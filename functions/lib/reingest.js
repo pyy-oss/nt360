@@ -143,12 +143,16 @@ async function reingestBucket({ db, storage, bucketName, prefix }) {
     const currentFy = fiscalYearFromOrders(snap.docs.map((d) => d.data()));
     if (currentFy > 0) await db.doc("config/fiscal").set({ currentFy }, { merge: true });
   }
-  // Recalcul des agrégats (sans-op si le module n'est pas présent).
+  // Recalcul des agrégats (sans-op si le module n'est pas présent). BEST-EFFORT (blindage) : les données sont
+  // DÉJÀ ré-écrites (applyWrites plus haut) → une erreur de recompute ne doit PAS faire échouer le reingest
+  // (le prochain recompute rattrape). MODULE_NOT_FOUND = agrégat absent (émulateur/test) = normal, silencieux.
   try {
     const { recomputeAll } = require("./aggregate");
     await recomputeAll(db);
   } catch (e) {
-    if (e.code !== "MODULE_NOT_FOUND") throw e;
+    if (e.code !== "MODULE_NOT_FOUND") {
+      try { require("firebase-functions").logger.error("reingest : recompute post ré-écriture échoué — données ré-écrites, agrégats au prochain recompute", { message: e && e.message }); } catch (_) { /* logger indisponible (test) */ }
+    }
   }
 
   return { objectsScanned: targets.length, objectsIngested: ingested, objectsFailed: failed, kinds, rowsIn, rowsOk, rowsSkipped, files: fileReports };

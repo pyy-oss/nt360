@@ -38,10 +38,11 @@ function mapOpportunity(rec) {
     designation: str(r.designation || r.name || r.affaire),
     amount, stage, stageLabel: STAGE_LABEL[stage] || String(stage),
     probability, weighted: oppWeighted(amount, probability),
-    closingDate: isoDay(r.closingDate),
-    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
-    dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
+  // Dates : gater sur le RÉSULTAT d'isoDay (null si hors regex/plausibleYear) — sinon null écraserait au merge
+  // une date curatée (closingDate = bucket période ; dateCreation = create_date Odoo, distinct du `createdAt`).
+  { const d = isoDay(r.closingDate); if (d) doc.closingDate = d; }
+  { const d = isoDay(r.dateCreation || r.createdDate); if (d) doc.dateCreation = d; }
   if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
   return { ok: true, object: "opportunity", collection: "opportunities", key: { fp, odooId: doc.odooId }, doc };
 }
@@ -87,17 +88,21 @@ function mapInvoice(rec) {
   const r = rec || {};
   const numero = str(r.numero || r.number);
   if (!numero) return { ok: false, error: "facture : 'numero' requis" };
+  const fp = fpKey(r.fp);
   const doc = {
     source: "odoo", odooId: traceId(r),
-    numero, fp: fpKey(r.fp), client: cleanName(r.client),
+    numero, client: cleanName(r.client),
     amountHt: num(r.amountHt), bu: cleanBu(r.bu),
-    date: isoDay(r.date), dueDate: isoDay(r.dueDate),
     paid: r.paid === true || /pay[ée]|régl|encaiss|sold/i.test(str(r.paid)),
-    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
-    dateCreation: isoDay(r.dateCreation || r.createdDate),
   };
+  // fp : gater sur le résultat de fpKey — un fp illisible ne doit PAS écraser au merge une correction posée
+  // par setInvoiceFp (facture rapprochée à la main). Dates idem (null d'isoDay écraserait date/échéance curatées).
+  if (fp) doc.fp = fp;
+  { const d = isoDay(r.date); if (d) doc.date = d; }
+  { const d = isoDay(r.dueDate); if (d) doc.dueDate = d; }
+  { const d = isoDay(r.dateCreation || r.createdDate); if (d) doc.dateCreation = d; } // create_date Odoo, distinct du `createdAt`
   if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre Odoo (ADR-052) — attribut EN PLUS du FP (clé)
-  return { ok: true, object: "invoice", collection: "invoices", id: safeId(numero), key: { fp: doc.fp, odooId: doc.odooId }, doc };
+  return { ok: true, object: "invoice", collection: "invoices", id: safeId(numero), key: { fp: doc.fp || null, odooId: doc.odooId }, doc };
 }
 
 // --- BC fournisseur (ligne de bon de commande) → collection bcLines (ADR-051). Le webhook reçoit un JSON
@@ -111,7 +116,10 @@ function mapBc(rec) {
   if (!bcNumber) return { ok: false, error: "BC : 'bcNumber' (N° BC) requis" };
   const doc = { source: "odoo", bcNumber };
   if (present(traceId(r))) doc.odooId = traceId(r);
-  if (present(r.fp)) doc.fp = fpKey(r.fp);
+  // ADDITIF STRICT (audit intégrité FP) : gater sur le RÉSULTAT de fpKey, PAS sur l'input brut. fpKey rejette
+  // un placeholder (FP/…/0000) ou une forme illisible en renvoyant null ; l'écrire écraserait au merge un FP
+  // correct posé par un envoi antérieur (BC orphelin → coût SOA perdu). null rejeté = clé omise = valeur préservée.
+  { const fp = fpKey(r.fp); if (fp) doc.fp = fp; }
   if (present(r.supplier)) doc.supplier = cleanName(r.supplier);
   if (present(r.customer)) doc.customer = cleanName(r.customer);
   if (present(r.country)) doc.country = str(r.country);
@@ -121,10 +129,28 @@ function mapBc(rec) {
   if (present(r.amount)) doc.amount = Math.max(0, num(r.amount));
   if (present(r.amountXof)) doc.amountXof = Math.max(0, num(r.amountXof)); // contre-valeur SAISIE prioritaire
   if (present(r.status)) doc.statusRaw = str(r.status); // le handler valide contre BC_STAGES (défaut « emis »)
-  if (present(r.eta || r.etaReel)) doc.etaReel = isoDay(r.eta || r.etaReel);
-  if (present(r.dateIn)) doc.dateIn = isoDay(r.dateIn);
+  // Dates : gater sur le RÉSULTAT d'isoDay (null si hors regex OU hors plausibleYear, ex. sentinelle Odoo
+  // 0001-01-01 ou engagement > année+3) — sinon null écraserait la date curatée au merge.
+  { const d = isoDay(r.eta || r.etaReel); if (d) doc.etaReel = d; }
+  { const d = isoDay(r.etaContrat); if (d) doc.etaContrat = d; } // ETA CONTRACTUELLE (engagement) — distincte de l'ETA réelle
+  { const d = isoDay(r.dateIn); if (d) doc.dateIn = d; }
+  { const d = isoDay(r.updateDate); if (d) doc.updateDate = d; } // date de dernière mise à jour côté Odoo
+  if (present(r.comment)) doc.comment = str(r.comment); // note libre (miroir du champ `comment` des bcLines ClickUp)
   if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre (Odoo) — capté additivement, FP reste la clé (Lot DC)
   return { ok: true, object: "bc", collection: "bcLines", key: { bcNumber, fp: doc.fp || null, odooId: doc.odooId || null }, doc };
+}
+
+// --- Rapprochement DC → N° FP (overlay config/dcAliases, ADR-054). Quand Odoo envoie un BC dont le N° FP
+// est absent/placeholder (fpKey l'a rejeté → doc.fp indéfini) mais qui porte un DC connu, on récupère le FP
+// de l'affaire via un overlay CURÉ (même esprit que fpAliases : non destructif, survit aux ré-imports). PUR :
+// l'overlay (I/O) est chargé par le handler et passé ici. Le FP explicite d'Odoo PRIME toujours (cas normal :
+// Odoo envoie FP+DC). Retourne le N° FP canonique à utiliser, ou null si rien ne résout. ---
+function resolveBcFp(doc, dcAliasMap) {
+  const d = doc || {};
+  if (d.fp) return d.fp; // FP fourni par Odoo → prime (déjà canonique via fpKey dans mapBc)
+  const dc = str(d.dc);
+  if (dc && dcAliasMap && dcAliasMap[dc]) return fpKey(dcAliasMap[dc]) || null;
+  return null;
 }
 
 /**
@@ -141,4 +167,4 @@ function mapOdooRecord(object, rec) {
   }
 }
 
-module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc };
+module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc, resolveBcFp };

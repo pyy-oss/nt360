@@ -113,9 +113,18 @@ connus (un `update` partiel ne réécrit pas le reste). Le **statut** ne pose QU
 | `amount` | number | Montant en devise. |
 | `amountXof` | number | Contre-valeur XOF **saisie** (prioritaire sur la conversion). |
 | `status` | string | Engagement : `a_emettre`/`emis`/`livre` (autre valeur → `emis`). |
-| `eta` | string | ETA `AAAA-MM-JJ` (alias `etaReel`). |
+| `eta` | string | ETA **réelle** `AAAA-MM-JJ` (alias `etaReel`). |
+| `etaContrat` | string | ETA **contractuelle** `AAAA-MM-JJ` (engagement, distincte de l'ETA réelle). |
 | `dateIn` | string | Date d'entrée `AAAA-MM-JJ`. |
-| `dc` | string | Identifiant DC propre (Odoo) — capté additivement ; le FP reste la clé de rapprochement. |
+| `updateDate` | string | Date de dernière mise à jour côté Odoo `AAAA-MM-JJ`. |
+| `comment` | string | Note libre (miroir du champ `comment` des lignes BC). |
+| `dc` | string | Identifiant DC propre (Odoo) — capté additivement ; le FP reste la clé de rapprochement. Voir **rapprochement DC** ci-dessous. |
+
+**Rapprochement DC → N° FP (ADR-054).** Cas normal : Odoo envoie **`fp` ET `dc`** → le `fp` fait foi.
+Filet pour les BC dont le `fp` est absent/placeholder (rejeté par `fpKey`) mais qui portent un `dc` connu :
+un overlay curé côté nt360 (`config/dcAliases`, alimenté par un data-steward via l'écran *Assainissement →
+Rapprochement DC → N° FP*) rattache alors le BC à l'affaire. Non destructif, survit aux ré-imports. Le `fp`
+explicite d'Odoo **prime toujours** sur l'overlay.
 
 ## Réponse
 
@@ -277,8 +286,11 @@ def map_bc(p):
         "currency": p.currency_id.name or "XOF",           # converti en XOF côté nt360 (config/fxRates)
         "amount": p.amount_untaxed or 0,
         "status": status,
-        # "eta": _iso(p.date_planned),                     # optionnel : date d'arrivée prévue si dispo
-        "dc": _dc(p),                                      # réf. externe DC (optionnel, en plus du FP)
+        # "eta": _iso(p.date_planned),                     # ETA RÉELLE (date d'arrivée) si dispo
+        # "etaContrat": _iso(p.date_order),                # ETA CONTRACTUELLE (engagement) si dispo
+        # "comment": p.notes or "",                        # note libre éventuelle
+        "updateDate": _iso(p.write_date),                  # date de dernière MàJ Odoo
+        "dc": _dc(p),                                      # réf. externe DC (en plus du FP ; sert de filet de rapprochement)
         "dateCreation": _iso(p.create_date),
     }
 ```

@@ -87,8 +87,15 @@ async function ingestHandler(event) {
       report, ts: FieldValue.serverTimestamp(),
     });
 
-    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-    await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    // Post-traitement BEST-EFFORT (blindage imports) : les données sont DÉJÀ écrites (applyWrites) — un échec
+    // du fisc/recompute ne doit PAS marquer l'ingestion en erreur (le prochain recompute — trigger différé,
+    // mutation, ou planifié — rattrape). Un échec d'ÉCRITURE des données, lui, reste remonté par le catch externe.
+    try {
+      if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+      await recomputeSummaries(); // F3 : recalcul des agrégats impactés
+    } catch (re) {
+      logger.error("ingest : recompute post-écriture échoué — données ingérées, agrégats au prochain recompute", { name, message: re && re.message });
+    }
     await logOps({ kind: "ingest", action: "ingest", status: "ok", detail: { name, kinds, rowsOk: report.rowsOk ?? 0 } });
   } catch (e) {
     logger.error("ingest a échoué", { name, message: e && e.message, stack: e && e.stack });
@@ -1059,8 +1066,15 @@ async function runSalesSync(objectKey) {
   const [buf] = await file.download();
   const wb = await readWorkbook(buf);
   const res = await applySalesSync(db, wb);
-  const { recomputeAll } = require("./lib/aggregate");
-  await recomputeAll(db); // recalcul complet : une opp gagnée peut devenir commande (CAS/backlog/rentabilité)
+  // Recompute BEST-EFFORT (blindage) : la synchro (applySalesSync) a DÉJÀ écrit les opps — un échec du
+  // recalcul ne doit pas faire échouer la synchro (le prochain recompute rattrape). Recalcul complet car une
+  // opp gagnée peut devenir commande (CAS/backlog/rentabilité).
+  try {
+    const { recomputeAll } = require("./lib/aggregate");
+    await recomputeAll(db);
+  } catch (re) {
+    logger.error("syncSalesData : recompute post-synchro échoué — opps synchronisées, agrégats au prochain recompute", { message: re && re.message });
+  }
   logger.info("syncSalesData", res);
   return res;
 }
@@ -1130,8 +1144,17 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
     detail: { kinds, rowsOk, files: files.length }, ts: FieldValue.serverTimestamp(),
   });
 
-  if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-  await recomputeSummaries();
+  // Post-traitement BEST-EFFORT (blindage imports) : les données sont DÉJÀ écrites (applyWrites ci-dessus) —
+  // un échec du fisc/recompute ne doit PAS transformer un import RÉUSSI en « internal » (même piège que
+  // createOrder, cf. recompute best-effort). Recompute DIFFÉRÉ (requestRecompute) comme les autres actions
+  // → la réponse revient en quelques secondes quelle que soit la taille du classeur (plus de faux timeout
+  // client), les agrégats se rafraîchissent via onRecomputeRequest. Un échec est journalisé, pas remonté.
+  try {
+    if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
+    await requestRecompute();
+  } catch (e) {
+    logger.error("importDelta : post-traitement (fisc/recompute) échoué — données importées, agrégats au prochain recompute", { message: e && e.message, stack: e && e.stack });
+  }
   // `files` = détail PAR fichier (kinds reconnus, lignes OK, erreur éventuelle, byKind) — permet à
   // l'UI d'afficher précisément ce qui a été reconnu et la cause d'un éventuel échec par classeur.
   return { ok: true, kinds, rowsIn, rowsOk, rowsSkipped, fileCount: files.length, files };
@@ -1207,9 +1230,44 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
     if (Object.values(map).includes(from)) throw new HttpsError("failed-precondition", `le N° FP ${from} est déjà la cible d'une réconciliation — il ne peut pas devenir une source`);
     map[from] = to;
   }
-  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // merge:FALSE (audit intégrité) : `map` est un OBJET ; avec merge:true Firestore fusionne récursivement et
+  // les clés retirées en mémoire SURVIVENT en base — un alias « supprimé » continuait d'être appliqué au
+  // recompute. Le doc ne contient que {map, updatedAt} → remplacement complet, la suppression prend effet.
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
+    detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
+  });
+  await requestRecompute();
+  return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
+});
+
+// --- RAPPROCHEMENT DC → N° FP (BC fournisseur Odoo) : overlay config/dcAliases (ADR-054), MÊME esprit que
+// setFpAlias mais keyé par le DC (identifiant propre du BC côté Odoo). Filet quand Odoo envoie un BC sans FP
+// résoluble mais avec un DC connu → le handler odooWebhook rattache alors le BC à l'affaire (resolveBcFp).
+// NON destructif, survit aux ré-imports. `from` = DC (chaîne libre, on ne canonise pas — format DC inconnu,
+// on ne l'invente pas) ; `to` = N° FP (fpKey). `to` vide = SUPPRIME l'alias. Droit « import » (data-steward),
+// audité, recompute complet (un BC nouvellement rattaché peut alimenter le carnet coût/SOA). ---
+exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey } = require("./lib/ids");
+  const from = String(req.data?.from == null ? "" : req.data.from).trim();
+  const rawTo = req.data?.to;
+  const to = (rawTo === "" || rawTo == null) ? "" : fpKey(rawTo);
+  if (!from) throw new HttpsError("invalid-argument", "DC source requis");
+  if (rawTo != null && rawTo !== "" && !to) throw new HttpsError("invalid-argument", "N° FP cible invalide (attendu FP/AAAA/NNNNN)");
+  const ref = db.doc("config/dcAliases");
+  const map = { ...(((await ref.get()).data() || {}).map || {}) };
+  if (!to) {
+    if (!(from in map)) throw new HttpsError("not-found", "aucun rapprochement sur ce DC");
+    delete map[from];
+  } else {
+    map[from] = to;
+  }
+  // merge:FALSE (audit intégrité, cf. setFpAlias) : sinon la clé retirée survivrait au merge récursif du champ map.
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
   await requestRecompute();
@@ -1231,16 +1289,22 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits. Scans BORNÉS
   // (R1) sur les TROIS collections (orders/invoices désormais plafonnés comme opps) → mémoire/latence
   // bornées même sur gros volumes ; `capped` remonté pour l'observabilité (troncature JAMAIS silencieuse).
-  const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc] = await Promise.all([
+  const { isAgedLost } = require("./domain/oppLifecycle");
+  const { safeId } = require("./lib/sheets");
+  const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc, cxlODoc, cxlIDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").limit(MAX_SCAN + 1).get(),
-    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo").limit(MAX_SCAN + 1).get(),
+    // stale/source/ageDays/probability : requis pour exclure fantômes/périmées et dédupliquer inter-source
+    // (assiette ALIGNÉE sur le recompute/correctionQueue — sinon le Dossier client sur-compterait, audit intégrité).
+    db.collection("opportunities").select("fp", "client", "amount", "stage", "stageLabel", "designation", "am", "visibleTo", "stale", "source", "ageDays", "probability").limit(MAX_SCAN + 1).get(),
     db.doc("config/fpAliases").get(),
     db.doc("config/clientAliases").get(),
+    db.doc("config/cancelOrders").get(),
+    db.doc("config/cancelInvoices").get(),
   ]);
   const oCap = sliceCapped(ordSnap.docs), iCap = sliceCapped(invSnap.docs), pCap = sliceCapped(oppSnap.docs);
-  const orders = oCap.docs.map((d) => d.data());
-  const invoices = iCap.docs.map((d) => d.data());
+  let orders = oCap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let invoices = iCap.docs.map((d) => ({ id: d.id, ...d.data() }));
   let opps = pCap.docs.map((d) => d.data());
   const capped = oCap.capped || iCap.capped || pCap.capped;
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne rapproche
@@ -1252,6 +1316,17 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
   const aliasResolver = buildFpAliasResolver((aliasDoc.data() || {}).map || {});
   const fpKeyOf = (fp) => fpKey(aliasResolver(fp)); // clé FP canonique, alias de réconciliation appliqués
   const normClient = buildClientResolver((clientDoc.data() || {}).pairs || []);
+  // ASSIETTE ALIGNÉE sur le recompute (aggregate.js) / le Centre de correction (correctionQueue) — sinon le
+  // Dossier client proposait de rapprocher vers un FP ANNULÉ et comptait des opps fantômes/périmées/doublons
+  // que le reste du système ignore (audit intégrité, systèmes de correction). Ordre identique : dédup inter-
+  // source, puis exclusion fantômes(stale)/périmées(aged), puis annulations (commandes par safeId(fp), factures par id).
+  const salesFps = new Set(opps.filter((o) => o.source === "salesData" && fpKeyOf(o.fp)).map((o) => fpKeyOf(o.fp)));
+  opps = opps.filter((o) => !(o.source === "saisie" && fpKeyOf(o.fp) && salesFps.has(fpKeyOf(o.fp))));
+  opps = opps.filter((o) => o.stale !== true && !isAgedLost(o));
+  const itemsOf = (snap) => new Set((((snap.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
+  const cancelledOrders = itemsOf(cxlODoc), cancelledInvoices = itemsOf(cxlIDoc);
+  orders = orders.filter((o) => !cancelledOrders.has(safeId(o.fp)));
+  invoices = invoices.filter((i) => !cancelledInvoices.has(i.id));
 
   const wanted = String(req.data?.client || "").trim();
   if (wanted) {
@@ -1289,14 +1364,15 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
   // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
   // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
-  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc] = await Promise.all([
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc, dcAliasDoc] = await Promise.all([
     // raf/designation : requis par mergeCommandes (RAF curaté + affaire) pour aligner l'assiette « commandes ».
     db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "raf", "designation", "source").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").limit(MAX_SCAN + 1).get(),
     // source/ageDays/probability : requis par isAgedLost (sinon opps_agees toujours vide). expenseType :
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
     db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
-    db.collection("bcLines").select("fp", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
+    // dc : requis pour le rapprochement DC → N° FP (ADR-054), aligné sur le recompute (aggregate.js).
+    db.collection("bcLines").select("fp", "dc", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
     // commercial : mergeCommandes en dérive l'AM d'une commande enrichie par fiche (sinon commandes_sans_am divergerait).
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal", "commercial").limit(MAX_SCAN + 1).get(),
     db.doc("config/alerts").get(),
@@ -1304,6 +1380,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     db.doc("config/cancelOrders").get(),
     db.doc("config/cancelInvoices").get(),
     db.doc("config/orderCasOverride").get(),
+    db.doc("config/dcAliases").get(),
   ]);
   let scanCapped = false;
   const withId = (snap) => { const s = sliceCapped(snap.docs); if (s.capped) scanCapped = true; return s.docs.map((d) => ({ id: d.id, ...d.data() })); };
@@ -1320,6 +1397,14 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
     }
+  }
+  // RAPPROCHEMENT DC → N° FP (overlay config/dcAliases, ADR-054) — MÊME résolution que le recompute : un BC
+  // sans FP mais portant un DC connu est rattaché à l'affaire, sinon il compterait à tort « bc_fp_inconnu »
+  // DANS LE CENTRE DE CORRECTION alors que le cockpit Qualité (aggregate) l'aura rattaché → divergence.
+  const dcAliasMap = ((dcAliasDoc.data() || {}).map) || {};
+  if (Object.keys(dcAliasMap).length) {
+    const { resolveBcFp } = require("./domain/odooSync"); // require LOCAL (module fn-scoped, cf. buildFpAliasResolver)
+    for (const b of bcLines) { if (b && (b.fp == null || b.fp === "") && b.dc) { const fp = resolveBcFp(b, dcAliasMap); if (fp) b.fp = fp; } }
   }
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
   // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).
@@ -4198,7 +4283,7 @@ const ODOO_MAX_RECORDS = 500;
 exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
   if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
   const { verifySignature } = require("./lib/clickupWebhook"); // HMAC-SHA256 générique (réutilisé)
-  const { mapOdooRecord } = require("./domain/odooSync");
+  const { mapOdooRecord, resolveBcFp } = require("./domain/odooSync");
   const { safeId } = require("./lib/sheets");
   const cfg = (await db.doc("config/odooWebhook").get()).data() || {};
   if (!cfg.secret) { logger.warn("odooWebhook : aucun secret configuré"); res.status(503).json({ error: "webhook non configuré" }); return; }
@@ -4226,6 +4311,9 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     const { normCur } = require("./parsers/bcPdf");
     const { toXof } = require("./lib/fx");
     const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
+    // Overlay de rapprochement DC → N° FP (ADR-054) : filet quand Odoo envoie un BC sans FP résoluble mais
+    // avec un DC connu. Vide par défaut → aucun effet (le cas normal Odoo envoie FP+DC).
+    const dcAliases = ((await db.doc("config/dcAliases").get()).data() || {}).map || {};
     const known = new Set();
     // Lecture BORNÉE (MAX_SCAN) : le `known` garantit l'absence de double-compte du SOA (ADR-051). Si bcLines
     // dépasse le plafond, on REFUSE l'ingestion BC (fail-safe, jamais silencieux) plutôt que de bâtir un `known`
@@ -4240,7 +4328,7 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
       const v = d.data() || {};
       if (v.bcNumber && v.source !== "odoo") { known.add(bcDom.bcKey(v.bcNumber, safeId)); known.add(idBcKey(v.bcNumber)); }
     });
-    bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known };
+    bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known, dcAliases };
   }
   // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT (jamais « facture »/« solde » — le solde SOA reste un acte
   // comptable, MÊME règle que l'import ClickUp `mapBcStatus`). Défaut « emis » (un BC Odoo est une commande émise).
@@ -4253,6 +4341,10 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
     // --- BC fournisseur → bcLines (ADR-051) : priorité comptable/ClickUp + conversion XOF + statut d'engagement ---
     if (m.object === "bc") {
+      // Rapprochement DC → FP (ADR-054) : si Odoo n'a pas fourni de FP résoluble mais un DC connu de l'overlay
+      // config/dcAliases, on rattache le BC à l'affaire. Le FP explicite d'Odoo prime (resolveBcFp le garantit).
+      const resolvedFp = resolveBcFp(m.doc, bcCtx.dcAliases);
+      if (resolvedFp && resolvedFp !== m.doc.fp) { m.doc.fp = resolvedFp; m.key.fp = resolvedFp; }
       const key = bcCtx.bcDom.bcKey(m.key.bcNumber, safeId);
       if (bcCtx.known.has(key) || bcCtx.known.has(bcCtx.idBcKey(m.key.bcNumber))) {
         // Un BC comptable/ClickUp de MÊME N° BC existe déjà → il PRIME ; on n'écrit pas de doublon Odoo (évite le
@@ -4752,7 +4844,10 @@ exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, asyn
       uid: req.auth.uid, action: "dedupe", module: "habilitations", entity: "collections",
       entityId: only.join(","), detail: result, ts: FieldValue.serverTimestamp(),
     });
-    await recomputeSummaries();
+    // Recompute BEST-EFFORT (blindage) : les doublons sont DÉJÀ supprimés (batch.commit) — un échec du
+    // recalcul ne doit pas remonter en erreur (le prochain recompute rattrape).
+    try { await recomputeSummaries(); }
+    catch (re) { logger.error("dedupe : recompute post-suppression échoué — doublons supprimés, agrégats au prochain recompute", { message: re && re.message }); }
   }
   return { ok: true, applied: apply, result };
 });
@@ -4856,8 +4951,14 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
     uid: req.auth.uid, action: "import_legacy", module: "import", entity: "backup", entityId: String(writes.length),
     detail: { written: writes.length, force: req.data?.force === true }, ts: FieldValue.serverTimestamp(),
   });
-  const { recomputeAll } = require("./lib/aggregate");
-  await recomputeAll(db);
+  // Recompute BEST-EFFORT (blindage) : la restauration a DÉJÀ écrit les docs — un échec du recalcul ne doit
+  // pas faire échouer l'import legacy (le prochain recompute rattrape).
+  try {
+    const { recomputeAll } = require("./lib/aggregate");
+    await recomputeAll(db);
+  } catch (re) {
+    logger.error("importLegacyBackup : recompute post-restauration échoué — docs restaurés, agrégats au prochain recompute", { message: re && re.message });
+  }
   return { ok: true, written: writes.length };
 });
 

@@ -306,6 +306,9 @@ service cloud.firestore {
     // apparaissent déjà dans de nombreuses vues) ; lisible par le carnet (overview), écrite par le
     // callable setFpAlias (Admin SDK, droit « import »).
     match /config/fpAliases      { allow read: if canRead('overview');    allow write: if false; }
+    // Rapprochement DC → N° FP (BC fournisseur Odoo, ADR-054) : les clés SONT des DC (identifiants
+    // procurement) → cloisonné au data-steward (droit « import », qui édite le rapprochement via setDcAlias).
+    match /config/dcAliases      { allow read: if canRead('import');      allow write: if false; }
     // Liens BC↔ClickUp : les clés de la map SONT des n° de BC fournisseurs (safeId réversible) →
     // donnée procurement, cloisonnée au module « bc » (cf. audit intégral R1 : ce doc était dans
     // l'allowlist config/* world-readable, exposant les n° BC aux rôles bc:none / fournisseurs:none).

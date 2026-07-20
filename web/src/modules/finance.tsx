@@ -291,7 +291,7 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
 // Défini ICI (module lazy) plutôt que dans writes.ts pour ne pas alourdir le chunk d'entrée (budget 120 KB).
 type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
 async function deliveryMarginByAffaire() {
-  const res = await httpsCallable(functions, "deliveryMarginByAffaire")({});
+  const res = await httpsCallable(functions, "deliveryMarginByAffaire", { timeout: 120_000 })({});
   return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
 }
 function DeliveryMarginCard() {

@@ -43,13 +43,13 @@ export type CustomFieldDef = { key: string; label: string; type: "text" | "numbe
 /** Crée OU met à jour une opportunité de saisie (onCall : pose source='saisie', calcule le
  *  pondéré + l'étiquette d'étape, puis RECALCULE les agrégats — sinon l'opp reste invisible). */
 export async function upsertOpportunity(data: OppInput): Promise<{ ok: boolean; id: string }> {
-  const res = await httpsCallable(functions, "upsertOpportunity")(data);
+  const res = await httpsCallable(functions, "upsertOpportunity", { timeout: 120_000 })(data);
   return res.data as { ok: boolean; id: string };
 }
 
 /** Supprime une opportunité SAISIE (onCall : recalcule ensuite). */
 export async function deleteOpportunity(id: string) {
-  await httpsCallable(functions, "deleteOpportunity")({ id });
+  await httpsCallable(functions, "deleteOpportunity", { timeout: 120_000 })({ id });
 }
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
@@ -176,12 +176,12 @@ export async function timesheetKpis(fromMonth?: string, months?: number) {
 }
 // Import CRA en masse (Lot 19) — colle un tableau Nom/mois/facturés/congés/internes.
 export async function importTimesheets(text: string) {
-  const res = await httpsCallable(functions, "importTimesheets")({ text });
+  const res = await httpsCallable(functions, "importTimesheets", { timeout: 120_000 })({ text });
   return res.data as { ok: boolean; imported: number; errorCount: number; errors: { line: number; reason: string }[] };
 }
 // Auto-CRA depuis ClickUp (Lot 20) — pré-remplit les jours facturés depuis le temps ClickUp.
 export async function syncClickupTimesheets(months?: number) {
-  const res = await httpsCallable(functions, "syncClickupTimesheets")({ months });
+  const res = await httpsCallable(functions, "syncClickupTimesheets", { timeout: 300_000 })({ months });
   return res.data as { ok: boolean; entries: number; upserts: number; mapped: number; months: string[] };
 }
 
@@ -372,7 +372,7 @@ export function downloadBase64(filename: string, b64: string, mime = "applicatio
 
 /** Rattache une facture orpheline à sa commande en corrigeant son N° FP (onCall : recalcule). */
 export async function setInvoiceFp(id: string, fp: string) {
-  await httpsCallable(functions, "setInvoiceFp")({ id, fp });
+  await httpsCallable(functions, "setInvoiceFp", { timeout: 300_000 })({ id, fp });
 }
 
 /** RÉCONCILIATION FP — déclare qu'un N° FP (souvent celui d'une opp gagnée) désigne en réalité la
@@ -381,7 +381,16 @@ export async function setInvoiceFp(id: string, fp: string) {
  *  config/fpAliases, non destructif — survit aux ré-imports). `to` vide = supprime l'alias. Droit
  *  « import ». onCall : recalcule. */
 export async function setFpAlias(from: string, to: string) {
-  const res = await httpsCallable(functions, "setFpAlias")({ from, to });
+  const res = await httpsCallable(functions, "setFpAlias", { timeout: 300_000 })({ from, to });
+  return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
+}
+
+/** RAPPROCHEMENT DC → N° FP (BC fournisseur Odoo, ADR-054) — déclare qu'un DC (identifiant propre du
+ *  BC côté Odoo) désigne l'affaire `to`. Filet quand Odoo envoie un BC sans FP résoluble : le webhook
+ *  rattache alors le BC à l'affaire via cet overlay (config/dcAliases, non destructif). `to` vide =
+ *  supprime le rapprochement. Droit « import ». onCall : recalcule. */
+export async function setDcAlias(from: string, to: string) {
+  const res = await httpsCallable(functions, "setDcAlias", { timeout: 300_000 })({ from, to });
   return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
 }
 
@@ -770,21 +779,21 @@ export async function logClientError(payload: { message: string; stack?: string;
 export type BillingMilestone = { date: string; amount: number };
 /** Enregistre l'échéancier de facturation d'un projet (≤ 15 jalons). Direction/PMO. Recalcule. */
 export async function setBillingMilestones(fp: string, milestones: BillingMilestone[]) {
-  const res = await httpsCallable(functions, "setBillingMilestones")({ fp, milestones });
+  const res = await httpsCallable(functions, "setBillingMilestones", { timeout: 300_000 })({ fp, milestones });
   return res.data as { ok: boolean; fp: string; milestones: BillingMilestone[] };
 }
 
 /** Corrige une fiche affaire : prix de vente et/ou de revient (marge recalculée). Donnée de marge —
  *  droit « rentabilité ». Comble « fiche sans prix de vente ». onCall : recalcule. */
 export async function patchProjectSheet(data: { fp: string; saleTotal?: number; costTotal?: number }) {
-  await httpsCallable(functions, "patchProjectSheet")(data);
+  await httpsCallable(functions, "patchProjectSheet", { timeout: 300_000 })(data);
 }
 
 /** Crée/met à jour une ligne de crédit fournisseur : plafond autorisé + solde d'ouverture SOA daté
  *  (« à jour maintenant »). Seule une facture (BC statut « facturé ») bouge ensuite le solde.
  *  onCall : recalcule exposition + alertes. */
 export async function upsertCreditLine(id: string, data: { authorized: number; openingBalance?: number; openingDate?: string | null }) {
-  await httpsCallable(functions, "upsertCreditLine")({ id, authorized: data.authorized, openingBalance: data.openingBalance, openingDate: data.openingDate ?? null });
+  await httpsCallable(functions, "upsertCreditLine", { timeout: 120_000 })({ id, authorized: data.authorized, openingBalance: data.openingBalance, openingDate: data.openingDate ?? null });
 }
 
 /** MES ADR-P20 — ré-appareille les lignes de crédit fournisseur sur leur clé CANONIQUE (cleanName :
@@ -807,12 +816,12 @@ export async function upsertObjective(o: {
   fiscalYear: number; scope: string; scopeValue: string; label?: string;
   targetCas: number; targetInvoiced: number; targetMargin: number; targetMarginPct?: number;
 }) {
-  await httpsCallable(functions, "upsertObjective")(o);
+  await httpsCallable(functions, "upsertObjective", { timeout: 120_000 })(o);
 }
 
 /** Supprime un objectif (callable serveur). */
 export async function deleteObjective(id: string) {
-  await httpsCallable(functions, "deleteObjective")({ id });
+  await httpsCallable(functions, "deleteObjective", { timeout: 120_000 })({ id });
 }
 
 /** Met à jour la matrice de droits via le callable setPermissions (schéma validé + audité côté
@@ -856,7 +865,7 @@ export type ProjectionTierInput = { active: boolean; weight: number };
 export type ProjectionConfigInput = { certitudes: ProjectionTierInput; forecast: ProjectionTierInput; pipe: ProjectionTierInput; cashOpening?: number; excludeDormant?: boolean; geleMonths?: number };
 /** Enregistre les niveaux de projection (admin) : recompute COMPLET (overview/pipeline/atterrissage/ams). */
 export async function callSetProjectionConfig(cfg: ProjectionConfigInput) {
-  const res = await httpsCallable(functions, "setProjectionConfig")(cfg);
+  const res = await httpsCallable(functions, "setProjectionConfig", { timeout: 300_000 })(cfg);
   return res.data as ProjectionConfigInput & { ok: boolean };
 }
 
@@ -887,7 +896,7 @@ export async function aiSuggestClientMerges(names: { name: string; count: number
 /** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
  *  entière ; recalcule tous les agrégats client. */
 export async function setClientAliases(pairs: { from: string; to: string }[]) {
-  const res = await httpsCallable(functions, "setClientAliases")({ pairs });
+  const res = await httpsCallable(functions, "setClientAliases", { timeout: 300_000 })({ pairs });
   return res.data as { ok: boolean; count: number };
 }
 
@@ -895,7 +904,7 @@ export async function setClientAliases(pairs: { from: string; to: string }[]) {
  *  jamais). Gouverné par le module RBAC de la donnée, audité, recompute derrière. Les identifiants
  *  sont des DOC IDS. Collections : orders / invoices / bcLines / projectSheets / opportunities. */
 export async function deleteRecords(collection: string, ids: string[]) {
-  const res = await httpsCallable(functions, "deleteRecords")({ collection, ids });
+  const res = await httpsCallable(functions, "deleteRecords", { timeout: 300_000 })({ collection, ids });
   return res.data as { ok: boolean; count: number };
 }
 /** Supprime un seul enregistrement (assainissement). */
@@ -931,7 +940,7 @@ export async function curateNewsNow() {
 
 /** Déclenche un recalcul des agrégats (admin). */
 export async function callRecompute() {
-  const res = await httpsCallable(functions, "recompute")({});
+  const res = await httpsCallable(functions, "recompute", { timeout: 300_000 })({});
   return res.data;
 }
 
@@ -972,7 +981,7 @@ export async function callImportDelta(file: File, onPhase?: (p: "reading" | "pro
   onPhase?.("reading");
   const fileB64 = await fileToBase64(file);
   onPhase?.("processing");
-  const res = await httpsCallable(functions, "importDelta")({ fileB64, filename: file.name });
+  const res = await httpsCallable(functions, "importDelta", { timeout: 540_000 })({ fileB64, filename: file.name });
   return res.data as ImportDeltaResult;
 }
 
@@ -985,7 +994,7 @@ export type BcLineFields = {
 /** Analyse un BC PDF (pdfjs côté serveur) et renvoie les champs pré-remplis (best-effort). */
 export async function callParseBcPdf(pdf: File): Promise<BcLineFields> {
   const pdfB64 = await fileToBase64(pdf);
-  const res = await httpsCallable(functions, "parseBcPdf")({ pdfB64 });
+  const res = await httpsCallable(functions, "parseBcPdf", { timeout: 120_000 })({ pdfB64 });
   return (res.data as { ok: boolean; fields: BcLineFields }).fields;
 }
 
@@ -1002,7 +1011,7 @@ export type DedupeResult = { ok: boolean; applied: boolean; result: Record<strin
 
 /** Dédoublonne (admin) factures/opportunités/BC. `apply:false` = analyse seule (aperçu). */
 export async function callDedupe(collections?: string[], apply = true): Promise<DedupeResult> {
-  const res = await httpsCallable(functions, "dedupe")({ collections, apply });
+  const res = await httpsCallable(functions, "dedupe", { timeout: 300_000 })({ collections, apply });
   return res.data as DedupeResult;
 }
 
