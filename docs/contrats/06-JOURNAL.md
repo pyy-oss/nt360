@@ -1664,3 +1664,20 @@ create+update **déjà supportées** (webhook `object:"invoice"`). BC fournisseu
 `bcLines` (PDF/ClickUp) vs `orders.suppliers[]`, mapping indéfini. « DC/AAAA/NNNN » = entité sans modèle dans
 le code (FP est la clé canonique). Bouton « sync-depuis-Odoo » = nécessite un client Odoo SORTANT inexistant
 (tout est PUSH aujourd'hui). Aucun de ces points n'est un lot additif propre sans décision métier.
+
+## Correctif re-audit #5 — webhook Odoo : mapping commande ADDITIF (ADR-049) — 2026-07-20
+
+**Fait.** `mapOrder` (`functions/domain/odooSync.js`) ne façonne plus un doc complet (`raf:null`, `cas:0`,
+`designation:""`, `suppliers:[]`) mais un doc **additif** : chaque champ n'est posé que si Odoo le fournit
+(`present()` distingue « absent » de « 0/vide »). Avec `set(...,{merge:true})`, un update Odoo (souvent
+partiel, temps réel) **cesse d'écraser** la valeur curatée du P&L Excel — en premier lieu le **RAF FIGÉ**
+qui retombait sinon sur le dérivé et faisait bouger le backlog en silence. `fp` + `source:"odoo"` toujours
+écrits. Décision du re-audit : « shipper maintenant, en lot séparé ».
+
+**Vérifs.** 1253 functions au vert (test `odooSync` mis à jour : raf/dateCommande absents → clé omise ;
+nouveau test « update partiel préserve les champs curatés ») ; no-undef (159) + deploy-targets (189) OK.
+Backend seul, aucun changement front/bundle.
+
+**Reste (décision prise, à coder ensuite) — cluster #3/#4 :** « Odoo = source live égale » → dédoublonnage
+par fpKey à travers `{salesData, odoo}` dans `aggregate.js` + inclusion dans le calcul fantôme + miroir
+`overviewCalc.ts` + test de parité + ADR d'autorité inter-sources. Lot suivant.

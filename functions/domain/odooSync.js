@@ -46,33 +46,38 @@ function mapOpportunity(rec) {
 }
 
 // --- Commande (carnet P&L) ---
+// present(v) : Odoo a-t-il RÉELLEMENT fourni ce champ ? (distingue « absent » de « 0/vide »).
+const present = (v) => v != null && v !== "";
 function mapOrder(rec) {
   const r = rec || {};
   const fp = fpKey(r.fp);
   if (!fp) return { ok: false, error: "commande : 'fp' (N° FP) requis" };
-  const cas = Math.max(0, num(r.cas));
-  const suppliers = Array.isArray(r.suppliers)
-    ? r.suppliers.map((s) => ({ name: cleanName(s && s.name), amount: Math.max(0, num(s && s.amount)) })).filter((s) => s.name && s.amount > 0)
-    : [];
   // Date de commande (date_order Odoo). Champ `dateCommande` déjà porté par le carnet (jusqu'ici alimenté
   // seulement par l'overlay ClickUp) — on réutilise le même nom (pas de 2ᵉ vérité).
   const dateCommande = isoDay(r.dateCommande || r.datePo || r.dateOrder);
   // yearPo reste le millésime autoritaire ; s'il n'est pas fourni mais que la date l'est, on le dérive
   // (l'émetteur Odoo peut n'envoyer que la date complète).
   const yearPo = plausibleYear(parseInt(r.yearPo, 10) || (dateCommande ? parseInt(dateCommande.slice(0, 4), 10) : 0));
-  const doc = {
-    source: "odoo", odooId: traceId(r),
-    fp, client: cleanName(r.client), designation: str(r.designation),
-    bu: cleanBu(r.bu), yearPo,
-    dateCommande,
-    cas,
-    // RAF Excel FIGÉ seulement si fourni (null = laisser le repli dérivé de mergeCommandes agir).
-    raf: r.raf == null || r.raf === "" ? null : Math.max(0, num(r.raf)),
-    suppliers,
-    // Date de création côté Odoo (create_date) — distincte du `createdAt` technique posé par le handler.
-    dateCreation: isoDay(r.dateCreation || r.createdDate),
-  };
-  return { ok: true, object: "order", collection: "orders", id: safeId(fp), key: { fp, odooId: doc.odooId }, doc };
+  const dateCreation = isoDay(r.dateCreation || r.createdDate);
+  // Doc ADDITIF : on n'écrit QUE les champs réellement fournis par Odoo (constat re-audit #5). L'upsert du
+  // handler fait `set(..., {merge:true})` ; écrire `raf:null`/`cas:0`/`designation:""` ÉCRASAIT la valeur
+  // curatée du P&L (Excel) à chaque update Odoo — surtout le RAF FIGÉ. En omettant la clé absente, merge:true
+  // PRÉSERVE la valeur curatée et le repli dérivé de mergeCommandes continue de s'appliquer si le champ
+  // manque partout. fp est toujours écrit (clé de rapprochement), source/odooId tracent l'origine.
+  const doc = { source: "odoo", fp };
+  if (present(traceId(r))) doc.odooId = traceId(r);
+  if (present(r.client)) doc.client = cleanName(r.client);
+  if (present(r.designation)) doc.designation = str(r.designation);
+  if (present(r.bu)) doc.bu = cleanBu(r.bu);
+  if (yearPo > 0) doc.yearPo = yearPo;
+  if (dateCommande) doc.dateCommande = dateCommande;
+  if (present(r.cas)) doc.cas = Math.max(0, num(r.cas));
+  if (present(r.raf)) doc.raf = Math.max(0, num(r.raf)); // RAF Excel FIGÉ — posé seulement si Odoo le fournit.
+  if (Array.isArray(r.suppliers)) {
+    doc.suppliers = r.suppliers.map((s) => ({ name: cleanName(s && s.name), amount: Math.max(0, num(s && s.amount)) })).filter((s) => s.name && s.amount > 0);
+  }
+  if (dateCreation) doc.dateCreation = dateCreation; // create_date Odoo — distinct du `createdAt` technique.
+  return { ok: true, object: "order", collection: "orders", id: safeId(fp), key: { fp, odooId: traceId(r) }, doc };
 }
 
 // --- Facture (source de la facturation, rapprochée par fpKey) ---
