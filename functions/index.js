@@ -1216,6 +1216,37 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
+// --- RAPPROCHEMENT DC → N° FP (BC fournisseur Odoo) : overlay config/dcAliases (ADR-054), MÊME esprit que
+// setFpAlias mais keyé par le DC (identifiant propre du BC côté Odoo). Filet quand Odoo envoie un BC sans FP
+// résoluble mais avec un DC connu → le handler odooWebhook rattache alors le BC à l'affaire (resolveBcFp).
+// NON destructif, survit aux ré-imports. `from` = DC (chaîne libre, on ne canonise pas — format DC inconnu,
+// on ne l'invente pas) ; `to` = N° FP (fpKey). `to` vide = SUPPRIME l'alias. Droit « import » (data-steward),
+// audité, recompute complet (un BC nouvellement rattaché peut alimenter le carnet coût/SOA). ---
+exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "import");
+  const { fpKey } = require("./lib/ids");
+  const from = String(req.data?.from == null ? "" : req.data.from).trim();
+  const rawTo = req.data?.to;
+  const to = (rawTo === "" || rawTo == null) ? "" : fpKey(rawTo);
+  if (!from) throw new HttpsError("invalid-argument", "DC source requis");
+  if (rawTo != null && rawTo !== "" && !to) throw new HttpsError("invalid-argument", "N° FP cible invalide (attendu FP/AAAA/NNNNN)");
+  const ref = db.doc("config/dcAliases");
+  const map = { ...(((await ref.get()).data() || {}).map || {}) };
+  if (!to) {
+    if (!(from in map)) throw new HttpsError("not-found", "aucun rapprochement sur ce DC");
+    delete map[from];
+  } else {
+    map[from] = to;
+  }
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
+    detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
+  });
+  await requestRecompute();
+  return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
+});
+
 // --- DOSSIER CLIENT (rapprochement) : regroupe Opportunités / Commandes P&L / Factures par CLIENT
 // canonique puis par N° FP (alias appliqués), et propose des rapprochements (FP facture prioritaire).
 // LECTURE SEULE (aucune mutation) — gouverné par le module « import » (data-steward). Sans `client`,
@@ -4198,7 +4229,7 @@ const ODOO_MAX_RECORDS = 500;
 exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
   if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
   const { verifySignature } = require("./lib/clickupWebhook"); // HMAC-SHA256 générique (réutilisé)
-  const { mapOdooRecord } = require("./domain/odooSync");
+  const { mapOdooRecord, resolveBcFp } = require("./domain/odooSync");
   const { safeId } = require("./lib/sheets");
   const cfg = (await db.doc("config/odooWebhook").get()).data() || {};
   if (!cfg.secret) { logger.warn("odooWebhook : aucun secret configuré"); res.status(503).json({ error: "webhook non configuré" }); return; }
@@ -4226,6 +4257,9 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     const { normCur } = require("./parsers/bcPdf");
     const { toXof } = require("./lib/fx");
     const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
+    // Overlay de rapprochement DC → N° FP (ADR-054) : filet quand Odoo envoie un BC sans FP résoluble mais
+    // avec un DC connu. Vide par défaut → aucun effet (le cas normal Odoo envoie FP+DC).
+    const dcAliases = ((await db.doc("config/dcAliases").get()).data() || {}).map || {};
     const known = new Set();
     // Lecture BORNÉE (MAX_SCAN) : le `known` garantit l'absence de double-compte du SOA (ADR-051). Si bcLines
     // dépasse le plafond, on REFUSE l'ingestion BC (fail-safe, jamais silencieux) plutôt que de bâtir un `known`
@@ -4240,7 +4274,7 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
       const v = d.data() || {};
       if (v.bcNumber && v.source !== "odoo") { known.add(bcDom.bcKey(v.bcNumber, safeId)); known.add(idBcKey(v.bcNumber)); }
     });
-    bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known };
+    bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known, dcAliases };
   }
   // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT (jamais « facture »/« solde » — le solde SOA reste un acte
   // comptable, MÊME règle que l'import ClickUp `mapBcStatus`). Défaut « emis » (un BC Odoo est une commande émise).
@@ -4253,6 +4287,10 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
     // --- BC fournisseur → bcLines (ADR-051) : priorité comptable/ClickUp + conversion XOF + statut d'engagement ---
     if (m.object === "bc") {
+      // Rapprochement DC → FP (ADR-054) : si Odoo n'a pas fourni de FP résoluble mais un DC connu de l'overlay
+      // config/dcAliases, on rattache le BC à l'affaire. Le FP explicite d'Odoo prime (resolveBcFp le garantit).
+      const resolvedFp = resolveBcFp(m.doc, bcCtx.dcAliases);
+      if (resolvedFp && resolvedFp !== m.doc.fp) { m.doc.fp = resolvedFp; m.key.fp = resolvedFp; }
       const key = bcCtx.bcDom.bcKey(m.key.bcNumber, safeId);
       if (bcCtx.known.has(key) || bcCtx.known.has(bcCtx.idBcKey(m.key.bcNumber))) {
         // Un BC comptable/ClickUp de MÊME N° BC existe déjà → il PRIME ; on n'écrit pas de doublon Odoo (évite le

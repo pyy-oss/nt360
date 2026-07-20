@@ -3,6 +3,28 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-054 — BC Odoo : champs additifs (etaContrat / updateDate / comment) + rapprochement DC → N° FP (overlay `config/dcAliases`)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« mettre à jour le webhook entrant pour les BC » — axes retenus : champs manquants, doc Odoo, rôle du DC dans le rapprochement)
+
+### Contexte
+Le webhook BC (ADR-051) capte les lignes `bcLines` d'Odoo mais laisse tomber des champs que le type `BcLine` de l'app connaît déjà (donc consommés en aval) : `etaContrat` (ETA contractuelle, distincte de l'ETA réelle `etaReel`, utilisée par `clickupBc.js`), `updateDate`, `comment`. Par ailleurs le DC (ADR-052) était capté **inerte** : aucun rôle fonctionnel. Le cas normal reste « Odoo envoie FP **et** DC », mais un BC dont le FP est absent/placeholder (rejeté par `fpKey`) ne se rattache alors à aucune affaire.
+
+### Décision
+- **Champs additifs** dans `mapBc` (PUR, patron ADR-049 « n'écrire que le fourni ») : `etaContrat`/`updateDate` (via `isoDay`, date invalide → `null`), `comment` (via `str`). Aucun champ existant réécrit.
+- **Rapprochement DC → N° FP** = overlay CURÉ `config/dcAliases` (map `dc → FP`), **même esprit que `fpAliases`** : non destructif, survit aux ré-imports, humain dans la boucle. Helper PUR `resolveBcFp(doc, dcAliasMap)` (testé) : le **FP explicite d'Odoo PRIME toujours** ; l'overlay n'agit QUE si le FP est absent. Le handler `odooWebhook` charge l'overlay et l'applique avant l'upsert BC.
+- Overlay alimenté par un **data-steward** (droit « import ») via le callable **`setDcAlias`** (miroir de `setFpAlias`, audité, recompute) et l'écran *Assainissement → Rapprochement DC → N° FP*. `config/dcAliases` lisible sous `canRead('import')` (les clés SONT des DC procurement).
+- **Alternatives écartées** (proposées à la Direction) : (b) rattacher le BC à la commande CLIENT par DC = changement de modèle → écarté (additif seulement) ; (c) DC = sous-affaire d'un FP → écarté (spéculatif, aucune donnée). L'overlay curé est le choix réversible et conforme à « la règle de l'ERP gagne ».
+
+### Conséquences
+- **Additif et réversible** : overlay vide par défaut → **comportement strictement inchangé** (le cas Odoo FP+DC n'utilise jamais l'overlay). Retirer un alias annule le rattachement.
+- Un BC nouvellement rattaché peut alimenter le carnet coût/SOA → `setDcAlias` déclenche un recompute complet, comme `setFpAlias`.
+- `setDcAlias` ajouté à `deployed-functions.txt` (garde CI). Tests : `resolveBcFp` (FP prime / DC connu / DC inconnu) + champs additifs dans `odooSync.test.js`.
+
+---
+
 ## ADR-053 — Bouton Admin « Purge des données » (table rase P&L / Opportunités), Direction-only et irréversible
 
 - **Date :** 2026-07-20

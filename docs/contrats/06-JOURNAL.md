@@ -1811,3 +1811,27 @@ PRÉSERVÉS. `purgePlan` étendu (champ `filtered`, dédup par collection|field|
 
 **Vérifs.** 1261 functions au vert ; no-undef (159) + firestore-indexes (les `where` mono-champ n'exigent aucun
 index composite) ; tsc propre ; bundle ≤ 122.
+
+## Webhook BC entrant — champs additifs + rapprochement DC → N° FP (ADR-054) — 2026-07-20
+
+**Contexte.** « Mettre à jour le webhook entrant pour les BC » — 3 axes retenus par la Direction : champs
+manquants, doc Odoo (mapping), rôle du DC dans le rapprochement.
+
+**Fait.**
+- **Champs (grounded, non inventés — issus du type `BcLine` déjà consommé en aval)** : `mapBc` capte désormais
+  `etaContrat` (ETA contractuelle ≠ `etaReel`, utilisée par `clickupBc.js`), `updateDate`, `comment`. Additif
+  (patron ADR-049) : date invalide → `null`, champ absent → omis (pas d'écrasement au merge).
+- **Rapprochement DC → N° FP** : helper PUR `resolveBcFp(doc, dcAliasMap)` (le FP explicite d'Odoo PRIME ;
+  l'overlay n'agit que si le FP manque). Handler `odooWebhook` charge `config/dcAliases` dans `bcCtx` et
+  l'applique avant l'upsert BC. Callable `setDcAlias` (miroir `setFpAlias`, droit « import », audité, recompute).
+  Front : carte *Assainissement → Rapprochement DC → N° FP* (miroir `FpReconcileCard`) + wrapper `setDcAlias`.
+  Règle Firestore `config/dcAliases` lisible sous `canRead('import')`. `deployed-functions.txt` : +`setDcAlias`.
+- **Doc** `docs/ODOO_WEBHOOK.md` : lignes du contrat BC (etaContrat/updateDate/comment) + section rapprochement
+  DC + exemple `map_bc` mis à jour.
+
+**Décision de modèle (ADR-054).** DC = overlay curé `dcAliases` (additif, réversible, humain dans la boucle),
+PAS un changement de modèle (lien BC↔commande client par DC, ou DC = sous-affaire) — écartés faute de donnée et
+par « additif uniquement ». Overlay vide par défaut → comportement strictement inchangé (cas normal Odoo FP+DC).
+
+**Vérifs.** odooSync.test.js au vert (19 tests, dont resolveBcFp 3 cas + champs additifs) ; no-undef (159) +
+deploy-targets (191) OK. tsc + bundle : à valider en CI.

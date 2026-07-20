@@ -385,6 +385,15 @@ export async function setFpAlias(from: string, to: string) {
   return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
 }
 
+/** RAPPROCHEMENT DC → N° FP (BC fournisseur Odoo, ADR-054) — déclare qu'un DC (identifiant propre du
+ *  BC côté Odoo) désigne l'affaire `to`. Filet quand Odoo envoie un BC sans FP résoluble : le webhook
+ *  rattache alors le BC à l'affaire via cet overlay (config/dcAliases, non destructif). `to` vide =
+ *  supprime le rapprochement. Droit « import ». onCall : recalcule. */
+export async function setDcAlias(from: string, to: string) {
+  const res = await httpsCallable(functions, "setDcAlias")({ from, to });
+  return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
+}
+
 // DOSSIER CLIENT (rapprochement Opp/Commande/Facture). Lecture seule, gouverné « import ».
 export type ReconRow = { fp?: string; client?: string; amount?: number; cas?: number; raf?: number; amountHt?: number; stage?: number; stageLabel?: string; designation?: string; am?: string; date?: string; numero?: string; source?: string; linked?: boolean };
 export type ReconCluster = { fp: string; opps: ReconRow[]; orders: ReconRow[]; invoices: ReconRow[]; oppAmount: number; orderCas: number; invoiceTotal: number; hasOrder: boolean; hasInvoice: boolean; won: boolean };

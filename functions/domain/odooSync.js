@@ -122,9 +122,25 @@ function mapBc(rec) {
   if (present(r.amountXof)) doc.amountXof = Math.max(0, num(r.amountXof)); // contre-valeur SAISIE prioritaire
   if (present(r.status)) doc.statusRaw = str(r.status); // le handler valide contre BC_STAGES (défaut « emis »)
   if (present(r.eta || r.etaReel)) doc.etaReel = isoDay(r.eta || r.etaReel);
+  if (present(r.etaContrat)) doc.etaContrat = isoDay(r.etaContrat); // ETA CONTRACTUELLE (engagement) — distincte de l'ETA réelle
   if (present(r.dateIn)) doc.dateIn = isoDay(r.dateIn);
+  if (present(r.updateDate)) doc.updateDate = isoDay(r.updateDate); // date de dernière mise à jour côté Odoo
+  if (present(r.comment)) doc.comment = str(r.comment); // note libre (miroir du champ `comment` des bcLines ClickUp)
   if (present(r.dc)) doc.dc = str(r.dc); // identifiant DC propre (Odoo) — capté additivement, FP reste la clé (Lot DC)
   return { ok: true, object: "bc", collection: "bcLines", key: { bcNumber, fp: doc.fp || null, odooId: doc.odooId || null }, doc };
+}
+
+// --- Rapprochement DC → N° FP (overlay config/dcAliases, ADR-054). Quand Odoo envoie un BC dont le N° FP
+// est absent/placeholder (fpKey l'a rejeté → doc.fp indéfini) mais qui porte un DC connu, on récupère le FP
+// de l'affaire via un overlay CURÉ (même esprit que fpAliases : non destructif, survit aux ré-imports). PUR :
+// l'overlay (I/O) est chargé par le handler et passé ici. Le FP explicite d'Odoo PRIME toujours (cas normal :
+// Odoo envoie FP+DC). Retourne le N° FP canonique à utiliser, ou null si rien ne résout. ---
+function resolveBcFp(doc, dcAliasMap) {
+  const d = doc || {};
+  if (d.fp) return d.fp; // FP fourni par Odoo → prime (déjà canonique via fpKey dans mapBc)
+  const dc = str(d.dc);
+  if (dc && dcAliasMap && dcAliasMap[dc]) return fpKey(dcAliasMap[dc]) || null;
+  return null;
 }
 
 /**
@@ -141,4 +157,4 @@ function mapOdooRecord(object, rec) {
   }
 }
 
-module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc };
+module.exports = { OBJECTS, mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc, resolveBcFp };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc } = require("../domain/odooSync");
+const { mapOdooRecord, mapOpportunity, mapOrder, mapInvoice, mapBc, resolveBcFp } = require("../domain/odooSync");
 
 describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
   it("opportunité : canonicalise le FP, dérive stageLabel/weighted, trace odooId + source", () => {
@@ -128,9 +128,41 @@ describe("odooSync — mapping du contrat Odoo → docs nt360", () => {
     expect(mapOrder({ fp: "FP/2026/1", cas: 100, dc: "DC/2026/6" }).key.fp).toBe("FP/2026/1");
   });
 
+  it("BC : champs additifs etaContrat / updateDate / comment captés (ADR-054)", () => {
+    const m = mapBc({ bcNumber: "BC-2", etaContrat: "2026-05-01", updateDate: "2026-05-10", comment: "  urgent  " });
+    expect(m.doc.etaContrat).toBe("2026-05-01");
+    expect(m.doc.updateDate).toBe("2026-05-10");
+    expect(m.doc.comment).toBe("urgent"); // str() trim
+    // absents → omis (doc additif, pas d'écrasement au merge)
+    const d = mapBc({ bcNumber: "BC-3" }).doc;
+    expect("etaContrat" in d).toBe(false);
+    expect("updateDate" in d).toBe(false);
+    expect("comment" in d).toBe(false);
+    // date invalide → null (isoDay), pas de valeur aberrante persistée
+    expect(mapBc({ bcNumber: "BC-4", etaContrat: "pas-une-date" }).doc.etaContrat).toBe(null);
+  });
+
   it("objet inconnu → rejet explicite", () => {
     expect(mapOdooRecord("contact", {}).ok).toBe(false);
     expect(mapOdooRecord("order", { fp: "FP/2026/1", cas: 1 }).ok).toBe(true);
     expect(mapOdooRecord("bc", { bcNumber: "BC-1" }).ok).toBe(true);
+  });
+});
+
+describe("resolveBcFp — rapprochement DC → N° FP du BC Odoo (overlay config/dcAliases, ADR-054)", () => {
+  it("FP explicite fourni par Odoo → PRIME toujours (cas normal FP+DC)", () => {
+    const doc = mapBc({ bcNumber: "BC-1", fp: "FP/2026/12", dc: "DC-9" }).doc;
+    expect(resolveBcFp(doc, { "DC-9": "FP/2099/1" })).toBe("FP/2026/12"); // l'overlay ne détourne pas un FP explicite
+  });
+  it("FP absent + DC connu de l'overlay → FP de l'affaire (canonique)", () => {
+    const doc = mapBc({ bcNumber: "BC-1", dc: "DC-9" }).doc; // pas de fp
+    expect("fp" in doc).toBe(false);
+    expect(resolveBcFp(doc, { "DC-9": "FP/2026/007" })).toBe("FP/2026/7"); // fpKey normalise les zéros de tête
+  });
+  it("FP absent + DC inconnu / overlay vide → null (aucun rattachement forcé)", () => {
+    const doc = mapBc({ bcNumber: "BC-1", dc: "DC-9" }).doc;
+    expect(resolveBcFp(doc, {})).toBe(null);
+    expect(resolveBcFp(doc, { "DC-AUTRE": "FP/2026/1" })).toBe(null);
+    expect(resolveBcFp(mapBc({ bcNumber: "BC-1" }).doc, { "DC-9": "FP/2026/1" })).toBe(null); // ni fp ni dc
   });
 });

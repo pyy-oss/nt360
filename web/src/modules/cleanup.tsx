@@ -15,7 +15,7 @@ import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, u
 import { DateField } from "../design/inputs";
 import { T, pct } from "../design/tokens";
 import {
-  deleteRecords, callDedupe, setFpAlias, reconClient, correctionQueue,
+  deleteRecords, callDedupe, setFpAlias, setDcAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
   aiSuggestCorrections,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
@@ -579,6 +579,53 @@ function FpReconcileCard() {
   );
 }
 
+// RAPPROCHEMENT DC → N° FP (BC fournisseur Odoo, ADR-054) — quand Odoo envoie un BC dont le N° FP est
+// absent/placeholder mais qui porte un DC (identifiant propre du BC), on déclare l'équivalence DC → affaire.
+// Le webhook entrant rattache alors le BC à ce N° FP (overlay config/dcAliases, non destructif, survit aux
+// ré-imports). Même esprit que la réconciliation N° FP, keyé par le DC. Le cas NORMAL (Odoo envoie FP+DC)
+// n'a pas besoin de cet overlay : le FP explicite prime toujours.
+function DcReconcileCard() {
+  const { data } = useDocData<{ map?: Record<string, string> }>("config/dcAliases");
+  const map = data?.map || {};
+  const entries = Object.entries(map);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const ready = from.trim() && to.trim();
+  return (
+    <Card title="Rapprochement DC → N° FP (BC fournisseur Odoo)">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-end gap-2 flex-wrap text-[13px]">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted">DC (identifiant du BC Odoo)</span>
+            <input className="field w-40 !py-1" aria-label="DC identifiant du BC Odoo" placeholder="DC…" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <span className="text-faint pb-1.5">→</span>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted">N° FP de l'affaire</span>
+            <input className="field w-40 !py-1" aria-label="N° FP de l'affaire" placeholder="FP/2026/…" value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          {ready && (
+            <Busy variant="ghost" label="Rapprocher" okMsg="Rapprochement enregistré (recalcul lancé)" errMsg="Rapprochement refusé"
+              fn={async () => { await setDcAlias(from.trim(), to.trim()); setFrom(""); setTo(""); }} />
+          )}
+        </div>
+        {entries.length > 0 && (
+          <Table columns={[
+            colText("DC", (r: [string, string]) => <span className="tabnum text-faint">{r[0]}</span>, (r: [string, string]) => r[0]),
+            colText("rattaché à (N° FP)", (r: [string, string]) => <span className="tabnum text-ink">{r[1]}</span>, (r: [string, string]) => r[1]),
+            colText("", (r: [string, string]) => (
+              <DangerBtn label="Retirer" okMsg="Rapprochement retiré (recalcul lancé)" errMsg="Retrait refusé"
+                confirm={`Retirer le rapprochement ${r[0]} → ${r[1]} ? Un BC Odoo portant ce DC sans N° FP ne sera plus rattaché à cette affaire.`}
+                fn={() => setDcAlias(r[0], "")} />
+            )),
+          ]} rows={entries} />
+        )}
+        <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Overlay non destructif : il survit aux ré-imports.</Tip>
+      </div>
+    </Card>
+  );
+}
+
 // DOSSIER CLIENT — rapprochement Opportunité / Commande P&L / Facture par client, pour repérer et
 // corriger d'un clic les N° FP divergents. S'appuie sur le callable reconClient (lecture seule,
 // gouverné « import ») qui aligne les trois flux par N° FP canonique et propose les réconciliations
@@ -807,6 +854,8 @@ export const Cleanup: FC<Props> = () => {
       {canImport && <ClientReconcileCard />}
 
       {canImport && <FpReconcileCard />}
+
+      {canImport && <DcReconcileCard />}
 
       {isDirection && <DedupeCard />}
 
