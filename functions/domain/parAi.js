@@ -29,11 +29,14 @@ function gapLabel(target, holders, minCount, okSuffix) {
 }
 
 // ── Snapshots (PURS) — dérivés des summaries, dé-bruités pour l'IA. Montants en FCFA.
-function actionPlanSnapshot({ dateIso, ca, quotas, relances }) {
+function actionPlanSnapshot({ dateIso, ca, quotas, relances, partnerId }) {
   // CA MIXTE (ADR-P12) : on transmet la ventilation par partenaire — part adossée aux BC (fiable, traçable)
   // vs part déclarative (à confirmer). L'IA distingue ainsi un CA solide d'un CA à fiabiliser.
   const caByPartner = {}; for (const p of (ca && ca.byPartner) || []) caByPartner[p.partnerId] = p;
-  const partners = ((quotas && quotas.partners) || []).map((q) => {
+  // PORTÉE optionnelle : un partenaire ciblé (partnerId) ou tout le parc (défaut). Filtre à la SOURCE
+  // (quotas.partners + relances) pour que l'IA ne voie que le périmètre demandé.
+  const scoped = partnerId ? ((quotas && quotas.partners) || []).filter((q) => q.partnerId === partnerId) : ((quotas && quotas.partners) || []);
+  const partners = scoped.map((q) => {
     const c = caByPartner[q.partnerId] || {};
     return {
       nom: str(q.name || q.partnerId, 80),

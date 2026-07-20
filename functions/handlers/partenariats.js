@@ -283,12 +283,16 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   const generateParActionPlan = onCallG("generateParActionPlan", { secrets: ANTHROPIC_API_KEY ? [ANTHROPIC_API_KEY] : [], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
     const apiKey = await assertAiReady(req);
     const seeCa = await parCanSeeCa(req); // CA masqué sans droit `rentabilite` (ADR-P07)
+    // PORTÉE optionnelle : un partenaire ciblé (partnerId fourni) ou tout le parc (défaut). Si ciblé, on
+    // vérifie son existence (référentiel) — un id inconnu ne doit pas produire un plan vide silencieux.
+    const partnerId = slug(req.data && req.data.partnerId);
+    if (partnerId && !(await db.doc(`par_partners/${partnerId}`).get()).exists) throw new HttpsError("failed-precondition", "partenaire inconnu (référentiel)");
     const { actionPlanSnapshot } = require("../domain/parAi");
     const [caSnap, quotaSnap, relSnap] = await Promise.all([
       db.doc("summaries/par_ca").get(), db.doc("summaries/par_quotas").get(), db.doc("summaries/par_relances").get(),
     ]);
-    const snapshot = actionPlanSnapshot({ dateIso: new Date().toISOString().slice(0, 10), ca: seeCa ? (caSnap.data() || {}) : {}, quotas: quotaSnap.data() || {}, relances: relSnap.data() || {} });
-    if (!snapshot.partners.length) throw new HttpsError("failed-precondition", "aucune donnée partenaire à analyser (initialisez le référentiel).");
+    const snapshot = actionPlanSnapshot({ dateIso: new Date().toISOString().slice(0, 10), ca: seeCa ? (caSnap.data() || {}) : {}, quotas: quotaSnap.data() || {}, relances: relSnap.data() || {}, partnerId });
+    if (!snapshot.partners.length) throw new HttpsError("failed-precondition", partnerId ? "aucune donnée pour ce partenaire (quotas non calculés)." : "aucune donnée partenaire à analyser (initialisez le référentiel).");
     const { generateActionPlan } = require("../lib/parAi");
     let out;
     try { out = await generateActionPlan(apiKey, snapshot); }
