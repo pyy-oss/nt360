@@ -786,7 +786,7 @@ async function recomputeCore(db, only) {
       ]);
       // Horodatages Firestore → millisecondes à la FRONTIÈRE I/O (le domaine reste pur). Le mois
       // d'ouverture (quota) se dérive de ouvertLe.
-      const ticks = mntTickets.map((t) => { const openMs = tsMs(t.ouvertLe); return { id: t.id, contratId: t.contratId, ouvertMs: openMs, priseEnCompteMs: t.priseEnCompteLe ? tsMs(t.priseEnCompteLe) : null, resoluMs: t.resoluLe ? tsMs(t.resoluLe) : null, dateJour: openMs ? new Date(openMs).toISOString().slice(0, 10) : null }; });
+      const ticks = mntTickets.map((t) => { const openMs = tsMs(t.ouvertLe); return { id: t.id, contratId: t.contratId, ouvertMs: openMs, priseEnCompteMs: t.priseEnCompteLe ? tsMs(t.priseEnCompteLe) : null, resoluMs: t.resoluLe ? tsMs(t.resoluLe) : null, dateJour: openMs ? new Date(openMs).toISOString().slice(0, 10) : null, engagementsSnapshot: Array.isArray(t.engagementsSnapshot) ? t.engagementsSnapshot : null }; });
       // Rentabilité → PALIER de risque (ADR-034). On calcule la marge PRUDENTE côté serveur (hasCost=true,
       // le calcul est de confiance) via computeContratPnl — SOURCE UNIQUE de la marge, donc même nombre que
       // la vue Rentabilité — puis on ne matérialise QUE le palier (negative/faible), jamais le montant

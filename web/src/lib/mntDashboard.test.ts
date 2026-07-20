@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
 
 const asOf = "2026-07-15";
 
@@ -140,6 +140,29 @@ describe("slaAgenda — calendrier SLA des tickets ouverts", () => {
     const c2 = { id: "C2", engagements: [{ type: "resolution", couverture: "h24", seuilHeures: 24 }] };
     const tickets = [{ id: "T2", contratId: "C2", statut: "ouvert", ouvertMs: 0, priseEnCompteMs: null, resoluMs: null }];
     expect(slaAgenda(tickets, [c2], 5 * H).map((x) => x.slaType)).toEqual(["resolution"]);
+  });
+
+  it("opposabilité (ADR-P24) : le SLA du ticket suit engagementsSnapshot (figé), pas le contrat courant", () => {
+    // Contrat courant : résolution 24 h. Ticket figé sous une résolution 4 h (engagementsSnapshot) →
+    // à now=5 h, il est ROMPU sur le snapshot (4 h), alors que le contrat courant (24 h) ne le romprait pas.
+    const tickets = [{ id: "T1", contratId: "C1", statut: "ouvert", ouvertMs: 0, priseEnCompteMs: null, resoluMs: null,
+      engagementsSnapshot: [{ type: "resolution", couverture: "h24", seuilHeures: 4 }] }];
+    const a = slaAgenda(tickets, [c1], 5 * H);
+    const res = a.find((x) => x.slaType === "resolution")!;
+    expect(res.state).toBe("rompu"); // jugé sur le snapshot 4 h
+  });
+});
+
+describe("engagementsForTicket — repli opposable (ADR-P24)", () => {
+  const contrat = { id: "C1", engagements: [{ type: "resolution", couverture: "h24", seuilHeures: 24 }] };
+  it("retourne le snapshot du ticket quand présent", () => {
+    const snap = [{ type: "prise_en_compte", couverture: "h24", seuilHeures: 2 }];
+    expect(engagementsForTicket({ engagementsSnapshot: snap }, contrat)).toBe(snap);
+  });
+  it("repli sur les engagements courants du contrat quand le snapshot est absent (non-régression)", () => {
+    expect(engagementsForTicket({}, contrat)).toBe(contrat.engagements);
+    expect(engagementsForTicket({ engagementsSnapshot: null }, contrat)).toBe(contrat.engagements);
+    expect(engagementsForTicket(null, null)).toEqual([]);
   });
 });
 

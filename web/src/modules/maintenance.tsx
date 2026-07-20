@@ -34,7 +34,7 @@ import {
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, recurringRevenue, slaAgenda, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
+import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, FilterNote, useCommandesRows } from "./_shared";
 import type { Props } from "./_shared";
@@ -334,6 +334,7 @@ export const Maintenance: FC<Props> = () => {
       ouvertMs: t.ouvertLe ? tsMillis(t.ouvertLe) : null,
       priseEnCompteMs: t.priseEnCompteLe ? tsMillis(t.priseEnCompteLe) : null,
       resoluMs: t.resoluLe ? tsMillis(t.resoluLe) : null,
+      engagementsSnapshot: t.engagementsSnapshot ?? null, // opposabilité ADR-P24 (repli contrat courant si absent)
     })),
     vContrats, nowMs, slaCal), [vTickets, vContrats, nowMs, slaCal]);
   // Restant lisible : « 2 j 3 h » ou « En retard de … » (rompu). Zéro dépendance externe (arrondi h).
@@ -394,7 +395,8 @@ export const Maintenance: FC<Props> = () => {
     // SLA de RÉSOLUTION : dérivé live de l'engagement du contrat (jours ouvrés, ADR-002) — ouvertLe →
     // resoluLe (ou maintenant si non résolu). « — » si le contrat n'a pas d'engagement de résolution.
     colText("SLA résolution", (t: MntTicket) => {
-      const eng = (contratById[t.contratId || ""]?.engagements || []).find((e) => e.type === "resolution");
+      // OPPOSABILITÉ (ADR-P24) : engagement figé à l'ouverture (engagementsSnapshot), à défaut contrat courant.
+      const eng = engagementsForTicket(t, contratById[t.contratId || ""]).find((e) => e.type === "resolution");
       if (!eng || !t.ouvertLe) return "—";
       const st = slaState(eng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs, slaCal);
       return <Badge tone={slaTone(st.state)}>{SLA_STATE_LABEL[st.state]}</Badge>;
@@ -1159,7 +1161,6 @@ export const Maintenance: FC<Props> = () => {
         const vcPnl = pnl?.rows.find((r) => fpKey(r.fp || "") === vfp);
         const vcRisk = risqueItems.find((r) => fpKey(r.fp || "") === vfp);
         const openTk = vcTickets.filter((t) => t.statut === "ouvert" || t.statut === "en_cours").length;
-        const resoEng = (vc.engagements || []).find((e) => e.type === "resolution"); // engagement de résolution → état SLA des tickets
         // Maintenance par type de CE contrat (ADR-025) : tickets/interventions comptés séparément, confrontés
         // aux objectifs (max) embarqués. Affiché si le contrat a une activité classée OU des objectifs posés.
         const vcType = typeStats.parContrat.find((p) => p.contratId === vc.id);
@@ -1218,7 +1219,9 @@ export const Maintenance: FC<Props> = () => {
                       <thead className="sticky top-0 bg-panel2 text-muted"><tr className="text-left"><th className="px-2 py-1 font-medium">Titre</th><th className="px-2 py-1 font-medium">Priorité</th><th className="px-2 py-1 font-medium">Statut</th><th className="px-2 py-1 font-medium">SLA résolution</th></tr></thead>
                       <tbody>
                         {vcTickets.map((t) => {
-                          const st = resoEng && t.ouvertLe ? slaState(resoEng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs, slaCal) : null;
+                          // OPPOSABILITÉ (ADR-P24) : SLA du ticket sur son engagement FIGÉ (snapshot), à défaut le contrat courant.
+                          const teng = engagementsForTicket(t, vc).find((e) => e.type === "resolution");
+                          const st = teng && t.ouvertLe ? slaState(teng, tsMillis(t.ouvertLe), t.resoluLe ? tsMillis(t.resoluLe) : null, nowMs, slaCal) : null;
                           return (
                             <tr key={t.id} className="border-t border-line/40">
                               <td className="px-2 py-1">{t.titre || "—"}</td>

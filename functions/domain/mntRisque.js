@@ -73,8 +73,12 @@ function mntRisque({ contrats, tickets, invoices, asOf, nowMs, margeByContrat, c
     for (const t of myTickets) {
       const openMs = Number(t.ouvertMs) || 0;
       if (!openMs) continue;
+      // OPPOSABILITÉ (ADR-P24) : le SLA se mesure sur les engagements FIGÉS à l'ouverture du ticket
+      // (engagementsSnapshot), avec REPLI sur les engagements COURANTS du contrat si le snapshot est absent
+      // (tickets antérieurs au versionnement). Snapshot absent ⇒ engs === engagements ⇒ sortie byte-identique.
+      const engs = Array.isArray(t.engagementsSnapshot) ? t.engagementsSnapshot : engagements;
       let rompu = false;
-      for (const e of engagements) {
+      for (const e of engs) {
         // Horodatage de l'atteinte selon le type d'engagement. Pour « prise en compte », un ticket
         // résolu DIRECTEMENT (ouvert→resolu, sans passer par en_cours) n'a jamais de priseEnCompteLe :
         // il a pourtant été pris en compte AU PLUS TARD à sa résolution → on retombe sur resoluMs

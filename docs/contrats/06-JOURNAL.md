@@ -1430,3 +1430,40 @@ contribution TACE sans détruire de donnée, l'extinction reste réversible (rè
 **Vérifs.** 1240 functions (dont `mntRecurring` 3, `isContratOrphelin` 3, échéance 90 j, gate C3 mis à jour) +
 288 web (dont parité back↔front + fenêtre 90 j) au vert ; bundle 119,4 KB (<= 120) ; check-no-undef,
 check-deploy-targets (187, aucun nouvel export), check-firestore-indexes OK ; tsc propre.
+
+
+---
+
+## Lot 10b — Contrat opposable : versionnement (ADR-P24)
+
+**ADR-P24 — Opposabilité du contrat de maintenance.** On fige une VERSION immuable du sous-ensemble
+SIGNIFICATIF du contrat (engagements SLA, couverture, quota, prix, périodicité) à chaque changement réel,
+pour que le SLA d'un ticket soit calculé sur la version EN VIGUEUR à son ouverture — opposable, indépendant
+des éditions ultérieures. Additif, sous drapeau ; **repli sur les engagements courants si le snapshot est
+absent** → non-régression byte-identique. Décision structurante validée humainement (R1/R2 de la SPEC).
+
+**Câblage.**
+- Domaine PUR `mntContratVersion.js` : `versionPayload` (ignore client/statut/dates → éditer le statut ne
+  crée PAS de version), `versionHash` (sha1 sur JSON stable — insensible à l'ordre des engagements),
+  `versionsDiffer`. Testé (4 cas : ignore non-significatifs, stable au réordre, change sur les 4 axes, diff).
+- `upsertMntContrat` : point d'interception UNIQUE — crée une version (append-only `mnt_contratsVersions`)
+  quand le hash change ; champs additifs `versionCourante/Id/Hash` sur `mnt_contrats`.
+- `importMntContrats` : versionne les contrats CRÉÉS (version 1, même batch — chunk réduit 400→200 car une
+  création = 2 écritures ≤ 500/batch). **Les MàJ d'import ne versionnent pas** (patch partiel, engagements
+  préservés) : elles versionneront au prochain `upsertMntContrat` — décision explicite, non silencieuse.
+- `upsertMntTicket` (création) : GÈLE `engagementsSnapshot` + `versionId/versionNo` du contrat en vigueur
+  (gel-une-fois, jamais réécrit en édition, comme `ouvertLe`).
+- `mntRisque` : le SLA se mesure sur `t.engagementsSnapshot ?? engagements` (repli). Le **quota** reste
+  contrat-level (agrégat mensuel, pas rattaché à un ticket) — décision assumée.
+- `aggregate.js` : le mapping `ticks` porte `engagementsSnapshot` (null si absent) → summaries/mnt_risque
+  inchangé quand aucun ticket ne porte de snapshot (prouvé par mntRecomputeGate).
+- Rules : `mnt_contratsVersions` lisible drapeau+droit maintenance, écriture cliente refusée. Index composite
+  (contratId, version DESC).
+- Front : miroir PUR `engagementsForTicket` (mntDashboard.ts) — `slaAgenda` + colonnes SLA (liste + fiche
+  contrat) jugent sur le snapshot du ticket, repli contrat courant. Types additifs `MntTicket.*`.
+
+**Hors périmètre (confirmé).** Couverture back-to-back / `couverture_b2b` (R3) : reste pour un lot ultérieur.
+
+**Vérifs.** 1245 functions (dont `mntContratVersion` 4, opposabilité mntRisque, gate C3) + 291 web (dont
+`engagementsForTicket` + slaAgenda opposable) au vert ; bundle 119,4 KB (<= 120) ; check-no-undef (158),
+check-deploy-targets (187, aucun nouvel export), check-firestore-indexes (3 composites) OK ; tsc propre.

@@ -285,7 +285,10 @@ export type MntContrat = {
 };
 // Tickets & interventions de maintenance (mnt_, Lot 2). Temps d'intervention en heures ; alimente
 // le CRA (timesheets) converti en jours. Rattachés au contrat (contratId) et à l'affaire (fp).
-export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; typeMaintenance?: string | null; ouvertLe?: any; priseEnCompteLe?: any; resoluLe?: any; updatedAt?: any };
+export type MntTicket = { id?: string; contratId?: string; fp?: string; client?: string; titre?: string; statut?: string; priorite?: string; typeMaintenance?: string | null; ouvertLe?: any; priseEnCompteLe?: any; resoluLe?: any; updatedAt?: any;
+  // OPPOSABILITÉ (Lot 10b, ADR-P24) — champs ADDITIFS figés à la création : engagements du contrat en vigueur
+  // + n° de version. Absents sur les tickets antérieurs au versionnement (repli sur le contrat courant).
+  engagementsSnapshot?: MntEngagement[] | null; versionId?: string | null; versionNo?: number | null };
 export type MntIntervention = { id?: string; ticketId?: string; contratId?: string; fp?: string; consultantId?: string; date?: string; heures?: number; commentaire?: string; typeMaintenance?: string | null; updatedAt?: any };
 // Abonnements de surveillance PAR UTILISATEUR (mnt_watches/{uid}, ADR-026). Global = tout le parc,
 // sinon ciblé par contrat (id) / client (nom) / AM (nom).
