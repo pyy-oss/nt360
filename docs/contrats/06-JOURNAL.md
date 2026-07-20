@@ -1372,3 +1372,28 @@ Direction — aucune donnée de règlement daté).
 
 **Vérifs.** `recognition` (7) + `recognitionGate` (2) ; 1138 functions + 271 web ; bundle 118.3 KB (≤ 120) ;
 check-deploy-targets (178, aucun nouvel export) + check-no-undef OK.
+
+
+---
+
+## Lot 8b — Front facture fournisseur (vérité du coût), câblage additif
+
+**Contexte.** Le backend « Vérité du coût » (ADR-P21) était fusionné mais sans surface front : ni bascule
+du drapeau, ni saisie des factures fournisseur, ni rapprochement coût planifié/réel. Lot 8b câble ces trois
+manques — **additif strict**, aucun nouvel export serveur, aucune règle ni index touchés.
+
+**Arbitrage humain (étanchéité du drapeau).** `config/soaFeature` ne gouverne que la SOURCE du solde SOA,
+pas l'affichage. Décision : la **saisie/liste** des factures reste sous le seul droit `fournisseurs` (pour
+amorcer les pièces AVANT de basculer), tandis que la **carte de réconciliation coût** en FP 360° est gâtée
+par le drapeau (kill-switch sur l'effet métier) + accès Rentabilité (le coût planifié `o.costTotal` est
+confidentiel). Drapeau éteint ⇒ FP 360° strictement d'avant.
+
+**Câblage.** (1) `SoaFeatureCard` admin calquée sur `ParFeatureCard` (appel `setSoaFeature` inline, chunk
+d'entrée au plafond). (2) `SupplierInvoiceCard` dans « Crédit Fournisseurs » : Combo/DateField/Busy/DangerBtn
+réutilisés, `upsert/deleteSupplierInvoice` inline, montant XOF **entier** (le FCFA n'a pas de subdivision).
+(3) Carte « Réconciliation amont (coût) » en FP 360° : coût planifié (`o.costTotal`, carnet) rapproché du
+coût réel (Σ factures fournisseur par **fpKey**, pendant symétrique de l'aval). Helper PUR `supplierCostByFp`
+(domain/fournisseurs.js) + test, pour figer le rapprochement une fois. Type `SupplierInvoice` additif.
+
+**Vérifs.** `fournisseursSupplierCost` (4 nouveaux) ; 1233 functions + 287 web au vert ; bundle 119.4 KB
+(<= 120) ; check-deploy-targets (187, aucun nouvel export) + check-no-undef OK ; tsc propre.

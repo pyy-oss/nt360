@@ -199,6 +199,13 @@ export type SupplierRow = {
   disponible?: number; coverage?: number; util?: number; reco?: number; state?: string;
 };
 
+// Facture fournisseur RÉELLE (ADR-P21, Lot 8b) — pièce comptable saisie côté front, source du solde SOA
+// sous drapeau. Montant en `number` (jamais string) ; le franc CFA n'a pas de subdivision (saisie entière).
+export type SupplierInvoice = {
+  id?: string; supplier: string; amountXof: number;
+  date?: string | null; bcNumber?: string | null; fp?: string | null; ref?: string | null;
+};
+
 export type AlertItem = { type: string; severity: "high" | "medium" | "low"; count: number; message: string; refs?: string[] };
 export interface AlertsSummary { items?: AlertItem[]; fy?: number }
 export type QualityIssue = { type: string; severity: "high" | "medium" | "low"; count: number; label: string; refs?: string[] };

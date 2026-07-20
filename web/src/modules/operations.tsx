@@ -13,11 +13,13 @@ import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
 import { setBcStatus, patchBcLine, upsertCreditLine, migrateCreditLineKeys, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../lib/firebase";
 import { trackWrite } from "../lib/activity";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, useSupplierOptions, FpLink } from "./_shared";
 import { useFilters } from "../lib/filters";
 import { MARGIN, QUALITY } from "../lib/thresholds";
-import type { SuppliersSummary, SupplierRow, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
+import type { SuppliersSummary, SupplierRow, SupplierInvoice, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
 
@@ -188,9 +190,55 @@ export const Fournisseurs: FC<Props> = () => {
         <Table columns={cols} rows={data.bySupplier || []} colsKey="fournisseurs" searchKeys={[(s: SupplierRow) => s.name || ""]} rowKey={(s: SupplierRow) => s.name || ""} bulk={[]} />
         <Tip><b>SOA — relevé de compte</b> : le <b>solde</b> n'est mû que par les <b>factures</b> (BC au statut « facturé », non payés) plus un <b>solde d'ouverture</b> daté posé « à jour maintenant ». Les BC non facturés (émis/livrés) et le prévisionnel des commandes forment l'<b>engagement</b> — il consomme le disponible mais <b>ne débite pas le compte</b>. <b>Disponible</b> = autorisé − solde − engagement.</Tip>
       </Card>
+      <SupplierInvoiceCard canWrite={canWrite} />
     </div>
   );
 };
+
+// Factures fournisseur RÉELLES (ADR-P21, Lot 8b) — saisie + liste. La saisie est sous le seul droit
+// d'ÉCRITURE 'fournisseurs' (indépendamment du drapeau « Vérité du coût ») : on doit pouvoir amorcer les
+// pièces AVANT de basculer le solde SOA dessus. Le solde ne les consomme qu'à drapeau allumé (back gated).
+function SupplierInvoiceCard({ canWrite }: { canWrite: boolean }) {
+  const { rows } = useCollectionData<SupplierInvoice>("supplierInvoices");
+  const { data: soa } = useDocData<{ enabled?: boolean }>("config/soaFeature");
+  const supplierOpts = useSupplierOptions();
+  const on = soa?.enabled === true;
+  const empty = { supplier: "", amountXof: "", date: "", bcNumber: "", fp: "", ref: "" };
+  const [f, setF] = useState(empty);
+  const call = (name: string) => httpsCallable(functions, name);
+  const cols = [
+    colText("Date", (i: SupplierInvoice) => i.date || "—", (i: SupplierInvoice) => i.date || ""),
+    colText("Fournisseur", (i: SupplierInvoice) => i.supplier, (i: SupplierInvoice) => i.supplier),
+    // Montant ENTIER (le franc CFA n'a pas de subdivision), aligné droite.
+    colNum("Montant XOF", (i: SupplierInvoice) => money(i.amountXof), (i: SupplierInvoice) => i.amountXof || 0),
+    colText("N° BC", (i: SupplierInvoice) => i.bcNumber || "—"),
+    colText("N° FP", (i: SupplierInvoice) => <FpLink fp={i.fp} />),
+    colText("Réf.", (i: SupplierInvoice) => i.ref || "—"),
+    ...(canWrite ? [colNum("", (i: SupplierInvoice) => <DangerBtn label="Suppr." confirm={`Supprimer la facture fournisseur ${i.supplier} (${money(i.amountXof)}) ?`} okMsg="Facture supprimée" fn={() => call("deleteSupplierInvoice")({ id: i.id })} />)] : []),
+  ];
+  return (
+    <Card title={`Factures fournisseur · ${rows.length}`}>
+      {canWrite && (
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <Combo className="min-w-[180px]" placeholder="Fournisseur" ariaLabel="Fournisseur (facture)" allowCreate value={f.supplier} onChange={(v) => setF({ ...f, supplier: v })} options={supplierOpts.map((s) => ({ value: s, label: s }))} />
+          <input className="field w-32" placeholder="Montant XOF" aria-label="Montant XOF (facture fournisseur)" value={f.amountXof} onChange={(e) => setF({ ...f, amountXof: e.target.value })} />
+          <DateField className="w-40" ariaLabel="Date de la facture" value={f.date} onChange={(v) => setF({ ...f, date: v })} placeholder="date facture" />
+          <input className="field w-32" placeholder="N° BC (option)" aria-label="Numéro de BC (facture)" value={f.bcNumber} onChange={(e) => setF({ ...f, bcNumber: e.target.value })} />
+          <input className="field w-36" placeholder="N° FP (option)" aria-label="Numéro FP (facture)" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} />
+          <input className="field w-32" placeholder="Réf. (option)" aria-label="Référence de la facture" value={f.ref} onChange={(e) => setF({ ...f, ref: e.target.value })} />
+          <Busy label="Enregistrer" okMsg="Facture enregistrée" errMsg="Enregistrement refusé" fn={async () => {
+            await call("upsertSupplierInvoice")({ supplier: f.supplier, amountXof: Number(f.amountXof) || 0, date: f.date || undefined, bcNumber: f.bcNumber || undefined, fp: f.fp || undefined, ref: f.ref || undefined });
+            setF(empty);
+          }} />
+        </div>
+      )}
+      <Table columns={cols} rows={rows} colsKey="supplierInvoices" searchKeys={[(i: SupplierInvoice) => i.supplier || "", (i: SupplierInvoice) => i.fp || "", (i: SupplierInvoice) => i.bcNumber || ""]} rowKey={(i: SupplierInvoice) => i.id || ""} bulk={[]} />
+      <Tip><b>Pièces comptables réelles</b> (facture fournisseur) — saisies indépendamment du drapeau ; le montant est <b>entier</b> (le franc CFA n'a pas de subdivision). {on
+        ? <>La « <b>Vérité du coût</b> » est <b className="text-emerald">active</b> : le solde du compte fournisseur dérive de ces factures.</>
+        : <>La « <b>Vérité du coût</b> » est <b>éteinte</b> : ces factures n'impactent pas encore le solde SOA. Saisissez les pièces, puis activez le drapeau dans <b>Habilitations</b>.</>}</Tip>
+    </Card>
+  );
+}
 function CreditEditor({ name, authorized, opening, openingDate }: { name: string; authorized: number; opening: number; openingDate: string }) {
   const [a, setA] = useState(String(authorized || ""));
   const [o, setO] = useState(String(opening || ""));
@@ -723,6 +771,13 @@ export const Fp360: FC<Props> = () => {
   const o = key ? cmdRows.find((r) => fpKey(r.fp) === key) : undefined;
   // Σ facturé listé pour ce FP (détail) ; l'AUTORITÉ reste o.facture (Σ par fpKey du carnet, mergeCommandes).
   const sumFacture = invoices.reduce((s, i) => s + (i.amountHt || 0), 0);
+  // RÉCONCILIATION AMONT (coût, ADR-P21, Lot 8b) — pendant symétrique de l'aval : coût RÉEL = Σ factures
+  // FOURNISSEUR rapprochées par fpKey. Gâtée par le drapeau « Vérité du coût » (kill-switch de l'effet
+  // métier — arbitrage humain) ET l'accès Rentabilité (le coût planifié o.costTotal est confidentiel).
+  const { data: soaCfg } = useDocData<{ enabled?: boolean }>("config/soaFeature");
+  const soaOn = soaCfg?.enabled === true;
+  const { rows: supInv } = useCollectionData<SupplierInvoice>(key && canMargin && soaOn ? "supplierInvoices" : null, cons, key);
+  const coutReel = supInv.filter((x) => fpKey(x.fp) === key).reduce((s, i) => s + (i.amountXof || 0), 0);
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recherche par N° FP">
@@ -759,6 +814,19 @@ export const Fp360: FC<Props> = () => {
               {Math.round(sumFacture) !== Math.round(o.facture || 0) && (
                 <div className="text-[11px] text-faint mt-1">Σ factures listées ({fmt(sumFacture)}) ≠ Facturé carnet ({fmt(o.facture || 0)}) — factures annulées ou graphie de N° FP différente ; le <b>carnet fait autorité</b>.</div>
               )}
+            </Card>
+          )}
+          {/* Réconciliation AMONT (coût) — pendant symétrique de l'aval : coût planifié (carnet) ↔ coût réel
+              (Σ factures fournisseur, ADR-P21). Gâtée par le drapeau « Vérité du coût » + accès Rentabilité. */}
+          {o && canMargin && soaOn && (
+            <Card title="Réconciliation amont (coût)">
+              <div className={grid4}>
+                <Kpi label="Coût planifié (carnet)" value={fmt(o.costTotal || 0)} tone="steel" />
+                <Kpi label="Coût réel (Σ factures)" value={fmt(coutReel)} tone="clay" />
+                <Kpi label="Écart (planifié − réel)" value={fmt((o.costTotal || 0) - coutReel)} tone="gold" />
+                <Kpi label="Factures fournisseur" value={supInv.filter((x) => fpKey(x.fp) === key).length.toLocaleString("fr-FR")} />
+              </div>
+              <Tip>Le <b>coût réel</b> provient des <b>factures fournisseur</b> rattachées à ce N° FP (rapprochées par fpKey, autorité N° FP). Écart <b>positif</b> = achats planifiés non encore facturés ; <b>négatif</b> = dépassement du coût prévu.</Tip>
             </Card>
           )}
           <Card title={`Factures · ${invoices.length} · Σ ${fmt(sumFacture)}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>

@@ -157,4 +157,18 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
   };
 }
 
-module.exports = { suppliers };
+// RÉCONCILIATION AMONT (coût) — regroupe le coût RÉEL (factures fournisseur, ADR-P21) par N° d'affaire
+// CANONIQUE (fpKey, autorité N° FP : « FP/2026/007 » == « FP/2026/7 »). Pendant symétrique de la Σ facturé
+// (aval) déjà rapprochée par fpKey en FP 360°. PUR (aucune I/O) → miroir trivial côté front, testé une fois.
+// Les factures sans N° FP sont ignorées (rien à rapprocher à une affaire).
+function supplierCostByFp(supplierInvoices) {
+  const out = {};
+  for (const inv of Array.isArray(supplierInvoices) ? supplierInvoices : []) {
+    const k = fpKey(inv && inv.fp) || "";
+    if (!k) continue;
+    out[k] = (out[k] || 0) + (Number(inv && inv.amountXof) || 0);
+  }
+  return out;
+}
+
+module.exports = { suppliers, supplierCostByFp };
