@@ -676,7 +676,10 @@ function OrderEditor({ row }: { row: Order }) {
   const [am, setAm] = useState("");
   const [y, setY] = useState("");
   const [nf, setNf] = useState("");
-  const yearMissing = !(row.yearPo && row.yearPo > 0);
+  // Millésime « manquant » = absent OU aberrant : on borne par plausibleYear (miroir de dataQuality.js
+  // « commandes_sans_annee » et de atterrissage.js), sinon un yearPo brut aberrant (1900, 20226) resterait
+  // « présent » ici alors que Qualité le signale — l'utilisateur envoyé corriger ne verrait pas le champ.
+  const yearMissing = !(plausibleYear(row.yearPo) > 0);
   const anyField = cas !== "" || raf !== "" || client.trim() !== "" || am.trim() !== "";
   return (
     <>
