@@ -2834,7 +2834,11 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
     uid: req.auth.uid, action: "create_order", module: "overview", entity: "order", entityId: id,
     detail: { fp, cas, source: "manuel" }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  // Recompute BEST-EFFORT (« n'échoue jamais l'action appelante ») : la commande EST créée (intention de
+  // l'utilisateur, écrite ci-dessus). Un échec/lenteur du recompute — verrou de bail, transitoire — NE DOIT
+  // PAS remonter en faux « internal » et pousser l'utilisateur à recliquer (→ already-exists). Le carnet se
+  // rafraîchit au prochain recompute (planifié 05:00 ou action suivante). L'échec reste tracé (logger/opsLog).
+  try { await requestRecompute(); } catch (e) { logger.error("createOrder : recompute en échec (commande créée quand même)", { fp, msg: e && e.message }); }
   return { ok: true, fp };
 });
 
