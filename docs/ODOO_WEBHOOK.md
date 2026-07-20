@@ -1,8 +1,9 @@
 # Webhook entrant Odoo → nt360
 
-Reçoit les mises à jour Odoo sur les **opportunités**, **commandes** (carnet P&L) et **factures**, et les
-applique dans nt360 (upsert idempotent). Odoo est **source autoritaire** : un objet inconnu est **créé**, un
-objet connu est **mis à jour**.
+Reçoit les mises à jour Odoo sur les **opportunités**, **commandes** (carnet P&L), **factures** et **BC
+fournisseurs**, et les applique dans nt360 (upsert idempotent). Odoo est **source autoritaire** : un objet
+inconnu est **créé**, un objet connu est **mis à jour**. Un **backfill complet** se fait par le même endpoint,
+côté Odoo (§4bis) — pas de client sortant côté nt360.
 
 ## Endpoint
 
@@ -143,7 +144,8 @@ Excel convergent sur les mêmes documents (pas de seconde vérité).
 # Guide d'implémentation — côté Odoo
 
 Cette partie s'adresse au **développeur Odoo**. nt360 est déjà prêt à recevoir ; il reste à **émettre**
-depuis Odoo (opportunités, commandes, factures) vers l'endpoint `odooWebhook`, signé HMAC.
+depuis Odoo (opportunités, commandes, factures, BC fournisseurs) vers l'endpoint `odooWebhook`, signé HMAC.
+Deux modes : **temps réel** (Automated Actions, §4) et **backfill complet paginé** (Server Action, §4bis).
 
 ## 0. Prérequis (à récupérer auprès de nt360 / Direction)
 
@@ -216,6 +218,7 @@ et la BU sont souvent des champs `x_studio_…` — remplacez les `TODO` par vos
 ```python
 def _fp(rec):        return rec.x_studio_fp or ""        # TODO: votre champ N° FP (FP/AAAA/N)
 def _bu(rec):        return rec.x_studio_bu or ""         # TODO: votre champ Business Unit
+def _dc(rec):        return rec.x_studio_dc or ""         # TODO: votre champ N° DC (réf. externe, EN PLUS du FP)
 def _iso(d):         return d and str(d)[:10] or ""       # date/datetime Odoo → 'AAAA-MM-JJ'
 STAGE_MAP = {"New": 1, "Qualified": 2, "Proposition": 3, "Négociation": 4, "Won": 6, "Lost": 5}  # TODO: vos étapes → 1..6
 
@@ -230,6 +233,7 @@ def map_lead(l):
         "stage": STAGE_MAP.get(l.stage_id.name, 1),
         "probability": l.probability or 0,                # IdC en % (0-100)
         "closingDate": _iso(l.date_deadline),
+        "dc": _dc(l),                                     # réf. externe DC (optionnel, en plus du FP)
         "dateCreation": _iso(l.create_date),              # date de création Odoo
     }
 
@@ -244,6 +248,7 @@ def map_order(o):
         "cas": o.amount_untaxed or 0,
         # "raf": ...,                                      # omettre → nt360 garde son RAF dérivé
         # "suppliers": [{"name": .., "amount": ..}],       # optionnel
+        "dc": _dc(o),                                     # réf. externe DC (optionnel, en plus du FP)
         "dateCreation": _iso(o.create_date),              # date de création Odoo
     }
 
@@ -256,7 +261,25 @@ def map_invoice(m):
         "amountHt": m.amount_untaxed or 0, "bu": _bu(m),
         "date": _iso(m.invoice_date), "dueDate": _iso(m.invoice_date_due),
         "paid": m.payment_state == "paid",
+        "dc": _dc(m),                                     # réf. externe DC (optionnel, en plus du FP)
         "dateCreation": _iso(m.create_date),              # date de création Odoo
+    }
+
+# purchase.order → bc  (bon de commande fournisseur ; N° BC requis ; statut d'ENGAGEMENT seulement)
+def map_bc(p):
+    # état Odoo → statut d'engagement nt360 (jamais 'facture'/'solde' : le solde reste un acte comptable)
+    status = "livre" if p.state == "done" else ("emis" if p.state == "purchase" else "a_emettre")
+    return {
+        "odooId": "purchase.order:%s" % p.id,
+        "bcNumber": p.name or "",                          # N° BC (requis)
+        "fp": _fp(p), "supplier": p.partner_id.name or "",
+        "description": p.origin or p.name or "",
+        "currency": p.currency_id.name or "XOF",           # converti en XOF côté nt360 (config/fxRates)
+        "amount": p.amount_untaxed or 0,
+        "status": status,
+        # "eta": _iso(p.date_planned),                     # optionnel : date d'arrivée prévue si dispo
+        "dc": _dc(p),                                      # réf. externe DC (optionnel, en plus du FP)
+        "dateCreation": _iso(p.create_date),
     }
 ```
 
@@ -275,14 +298,46 @@ Une *Automated Action* (`base.automation`) par modèle, **sur création et mise 
 | `crm.lead` | À la création & mise à jour | Server Action → `_nt360_send(env, "opportunity", [map_lead(r) for r in records])` |
 | `sale.order` | À la création & mise à jour | `_nt360_send(env, "order", [map_order(r) for r in records])` |
 | `account.move` | À la validation (`state == 'posted'`) & mise à jour | `_nt360_send(env, "invoice", [map_invoice(r) for r in records])` |
+| `purchase.order` | À la confirmation (`state in ('purchase','done')`) & mise à jour | `_nt360_send(env, "bc", [map_bc(r) for r in records])` |
 
 - **Idempotence** : renvoyer le même enregistrement est sans danger — nt360 fait un **upsert** sur un id
-  déterministe (`fp`/`numero`) ou par rapprochement `fp`→`odooId`. Aucun doublon.
+  déterministe (`fp`/`numero`/N° BC) ou par rapprochement `fp`→`odooId`. Aucun doublon.
 - **Lots** : ≤ **500** `records` par requête (au-delà : `truncated: true`). Pour un backfill massif,
-  paginez côté Odoo.
+  paginez côté Odoo (voir §4bis).
 - **Fiabilité** : `odooWebhook` est synchrone. En cas d'erreur réseau/`5xx`, prévoyez un **rejeu** (file /
   `queue_job`), le renvoi étant idempotent. Un `4xx` (401/400) est une erreur de configuration/contrat à
   corriger, pas à rejouer en boucle.
+
+## 4bis. Rattrapage / re-synchronisation complète (backfill paginé)
+
+Le webhook temps réel (§4) couvre les **créations & mises à jour** au fil de l'eau. Pour un **premier
+chargement** ou une **re-synchro complète** (« tirer tout Odoo vers nt360 »), pas besoin de client sortant
+côté nt360 : une **Server Action** côté Odoo itère les enregistrements et les POSTe **par lots de ≤ 500**
+vers le même endpoint. Idempotent → rejouable sans créer de doublon. Lancez-la manuellement (bouton d'action)
+ou via une **action planifiée** (`ir.cron`), p. ex. une fois par nuit en filet de sécurité.
+
+```python
+# Server Action « nt360 — backfill complet ». À exécuter sur un modèle quelconque (le recordset est ignoré).
+BATCH = 500  # ≤ ODOO_MAX_RECORDS
+PLAN = [
+    ("crm.lead",       "opportunity", map_lead,    []),                                  # toutes les opps
+    ("sale.order",     "order",       map_order,   [("state", "!=", "cancel")]),         # commandes non annulées
+    ("account.move",   "invoice",     map_invoice, [("move_type", "=", "out_invoice"),   # factures CLIENT
+                                                    ("state", "=", "posted")]),          # validées
+    ("purchase.order", "bc",          map_bc,      [("state", "in", ("purchase", "done"))]),  # BC confirmés
+]
+for model, obj, mapper, domain in PLAN:
+    Model  = env[model].sudo()
+    ids    = Model.search(domain).ids            # ordre stable ; adaptez le domaine à votre besoin
+    for i in range(0, len(ids), BATCH):
+        recs = Model.browse(ids[i:i + BATCH])
+        _nt360_send(env, obj, [mapper(r) for r in recs])   # signé + posté (cf. §2)
+```
+
+> **Delta au lieu de tout** : pour ne renvoyer que les enregistrements récents, ajoutez au `domain` un filtre
+> sur `write_date`, p. ex. `("write_date", ">", last_sync_iso)` où `last_sync_iso` est mémorisé dans un
+> `ir.config_parameter` (`nt360.last_backfill`) mis à jour en fin de run. Le renvoi restant idempotent, un
+> chevauchement de fenêtre est sans danger.
 
 ## 5. Tester l'endpoint AVANT de brancher Odoo (curl signé)
 

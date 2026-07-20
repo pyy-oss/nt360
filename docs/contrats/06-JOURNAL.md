@@ -1765,3 +1765,18 @@ anti-doublon). Réutilise les callables existants ; aucun changement backend.
 **Reste à confirmer.** Le 1ᵉʳ signalement (« Inscrire au P&L » sur « opportunités gagnées sans commande »)
 échoue différemment (probable `already-exists` : un `orders/{fp}` annulé/écarté existe) — en attente du toast
 exact pour un correctif ciblé.
+
+## Extension Odoo Lot 3 — backfill/re-sync par le webhook ENTRANT (option A retenue) — 2026-07-20
+
+**Décision.** Plutôt qu'un bouton « sync-depuis-Odoo » (client sortant xmlrpc/jsonrpc à construire, non
+testable sans instance, creds à héberger), la Direction retient l'**option A** : tout se tire d'Odoo vers
+l'app **par le webhook entrant existant** (PUSH). Le temps réel est déjà couvert (Automated Actions) ; le
+rattrapage/backfill complet se fait côté Odoo par une Server Action qui pagine (≤ 500/req) vers le même
+endpoint HMAC — idempotent, rejouable, aucun doublon. **Aucun code nt360 neuf**, on réutilise le chemin testé.
+
+**Fait (docs/ODOO_WEBHOOK.md).** Mappers `map_lead`/`map_order`/`map_invoice` enrichis du champ `dc` ; ajout
+`map_bc` (purchase.order → bc). Automated Action `purchase.order` documentée. Nouvelle §4bis « backfill paginé »
+(Server Action complète + variante delta via `write_date`/`ir.config_parameter`). Intro mise à jour (4 objets +
+2 modes). Le Lot 3 « client sortant » est **abandonné** au profit de l'option A.
+
+**Vérifs.** Docs seules (aucun code) ; aucun impact tests/bundle.
