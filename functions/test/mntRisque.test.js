@@ -75,6 +75,27 @@ describe("mntRisque — signal SLA rompu", () => {
     expect(r.items[0].slaRompus).toBe(0);
   });
 
+  it("opposabilité (ADR-P24) : le SLA est jugé sur engagementsSnapshot du ticket, pas sur le contrat COURANT", () => {
+    // Contrat COURANT : résolution 8 h (serait rompu). Le ticket a été ouvert sous une version PLUS LARGE
+    // (seuil 10000 h, figé dans engagementsSnapshot) → NON rompu : la version en vigueur à l'ouverture prime.
+    const tOpen = day("2026-07-06");
+    const rSnap = mntRisque({
+      contrats: [contrat],
+      tickets: [{ id: "t1", contratId: "c1", ouvertMs: tOpen, priseEnCompteMs: null, resoluMs: null, dateJour: "2026-07-06",
+        engagementsSnapshot: [{ type: "resolution", couverture: "ouvre_lun_ven", seuilHeures: 10000, quota: null }] }],
+      invoices: [], asOf: ASOF, nowMs: NOW,
+    });
+    expect(rSnap.items[0].slaRompus).toBe(0); // jugé sur le snapshot (large), pas sur le contrat courant (8 h)
+    // MÊME ticket SANS snapshot → repli sur le contrat courant (8 h) → rompu. Preuve de non-régression :
+    // en l'absence de snapshot, la sortie est IDENTIQUE au comportement d'avant le versionnement.
+    const rFallback = mntRisque({
+      contrats: [contrat],
+      tickets: [{ id: "t1", contratId: "c1", ouvertMs: tOpen, priseEnCompteMs: null, resoluMs: null, dateJour: "2026-07-06" }],
+      invoices: [], asOf: ASOF, nowMs: NOW,
+    });
+    expect(rFallback.items[0].slaRompus).toBe(1);
+  });
+
   it("prise en compte : ticket résolu en PREMIER CONTACT (sans en_cours) n'est PAS rompu à tort (audit BUG1)", () => {
     // Engagement « prise_en_compte » 4 h. Ticket ouvert→resolu directement (priseEnCompteMs null car jamais
     // passé en_cours), résolu en 1 h. La prise en compte a eu lieu AU PLUS TARD à la résolution (1 h < 4 h)

@@ -40,11 +40,29 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     if (!v.ok) throw new HttpsError("invalid-argument", v.error);
     const id = safeId(v.value.fp); // 1 contrat = 1 affaire (ADR-001), idempotent
     const ref = db.doc(`mnt_contrats/${id}`);
-    const exists = (await ref.get()).exists;
+    const prevSnap = await ref.get();
+    const exists = prevSnap.exists;
+    const prev = prevSnap.data() || {};
+    // VERSIONNEMENT OPPOSABLE (Lot 10b, ADR-P24) : point d'interception UNIQUE de toute mutation de contrat.
+    // On fige une version IMMUABLE (append-only mnt_contratsVersions) du sous-ensemble significatif
+    // (engagements SLA, couverture, quota, prix, périodicité) SEULEMENT quand il change réellement (hash).
+    // versionCourante/Id/Hash sont des champs ADDITIFS sur mnt_contrats (aucun champ existant retiré).
+    const { versionPayload, versionHash, versionsDiffer } = require("../domain/mntContratVersion");
+    const payload = versionPayload(v.value);
+    const hash = versionHash(payload);
+    const changed = versionsDiffer(prev.versionHash, payload);
     const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
+    if (changed) {
+      const versionNo = (Number(prev.versionCourante) || 0) + 1;
+      const vref = await db.collection("mnt_contratsVersions").add({
+        contratId: id, fp: v.value.fp, version: versionNo, payload, hash,
+        effectiveFrom: FieldValue.serverTimestamp(), createdBy: req.auth.uid, ts: FieldValue.serverTimestamp(),
+      });
+      doc.versionCourante = versionNo; doc.versionHash = hash; doc.versionCouranteId = vref.id;
+    }
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_mnt_contrat" : "create_mnt_contrat", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { fp: v.value.fp, statut: v.value.statut, montantEngage: v.value.montantEngage }, ts: FieldValue.serverTimestamp() });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_mnt_contrat" : "create_mnt_contrat", module: "maintenance", entity: "mnt_contrat", entityId: id, detail: { fp: v.value.fp, statut: v.value.statut, montantEngage: v.value.montantEngage, version: changed ? doc.versionCourante : (prev.versionCourante || null), newVersion: changed }, ts: FieldValue.serverTimestamp() });
     // Rafraîchit summaries/mnt_risque (KPI risque/rétention) après l'édition — recompute DIFFÉRÉ et SCOPÉ
     // « maintenance » (le seul bloc à recalculer ; les lectures invoices/asOf sont inconditionnelles).
     // Sinon le score ne bougeait qu'au recompute planifié de 05:00.
@@ -66,6 +84,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const { readWorkbook } = require("../lib/xlsxRead");
     const { parseMntContratsImport } = require("../parsers/mntImport");
     const { planMntContratsImport } = require("../domain/mntImport");
+    const { versionPayload, versionHash } = require("../domain/mntContratVersion"); // versionnement des créations (ADR-P24)
     let wb;
     try { wb = await readWorkbook(Buffer.from(fileB64, "base64")); }
     catch (e) { throw new HttpsError("invalid-argument", "classeur illisible (.xlsx/.csv attendu)"); }
@@ -87,12 +106,24 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       ...plan.toCreate.map((r) => ({ mode: "create", id: r.id, value: r.value })),
       ...plan.toUpdate.map((r) => ({ mode: "update", id: r.id, patch: r.patch })),
     ];
-    for (let i = 0; i < all.length; i += 400) {
+    // Chunk de 200 (et non 400) : une CRÉATION ajoute désormais 2 écritures (contrat + sa version 1) → au pire
+    // 200 × 2 = 400 ≤ 500 (limite Firestore/batch). Une MISE À JOUR reste 1 écriture.
+    for (let i = 0; i < all.length; i += 200) {
       const batch = db.batch();
-      for (const rec of all.slice(i, i + 400)) {
+      for (const rec of all.slice(i, i + 200)) {
         const ref = db.doc(`mnt_contrats/${rec.id}`);
-        if (rec.mode === "update") batch.set(ref, { ...rec.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-        else batch.set(ref, { ...rec.value, updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        if (rec.mode === "update") {
+          // MàJ d'import = patch PARTIEL (engagements préservés) → NE versionne PAS ici (impossible sans
+          // relire le doc en masse) ; la version se posera au prochain upsertMntContrat (ADR-P24, note).
+          batch.set(ref, { ...rec.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        } else {
+          // CRÉATION : version 1 opposable dans le MÊME batch (append-only), même patron qu'upsertMntContrat.
+          const payload = versionPayload(rec.value);
+          const hash = versionHash(payload);
+          const vref = db.collection("mnt_contratsVersions").doc();
+          batch.set(vref, { contratId: rec.id, fp: rec.value.fp, version: 1, payload, hash, effectiveFrom: FieldValue.serverTimestamp(), createdBy: req.auth.uid, ts: FieldValue.serverTimestamp() });
+          batch.set(ref, { ...rec.value, versionCourante: 1, versionHash: hash, versionCouranteId: vref.id, updatedAt: FieldValue.serverTimestamp(), createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+        }
       }
       await batch.commit();
     }
@@ -417,7 +448,15 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       // sinon le moteur de risque calcule markMs=null → SLA « rompu » à jamais sur un ticket clos dans les
       // temps (audit m5). serverTimestamp partagé : ouverture et résolution au même instant → SLA respecté.
       const seedTs = FieldValue.serverTimestamp();
-      const seed = { ...doc, ouvertLe: seedTs, createdBy: req.auth.uid };
+      // OPPOSABILITÉ (Lot 10b, ADR-P24) : à la CRÉATION, on GÈLE la version de contrat EN VIGUEUR + un
+      // snapshot de ses engagements — le SLA du ticket sera calculé sur CETTE version, indépendamment des
+      // éditions ultérieures du contrat. Gel-une-fois (jamais réécrit en édition, comme ouvertLe). Contrat
+      // introuvable → snapshot vide + version null (repli au comportement courant, non-régression).
+      const c = (await db.doc(`mnt_contrats/${v.value.contratId}`).get()).data() || {};
+      const seed = { ...doc, ouvertLe: seedTs, createdBy: req.auth.uid,
+        engagementsSnapshot: Array.isArray(c.engagements) ? c.engagements : [],
+        versionId: c.versionCouranteId || null,
+        versionNo: c.versionCourante != null ? c.versionCourante : null };
       if (v.value.statut === "en_cours") seed.priseEnCompteLe = seedTs;
       if (v.value.statut === "resolu" || v.value.statut === "clos") seed.resoluLe = seedTs;
       const ref = await db.collection("mnt_tickets").add(seed);

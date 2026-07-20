@@ -204,33 +204,45 @@ export interface SlaAgendaItem {
   ticketId: string; contratId: string; client: string; titre: string; priorite: string;
   slaType: "prise_en_compte" | "resolution"; dueMs: number; state: "rompu" | "en_cours"; remainingMs: number;
 }
+type Eng = { type?: string; couverture?: string; seuilHeures?: number };
 type TicketMs = {
   id?: string; contratId?: string; client?: string; titre?: string; priorite?: string; statut?: string;
   ouvertMs?: number | null; priseEnCompteMs?: number | null; resoluMs?: number | null;
+  engagementsSnapshot?: Eng[] | null; // OPPOSABILITÉ (ADR-P24) : engagements figés à l'ouverture du ticket
 };
-type Eng = { type?: string; couverture?: string; seuilHeures?: number };
 type ContratEng = { id?: string; engagements?: Eng[] };
+
+// OPPOSABILITÉ (Lot 10b, ADR-P24) — miroir front de la règle de repli du back : les engagements applicables
+// à un ticket sont ceux FIGÉS à son ouverture (engagementsSnapshot), à défaut les engagements COURANTS du
+// contrat (ticket antérieur au versionnement). Snapshot absent ⇒ comportement identique (non-régression).
+export function engagementsForTicket(ticket: { engagementsSnapshot?: Eng[] | null } | null | undefined, contrat: ContratEng | null | undefined): Eng[] {
+  const snap = ticket && ticket.engagementsSnapshot;
+  if (Array.isArray(snap)) return snap;
+  return (contrat && contrat.engagements) || [];
+}
+
+// 1ᵉʳ engagement de chaque type dans une liste (la fiche impose au plus un par type utile ici).
+function slotOf(engagements: Eng[]): { prise_en_compte?: Eng; resolution?: Eng } {
+  const slot: { prise_en_compte?: Eng; resolution?: Eng } = {};
+  for (const e of engagements || []) {
+    if (e.type === "prise_en_compte" && !slot.prise_en_compte) slot.prise_en_compte = e;
+    else if (e.type === "resolution" && !slot.resolution) slot.resolution = e;
+  }
+  return slot;
+}
 
 /** Échéances SLA en attente des tickets ouverts, triées « rompu d'abord » puis par échéance la plus proche. PUR.
  * `cal` = calendrier SLA optionnel (fuseau/fériés/fenêtre B2B — ADR-P23) ; absent = horloge historique. */
 export function slaAgenda(tickets: TicketMs[], contrats: ContratEng[], nowMs: number, cal?: SlaCalendar | null): SlaAgendaItem[] {
-  // 1ᵉʳ engagement de chaque type par contrat (la fiche impose au plus un par type utile ici).
-  const engByContrat = new Map<string, { prise_en_compte?: Eng; resolution?: Eng }>();
-  for (const c of contrats || []) {
-    if (!c.id) continue;
-    const slot: { prise_en_compte?: Eng; resolution?: Eng } = {};
-    for (const e of c.engagements || []) {
-      if (e.type === "prise_en_compte" && !slot.prise_en_compte) slot.prise_en_compte = e;
-      else if (e.type === "resolution" && !slot.resolution) slot.resolution = e;
-    }
-    engByContrat.set(c.id, slot);
-  }
+  const contratById = new Map<string, ContratEng>();
+  for (const c of contrats || []) { if (c.id) contratById.set(c.id, c); }
   const out: SlaAgendaItem[] = [];
   for (const t of tickets || []) {
     const st = t.statut || "ouvert";
     if (st !== "ouvert" && st !== "en_cours") continue; // seuls les tickets OUVERTS
     if (t.ouvertMs == null) continue;
-    const engs = engByContrat.get(t.contratId || "") || {};
+    // Engagements OPPOSABLES du ticket (snapshot figé, sinon contrat courant) → slot par type.
+    const engs = slotOf(engagementsForTicket(t, contratById.get(t.contratId || "")));
     const pending: { slaType: SlaAgendaItem["slaType"]; eng: any }[] = [];
     if (t.priseEnCompteMs == null && engs.prise_en_compte) pending.push({ slaType: "prise_en_compte", eng: engs.prise_en_compte });
     if (t.resoluMs == null && engs.resolution) pending.push({ slaType: "resolution", eng: engs.resolution });
