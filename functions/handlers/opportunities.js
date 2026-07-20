@@ -278,7 +278,7 @@ function createOpportunities({
     if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'imports en peu de temps — patientez un instant.");
     const { fpKey } = require("../lib/ids");
     const { parseOpportunitiesImport } = require("../parsers/oppImport");
-    const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc } = require("../domain/oppImport");
+    const { planOpportunityImport, finalizeUpdatePatch, buildCreateDoc, importDateChange } = require("../domain/oppImport");
     const b64 = req.data?.fileB64;
     const filename = String(req.data?.filename || "opportunites.xlsx");
     const apply = req.data?.apply === true;
@@ -320,6 +320,10 @@ function createOpportunities({
     let batch = db.batch(), n = 0;
     const flush = async () => { if (n) { await batch.commit(); batch = db.batch(); n = 0; } };
     const transitions = [];
+    // Glissements de D Prev (closingDate) journalisés à l'import → PARITÉ avec patchOpportunity/upsertOpportunity :
+    // sans ça, le slippage (summaries/oppSlippage) était AVEUGLE aux mouvements de date issus des imports (la
+    // voie de données DOMINANTE : Sales_DATA entre par import). Lot 11.
+    const dateChanges = [];
     // Une opp GAGNÉE (stage 6) touchée par l'import réconcilie une commande (mergeCommandes) → portée élargie
     // (cf. oppScope). On lève le drapeau si une MAJ part de/arrive à Gagné, ou si une création naît Gagné.
     let wonTouched = false;
@@ -332,6 +336,9 @@ function createOpportunities({
       if (patch.stage !== undefined && patch.stage !== u.stageFrom) {
         transitions.push({ oppId: u.id, from: u.stageFrom, to: patch.stage, amount: patch.amount !== undefined ? patch.amount : (Number(cur.amount) || 0), client: cur.client, am: patch.am !== undefined ? patch.am : cur.am, bu: patch.bu !== undefined ? patch.bu : cur.bu, uid: req.auth.uid });
       }
+      // Changement de D Prev (closingDate) → journal du glissement (décision PURE, parité patchOpportunity).
+      const dc = importDateChange({ ...cur, id: u.id }, patch, req.auth.uid);
+      if (dc) dateChanges.push(dc);
       if (++n % 400 === 0) await flush();
     }
     let seq = 0;
@@ -352,6 +359,7 @@ function createOpportunities({
     }
     await flush();
     for (const t of transitions) await recordOppTransition(t); // journal funnel (parité patch/upsert)
+    for (const dc of dateChanges) await recordOppDateChange(dc); // journal slippage (parité patch/upsert) — Lot 11
 
     await db.collection("imports").add({
       uid: req.auth.uid, kinds: ["opportunities"], filename, objectKey: null, mode: "opp_bulk",
