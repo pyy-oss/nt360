@@ -737,23 +737,58 @@ function OrderCasFixer({ row }: { row: Order }) {
 // VALIDE le RAF (le fige comme curaté, défaut = valeur dérivée, éditable) ou SOLDE (RAF = 0, affaire
 // livrée). patchOrder écrit le RAF sur la commande P&L (une opp gagnée a toujours une ligne P&L sous-
 // jacente) → au recompute, rafSource passe « derive » → « excel » et la ligne quitte le lot suspect.
-function RafValidator({ row }: { row: { fp?: string; raf?: number } }) {
+function RafValidator({ row }: { row: { fp?: string; raf?: number; cas?: number; client?: string; affaire?: string | null; bu?: string; am?: string } }) {
   const [editing, setEditing] = useState(false);
   const [raf, setRaf] = useState("");
+  // Fige le RAF sur la commande. Ces lignes ont un RAF DÉRIVÉ car elles n'ont pas de ligne P&L curatée : soit
+  // il existe une commande P&L (source pnl/manuel) → patchOrder ; soit c'est une commande DÉRIVÉE d'une opp
+  // gagnée / fiche SANS doc `orders/{fp}` → patchOrder lève « commande introuvable » et on MATÉRIALISE via
+  // createOrder (source manuel, CAS de la ligne + RAF validé). Une ligne P&L Excel du même FP la réécrase au
+  // prochain import (P&L strict prioritaire préservé). Rend « intégrer »/« Solder » opérant sur TOUTES les lignes.
+  const setRafOnOrder = async (v: number) => {
+    try {
+      await patchOrder({ fp: row.fp!, raf: v });
+    } catch (e: any) {
+      const msg = String(e?.message || e?.code || "");
+      const noOrder = msg.includes("failed-precondition") || msg.includes("introuvable");
+      if (!noOrder) throw e; // vraie erreur (droit, validation…) → on la remonte
+      if (!((row.cas || 0) > 0)) throw new Error("CAS manquant : corriger la commande à la source");
+      await createOrder({ fp: row.fp!, cas: row.cas!, raf: v, client: row.client, am: row.am, bu: row.bu, designation: row.affaire || undefined });
+    }
+  };
+  // Correction du N° FP (les commerciaux saisissent parfois une mauvaise version). Ré-clé la commande P&L si
+  // elle existe (patchOrder newFp, avec sa garde anti-fusion), sinon matérialise la commande DÉRIVÉE sous le
+  // FP corrigé (createOrder — refuse si une commande existe déjà sous ce FP → pas de doublon). Miroir de la
+  // correction FP disponible sur les « opportunités gagnées sans commande ».
+  const [nf, setNf] = useState("");
+  const fixFp = async (newFp: string) => {
+    try {
+      await patchOrder({ fp: row.fp!, newFp });
+    } catch (e: any) {
+      const msg = String(e?.message || e?.code || "");
+      const noOrder = msg.includes("failed-precondition") || msg.includes("introuvable");
+      if (!noOrder) throw e;
+      if (!((row.cas || 0) > 0)) throw new Error("CAS manquant : corriger la commande à la source");
+      await createOrder({ fp: newFp, cas: row.cas!, client: row.client, am: row.am, bu: row.bu, designation: row.affaire || undefined });
+    }
+  };
   if (!editing) {
     return (
-      <button type="button" onClick={() => { setRaf(String(row.raf ?? "")); setEditing(true); }}
-        className="text-gold hover:underline text-[11px]" title="Valider le RAF et intégrer au backlog fiable">intégrer</button>
+      <button type="button" onClick={() => { setRaf(String(row.raf ?? "")); setNf(""); setEditing(true); }}
+        className="text-gold hover:underline text-[11px]" title="Valider le RAF / corriger le FP et intégrer au backlog fiable">intégrer</button>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 justify-end flex-wrap">
       <input className="field w-24 !py-1 text-xs text-right" inputMode="decimal" autoFocus aria-label={`RAF validé de ${row.fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
       <Busy variant="ghost" label="Valider" okMsg="RAF validé — intégré au backlog fiable (recalcul lancé)" errMsg="Validation refusée"
-        fn={async () => { const v = parseNum(raf); if (!(v >= 0)) throw new Error("saisir un RAF ≥ 0"); await patchOrder({ fp: row.fp!, raf: v }); setEditing(false); }} />
+        fn={async () => { const v = parseNum(raf); if (!(v >= 0)) throw new Error("saisir un RAF ≥ 0"); await setRafOnOrder(v); setEditing(false); }} />
       <Busy variant="ghost" label="Solder (0)" okMsg="Commande soldée (recalcul lancé)" errMsg="Solde refusé"
-        fn={async () => { await patchOrder({ fp: row.fp!, raf: 0 }); setEditing(false); }} />
-      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler la validation">✕</button>
+        fn={async () => { await setRafOnOrder(0); setEditing(false); }} />
+      <input className="field w-28 !py-1 text-xs" aria-label={`Corriger le N° FP de ${row.fp}`} placeholder="nouveau N° FP" value={nf} onChange={(e) => setNf(e.target.value)} />
+      {nf.trim() && <Busy variant="ghost" label="Corriger FP" okMsg="N° FP corrigé (recalcul lancé)" errMsg="Correction FP refusée"
+        fn={async () => { await fixFp(nf.trim()); setEditing(false); }} />}
+      <button type="button" onClick={() => setEditing(false)} className="text-muted hover:text-ink text-[11px]" aria-label="Annuler l'édition">✕</button>
     </span>
   );
 }
