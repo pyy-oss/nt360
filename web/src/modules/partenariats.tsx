@@ -45,6 +45,7 @@ type CaHistory = { days?: { date: string; totalXof: number; bcXof: number; decla
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
 type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number; partnerRenewals?: { id: string; partnerId: string; name: string; renewalDate: string; daysLeft: number; bucket: string }[]; partnerRenewalTotal?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
+type PipelineSummary = { partners?: { partnerId: string; name: string; openXof: number; openWeightedXof: number; openCount: number; wonXof: number; wonCount: number }[]; totalOpenXof?: number; totalWonXof?: number; exerciseYear?: number } | null;
 type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
 type ConsultantLite = { id: string; name: string; bu?: string };
 
@@ -87,6 +88,7 @@ export const Partenariats: FC<Props> = () => {
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
   const { data: history } = useDocData<QuotaHistory>("summaries/par_quotasHistory");
+  const { data: parPipeline } = useDocData<PipelineSummary>("summaries/par_pipeline");
   const { data: mapDoc } = useDocData<{ map?: Record<string, string | Record<string, number>> }>("config/parPartnerMap");
 
   const partnerName = useMemo(() => { const m: Record<string, string> = {}; for (const p of partners || []) m[p.id] = p.name; return m; }, [partners]);
@@ -125,7 +127,7 @@ export const Partenariats: FC<Props> = () => {
       )}
 
       {!loadError && !parLoading && <>
-        {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} pipeline={parPipeline} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
         {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
         {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
         {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
@@ -353,12 +355,14 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   );
 };
 
-const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, caHistory, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; pipeline: PipelineSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, caHistory, pipeline, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
   // Action de ligne « Éditer le partenaire » depuis une vue read-only → bascule Paramétrage + ouvre le formulaire.
   const editCol = (id: (r: any) => string) => colText("", (r: any) => <button className="btn-ghost text-[11px]" onClick={() => onEditPartner(id(r))}>Éditer</button>);
-  const alertItems = alerts?.items || [];
+  // Mémoïsés (identité stable) : ces tableaux sont des DÉPENDANCES de useMemo plus bas (compareRows,
+  // trainRows) — le repli `|| []` recréé à chaque rendu invaliderait les mémos en boucle (eslint react-hooks).
+  const alertItems = useMemo(() => alerts?.items || [], [alerts]);
   const relanceItems = relances?.items || [];
-  const quotaPartners = quotas?.partners || [];
+  const quotaPartners = useMemo(() => quotas?.partners || [], [quotas]);
   // Tendance de conformité (Lot P3) : historique quotidien de la couverture des quotas (30 derniers jours).
   const trend = (history?.days || []).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Conformes: d.conformes, "À risque": d.aRisque, "Non conformes": d.nonConformes }));
   // Plan d'affaires : partenaires portant un BP saisi, avec taux d'atteinte par axe + global (miroir du
@@ -488,6 +492,39 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
           </div>
         )}
       </Card>
+      )}
+
+      {/* Pipeline SOURCÉ PARTENAIRE (PAR-L1) : opps taguées d'un constructeur (formulaire Pipeline) —
+          ouvert + pondéré (même autorité projectionWeight que la prévision) + gagné de l'exercice, avec
+          l'objectif pipeline du plan d'affaires en regard (contrepartie MESURÉE du déclaré). */}
+      {!!(pipeline?.partners || []).length && (
+        <Card title={`Pipeline sourcé partenaire${pipeline?.exerciseYear ? ` · ${pipeline.exerciseYear}` : ""}`} actions={<ExportBtn name="pipeline-source-partenaire" cols={[
+          { header: "Constructeur", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => r.name },
+          { header: "Ouvert (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openXof) },
+          { header: "Pondéré (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openWeightedXof) },
+          { header: "Gagné (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.wonXof) },
+          { header: "Opps ouvertes", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openCount) },
+        ]} rows={pipeline!.partners!} />}>
+          <Tip>Les opportunités <b>taguées d'un constructeur</b> (champ « Constructeur (partenariat) » du formulaire Pipeline) : pipeline <b>ouvert</b>, son <b>pondéré</b> de projection (mêmes paliers que la prévision) et le <b>gagné</b> de l'exercice — à comparer à l'objectif pipeline du plan d'affaires, qui reste déclaratif.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              colNum("Ouvert", (r) => money(r.openXof), (r) => r.openXof),
+              colNum("Pondéré", (r) => money(r.openWeightedXof), (r) => r.openWeightedXof),
+              colNum("Gagné", (r) => r.wonXof ? money(r.wonXof) : <span className="text-faint">—</span>, (r) => r.wonXof),
+              colNum("Opps", (r) => `${r.openCount}${r.wonCount ? ` + ${r.wonCount} gagnée(s)` : ""}`, (r) => r.openCount + r.wonCount),
+              colNum("vs objectif pipeline (BP)", (r) => {
+                const bp = Number(partners.find((p) => p.id === r.partnerId)?.businessPlan?.pipelineBp) || 0;
+                return bp > 0 ? <MiniBar ratio={(r.openXof + r.wonXof) / bp} /> : <span className="text-faint">—</span>;
+              }, (r) => { const bp = Number(partners.find((p) => p.id === r.partnerId)?.businessPlan?.pipelineBp) || 0; return bp > 0 ? (r.openXof + r.wonXof) / bp : -1; }),
+            ]}
+            rows={pipeline!.partners!} rowKey={(r) => r.partnerId} empty="Aucune opportunité taguée d'un constructeur."
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+            <Dot color={T.gold} label={<>Ouvert <b className="tabnum">{money(pipeline?.totalOpenXof || 0)}</b></>} />
+            <Dot color={T.emerald} label={<>Gagné <b className="tabnum">{money(pipeline?.totalWonXof || 0)}</b></>} />
+          </div>
+        </Card>
       )}
 
       <Card title="Conformité des quotas de certification" actions={<ExportBtn name="conformite-quotas" cols={[

@@ -947,6 +947,15 @@ async function recomputeCore(db, only) {
       caDays.sort((a, b) => (a.date < b.date ? -1 : 1));
       w.push({ path: "summaries/par_caHistory", data: { days: caDays.slice(-90), ...stamp } });
 
+      // Pipeline SOURCÉ PARTENAIRE (PAR-L1) : opps taguées `parPartnerId` (dédupliquées — même population
+      // `opps` que summaries/pipeline) → ouvert + pondéré (MÊME autorité projectionWeight/tiers que la
+      // prévision) + gagné de l'exercice. Contrepartie MESURÉE du pipelineYtd déclaré du plan d'affaires.
+      const { pipelineByPartner } = require("../domain/parPipeline");
+      const pp = pipelineByPartner(opps, { year: exerciseYear, tiers });
+      w.push({ path: "summaries/par_pipeline", data: { asOf, exerciseYear,
+        partners: pp.partners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId })),
+        totalOpenXof: pp.totalOpenXof, totalWonXof: pp.totalWonXof, ...stamp } });
+
       // Quotas de certification (couverture par exigence) + statut de conformité par partenaire (ADR-P04).
       const certsByPartner = {}; for (const c of parCertifs) { (certsByPartner[c.partnerId] = certsByPartner[c.partnerId] || []).push(c); }
       const quotas = coverageAll(parPartners, certsByPartner);

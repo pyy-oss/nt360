@@ -96,6 +96,10 @@ function createOpportunities({
       // Origine du lead (canal) + concurrent identifié sur une perte — analytique commerciale (DC Lot 6).
       leadSource: String(d.leadSource || "").trim().slice(0, 60) || null,
       competitor: String(d.competitor || "").trim().slice(0, 120) || null,
+      // Constructeur SOURCEUR (module Partenariats, PAR-L1) : slug du référentiel par_partners — trace les
+      // affaires sourcées/co-vendues via un programme partenaire (agrégat summaries/par_pipeline). Champ
+      // ADDITIF et inerte drapeau éteint (le bloc par_ d'aggregate est gaté par config/parFeature).
+      parPartnerId: require("../domain/parPartner").slug(d.parPartnerId) || null,
       updatedAt: FieldValue.serverTimestamp(),
     };
     if (ownerUid !== undefined) { doc.ownerUid = ownerUid; doc.visibleTo = await visibleToFor(ownerUid); }
@@ -187,6 +191,7 @@ function createOpportunities({
     if (d.lostReason !== undefined) patch.lostReason = String(d.lostReason || "").trim().slice(0, 200) || null;
     if (d.leadSource !== undefined) patch.leadSource = String(d.leadSource || "").trim().slice(0, 60) || null; // origine du lead (canal)
     if (d.competitor !== undefined) patch.competitor = String(d.competitor || "").trim().slice(0, 120) || null; // concurrent (analytique perte)
+    if (d.parPartnerId !== undefined) patch.parPartnerId = require("../domain/parPartner").slug(d.parPartnerId) || null; // constructeur sourceur (PAR-L1)
     if (d.stage !== undefined) {
       const stage = clampStage(d.stage);
       patch.stage = stage;

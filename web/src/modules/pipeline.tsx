@@ -330,7 +330,7 @@ export const Am360: FC<Props> = () => {
 const DEFAULT_PROBA: Record<number, number> = { 1: 10, 2: 25, 3: 40, 4: 60, 5: 80, 8: 5 };
 // Origines de lead (canaux) — liste fixe, alignée sur le vocabulaire commercial ESN.
 const LEAD_SOURCES = ["Entrant", "Sortant", "Référence", "Partenaire", "Appel d'offres", "Salon", "Autre"];
-const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", leadSource: "", competitor: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
+const EMPTY_OPP = { id: "", client: "", am: "", bu: "ICT", fp: "", amount: "", stage: "1", probability: "", closingDate: "", mbPrev: "", dr: "non", nextStep: "", nextStepDate: "", lostReason: "", leadSource: "", competitor: "", parPartnerId: "", forecastCategory: "", custom: {} as Record<string, unknown>, lines: [] as OppLine[], patch: false };
 // Total dérivé des lignes produit (CPQ-lite, Lot 8) — miroir client de domain/quote.computeLines.
 const lineTot = (l: OppLine) => Math.round((Number(l.qty) || 0) * (Number(l.unitPrice) || 0) * (1 - (Number(l.discountPct) || 0) / 100));
 const linesTotal = (ls: OppLine[]) => ls.reduce((s, l) => s + lineTot(l), 0);
@@ -543,6 +543,13 @@ export const OppList: FC<Props> = () => {
   // C'est un filtre d'affichage (pas une métrique recalculée) → aucune divergence de chiffres possible.
   const [stageF, setStageF] = useState(0);
   const bus = useBusinessUnits(); // référentiel BU (Admin) pour le sélecteur de saisie d'opportunité
+  // Constructeur SOURCEUR (module Partenariats, PAR-L1) : le référentiel par_partners n'est lu que si le
+  // module est ALLUMÉ et lisible (rules : drapeau + droit `partenariats`) — sinon aucun abonnement, et le
+  // sélecteur n'apparaît pas (l'écran Pipeline reste strictement celui d'avant, drapeau éteint).
+  const canPar = useCan("partenariats") !== "none";
+  const { data: parFlag } = useDocData<{ enabled?: boolean }>(canPar ? "config/parFeature" : null);
+  const { rows: parPartners } = useCollectionData<{ id: string; name?: string }>(canPar && parFlag?.enabled === true ? "par_partners" : null);
+  const parOpts = useMemo(() => (parPartners || []).map((p) => ({ value: p.id, label: p.name || p.id })).sort((a, b) => a.label.localeCompare(b.label)), [parPartners]);
   const amOpts = useAmOptions(), clientOpts = useClientOptions(); // autocomplete Client/AM (mêmes sources que les filtres)
   const prefill = (o: Opportunity, patch: boolean) => { setF({
     id: o.oppId || o.id || "", client: o.client || "", am: o.am || "", bu: o.bu || "AUTRE", fp: o.fp || "",
@@ -551,7 +558,7 @@ export const OppList: FC<Props> = () => {
     forecastCategory: (o as { forecastCategory?: string }).forecastCategory || "",
     custom: ((o as { custom?: Record<string, unknown> }).custom) || {},
     lines: ((o as { lines?: OppLine[] }).lines) || [],
-    nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", leadSource: o.leadSource || "", competitor: o.competitor || "", patch,
+    nextStep: o.nextStep || "", nextStepDate: o.nextStepDate || "", lostReason: o.lostReason || "", leadSource: o.leadSource || "", competitor: o.competitor || "", parPartnerId: o.parPartnerId || "", patch,
   }); setOpen(true); };
   const editOpp = (o: Opportunity) => prefill(o, false); // opp SAISIE → édition complète (upsert)
   const fixOpp = (o: Opportunity) => prefill(o, true);   // opp IMPORTÉE → correction (patch, source conservée)
@@ -667,9 +674,9 @@ export const OppList: FC<Props> = () => {
               <Busy label={f.patch ? "Actualiser" : f.id ? "Enregistrer" : "Ajouter"} okMsg="Opportunité enregistrée"
                 fn={async () => {
                   if (f.patch) {
-                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
+                    await patchOpportunity({ id: f.id, fp: f.fp.trim() || undefined, closingDate: f.closingDate || null, amount: Number(f.amount) || 0, stage: Number(f.stage), am: f.am, bu: f.bu, probability: f.probability !== "" ? Number(f.probability) : undefined, nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, parPartnerId: f.parPartnerId, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   } else {
-                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
+                    await upsertOpportunity({ id: f.id || undefined, client: f.client, am: f.am, bu: f.bu, fp: f.fp || undefined, amount: Number(f.amount) || 0, stage: Number(f.stage), probability: Number(f.probability) || 0, closingDate: f.closingDate || undefined, mbPrev: f.mbPrev !== "" ? Number(f.mbPrev) : undefined, dr: f.dr === "oui", nextStep: f.nextStep, nextStepDate: f.nextStepDate || null, lostReason: f.lostReason, leadSource: f.leadSource, competitor: f.competitor, parPartnerId: f.parPartnerId, forecastCategory: (f.forecastCategory || null) as ForecastCategory | null, custom: f.custom, lines: f.lines });
                   }
                   setOpen(false); setF({ ...EMPTY_OPP });
                 }} />
@@ -741,6 +748,12 @@ export const OppList: FC<Props> = () => {
             {/* Origine du lead (canal) : analytique d'acquisition — quel canal alimente le pipe. */}
             <Field label="Source du lead">
               <Select ariaLabel="Origine du lead" value={f.leadSource} onChange={(v) => setF({ ...f, leadSource: v })} options={[{ value: "", label: "—" }, ...LEAD_SOURCES.map((s) => ({ value: s, label: s }))]} /></Field>
+            {/* Constructeur sourceur (PAR-L1) : rattache l'affaire à un programme partenaire — alimente le
+                pipeline sourcé du module Partenariats (summaries/par_pipeline). Visible drapeau allumé seulement. */}
+            {parOpts.length > 0 && (
+              <Field label="Constructeur (partenariat)">
+                <Select ariaLabel="Constructeur sourceur (partenariat)" value={f.parPartnerId} onChange={(v) => setF({ ...f, parPartnerId: v })} options={[{ value: "", label: "—" }, ...parOpts]} /></Field>
+            )}
             {/* Motif de perte + concurrent : pertinents pour une opp Perdue (étape 7) → analytique win/loss. */}
             {Number(f.stage) === 7 && (
               <>

@@ -221,7 +221,10 @@ async function recomputeSummaries(only) {
 // nourrit que les summaries réellement dérivés des opportunités — pipeline (+ funnel), ams, atterrissage
 // (le pondéré nourrit le projeté CAS), overview (certitudes/conversion), news, alerts, dataQuality (compte
 // + « gagnées sans FP/P&L ») — et saute commandes/backlog/rentabilité/clients/domaines/fournisseurs/cash.
-const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality"];
+// + "partenariats" : le pipeline SOURCÉ PARTENAIRE (summaries/par_pipeline, PAR-L1) dérive des opps
+// taguées parPartnerId — sans ce scope, taguer/gagner une opp laisserait le sourcé figé. Coût nul drapeau
+// éteint (le bloc par_ d'aggregate sort immédiatement).
+const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality", "partenariats"];
 
 // MAIS une opp GAGNÉE (stage 6) dont le N° FP matche une ligne P&L RÉCONCILIE la commande dans
 // mergeCommandes (domain/commandes.js) — c'est un AGRÉGAT, pas une jointure d'affichage : elle écrase

@@ -33,6 +33,7 @@ export type OppInput = {
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
   forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[];
   leadSource?: string; competitor?: string;
+  parPartnerId?: string; // constructeur sourceur (module Partenariats, PAR-L1)
 };
 // LIGNES PRODUIT / CPQ-lite (Lot 8) — quand des lignes existent, le montant de l'opp est DÉRIVÉ.
 export type OppLine = { product: string; qty: number; unitPrice: number; discountPct: number; lineTotal?: number };
@@ -54,7 +55,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string; parPartnerId?: string }) {
   // Timeout client aligné sur le serveur (timeoutSeconds: 120) : l'écriture déclenche un recompute
   // synchrone (repli) qui peut dépasser le défaut de 70 s → faux « internal » alors que le patch a réussi.
   await httpsCallable(functions, "patchOpportunity", { timeout: 120_000 })(data);
