@@ -2137,3 +2137,18 @@ no-undef (164), deploy-targets (199), bundle 120,9 ≤ 122 Ko.
 
 **En parallèle (prod).** PR #557 fusionnée (squash 3c2adec) sur « go » — déploiement main en cours à
 la fusion (à confirmer au prochain point).
+
+---
+
+## 2026-07-21 — Récupération BC Odoo : option PUSH confirmée (renvoi unitaire §4ter + état de réception)
+
+**Fait.** Demande « récupérer via webhook entrant odoo (unitaire ou masse) » depuis le rapprochement
+DC → N° FP. Arbitrage utilisateur (AskUserQuestion) : RESTER EN PUSH (pas de client sortant Odoo — l'option
+A d'ADR-051/274 tient). Livré : (1) doc ODOO_WEBHOOK.md §4ter — Server Action « renvoyer les BC
+sélectionnés » (unitaire par DC ou sélection de la vue liste), en plus du backfill §4bis ; (2) odooWebhook
+persiste `lastReceived` (horodatage, objet, écrits/échecs — best-effort, jamais bloquant) et
+odooWebhookStatus l'expose (epoch ms) ; (3) Admin → Intégration affiche « Dernier envoi reçu » ;
+(4) le Tip du rapprochement DC explique comment déclencher le renvoi et où vérifier son arrivée.
+
+**Vérifs.** Functions 1342/1342, web 301/301, tsc/eslint 0, no-undef (164), deploy-targets (199),
+bundle 120,9 ≤ 122 Ko.

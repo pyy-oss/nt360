@@ -943,7 +943,7 @@ export function OutboundWebhookCard() {
 // client (il porte le secret) : l'état est lu via le callable `odooWebhookStatus` (jamais le secret). Le
 // secret partagé est écrit seul (≥ 16 car.) ; laisser vide conserve l'existant. `enabled` = interrupteur (gate).
 export function OdooWebhookCard() {
-  const [status, setStatus] = useState<{ enabled: boolean; hasSecret: boolean } | null>(null);
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof odooWebhookStatus>> | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [secret, setSecret] = useState("");
   useEffect(() => { odooWebhookStatus().then((s) => { setStatus(s); setEnabled(s.enabled); }).catch(() => setStatus({ enabled: false, hasSecret: false })); }, []);
@@ -964,7 +964,16 @@ export function OdooWebhookCard() {
         <label className="flex items-center gap-2"><Toggle checked={enabled} onChange={setEnabled} ariaLabel="Activer l'intégration Odoo" />Activer la réception (interrupteur — coupe l'intégration sans supprimer le secret)</label>
         <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">Secret partagé HMAC (≥ 16 caractères — écrit seul, jamais réaffiché)</span>
           <input className="field !py-1" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="Secret partagé Odoo" placeholder={status?.hasSecret ? "•••••••• (laisser vide pour conserver)" : "collez le secret partagé"} /></label>
-        <Tip>Odoo pousse ses mises à jour en <b>POST JSON signé</b> (<code>X-Signature</code>, HMAC-SHA256 du corps) vers la fonction <code>odooWebhook</code>. Le secret partagé signe le corps ; il est stocké côté serveur et <b>jamais réaffiché</b>. Contrat + exemple : <code>docs/ODOO_WEBHOOK.md</code>.</Tip>
+        {/* État de réception : seul moyen côté app de vérifier qu'un renvoi (unitaire §4ter / backfill §4bis),
+            déclenché CÔTÉ ODOO, est bien arrivé — le webhook est entrant uniquement (pas de client sortant). */}
+        {status?.lastReceived && (
+          <div className="text-[12px] text-muted">
+            Dernier envoi reçu : <span className="text-ink tabnum">{status.lastReceived.at ? new Date(status.lastReceived.at).toLocaleString("fr-FR") : "—"}</span>
+            {" "}· objet <b className="text-ink">{status.lastReceived.object || "—"}</b>
+            {" "}· <span className="tabnum">{status.lastReceived.written}</span> écrit(s){status.lastReceived.failed ? <> · <span className="text-clay tabnum">{status.lastReceived.failed} échec(s)</span></> : ""}
+          </div>
+        )}
+        <Tip>Odoo pousse ses mises à jour en <b>POST JSON signé</b> (<code>X-Signature</code>, HMAC-SHA256 du corps) vers la fonction <code>odooWebhook</code>. Le secret partagé signe le corps ; il est stocké côté serveur et <b>jamais réaffiché</b>. La <b>récupération</b> (unitaire par DC ou backfill en masse) se déclenche <b>côté Odoo</b> — Server Actions prêtes à coller dans <code>docs/ODOO_WEBHOOK.md</code> (§4bis/§4ter) ; le renvoi est idempotent (aucun doublon).</Tip>
       </div>
     </Card>
   );

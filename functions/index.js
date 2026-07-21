@@ -4534,6 +4534,12 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
       await Promise.all(batch.slice(i, i + CONC).map((rec) => processOne(rec)));
     }
     if (wrote) await requestRecompute(null); // recompute différé/coalescé (un seul pour tout le lot)
+    // État de réception (best-effort) : horodatage/volume du DERNIER envoi Odoo, affiché en Admin →
+    // Intégration — seul moyen côté app de VÉRIFIER qu'un renvoi (unitaire §4ter / backfill §4bis),
+    // déclenché côté Odoo, est bien arrivé. Ne doit jamais faire échouer la réponse au webhook.
+    try {
+      await db.doc("config/odooWebhook").set({ lastReceived: { at: FieldValue.serverTimestamp(), object, written: results.length, failed: errors.length } }, { merge: true });
+    } catch (e) { logger.warn("odooWebhook : lastReceived non persisté", { msg: e && e.message }); }
     res.status(200).json({ ok: true, object, written: results.length, failed: errors.length, truncated, results, errors });
   } catch (e) {
     logger.error("odooWebhook : traitement échoué", { object, msg: e && e.message, stack: e && e.stack });
@@ -4563,7 +4569,10 @@ exports.setOdooWebhook = onCallG("setOdooWebhook", { memoryMiB: 256, timeoutSeco
 exports.odooWebhookStatus = onCallG("odooWebhookStatus", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const cur = (await db.doc("config/odooWebhook").get()).data() || {};
-  return { enabled: cur.enabled !== false, hasSecret: !!cur.secret };
+  // Dernier envoi reçu (posé par odooWebhook) — epoch ms pour une sérialisation propre côté callable.
+  const lr = cur.lastReceived || null;
+  const lastReceived = lr ? { at: lr.at && typeof lr.at.toMillis === "function" ? lr.at.toMillis() : null, object: lr.object || "", written: Number(lr.written) || 0, failed: Number(lr.failed) || 0 } : null;
+  return { enabled: cur.enabled !== false, hasSecret: !!cur.secret, lastReceived };
 });
 
 // setupClickupWebhook : enregistre (ou met à jour) LE webhook workspace pointant vers clickupWebhook.

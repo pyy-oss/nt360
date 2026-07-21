@@ -804,7 +804,7 @@ function DcReconcileSection() {
             )),
           ]} rows={entries} />
         )}
-        <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Overlay non destructif : il survit aux ré-imports.</Tip>
+        <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Overlay non destructif : il survit aux ré-imports. Pour <b>récupérer le BC tout de suite</b> (sans attendre la prochaine mise à jour Odoo), faites-le <b>renvoyer côté Odoo</b> via le webhook entrant — Server Action unitaire par DC ou backfill en masse (<code>docs/ODOO_WEBHOOK.md</code> §4ter/§4bis, idempotent) ; l'arrivée se vérifie dans <b>Admin → Intégration</b> (« dernier envoi reçu »).</Tip>
       </div>
     </CorrSection>
   );
