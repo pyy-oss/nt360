@@ -3,6 +3,26 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-059 — Pipeline sourcé partenaire + import de certifications par fichier (PAR-L1/L2)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« pipeline sourcé partenaire, et import de certifs par fichier » — 2 des 3 efforts L reportés par ADR-058 ; MDF/rebates reste en attente)
+
+### Contexte
+Le plan d'affaires partenaire porte un `pipelineYtd` DÉCLARÉ (saisi à la main) sans contrepartie mesurée ; et l'amorçage des certifications ne connaissait que le dataset direction transcrit dans le code (parCertSeed) — aucun moyen pour le steward d'importer son propre fichier.
+
+### Décisions
+- **PAR-L1 — pipeline sourcé partenaire.** Champ ADDITIF `parPartnerId` (slug par_partners) sur l'opportunité (upsert/patch) ; agrégat PUR `domain/parPipeline` → `summaries/par_pipeline` : ouvert (étapes 1-5) + pondéré via la MÊME autorité `projectionWeight`/tiers que la prévision (jamais le `weighted` linéaire) + gagné de l'exercice (millésime `closingDate` via plausibleYear ; non daté conservé). Scope opp → `partenariats` (coût nul drapeau éteint). Front : sélecteur au formulaire Pipeline (visible drapeau allumé + droit partenariats — aucun abonnement sinon) ; carte au dashboard avec l'objectif pipeline du BP en regard. Limites assumées : millésime civil (pas la fenêtre fiscale constructeur — le sourçage se pilote à l'année commerciale), imports Odoo/fichier ne portent pas encore le tag.
+- **PAR-L2 — import de certifs par fichier.** Parser PUR `domain/parCertFile` (en-têtes FR tolérants, résolution partenaire par slug/nom et certif par code/libellé) : le fichier ne crée NI partenaire NI entrée de catalogue — lignes non résolues écartées et rapportées (« n'invente aucune donnée ») ; détenue sans date d'obtention rétro-calculée de l'échéance (validité catalogue). Callable `importParCertificationsFile` : dry-run → confirmation, MÊMES règles de propriété que l'import direction (source `par_cert_import`, éditions manuelles préservées, consultants créés sous droit `pipeline`, plafond 300), recompute synchrone best-effort. Lecture xlsx via `xlsxRead` (exceljs paresseux — la « session exceljs dédiée » envisagée n'était plus nécessaire, la migration CVE étant faite).
+
+### Conséquences
+- `summaries/par_pipeline` se lit sous le seul droit `partenariats` (montants d'opps, pas de marge — le verrou `rentabilite` reste réservé à par_ca*).
+- Réserve : le tag `parPartnerId` est manuel — le sourcé est un plancher tant que les opps historiques ne sont pas taguées.
+
+### Ce qu'on saura dans six mois
+Si le « pipeline sourcé » paraît faible, vérifier le TAUX DE TAG des opps avant de conclure à un partenariat sous-performant.
+
 ## ADR-058 — Remédiation audit 34 axes partenariats (PAR-P1→P4 : chiffres justes, fraîcheur, câblage, valeur channel)
 
 - **Date :** 2026-07-21

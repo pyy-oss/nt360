@@ -1965,3 +1965,21 @@ sourcé partenaire, import certifs par fichier (session exceljs dédiée) — ef
 
 **Vérifs.** Functions 1308/1308 (dont parRevenue 25, parPartner 15, parAlert 8, parNews 3, câblage 2),
 web 297/297, tsc OK, no-undef (160), deploy-targets (191), indexes, bundle 120,8 Ko ≤ 122.
+
+
+---
+
+## 2026-07-21 (suite) — PAR-L1/L2 : pipeline sourcé partenaire + import certifs fichier (ADR-059)
+
+**Fait (2 commits).** PAR-L1 : parPartnerId additif sur l'opp (upsert/patch), domain/parPipeline pur (5
+tests), summaries/par_pipeline (pondéré = projectionWeight/tiers, gagné = millésime closingDate via
+plausibleYear), scope opp → partenariats, sélecteur au formulaire Pipeline (gaté drapeau + droit), carte
+dashboard vs objectif BP. PAR-L2 : domain/parCertFile pur (6 tests — en-têtes FR tolérants, résolution
+référentiel stricte, rétro-calcul d'obtention), callable importParCertificationsFile (dry-run → confirm,
+propriété par_cert_import, consultants sous droit pipeline cap 300), bouton fichier en Paramétrage.
+
+**Appris.** normName LIE les apostrophes → « Date d'obtention » plie en « date dobtention » : les listes
+d'en-têtes reconnues doivent inclure les variantes PLIÉES, pas seulement les libellés lisibles.
+
+**Vérifs.** Functions 1319/1319, web 297/297, tsc/eslint OK, deploy-targets (192), no-undef (162),
+bundle 120,8 Ko ≤ 122. MDF/rebates/deal registration : toujours en attente (non demandé).
