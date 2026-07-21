@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-066 — Seed de la table FP–DC : import de fichier en masse dans config/dcAliases, l'existant prime en cas de conflit
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (contexte métier fourni : « le DC est généré sur FP dans Odoo… toutes les dépenses du projet sont rattachées au DC… pour le seed initial il est possible d'importer une table de correspondance FP–DC », puis « go »)
+
+### Contexte
+Le DC Odoo est GÉNÉRÉ depuis le FP (« Générer DC ») et porte ensuite TOUTES les dépenses du projet (BC fournisseurs, décaissements, astreintes…). La correspondance FP↔DC existe donc à la source pour le flux courant (webhook `fp`+`dc`) ; le rapprochement manuel un par un ne servait que l'historique — fastidieux à grande échelle.
+
+### Décisions
+- **Callable `importDcAliases`** (droit `import`, rate-limité, fichier .xlsx/.csv ≤ ~22 Mo via xlsxRead) : amorce `config/dcAliases` EN MASSE. Deux temps (dryRun → confirmation), comme PAR-L2.
+- **Plan PUR `domain/dcMapImport.planDcMapImport`** (testé) : détection PAR CONTENU — la cellule que `fpKey` résout est le FP, la SEULE autre cellule non vide est le DC (ordre de colonnes libre, entêtes écartées naturellement) ; toute ambiguïté est écartée et signalée (deux FP sur la ligne, ou plusieurs cellules non-FP — un export à colonnes surnuméraires ne « devine » jamais le DC, sinon mapping faux en masse) ; dédoublonnage par DC ; borne 5 000 lignes signalée.
+- **Règle de conflit : L'EXISTANT PRIME.** Un rapprochement déjà posé (manuel ou import précédent) n'est JAMAIS écrasé par le fichier — le conflit est signalé à l'aperçu et dans le résultat, l'arbitrage reste humain (modification à la main si le fichier a raison).
+- **Front** : bloc « Seed initial » dans la section Rapprochement DC du Centre de correction (fichier → Aperçu avec badges à ajouter / déjà en place / conflits conservés / écartées + exemples → Appliquer). Doc `ODOO_WEBHOOK.md` : contexte DC + mode d'emploi du seed.
+- Le DC comme **pivot des dépenses** est consigné : si d'autres charges Odoo (décaissements…) remontent un jour, leur clé de rattachement naturelle sera le DC via ce même overlay.
+
+### Conséquences
+- 200 fonctions déployées (199 + importDcAliases). Les BC historiques à DC connu se rattachent au recalcul suivant l'import.
+- Un fichier erroné ne peut pas corrompre les arbitrages existants (précédence + dry-run + audit).
+
+### Ce qu'on saura dans six mois
+Si les conflits sont nombreux à l'aperçu, c'est que la table Odoo et les rapprochements manuels ont divergé — auditer la source avant de forcer quoi que ce soit.
+
 ## ADR-065 — Normalisation fournisseurs dopée à l'IA : réutilisation du pipeline clients (entity), lève la variante « sans IA » de l'ADR-046
 
 - **Date :** 2026-07-21

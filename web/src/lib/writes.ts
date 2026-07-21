@@ -397,6 +397,22 @@ export async function setDcAlias(from: string, to: string) {
   return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
 }
 
+/** SEED de la table FP–DC (fichier .xlsx/.csv à deux colonnes, ordre libre) : amorce config/dcAliases
+ *  EN MASSE pour l'historique antérieur au webhook Odoo (le DC est généré depuis le FP côté Odoo).
+ *  `apply: false` = aperçu (dry-run) ; en cas de conflit, le rapprochement DÉJÀ posé prime (signalé). */
+export type DcMapImportResult = {
+  ok: boolean; dryRun?: boolean; added?: number; aliasCount?: number;
+  toAdd: number; unchanged: number; conflicts: number; skipped: number; truncated: boolean;
+  conflictsDetail: { dc: string; existing: string; incoming: string }[];
+  skippedDetail: { reason: string; detail: string }[];
+  sample: { dc: string; fp: string }[];
+};
+export async function importDcAliases(file: File, apply: boolean) {
+  const fileB64 = await fileToBase64(file);
+  const res = await httpsCallable(functions, "importDcAliases", { timeout: 300_000 })({ fileB64, filename: file.name, dryRun: !apply });
+  return res.data as DcMapImportResult;
+}
+
 // DOSSIER CLIENT (rapprochement Opp/Commande/Facture). Lecture seule, gouverné « import ».
 export type ReconRow = { fp?: string; client?: string; amount?: number; cas?: number; raf?: number; amountHt?: number; stage?: number; stageLabel?: string; designation?: string; am?: string; date?: string; numero?: string; source?: string; linked?: boolean };
 export type ReconCluster = { fp: string; opps: ReconRow[]; orders: ReconRow[]; invoices: ReconRow[]; oppAmount: number; orderCas: number; invoiceTotal: number; hasOrder: boolean; hasInvoice: boolean; won: boolean };

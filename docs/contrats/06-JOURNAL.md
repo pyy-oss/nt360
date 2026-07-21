@@ -2188,3 +2188,46 @@ retard) — on sait ce qu'on laisse sur la table avant de dérouler.
 122 Ko. Les primitives d'entêtes cockpit vivent donc dans un module séparé importé par les seuls lazy.
 
 **Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Seed FP–DC : import de la table de correspondance (ADR-066)
+
+**Fait.** Contexte métier fourni par la direction : le DC Odoo est GÉNÉRÉ depuis le FP (« Générer DC »)
+et porte ensuite toutes les dépenses du projet (BC, décaissements, astreintes…) ; une table FP–DC peut
+être exportée pour le seed. Livré : callable `importDcAliases` (droit import, dry-run → confirmation,
+fichier xlsx/csv ≤ ~22 Mo via xlsxRead), plan PUR `domain/dcMapImport` (détection PAR CONTENU — la
+cellule fpKey-résoluble est le FP, l'autre est le DC, ordre libre ; dédup par DC ; borne 5 000 signalée),
+règle de conflit L'EXISTANT PRIME (un arbitrage humain n'est jamais écrasé — conflits signalés). Front :
+bloc « Seed initial » dans Rapprochement DC (aperçu à badges + exemples + application). Doc
+ODOO_WEBHOOK.md : contexte DC (pivot des dépenses) + mode d'emploi. 200 fonctions déployées.
+
+**Appris.** Le DC est le pivot de TOUT le coût projet côté Odoo — consigné dans l'ADR : si les
+décaissements/charges remontent un jour, leur clé de rattachement naturelle sera le DC via ce même overlay.
+
+**Vérifs.** Functions 1346/1346 (dcMapImport 4), web 301/301, tsc/eslint 0, no-undef (165),
+deploy-targets (200/200), bundle 121,1 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Blindage du delta du jour (audit adverse conformiste + gardien)
+
+**Fait.** Audit adverse des 4 lots du jour (Centre de correction, IA fournisseurs, design Contrats,
+seed FP–DC) par deux agents. Conformiste : CONFORME — un seul écart (libellé DangerBtn « annuler » →
+« Annuler », ×2 dans cleanup.tsx), corrigé. Gardien : suites vertes et périmètre additif tenu, mais
+3 constats DOUTEUX, tous levés : (1) `fiscalYearFromOrders` (currentFy) calculait max(yearPo) sur le
+champ BRUT alors que le carnet dérive désormais le millésime du FP → même règle appliquée
+(`plausibleYear(yearPo) || année du FP`, les deux appelants lisent aussi `fp`) + tests ; (2) le push
+ClickUp unitaire « par FP seul » complétait la tâche depuis `orders/{id}` BRUT (ni fiche, ni override,
+ni alias) → complète désormais depuis la ligne FUSIONNÉE du carnet (même source que le push en masse,
+repli doc brut si hors carnet) ; (3) `planDcMapImport` devinait le DC sur une ligne à 3+ colonnes
+(première cellule non-FP) → toute ligne à plusieurs cellules non-FP est écartée « ambigu » + test.
+
+**Assumé (effet de bord documenté, pas un bug).** Le yearPo dérivé du FP (ADR-064) élargit les
+assiettes des alertes « pré-PO » et « dormantes » : des commandes jusque-là sans millésime y entrent
+au prochain recompute — les compteurs bougeront, de façon COHÉRENTE partout (backend et miroir front
+partagent la fusion).
+
+**Appris.** Quand une règle de dérivation entre dans `mergeCommandes`, chercher AUSSI les agrégats qui
+lisent les collections brutes sans passer par la fusion (currentFy, push unitaire) : c'est là que
+l'invariant « même métrique = même nombre » casse en silence.

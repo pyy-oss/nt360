@@ -104,4 +104,11 @@ describe("fiscalYearFromOrders — ancrage FY (§7)", () => {
   it("max(yearPo)", () => {
     expect(fiscalYearFromOrders([{ yearPo: 2024 }, { yearPo: 2026 }, { yearPo: 2025 }])).toBe(2026);
   });
+  it("même règle de millésime que le carnet : yearPo aberrant ignoré, année du FP en repli", () => {
+    // 20226 (faute de frappe Excel) ne doit PAS devenir currentFy ; 1900 → repli sur l'année du FP.
+    expect(fiscalYearFromOrders([{ yearPo: 20226, fp: "FP/2024/1" }, { yearPo: 2025, fp: "FP/2025/2" }])).toBe(2025);
+    expect(fiscalYearFromOrders([{ yearPo: 1900, fp: "FP/2026/3" }, { yearPo: 2025, fp: "FP/2025/4" }])).toBe(2026);
+    // yearPo plausible PRIME sur l'année du FP (commande d'une année sur un FP antérieur).
+    expect(fiscalYearFromOrders([{ yearPo: 2026, fp: "FP/2024/5" }])).toBe(2026);
+  });
 });

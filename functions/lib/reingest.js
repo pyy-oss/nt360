@@ -140,8 +140,9 @@ async function reingestBucket({ db, storage, bucketName, prefix }) {
 
   const kinds = [...kindsSet];
   // Réancre config/fiscal.currentFy = max(yearPo) des commandes (comme le trigger d'ingestion).
+  // fp lu aussi : millésime = plausibleYear(yearPo) sinon année du FP (règle du carnet).
   if (kinds.includes("pnl") || kinds.includes("fiche")) {
-    const snap = await db.collection("orders").select("yearPo").get();
+    const snap = await db.collection("orders").select("yearPo", "fp").get();
     const currentFy = fiscalYearFromOrders(snap.docs.map((d) => d.data()));
     if (currentFy > 0) await db.doc("config/fiscal").set({ currentFy }, { merge: true });
   }

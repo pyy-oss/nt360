@@ -19,7 +19,7 @@ import { plausibleYear } from "../lib/ids";
 import {
   deleteRecords, callDedupe, setFpAlias, setDcAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
-  setCancellation, fpDocId,
+  setCancellation, fpDocId, importDcAliases, type DcMapImportResult,
   aiSuggestCorrections,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
 } from "../lib/writes";
@@ -460,7 +460,7 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
       {ent === "order" && item.fp && caps.import && (
         <>
           <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Corriger la commande (année, client, AM, CAS, RAF) sans quitter le Centre">modifier</button>
-          <DangerBtn label="annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
+          <DangerBtn label="Annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
             confirm={`Annuler la commande ${item.fp}${item.client ? ` (${item.client})` : ""} ? Elle sort du carnet et du P&L. Overlay non destructif : rétablissable depuis Commandes → Annulées, et il survit aux ré-imports.`}
             fn={async () => { await setCancellation("orders", fpDocId(item.fp!), true, { label: affaire || undefined, client: item.client }); await done(); }} />
         </>
@@ -469,7 +469,7 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
         <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Requalifier (perdue / suspendue / annulée) ou corriger l'opportunité sans quitter le Centre">requalifier</button>
       )}
       {ent === "invoice" && item.id && caps.import && (
-        <DangerBtn label="annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
+        <DangerBtn label="Annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
           confirm={`Annuler la facture ${item.numero || item.id}${item.client ? ` (${item.client})` : ""} ? Elle sort du CA facturé et du cash. Overlay non destructif : rétablissable depuis Factures → Annulées.`}
           fn={async () => { await setCancellation("invoices", item.id!, true, { label: item.numero, client: item.client }); await done(); }} />
       )}
@@ -764,6 +764,9 @@ function DcReconcileSection() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const ready = from.trim() && to.trim();
+  // SEED par fichier (table FP–DC, deux colonnes ordre libre) : aperçu d'abord, application ensuite.
+  const [seedFile, setSeedFile] = useState<File | null>(null);
+  const [seedPreview, setSeedPreview] = useState<DcMapImportResult | null>(null);
   return (
     <CorrSection title="Rapprochement DC → N° FP (BC fournisseur Odoo)" hint={entries.length ? `${entries.length} rapprochements` : undefined}>
       <div className="flex flex-col gap-3">
@@ -782,6 +785,45 @@ function DcReconcileSection() {
               fn={async () => { await setDcAlias(from.trim(), to.trim()); setFrom(""); setTo(""); }} />
           )}
         </div>
+        {/* SEED INITIAL — import de la table de correspondance FP–DC exportée d'Odoo (le DC y est généré
+            depuis le FP : la correspondance existe à la source). Aperçu (dry-run) puis application ;
+            un rapprochement DÉJÀ posé prime toujours sur le fichier (conflits signalés, jamais écrasés). */}
+        <div className="flex flex-col gap-2 border-t border-hair pt-2.5">
+          <div className="flex items-center gap-2 flex-wrap text-[12px]">
+            <span className="text-[11px] text-muted">Seed initial — table FP–DC (.xlsx/.csv, deux colonnes, ordre libre)</span>
+            <input type="file" accept=".xlsx,.csv" aria-label="Table de correspondance FP–DC" className="text-[12px]"
+              onChange={(e) => { setSeedFile(e.target.files?.[0] || null); setSeedPreview(null); }} />
+            {seedFile && !seedPreview && (
+              <Busy variant="ghost" label="Aperçu" okMsg="Aperçu prêt — vérifiez puis appliquez" errMsg="Fichier illisible"
+                fn={async () => { setSeedPreview(await importDcAliases(seedFile, false)); }} />
+            )}
+          </div>
+          {seedPreview && (
+            <div className="flex flex-col gap-1 text-[12px]">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge tone={seedPreview.toAdd > 0 ? "emerald" : "steel"}>{seedPreview.toAdd} à ajouter</Badge>
+                {seedPreview.unchanged > 0 && <Badge tone="steel">{seedPreview.unchanged} déjà en place</Badge>}
+                {seedPreview.conflicts > 0 && <Badge tone="gold">{seedPreview.conflicts} conflit(s) — existant conservé</Badge>}
+                {seedPreview.skipped > 0 && <Badge tone="steel">{seedPreview.skipped} écartée(s)</Badge>}
+                {seedPreview.truncated && <Badge tone="clay">fichier tronqué (5 000 lignes max)</Badge>}
+                {seedPreview.toAdd > 0 && seedFile && (
+                  <Busy variant="ghost" label={`Appliquer les ${seedPreview.toAdd}`} okMsg="Table FP–DC importée (recalcul lancé)" errMsg="Import refusé"
+                    fn={async () => { await importDcAliases(seedFile, true); setSeedFile(null); setSeedPreview(null); }} />
+                )}
+                <button type="button" className="text-faint hover:underline text-[11px]" onClick={() => { setSeedFile(null); setSeedPreview(null); }}>annuler</button>
+              </div>
+              {seedPreview.sample.length > 0 && (
+                <div className="text-[11px] text-faint">Ex. : {seedPreview.sample.slice(0, 4).map((s) => `${s.dc} → ${s.fp}`).join(" · ")}{seedPreview.toAdd > 4 ? " · …" : ""}</div>
+              )}
+              {seedPreview.conflictsDetail.slice(0, 4).map((c) => (
+                <div key={c.dc} className="text-[11px] text-gold">Conflit {c.dc} : conservé {c.existing} (fichier : {c.incoming}) — modifiez à la main si le fichier a raison.</div>
+              ))}
+              {seedPreview.skippedDetail.slice(0, 3).map((s, i) => (
+                <div key={i} className="text-[11px] text-faint">Écartée : {s.reason} — {s.detail}</div>
+              ))}
+            </div>
+          )}
+        </div>
         {entries.length > 0 && (
           <Table columns={[
             colText("DC", (r: [string, string]) => <span className="tabnum text-faint">{r[0]}</span>, (r: [string, string]) => r[0]),
@@ -793,7 +835,7 @@ function DcReconcileSection() {
             )),
           ]} rows={entries} />
         )}
-        <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Overlay non destructif : il survit aux ré-imports. Pour <b>récupérer le BC tout de suite</b> (sans attendre la prochaine mise à jour Odoo), faites-le <b>renvoyer côté Odoo</b> via le webhook entrant — Server Action unitaire par DC ou backfill en masse (<code>docs/ODOO_WEBHOOK.md</code> §4ter/§4bis, idempotent) ; l'arrivée se vérifie dans <b>Admin → Intégration</b> (« dernier envoi reçu »).</Tip>
+        <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Dans Odoo, le DC est <b>généré depuis le FP</b> (« Générer DC ») puis porte <b>toutes les dépenses du projet</b> (BC, décaissements, astreintes…) : le <b>seed initial</b> ci-dessus importe la table de correspondance d'un coup pour l'historique. Overlay non destructif : il survit aux ré-imports. Pour <b>récupérer un BC tout de suite</b>, faites-le <b>renvoyer côté Odoo</b> via le webhook entrant — Server Action unitaire par DC ou backfill en masse (<code>docs/ODOO_WEBHOOK.md</code> §4ter/§4bis, idempotent) ; l'arrivée se vérifie dans <b>Admin → Intégration</b> (« dernier envoi reçu »).</Tip>
       </div>
     </CorrSection>
   );
