@@ -51,37 +51,84 @@ function resolvePartner(supplier, map) {
   return a.length ? a[0].partnerId : null;
 }
 
+// Début de l'EXERCICE FISCAL d'un partenaire (ISO) : dernière frontière `startMonth` <= asOf. Un constructeur
+// non calendaire (Cisco août→juillet : startMonth 8) voit son YTD démarrer au 1er du mois d'exercice, pas au
+// 1er janvier. startMonth 1/absent = année civile (comportement historique, géré par le millésime).
+function exerciseStartIso(asOf, startMonth) {
+  const m = Math.trunc(Number(startMonth)) || 1;
+  if (m <= 1 || m > 12) return null;
+  const y = Number(String(asOf).slice(0, 4)) || 0;
+  const cm = Number(String(asOf).slice(5, 7)) || 1;
+  const startYear = cm >= m ? y : y - 1;
+  return `${startYear}-${String(m).padStart(2, "0")}-01`;
+}
+
 /**
  * Agrège le CA par partenaire depuis les lignes BC. Somme amountXof des BC dont le fournisseur résout
  * vers un partenaire ; les fournisseurs NON mappés sont remontés à part (jamais silencieusement ignorés —
  * un BC non rattaché signale une table parPartnerMap à compléter). Montants arrondis XOF entier.
- * @param {object} [opts] opts.year : millésime d'exercice (année civile). Renseigné ⇒ ne retient que les BC de
- *   CETTE année (millésime du n° « BC/AAAA/N », ADR-P16) — un BC d'un AUTRE millésime valide est ÉCARTÉ et sa
- *   somme remontée dans offExerciseXof (jamais silencieux). Un BC NON daté (millésime 0) est CONSERVÉ (on ne le
- *   présume pas hors exercice — l'écarter sous-compterait le CA). Sans opts.year ⇒ cumul all-time (rétro-compat).
+ * Les lignes `source:"fiche"` (achats PLANIFIÉS au niveau projet) sont EXCLUES — parité avec TOUS les autres
+ * consommateurs de bcLines (SOA, cash, relances, alertes, Actualité) : sans cette exclusion, un achat planifié
+ * gonflait le « CA constructeur » puis était DOUBLE-COMPTÉ à l'arrivée du BC réel (audit partenariats, axe 2).
+ * @param {object} [opts]
+ *   opts.year : millésime d'exercice (année civile). Renseigné ⇒ ne retient que les BC de CETTE année
+ *     (millésime du n° « BC/AAAA/N », ADR-P16) — un BC d'un AUTRE millésime valide est ÉCARTÉ et sa somme
+ *     remontée dans offExerciseXof (jamais silencieux). Un BC NON daté (millésime 0) est CONSERVÉ (on ne le
+ *     présume pas hors exercice — l'écarter sous-compterait le CA). Sans opts.year ⇒ cumul all-time.
+ *   opts.resolveSupplier : résolveur d'ALIAS fournisseurs (config/supplierAliases, ADR-046) — la MÊME autorité
+ *     que le SOA. Sans lui, un fournisseur fusionné par alias au SOA restait scindé/non rattaché ici
+ *     (populations divergentes, audit axe 1). La table de mapping étant historiquement clé-ée en cleanName,
+ *     la recherche essaie la clé RÉSOLUE puis la clé brute (rétro-compat des mappings existants).
+ *   opts.asOf + opts.fiscalStartByPartner ({ partnerId: mois 2-12 }) : EXERCICE FISCAL constructeur
+ *     (fiscalStartMonth, jusqu'ici saisi mais INAPPLIQUÉ — audit axe 3). L'appartenance se juge par la DATE
+ *     du BC (dateIn) quand elle existe ; sinon approximation par millésime (les DEUX années civiles
+ *     chevauchant la fenêtre sont retenues). startMonth 1/absent = année civile (inchangé).
  * @returns { partners, unmapped, offExerciseXof, offExerciseCount }
  */
 function revenueByPartner(bcLines, map, opts = {}) {
   const year = Number.isFinite(Number(opts.year)) && Number(opts.year) > 0 ? Number(opts.year) : 0;
+  const keySup = typeof opts.resolveSupplier === "function" ? opts.resolveSupplier : normalizeSupplier;
+  const fiscalBy = opts.fiscalStartByPartner || {};
+  const asOf = String(opts.asOf || "").slice(0, 10);
   const byPartner = {}, unmapped = {};
   let offExerciseXof = 0, offExerciseCount = 0;
+  // Appartenance à l'exercice FISCAL d'un partenaire : fenêtre datée [début exercice, asOf] via dateIn ;
+  // repli millésime (deux années civiles chevauchantes retenues) si la ligne n'est pas datée.
+  const inFiscal = (b, y, startIso) => {
+    const d = String((b && b.dateIn) || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d >= startIso && (!asOf || d <= asOf);
+    const sy = Number(startIso.slice(0, 4));
+    return y === 0 || y === sy || y === sy + 1;
+  };
   for (const b of bcLines || []) {
+    // Achats planifiés de FICHE : jamais dans le CA (cf. en-tête — parité fournisseurs/cash/relances/alertes).
+    if (b && b.source === "fiche") continue;
     const amt = Number(b && b.amountXof) || 0;
     if (!(amt > 0)) continue; // BC à montant nul/négatif : hors CA (déjà signalé par la qualité fournisseurs)
-    if (year) {
-      const y = bcYear(b);
-      if (y && y !== year) { offExerciseXof += amt; offExerciseCount += 1; continue; } // autre millésime → hors exercice
-      // y === 0 (non daté) : conservé dans l'exercice courant (ne pas sous-compter un BC sans millésime).
-    }
-    const allocs = allocationsFor((map || {})[normalizeSupplier(b && b.supplier)]);
+    const y = bcYear(b);
+    // y === 0 (non daté) : conservé dans l'exercice courant (l'écarter sous-compterait le CA).
+    const raw = normalizeSupplier(b && b.supplier);
+    const resolved = keySup(b && b.supplier) || raw;
+    // Clé résolue (alias) d'abord, clé brute ensuite — un mapping posé sur l'une ou l'autre graphie matche.
+    let allocs = allocationsFor((map || {})[resolved]);
+    if (!allocs.length && resolved !== raw) allocs = allocationsFor((map || {})[raw]);
     if (allocs.length) {
       // Répartition pondérée (ADR-P14) : la somme des parts = amt → aucun double-compte inter-constructeurs.
+      // L'appartenance à l'exercice se juge PAR ALLOCATION : fenêtre FISCALE du constructeur si déclarée
+      // (un BC de décembre N-1 civil PEUT appartenir à l'exercice Cisco en cours), millésime civil sinon.
+      let anyOff = false;
       for (const a of allocs) {
+        const startIso = year && asOf ? exerciseStartIso(asOf, fiscalBy[a.partnerId]) : null;
+        const off = startIso ? !inFiscal(b, y, startIso) : Boolean(year && y && y !== year);
+        if (off) { offExerciseXof += amt * a.weight; anyOff = true; continue; }
         const g = byPartner[a.partnerId] || { partnerId: a.partnerId, revenueXof: 0, bcCount: 0 };
         g.revenueXof += amt * a.weight; g.bcCount += 1; byPartner[a.partnerId] = g;
       }
+      if (anyOff) offExerciseCount += 1;
     } else {
-      const key = normalizeSupplier(b && b.supplier) || "(inconnu)";
+      // Fournisseur NON mappé : pas de constructeur, donc pas de fenêtre fiscale — millésime civil seul juge.
+      if (year && y && y !== year) { offExerciseXof += amt; offExerciseCount += 1; continue; }
+      const key = resolved || "(inconnu)";
       const u = unmapped[key] || { supplier: key, revenueXof: 0, bcCount: 0 };
       u.revenueXof += amt; u.bcCount += 1; unmapped[key] = u;
     }
@@ -124,4 +171,4 @@ function blendRevenue(bcPartners, declaredByPartner) {
   return out.sort((a, b) => b.revenueXof - a.revenueXof);
 }
 
-module.exports = { normalizeSupplier, bcYear, allocationsFor, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };
+module.exports = { normalizeSupplier, bcYear, exerciseStartIso, allocationsFor, resolvePartner, revenueByPartner, revenueProgress, blendRevenue };
