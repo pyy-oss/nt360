@@ -2315,3 +2315,25 @@ affaire), règle firestore.rules de lecture de l'overlay.
 
 **Appris.** L'infrastructure d'annulation (CANCELLABLE + overlay + transaction + audit) s'étend à un
 nouvel objet en une ligne de spec — le patron « overlay non destructif » continue de payer.
+
+---
+
+## 2026-07-21 — P&L Projet : charges planifiées en Table + fix modale Montant (CA Signé)
+
+**Fait.** Retour utilisateur sur capture d'écran (×2). (1) Design : le bloc « Charges planifiées
+(fiche) » du P&L Projet (pile de lignes libres + gros bouton rouge répété) refait avec la primitive
+Table — colonnes Fournisseur/Type/XOF alignées, montants à droite, entête « · N · Σ », action
+compacte « Supprimer » (prop `label` ajoutée à ChargeDropBtn, défaut inchangé ailleurs) — même
+facture visuelle que « Coût par type » à côté. (2) Modale « Montant (CA Signé) » : le libellé du
+bouton Commande → Opportunité affichait « pose [object Object] » — money() (JSX) interpolé dans un
+template literal ; recomposé en JSX (même idiome que le bouton voisin). Ajout d'un « Réessayer »
+sur l'échec de lecture du montant de l'opp (peek), utile si l'« internal » observé était transitoire.
+
+**Appris.** Rechute du piège money()-dans-template-literal DANS LE MÊME COMPOSANT que le correctif
+de l'audit 40 axes (axe 37, lignes voisines) — commentaire de garde posé au site même cette fois.
+L'« internal » du peek de syncOrderAmount n'est PAS reproductible en local : branche saine (portées
+MAX_SCAN/sliceCapped OK, requireRead/HttpsError corrects), non modifiée par les lots récents ;
+guarded() trace le message réel dans opsLog → à lire en prod si l'erreur persiste après réessai
+(capture prise 9 min après la fin d'un déploiement).
+
+**Vérifs.** Web 303/303, tsc/eslint 0, bundle 121,1 ≤ 122 Ko (aucun changement functions).

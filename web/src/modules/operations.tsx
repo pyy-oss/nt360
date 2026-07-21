@@ -27,7 +27,7 @@ import type { SuppliersSummary, SupplierRow, SupplierInvoice, BcLine, ProjectShe
 // d'achat PLANIFIÉ de fiche — au recompute elle sort de TOUS les agrégats, Y COMPRIS du coût planifié
 // du P&L (costTotal ↓, marge ↑). Dans le MÊME geste, les BC RÉELS non soldés du même fournisseur sur
 // l'affaire passent en « Annulé » (ADR-068). Rétablissable (l'overlay se retire, les docs sont intacts).
-function ChargeDropBtn({ line, dropped, related }: { line: BcLine; dropped: boolean; related: BcLine[] }) {
+function ChargeDropBtn({ line, dropped, related, label = "Supprimer la charge" }: { line: BcLine; dropped: boolean; related: BcLine[]; label?: string }) {
   if (!line.id) return null;
   if (dropped) {
     return (
@@ -39,7 +39,7 @@ function ChargeDropBtn({ line, dropped, related }: { line: BcLine; dropped: bool
   }
   const lies = related.filter((b) => b.id && b.source !== "fiche" && !["annule", "solde"].includes(b.status || "a_emettre") && cleanName(b.supplier) === cleanName(line.supplier));
   return (
-    <DangerBtn label="Supprimer la charge" okMsg="Charge supprimée (recalcul lancé)" errMsg="Suppression refusée"
+    <DangerBtn label={label} okMsg="Charge supprimée (recalcul lancé)" errMsg="Suppression refusée"
       confirm={`Supprimer la charge ${money(line.amountXof)} (${line.supplier || "—"}) de ${line.fp || "l'affaire"} ? Elle sort de tous les agrégats, y compris du coût planifié du P&L${lies.length ? ` ; ${lies.length} BC lié(s) passeront en « Annulé »` : ""}. Rétablissable.`}
       fn={async () => {
         await setCancellation("charges", line.id!, true, { label: [line.supplier, line.expenseType].filter(Boolean).join(" · "), client: line.customer || "" });
@@ -104,20 +104,24 @@ export const PnlProjet: FC<Props> = () => {
           </div>
         )}
         {/* Charges planifiées de la fiche : suppression totale (y compris du coût planifié P&L) par
-            overlay, rétablissable — les BC réels du même fournisseur passent en « Annulé » (ADR-069). */}
+            overlay, rétablissable — les BC réels du même fournisseur passent en « Annulé » (ADR-069).
+            Table (primitive) plutôt que lignes libres : colonnes alignées, montants à droite, UNE
+            action compacte par ligne — même facture visuelle que « Coût par type » à côté. */}
         {canBc && (() => {
           const planned = lines.filter((b) => b.source === "fiche" && b.id);
-          return planned.length ? (
-            <div className="flex flex-col gap-1.5">
-              <div className="text-xs font-semibold text-muted">Charges planifiées (fiche)</div>
-              {planned.map((b) => (
-                <div key={b.id} className="flex flex-wrap items-center gap-3 text-xs">
-                  <span className="text-muted">{b.supplier || "—"} · {b.expenseType || "—"} · <span className="tabnum">{money(b.amountXof)}</span></span>
-                  <ChargeDropBtn line={b} dropped={droppedCharges.has(b.id!)} related={lines} />
-                </div>
-              ))}
+          if (!planned.length) return null;
+          const sum = planned.reduce((s, b) => s + (b.amountXof || 0), 0);
+          return (
+            <div>
+              <div className="text-xs font-semibold text-muted mb-1.5">Charges planifiées (fiche) · {planned.length} · Σ {money(sum)}</div>
+              <Table columns={[
+                colText("Fournisseur", (b: BcLine) => b.supplier || "—", (b: BcLine) => b.supplier || ""),
+                colText("Type", (b: BcLine) => b.expenseType || "—", (b: BcLine) => b.expenseType || ""),
+                colNum("XOF", (b: BcLine) => money(b.amountXof), (b: BcLine) => b.amountXof || 0),
+                colText("", (b: BcLine) => <ChargeDropBtn line={b} dropped={droppedCharges.has(b.id!)} related={lines} label="Supprimer" />, () => 0),
+              ]} rows={planned} />
             </div>
-          ) : null;
+          );
         })()}
         {lines.length ? (
           <div className="flex flex-col gap-3">

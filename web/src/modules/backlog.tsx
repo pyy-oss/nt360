@@ -883,6 +883,7 @@ function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite
   const [busy, setBusy] = useState(false);
   const [peek, setPeek] = useState<AmountPeek | null>(null);
   const [peekErr, setPeekErr] = useState<string | null>(null);
+  const [peekTry, setPeekTry] = useState(0); // « Réessayer » après un échec de lecture (ex. transitoire serveur)
   // À l'ouverture : lit le montant de l'opp liée (lecture seule) pour AFFICHER les deux valeurs et laisser
   // décider du sens. Rechargé si le CAS change (après une synchro appliquée hors fermeture).
   useEffect(() => {
@@ -893,7 +894,7 @@ function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite
       .then((p) => { if (alive) setPeek(p); })
       .catch((e) => { if (alive) setPeekErr(String(e?.message || e?.code || "").replace(/^functions\//, "") || "lecture impossible"); });
     return () => { alive = false; };
-  }, [open, row.fp, row.cas]);
+  }, [open, row.fp, row.cas, peekTry]);
 
   const run = async (direction: "toOpp" | "toOrder" | "clear") => {
     if (busy || !row.fp) return;
@@ -960,11 +961,17 @@ function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite
           )}
           {noOpp && <div className="text-[12px] text-clay">Aucune opportunité de même N° FP — la synchronisation est impossible (rien à comparer).</div>}
           {ambiguous && <div className="text-[12px] text-clay">Plusieurs opportunités portent ce N° FP — désambiguïsez (n'en garder qu'une gagnée) avant de synchroniser.</div>}
-          {peekErr && <div className="text-[12px] text-clay">Lecture du montant de l'opp impossible — {peekErr}.</div>}
+          {peekErr && (
+            <div className="text-[12px] text-clay">
+              Lecture du montant de l'opp impossible — {peekErr}.{" "}
+              <button type="button" className="underline" onClick={() => setPeekTry((n) => n + 1)}>Réessayer</button>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2">
             <button type="button" disabled={busy || !canToOpp} onClick={() => run("toOpp")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
-              Commande → Opportunité <span className="text-faint">· {!canPipelineWrite ? "droit « pipeline » (écriture) requis" : `pose ${money(row.cas)} sur l'opp${hasLines ? " (refusé : opp chiffrée par lignes)" : ""}`}</span>
+              {/* money() = JSX : composé en JSX, JAMAIS interpolé dans un template literal (→ « [object Object] »). */}
+              Commande → Opportunité <span className="text-faint">· {!canPipelineWrite ? "droit « pipeline » (écriture) requis" : <>pose {money(row.cas)} sur l'opp{hasLines ? " (refusé : opp chiffrée par lignes)" : ""}</>}</span>
             </button>
             <button type="button" disabled={busy || !canToOrder} onClick={() => run("toOrder")} className="btn-ghost !py-1.5 text-xs text-left disabled:opacity-40">
               Opportunité → Commande <span className="text-faint">· surcharge le CAS à {oppAmt != null ? money(oppAmt) : "—"} (persistant)</span>
