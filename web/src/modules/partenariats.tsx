@@ -8,8 +8,8 @@ import { Plus, Sparkles } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
-import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, Modal, Segmented, useToast, useConfirm } from "../design/components";
+import { useCollectionData, useDocData, DEFAULT_SUB_CAP } from "../lib/hooks";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, ErrorState, CardSkeleton, TruncationNote, Modal, Segmented, useToast, useConfirm } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
@@ -26,9 +26,14 @@ import {
   relanceBucketLabel, relanceBucketTone, VALIDATION_STATUS_LABEL, validationTone, BP_AXIS_LABEL, label,
 } from "../lib/parLabels";
 import type { Props } from "./_shared";
+// Types de la QBR (import type : effacé à la compilation — pptxgenjs reste chargé à la demande).
+import type { ParQbr, ParQbrSnapshot } from "../lib/parQbrPptx";
 
-// Appel callable INLINE (module lazy) — évite d'alourdir writes.ts (budget bundle).
-const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
+// Appel callable INLINE (module lazy) — évite d'alourdir writes.ts (budget bundle). `timeout` optionnel :
+// les callables LONGS (IA, imports, recompute — 300 s côté serveur) dépasseraient les 70 s par défaut du
+// SDK et remonteraient un faux « deadline-exceeded » alors que le serveur finit son travail (convention
+// writes.ts : timeout client aligné sur le serveur).
+const callFn = <T,>(name: string, payload: unknown, timeout?: number) => httpsCallable(functions, name, timeout ? { timeout } : undefined)(payload).then((r) => r.data as T);
 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
 type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | "bookingYtd" | "certBp" | "certYtd" | "growthBp" | "growthYtd", number>>;
@@ -70,10 +75,12 @@ export const Partenariats: FC<Props> = () => {
   const [editPartnerId, setEditPartnerId] = useState<string | null>(null);
   const goEditPartner = (id: string) => { setEditPartnerId(id); setTab("config"); };
 
-  // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
-  const { rows: partners } = useCollectionData<Partner>("par_partners");
-  const { rows: certifs } = useCollectionData<Certif>("par_certifications");
-  const { rows: assigns } = useCollectionData<Assign>("par_assignments");
+  // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit). loading/error/truncated
+  // exposés (audit partenariats) : un refus de droit ou une panne ne doit pas ressembler à « module vide »,
+  // et une collection tronquée au cap d'abonnement doit se signaler (TruncationNote), jamais silencieuse.
+  const { rows: partners, loading: partnersLoading, error: partnersError, truncated: partnersTrunc } = useCollectionData<Partner>("par_partners");
+  const { rows: certifs, loading: certifsLoading, error: certifsError, truncated: certifsTrunc } = useCollectionData<Certif>("par_certifications");
+  const { rows: assigns, loading: assignsLoading, error: assignsError, truncated: assignsTrunc } = useCollectionData<Assign>("par_assignments");
   const { data: ca } = useDocData<CaSummary>(canSeeCa ? "summaries/par_ca" : null);
   const { data: caHistory } = useDocData<CaHistory>(canSeeCa ? "summaries/par_caHistory" : null);
   const { data: quotas } = useDocData<QuotaSummary>("summaries/par_quotas");
@@ -89,10 +96,14 @@ export const Partenariats: FC<Props> = () => {
   // un tableau de bord à zéro sans indice (leçon du formulaire de référentiel : la complétude se mesure au
   // parcours). N'apparaît qu'en écriture et quand aucun partenaire n'existe.
   const empty = (partners || []).length === 0;
+  // Gardes de chargement/erreur (audit partenariats) : sans elles, un refus de droit ou une panne réseau
+  // rendait le module comme « vide » (onboarding à tort), et le premier rendu flashait des tableaux à zéro.
+  const loadError = partnersError || certifsError || assignsError;
+  const parLoading = partnersLoading || certifsLoading || assignsLoading;
   return (
     <div className="space-y-4">
       <Segmented
-        value={tab} onChange={setTab}
+        value={tab} onChange={setTab} ariaLabel="Sections du module Partenariats"
         options={[
           { value: "dash", label: "Tableau de bord" },
           { value: "certifs", label: "Certifications", count: certifs?.length },
@@ -102,20 +113,25 @@ export const Partenariats: FC<Props> = () => {
           { value: "ia", label: "IA & QBR" },
         ]}
       />
+      {loadError && <ErrorState error={loadError} />}
+      {!loadError && parLoading && <CardSkeleton />}
+      <TruncationNote show={partnersTrunc || certifsTrunc || assignsTrunc} cap={DEFAULT_SUB_CAP} />
 
-      {empty && canWrite && (
+      {!loadError && !parLoading && empty && canWrite && (
         <Card title="Démarrer le module Partenariats">
           <Tip>Le module est <b>activé mais vide</b>. Le plus rapide : ouvrez <b>Paramétrage</b> et cliquez <b>« Importer les 20 partenaires de référence »</b> — le référentiel se remplit d'un coup avec vos données (statut, plan d'affaires, certifications, exigences de quota). Sinon, créez un constructeur à la main avec <b>« Nouveau partenaire »</b> (ou en <b>partant d'un modèle</b>). Ajoutez ensuite les <b>certifications</b> de vos ingénieurs et leurs <b>assignations</b> — le tableau de bord se remplit tout seul.</Tip>
           <button className="btn mt-2" onClick={() => setTab("config")}><Plus size={14} /> Créer un partenaire</button>
         </Card>
       )}
 
-      {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
-      {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
-      {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
-      {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
-      {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
-      {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
+      {!loadError && !parLoading && <>
+        {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
+        {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
+        {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
+        {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
+      </>}
     </div>
   );
 };
@@ -168,18 +184,18 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
   const [planPartnerId, setPlanPartnerId] = useState(""); // "" = tous les partenaires (défaut)
   const [partnerId, setPartnerId] = useState("");
   const [periode, setPeriode] = useState("");
-  const [qbr, setQbr] = useState<{ qbr: any; snapshot: any } | null>(null);
+  const [qbr, setQbr] = useState<{ qbr: ParQbr; snapshot: ParQbrSnapshot } | null>(null);
   const [qbrBusy, setQbrBusy] = useState(false);
 
   const genPlan = async () => {
     if (planBusy) return; setPlanBusy(true);
-    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", { partnerId: planPartnerId || undefined }); setPlan(r.plan || []); }
+    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", { partnerId: planPartnerId || undefined }, 300_000); setPlan(r.plan || []); }
     catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
     finally { setPlanBusy(false); }
   };
   const genQbr = async () => {
     if (qbrBusy || !partnerId) return; setQbrBusy(true);
-    try { const r = await callFn<{ qbr: any; snapshot: any }>("generateParQbr", { partnerId, periode }); setQbr({ qbr: r.qbr, snapshot: r.snapshot }); }
+    try { const r = await callFn<{ qbr: ParQbr; snapshot: ParQbrSnapshot }>("generateParQbr", { partnerId, periode }, 300_000); setQbr({ qbr: r.qbr, snapshot: r.snapshot }); }
     catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
     finally { setQbrBusy(false); }
   };
@@ -295,8 +311,8 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   const risque = aRisque + nonConformes;
   const stats: { label: string; value: string; color?: string }[] = [
     { label: "Partenaires", value: String(partners.length) },
-    ...(canSeeCa ? [{ label: `CA constructeurs ${ca?.exerciseYear || ""}`.trim(), value: fmt(ca?.totalXof || 0), color: T.emerald }] : []),
-    { label: "Certifs à renouveler", value: String(alerts?.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
+    ...(canSeeCa ? [{ label: `CA constructeurs ${ca?.exerciseYear || ""}`.trim(), value: ca == null ? "\u2014" : fmt(ca.totalXof || 0), color: T.emerald }] : []),
+    { label: "Certifs à renouveler", value: alerts == null ? "\u2014" : String(alerts.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
     { label: "Partenariats à risque", value: String(risque), color: risque > 0 ? T.clay : undefined },
   ];
   return (
@@ -305,7 +321,7 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
         <div>
           <Eyebrow>Cockpit partenariats</Eyebrow>
           <div className="mt-1.5 flex items-end gap-2">
-            <span className="font-display leading-none tabnum text-[34px] sm:text-[40px]" style={{ color: ratio == null ? "rgb(var(--muted))" : ratio >= 0.999 ? T.emerald : ratio >= 0.5 ? T.gold : T.clay }}>{ratio == null ? "—" : pct(ratio)}</span>
+            <span className="font-display leading-none tabnum text-[34px] sm:text-[40px]" style={{ color: ratioColor(ratio) }}>{ratio == null ? "—" : pct(ratio)}</span>
             <span className="mb-1 text-[12px] text-muted">conformité des quotas{evalues ? ` · ${conformes}/${evalues}` : ""}</span>
           </div>
         </div>
@@ -431,12 +447,12 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
       )}
 
       <Card title="Conformité des quotas de certification" actions={<ExportBtn name="conformite-quotas" cols={[
-        { header: "Constructeur", render: (r: any) => r.name },
-        { header: "Statut", render: (r: any) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
-        { header: "Niveau tenu", render: (r: any) => tp(r).achieved?.name || "" },
-        { header: "Prochain niveau", render: (r: any) => tp(r).next?.name || "" },
-        { header: "Écart au prochain", render: (r: any) => tp(r).gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
-        { header: "Exigences couvertes", render: (r: any) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}` },
+        { header: "Constructeur", render: (r: QuotaRow) => r.name },
+        { header: "Statut", render: (r: QuotaRow) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
+        { header: "Niveau tenu", render: (r: QuotaRow) => tp(r).achieved?.name || "" },
+        { header: "Prochain niveau", render: (r: QuotaRow) => tp(r).next?.name || "" },
+        { header: "Écart au prochain", render: (r: QuotaRow) => tp(r).gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
+        { header: "Exigences couvertes", render: (r: QuotaRow) => `${(r.coverage || []).filter((c) => c.ok).length}/${(r.coverage || []).length}` },
       ]} rows={quotaPartners} />}>
         <Tip>Le <b>niveau tenu</b> est le plus haut palier dont toutes les exigences (et celles d'en dessous) sont couvertes ; le <b>prochain niveau</b> et son <b>écart</b> disent ce qu'il manque pour monter d'un cran. Dérivé de la couverture des quotas ci-après (mêmes chiffres).</Tip>
         <Table
@@ -445,8 +461,8 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
             colText("Statut", (r) => <Badge tone={partnershipTone(r.status)}>{label(PARTNERSHIP_STATUS_LABEL, r.status)}</Badge>),
             colText("Niveau tenu", (r) => tp(r).achieved?.name || "—"),
             colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
-            colText("Exigences couvertes", (r) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c: any) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
-            colText("Écarts", (r) => (r.gaps || []).length ? (r.gaps as any[]).map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
+            colText("Exigences couvertes", (r: QuotaRow) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
+            colText("Écarts", (r: QuotaRow) => (r.gaps || []).length ? r.gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
             ...(canWrite ? [editCol((r) => r.partnerId)] : []),
           ]}
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
@@ -553,13 +569,13 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
     <Card title="Certifications des ingénieurs" actions={<div className="flex items-center gap-2"><ExportBtn name="certifications" cols={exportCols} rows={certifs} />{canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Table
         columns={[
-          colText("Ingénieur", (r) => r.consultantName || r.consultantId),
-          colText("BU", (r) => r.consultantBu || "—"),
-          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId),
-          colText("Certification", (r) => r.certName || r.certificationCatalogId),
-          colText("Obtenue", (r) => frDate(r.obtainedDate)),
-          colText("Expire", (r) => r.expiryDate ? frDate(r.expiryDate) : "—"),
-          colText("Statut", (r) => <Badge tone={certStatusTone(r.status)}>{label(CERT_STATUS_LABEL, r.status)}</Badge>),
+          colText("Ingénieur", (r) => r.consultantName || r.consultantId, (r) => r.consultantName || r.consultantId),
+          colText("BU", (r) => r.consultantBu || "—", (r) => r.consultantBu || ""),
+          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId, (r) => partnerName[r.partnerId] || r.partnerId),
+          colText("Certification", (r) => r.certName || r.certificationCatalogId, (r) => r.certName || r.certificationCatalogId),
+          colText("Obtenue", (r) => frDate(r.obtainedDate), (r) => r.obtainedDate || ""),
+          colText("Expire", (r) => r.expiryDate ? frDate(r.expiryDate) : "—", (r) => r.expiryDate || ""),
+          colText("Statut", (r) => <Badge tone={certStatusTone(r.status)}>{label(CERT_STATUS_LABEL, r.status)}</Badge>, (r) => r.status),
           // Actions par ligne (écriture seulement) : réviser la date d'obtention ou retirer la certif.
           ...(canWrite ? [colText("", (r) => (
             <span className="inline-flex items-center gap-2">
@@ -640,10 +656,10 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
       <Tip>Affecter à un ingénieur l'obtention d'une certification à une échéance ; les relances (J-30/14/7) et les retards apparaissent au Tableau de bord.</Tip>
       <Table
         columns={[
-          colText("Ingénieur", (r) => r.consultantName || r.consultantId),
-          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId),
-          colText("Certif visée", (r) => r.cert || r.certificationCatalogId),
-          colText("Échéance", (r) => frDate(r.targetDate)),
+          colText("Ingénieur", (r) => r.consultantName || r.consultantId, (r) => r.consultantName || r.consultantId),
+          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId, (r) => partnerName[r.partnerId] || r.partnerId),
+          colText("Certif visée", (r) => r.cert || r.certificationCatalogId, (r) => r.cert || r.certificationCatalogId),
+          colText("Échéance", (r) => frDate(r.targetDate), (r) => r.targetDate || ""),
           // Écriture : le statut se pilote via le sélecteur (cycle de vie) ; lecture seule : badge.
           canWrite
             ? colText("Statut", (r) => <AssignStatusCell a={r} />, (r) => r.status)
@@ -717,7 +733,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   const runCertImport = async () => {
     if (impBusy) return; setImpBusy(true);
     try {
-      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number }>("importParCertifications", { dryRun: true });
+      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number }>("importParCertifications", { dryRun: true }, 300_000);
       const n = prev?.wouldCreateCount || 0;
       if (n > 0) {
         const names = (prev.wouldCreateConsultants || []).slice(0, 20).join(", ");
@@ -727,7 +743,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
         );
         if (!ok) { toast("Import annulé", "info"); return; }
       }
-      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; catalogAdded?: number; skipped?: number }>("importParCertifications", {});
+      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; catalogAdded?: number; skipped?: number }>("importParCertifications", {}, 300_000);
       toast(`${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s) · ${r?.catalogAdded || 0} entrée(s) catalogue${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`, "ok");
     } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
     finally { setImpBusy(false); }
@@ -795,7 +811,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   const suggest = async () => {
     if (suggBusy) return; setSuggBusy(true);
     try {
-      const r = await callFn<{ suggestions: { supplier: string; allocations: { partnerId: string; weight: number }[] }[] }>("suggestParPartnerMap", {});
+      const r = await callFn<{ suggestions: { supplier: string; allocations: { partnerId: string; weight: number }[] }[] }>("suggestParPartnerMap", {}, 300_000);
       const sugg = r.suggestions || [];
       if (!sugg.length) { toast("Aucun rattachement proposé — vérifiez à la main", "info"); return; }
       const byUpper = new Map(sugg.map((s) => [s.supplier.trim().toUpperCase(), s]));
@@ -894,7 +910,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
               // on force donc un recompute synchrone scopé (comme « Recalculer »). Best-effort : réservé
               // direction ; si l'appelant n'y a pas droit, l'amorçage reste bon, le tableau se remplira au
               // prochain recompute nocturne/manuel.
-              try { await callFn("recompute", { only: ["partenariats"] }); } catch { /* droit direction requis — non bloquant */ }
+              try { await callFn("recompute", { only: ["partenariats"] }, 300_000); } catch { /* droit direction requis — non bloquant */ }
             }} />
         )}
         {/* Amorçage des CERTIFICATIONS par ingénieur (2ᵉ fichier direction). Le callable résout les noms contre
