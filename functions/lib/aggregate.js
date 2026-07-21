@@ -384,7 +384,7 @@ async function recomputeCore(db, only) {
   const supAliasPairs = ((await db.doc("config/supplierAliases").get()).data() || {}).pairs || [];
   const resolveSupplier = buildSupplierResolver(supAliasPairs);
   const sup = suppliers(orders, bcLines, creditLines, supplierInvoices, { soaFromInvoices, resolveSupplier });
-  const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
+  const bf = backlogFy(orders, currentFy, { dormantYears: alertThr.dormantYears }); // backlog GLISSANT global (RAF de toutes les commandes ouvertes) + dormantes (même seuil que l'alerte)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   // Doc GLOBAL = pipeline « Tout » (rétro-compat ; Actualité + export CODIR). MÊME assiette que
   // summaries/pipeline_all : dormantes exclues si le drapeau est actif, sinon le « Pipeline actif pondéré »

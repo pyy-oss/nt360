@@ -114,8 +114,11 @@ export function useCommandesRows(enabled = true) {
   const canMargin = useCanSeeMargin();
   // enabled=false → aucun abonnement (name null) : la Vue d'ensemble / FP 360° ne chargent la liste
   // complète des commandes que lorsqu'elle est réellement nécessaire (filtre actif / recherche saisie).
-  const { data: meta, loading: l1 } = useDocData<CommandesSummary>(enabled ? "summaries/commandes" : null);
-  const { rows: chunks, loading: l2 } = useCollectionData<CommandeChunk>(enabled ? "commandesRows" : null, [orderBy("i", "asc")], "chunks");
+  // `error`/`truncated` PROPAGÉS (audit backlog H3/H1) : un refus de droit ou une panne se déguisait en
+  // « Aucune commande » avec bouton d'import, et un cap d'abonnement restait muet — contraire au contrat
+  // hooks.ts (« jamais de cap silencieux ») et au patron ErrorState des modules durcis.
+  const { data: meta, loading: l1, error: e1 } = useDocData<CommandesSummary>(enabled ? "summaries/commandes" : null);
+  const { rows: chunks, loading: l2, error: e2, truncated: t2 } = useCollectionData<CommandeChunk>(enabled ? "commandesRows" : null, [orderBy("i", "asc")], "chunks");
   // Marge par ligne dans une collection SÉPARÉE (accès « Rentabilité ») : lue seulement si activé ET
   // si le rôle a le droit marge (sinon name null → pas d'abonnement), puis fusionnée par FP.
   const { rows: mchunks } = useCollectionData<CommandeChunk>(enabled && canMargin ? "commandesRowsMargin" : null, [orderBy("i", "asc")], canMargin ? "mchunks" : "off");
@@ -126,7 +129,7 @@ export function useCommandesRows(enabled = true) {
     for (const c of mchunks) for (const m of (c.rows as any[]) || []) if (m.fp) mBy.set(m.fp, m);
     rows = base.map((r) => { const m = r.fp ? mBy.get(r.fp) : null; return m ? { ...r, mb: m.mb, costTotal: m.costTotal, marginPct: m.marginPct, mbSource: m.mbSource ?? null } : r; });
   }
-  return { rows, count: meta?.count ?? rows.length, loading: l1 || l2 };
+  return { rows, count: meta?.count ?? rows.length, loading: l1 || l2, error: e1 || e2, truncated: t2 };
 }
 
 // Module cible de chaque type d'alerte (pour rendre le centre d'alertes cliquable), avec le

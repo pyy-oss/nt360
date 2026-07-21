@@ -80,6 +80,9 @@ export interface BacklogSummary {
   // Diagnostic de fiabilité : RAF curaté Excel vs RAF dérivé (CAS − facturé, surévalué).
   totalExcel?: number; totalDerive?: number; countExcel?: number; countDerive?: number;
   deriveTop?: { fp?: string; client?: string; affaire?: string; bu?: string; source?: string | null; yearPo?: number; cas?: number; facture?: number; raf?: number }[];
+  // Commandes DORMANTES (millésime ≤ fy − dormantYears) — cible énumérable de l'alerte backlog_dormant.
+  dormantTop?: { fp?: string; client?: string; affaire?: string; bu?: string; yearPo?: number; raf?: number }[];
+  dormantCount?: number; dormantYears?: number;
 }
 
 export interface FacturationSummary {
