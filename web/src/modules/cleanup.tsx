@@ -460,7 +460,7 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
       {ent === "order" && item.fp && caps.import && (
         <>
           <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Corriger la commande (année, client, AM, CAS, RAF) sans quitter le Centre">modifier</button>
-          <DangerBtn label="annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
+          <DangerBtn label="Annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
             confirm={`Annuler la commande ${item.fp}${item.client ? ` (${item.client})` : ""} ? Elle sort du carnet et du P&L. Overlay non destructif : rétablissable depuis Commandes → Annulées, et il survit aux ré-imports.`}
             fn={async () => { await setCancellation("orders", fpDocId(item.fp!), true, { label: affaire || undefined, client: item.client }); await done(); }} />
         </>
@@ -469,7 +469,7 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
         <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Requalifier (perdue / suspendue / annulée) ou corriger l'opportunité sans quitter le Centre">requalifier</button>
       )}
       {ent === "invoice" && item.id && caps.import && (
-        <DangerBtn label="annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
+        <DangerBtn label="Annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
           confirm={`Annuler la facture ${item.numero || item.id}${item.client ? ` (${item.client})` : ""} ? Elle sort du CA facturé et du cash. Overlay non destructif : rétablissable depuis Factures → Annulées.`}
           fn={async () => { await setCancellation("invoices", item.id!, true, { label: item.numero, client: item.client }); await done(); }} />
       )}
