@@ -180,4 +180,20 @@ function supplierCostByFp(supplierInvoices) {
   return out;
 }
 
-module.exports = { suppliers, supplierCostByFp };
+// ACHATS ENGAGÉS PAR AFFAIRE — Σ des BC RÉELS par N° FP canonique (fpKey), TOUS statuts confondus :
+// un BC payé (soldé) reste un COÛT de l'affaire — le statut est du cash, pas du coût. Les lignes de
+// fiche (source « fiche ») sont EXCLUES : achats PLANIFIÉS, déjà portés par costTotal — les compter
+// ici ferait comparer le planifié à lui-même. Sert la réconciliation amont du FP 360° (planifié /
+// engagé / réel) et l'alerte achat_bc_sup_planifie. PUR (miroir front trivial, testé une fois).
+function bcCostByFp(bcLines) {
+  const out = {};
+  for (const b of Array.isArray(bcLines) ? bcLines : []) {
+    if (!b || b.source === "fiche") continue;
+    const k = fpKey(b.fp) || "";
+    if (!k) continue;
+    out[k] = (out[k] || 0) + (Number(b.amountXof) || 0);
+  }
+  return out;
+}
+
+module.exports = { suppliers, supplierCostByFp, bcCostByFp };

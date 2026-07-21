@@ -55,6 +55,10 @@ function parseLogistics(wb) {
     const conv = toXof(currency, amount, amountXof, undefined);
 
     const fp = fpKey(val(r, keys, "opp id", "n° fp", "n fp", "fp"));
+    // Identifiant DC Odoo (« Générer DC ») si l'export le porte — capté ADDITIVEMENT : clé de
+    // rattachement de secours via config/dcAliases quand le N° FP manque (ADR-054/066). Chaîne libre,
+    // jamais canonisée (format Odoo). Termes du plus spécifique au plus court (« dc » en dernier).
+    const dc = String(val(r, keys, "n° dc", "n dc", "dossier commercial", "dc") || "").trim();
     const statusRaw = String(val(r, keys, "statut", "status") || "").trim();
     const description = String(val(r, keys, "description") || "").trim();
     // ID = clé métier PHYSIQUE + INDEX D'OCCURRENCE parmi les lignes identiques (comme salesData).
@@ -98,6 +102,8 @@ function parseLogistics(wb) {
       etaReel: plausibleDate(toISO(val(r, keys, "eta reel"))),
       updateDate: plausibleDate(toISO(val(r, keys, "update date"))),
       comment: String(val(r, keys, "commentaires", "comment") || "").trim(),
+      // dc absent = champ NON écrit (le merge au ré-import préserve un dc déjà posé, cf. amountXof).
+      ...(dc ? { dc } : {}),
       source: "logistics",
     };
     byId.set(doc._id, doc); // dédup par clé métier (dernier gagne)

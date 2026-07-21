@@ -36,3 +36,29 @@ describe("supplierCostByFp — coût réel par affaire (fpKey)", () => {
     expect(supplierCostByFp(null)).toEqual({});
   });
 });
+
+// ENGAGÉ par affaire (audit BC/DC × rentabilité) : Σ BC RÉELS par fpKey, tous statuts (un BC payé
+// reste un coût), lignes de fiche exclues (achats planifiés, déjà dans costTotal). Miroir front :
+// FP 360° « Engagé (Σ BC) » (operations.tsx) — même assiette, même nombre.
+describe("bcCostByFp — achats engagés par affaire (fpKey)", () => {
+  const { bcCostByFp } = require("../domain/fournisseurs");
+  it("regroupe par fpKey (graphies fusionnées), tous statuts confondus, payés compris", () => {
+    const r = bcCostByFp([
+      { fp: "FP/2026/007", amountXof: 30_000, status: "emis" },
+      { fp: "FP/2026/7", amountXof: 20_000, status: "solde" }, // payé = toujours un coût
+    ]);
+    expect(r).toEqual({ "FP/2026/7": 50_000 });
+  });
+  it("exclut les lignes de fiche (planifié) et les BC sans N° FP résoluble", () => {
+    const r = bcCostByFp([
+      { fp: "FP/2026/1", amountXof: 10_000, source: "fiche" }, // planifié → exclu
+      { fp: "", amountXof: 5_000 },                            // sans FP → exclu
+      { fp: "FP/2026/1", amountXof: 8_000, source: "logistics" },
+    ]);
+    expect(r).toEqual({ "FP/2026/1": 8_000 });
+  });
+  it("robustesse : entrée vide / non tableau → objet vide", () => {
+    expect(bcCostByFp([])).toEqual({});
+    expect(bcCostByFp(undefined)).toEqual({});
+  });
+});

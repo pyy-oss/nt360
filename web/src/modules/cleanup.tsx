@@ -807,8 +807,9 @@ function DcReconcileSection() {
                 {seedPreview.skipped > 0 && <Badge tone="steel">{seedPreview.skipped} écartée(s)</Badge>}
                 {seedPreview.truncated && <Badge tone="clay">fichier tronqué (5 000 lignes max)</Badge>}
                 {seedPreview.toAdd > 0 && seedFile && (
-                  <Busy variant="ghost" label={`Appliquer les ${seedPreview.toAdd}`} okMsg="Table FP–DC importée (recalcul lancé)" errMsg="Import refusé"
-                    fn={async () => { await importDcAliases(seedFile, true); setSeedFile(null); setSeedPreview(null); }} />
+                  <Busy variant="ghost" label={`Appliquer les ${seedPreview.toAdd}`} errMsg="Import refusé"
+                    okMsg={(r: DcMapImportResult) => `Table FP–DC importée (recalcul lancé)${r?.backfilled ? ` — ${r.backfilled} BC rattaché(s)` : ""}`}
+                    fn={async () => { const r = await importDcAliases(seedFile, true); setSeedFile(null); setSeedPreview(null); return r; }} />
                 )}
                 <button type="button" className="text-faint hover:underline text-[11px]" onClick={() => { setSeedFile(null); setSeedPreview(null); }}>annuler</button>
               </div>

@@ -741,6 +741,10 @@ export const Fp360: FC<Props> = () => {
   const soaOn = soaCfg?.enabled === true;
   const { rows: supInv } = useCollectionData<SupplierInvoice>(key && canMargin && canFournisseurs && soaOn ? "supplierInvoices" : null, cons, key);
   const coutReel = supInv.filter((x) => fpKey(x.fp) === key).reduce((s, i) => s + (i.amountXof || 0), 0);
+  // ENGAGÉ = Σ BC RÉELS du FP, tous statuts (un BC payé reste un coût), lignes de fiche exclues (achats
+  // PLANIFIÉS, déjà dans costTotal) — miroir exact de domain/fournisseurs.bcCostByFp (alerte
+  // achat_bc_sup_planifie) : même assiette, même nombre.
+  const engage = bc.filter((b) => b.source !== "fiche").reduce((s, x) => s + (x.amountXof || 0), 0);
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recherche par N° FP">
@@ -787,16 +791,22 @@ export const Fp360: FC<Props> = () => {
             <Card title="Réconciliation amont (coût)">
               <div className={grid4}>
                 <Kpi label="Coût planifié (carnet)" value={fmt(o.costTotal || 0)} tone="steel" />
-                <Kpi label="Coût réel (Σ factures)" value={fmt(coutReel)} tone="clay" />
+                {/* Engagé > planifié = dérive d'achat DÉJÀ COMMANDÉE (même signal que l'alerte achat_bc_sup_planifie). */}
+                <Kpi label="Engagé (Σ BC)" value={fmt(engage)} tone={(o.costTotal || 0) > 0 && engage > (o.costTotal || 0) ? "clay" : "steel"} />
+                <Kpi label="Coût réel (Σ factures)" value={fmt(coutReel)} tone="clay" sub={`${supInv.filter((x) => fpKey(x.fp) === key).length.toLocaleString("fr-FR")} facture(s) fournisseur`} />
                 <Kpi label="Écart (planifié − réel)" value={fmt((o.costTotal || 0) - coutReel)} tone="gold" />
-                <Kpi label="Factures fournisseur" value={supInv.filter((x) => fpKey(x.fp) === key).length.toLocaleString("fr-FR")} />
               </div>
-              <Tip>Le <b>coût réel</b> provient des <b>factures fournisseur</b> rattachées à ce N° FP (rapprochées par fpKey, autorité N° FP). Écart <b>positif</b> = achats planifiés non encore facturés ; <b>négatif</b> = dépassement du coût prévu.</Tip>
+              <Tip>Le <b>coût réel</b> provient des <b>factures fournisseur</b> rattachées à ce N° FP (rapprochées par fpKey, autorité N° FP). L'<b>engagé</b> est la Σ des BC réels du FP (tous statuts, lignes planifiées de fiche exclues). Écart <b>positif</b> = achats planifiés non encore facturés ; <b>négatif</b> = dépassement du coût prévu.</Tip>
+              {(o.costTotal || 0) > 0 && engage > (o.costTotal || 0) && (
+                <Tip><b>BC émis supérieurs au coût planifié</b> ({fmt(engage - (o.costTotal || 0))} de dépassement) — la marge carnet est optimiste tant que la fiche n'est pas mise à jour.</Tip>
+              )}
             </Card>
           )}
           <Card title={`Factures · ${invoices.length} · Σ ${fmt(sumFacture)}`}><Table columns={[colText("Numéro", (i) => i.numero), colText("Date", (i) => i.date), colNum("Montant HT", (i) => money(i.amountHt))]} rows={invoices} /></Card>
           {canMargin && <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>}
-          <Card title={`Lignes BC · ${bc.length}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
+          {/* Σ engagé dans l'entête : visible SANS le drapeau « Vérité du coût » (les montants BC de la
+              table sont déjà lisibles ici) — la carte de réconciliation, elle, reste gatée (costTotal). */}
+          <Card title={`Lignes BC · ${bc.length}${engage > 0 ? ` · Σ engagé ${fmt(engage)}` : ""}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colText("DC", (b) => b.dc || "—"), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("Affaire", (x) => x.designation || "—"), colText("Commercial", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
       ) : <EmptyState label={`Aucun élément rattaché à ${key}.`} />) : (

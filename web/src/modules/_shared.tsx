@@ -138,7 +138,7 @@ export function useCommandesRows(enabled = true) {
 // Valeur = "module" ou "module:segment" (segment interne à pré-sélectionner sur la vue cible). Forme
 // chaîne compacte (une seule string par type) pour ne pas alourdir le chunk d'entrée (budget 120 KB).
 const ALERT_TARGET: Record<string, string> = {
-  marge_negative: "orderlist:negmb", achat_sup_vente: "orderlist", raf_incoherent: "orderlist",
+  marge_negative: "orderlist:negmb", achat_sup_vente: "orderlist", achat_bc_sup_planifie: "orderlist", raf_incoherent: "orderlist",
   factures_non_rattachees: "invoicelist:orphan", facture_pre_po: "invoicelist", surfacturation: "invoicelist",
   facture_avant_commande: "invoicelist", commande_non_facturee: "orderlist",
   backlog_dormant: "backlog", ligne_saturee: "fournisseurs", ligne_tension: "fournisseurs",

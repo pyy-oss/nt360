@@ -2231,3 +2231,23 @@ partagent la fusion).
 **Appris.** Quand une règle de dérivation entre dans `mergeCommandes`, chercher AUSSI les agrégats qui
 lisent les collections brutes sans passer par la fusion (currentFy, push unitaire) : c'est là que
 l'invariant « même métrique = même nombre » casse en silence.
+
+---
+
+## 2026-07-21 — BC/DC × Rentabilité : engagé (Σ BC), rattachement DC persistant, DC à l'import (ADR-067)
+
+**Fait.** Suite de l'audit « prise en compte des DC et BC liés dans la rentabilité » (3 lots validés par
+« go ») : (A) nouvelle grandeur ENGAGÉ = `bcCostByFp` (Σ BC réels par fpKey, tous statuts, fiche exclue)
+affichée en FP 360° (réconciliation amont planifié/engagé/réel/écart + entête Lignes BC) et alerte
+`achat_bc_sup_planifie` (high, margin) quand engagé > costTotal connu ; (B) le fp résolu par DC est
+désormais PERSISTÉ sur les docs bcLines — resolveBcDc à l'import (delta + trigger, même règle que le
+webhook), backfill au seed (importDcAliases, borné 20 000) et au rapprochement manuel (setDcAlias,
+ciblé par DC), jamais d'écrasement, résolution mémoire du recompute conservée en filet ; (C) le parseur
+Logistics capte la colonne « DC » additivement, colonne DC affichée dans Lignes BC du FP 360°.
+
+**Appris.** La rentabilité ne consommait AUCUN BC (coût = planifié fiche/P&L puis réel factures) : le
+stade « engagé » manquait alors que la donnée était déjà à l'écran, listée sans être sommée. Et toute
+résolution d'overlay « en mémoire au recompute » doit se demander : les vues front qui lisent le champ
+brut verront-elles la même chose ? Sinon, backfill persistant.
+
+**Vérifs.** Functions + web complets (voir PR), miroir front `engage` = assiette exacte de bcCostByFp.
