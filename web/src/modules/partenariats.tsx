@@ -3,13 +3,13 @@
 // écritures callable et les formats de l'ERP (FCFA entier via money, date JJ/MM/AAAA via frDate). Le CA
 // est DÉRIVÉ des BC fournisseurs (summaries/par_ca) — aucune saisie. Aucune valeur en dur (tons/libellés
 // via lib/parLabels). Composant LAZY → callables inline (hors chunk d'entrée).
-import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import { Plus, Sparkles } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { useCan, useCanSeeMargin } from "../lib/rbac";
-import { useCollectionData, useDocData } from "../lib/hooks";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, Modal, Segmented, useToast, useConfirm } from "../design/components";
+import { useCollectionData, useDocData, DEFAULT_SUB_CAP } from "../lib/hooks";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Eyebrow, money, EmptyState, ErrorState, CardSkeleton, TruncationNote, Modal, Segmented, useToast, useConfirm } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { frDate } from "../lib/format";
 import { ExportBtn } from "../design/bulk";
@@ -26,20 +26,26 @@ import {
   relanceBucketLabel, relanceBucketTone, VALIDATION_STATUS_LABEL, validationTone, BP_AXIS_LABEL, label,
 } from "../lib/parLabels";
 import type { Props } from "./_shared";
+// Types de la QBR (import type : effacé à la compilation — pptxgenjs reste chargé à la demande).
+import type { ParQbr, ParQbrSnapshot } from "../lib/parQbrPptx";
 
-// Appel callable INLINE (module lazy) — évite d'alourdir writes.ts (budget bundle).
-const callFn = <T,>(name: string, payload: unknown) => httpsCallable(functions, name)(payload).then((r) => r.data as T);
+// Appel callable INLINE (module lazy) — évite d'alourdir writes.ts (budget bundle). `timeout` optionnel :
+// les callables LONGS (IA, imports, recompute — 300 s côté serveur) dépasseraient les 70 s par défaut du
+// SDK et remonteraient un faux « deadline-exceeded » alors que le serveur finit son travail (convention
+// writes.ts : timeout client aligné sur le serveur).
+const callFn = <T,>(name: string, payload: unknown, timeout?: number) => httpsCallable(functions, name, timeout ? { timeout } : undefined)(payload).then((r) => r.data as T);
 
 type CatalogEntry = { id: string; code?: string; name: string; competencyId: string; level: string; validityMonths: number };
 type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | "bookingYtd" | "certBp" | "certYtd" | "growthBp" | "growthYtd", number>>;
 type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; caDeclaredXof?: number; fiscalStartMonth?: number; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
-type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; bcXof?: number; declaredXof?: number; exerciseYear?: number; offExerciseXof?: number; offExerciseCount?: number; asOf?: string } | null;
+type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; unmappedCount?: number; declaredRawXof?: number; totalXof?: number; bcXof?: number; declaredXof?: number; exerciseYear?: number; offExerciseXof?: number; offExerciseCount?: number; asOf?: string } | null;
 type CaHistory = { days?: { date: string; totalXof: number; bcXof: number; declaredXof: number }[] } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
-type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
+type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number; partnerRenewals?: { id: string; partnerId: string; name: string; renewalDate: string; daysLeft: number; bucket: string }[]; partnerRenewalTotal?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
+type PipelineSummary = { partners?: { partnerId: string; name: string; openXof: number; openWeightedXof: number; openCount: number; wonXof: number; wonCount: number }[]; totalOpenXof?: number; totalWonXof?: number; exerciseYear?: number } | null;
 type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
 type ConsultantLite = { id: string; name: string; bu?: string };
 
@@ -70,16 +76,19 @@ export const Partenariats: FC<Props> = () => {
   const [editPartnerId, setEditPartnerId] = useState<string | null>(null);
   const goEditPartner = (id: string) => { setEditPartnerId(id); setTab("config"); };
 
-  // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit).
-  const { rows: partners } = useCollectionData<Partner>("par_partners");
-  const { rows: certifs } = useCollectionData<Certif>("par_certifications");
-  const { rows: assigns } = useCollectionData<Assign>("par_assignments");
+  // Lectures temps réel (onSnapshot) — gatées par les rules (drapeau + droit). loading/error/truncated
+  // exposés (audit partenariats) : un refus de droit ou une panne ne doit pas ressembler à « module vide »,
+  // et une collection tronquée au cap d'abonnement doit se signaler (TruncationNote), jamais silencieuse.
+  const { rows: partners, loading: partnersLoading, error: partnersError, truncated: partnersTrunc } = useCollectionData<Partner>("par_partners");
+  const { rows: certifs, loading: certifsLoading, error: certifsError, truncated: certifsTrunc } = useCollectionData<Certif>("par_certifications");
+  const { rows: assigns, loading: assignsLoading, error: assignsError, truncated: assignsTrunc } = useCollectionData<Assign>("par_assignments");
   const { data: ca } = useDocData<CaSummary>(canSeeCa ? "summaries/par_ca" : null);
   const { data: caHistory } = useDocData<CaHistory>(canSeeCa ? "summaries/par_caHistory" : null);
   const { data: quotas } = useDocData<QuotaSummary>("summaries/par_quotas");
   const { data: alerts } = useDocData<AlertSummary>("summaries/par_alerts");
   const { data: relances } = useDocData<RelanceSummary>("summaries/par_relances");
   const { data: history } = useDocData<QuotaHistory>("summaries/par_quotasHistory");
+  const { data: parPipeline } = useDocData<PipelineSummary>("summaries/par_pipeline");
   const { data: mapDoc } = useDocData<{ map?: Record<string, string | Record<string, number>> }>("config/parPartnerMap");
 
   const partnerName = useMemo(() => { const m: Record<string, string> = {}; for (const p of partners || []) m[p.id] = p.name; return m; }, [partners]);
@@ -89,10 +98,14 @@ export const Partenariats: FC<Props> = () => {
   // un tableau de bord à zéro sans indice (leçon du formulaire de référentiel : la complétude se mesure au
   // parcours). N'apparaît qu'en écriture et quand aucun partenaire n'existe.
   const empty = (partners || []).length === 0;
+  // Gardes de chargement/erreur (audit partenariats) : sans elles, un refus de droit ou une panne réseau
+  // rendait le module comme « vide » (onboarding à tort), et le premier rendu flashait des tableaux à zéro.
+  const loadError = partnersError || certifsError || assignsError;
+  const parLoading = partnersLoading || certifsLoading || assignsLoading;
   return (
     <div className="space-y-4">
       <Segmented
-        value={tab} onChange={setTab}
+        value={tab} onChange={setTab} ariaLabel="Sections du module Partenariats"
         options={[
           { value: "dash", label: "Tableau de bord" },
           { value: "certifs", label: "Certifications", count: certifs?.length },
@@ -102,20 +115,25 @@ export const Partenariats: FC<Props> = () => {
           { value: "ia", label: "IA & QBR" },
         ]}
       />
+      {loadError && <ErrorState error={loadError} />}
+      {!loadError && parLoading && <CardSkeleton />}
+      <TruncationNote show={partnersTrunc || certifsTrunc || assignsTrunc} cap={DEFAULT_SUB_CAP} />
 
-      {empty && canWrite && (
+      {!loadError && !parLoading && empty && canWrite && (
         <Card title="Démarrer le module Partenariats">
           <Tip>Le module est <b>activé mais vide</b>. Le plus rapide : ouvrez <b>Paramétrage</b> et cliquez <b>« Importer les 20 partenaires de référence »</b> — le référentiel se remplit d'un coup avec vos données (statut, plan d'affaires, certifications, exigences de quota). Sinon, créez un constructeur à la main avec <b>« Nouveau partenaire »</b> (ou en <b>partant d'un modèle</b>). Ajoutez ensuite les <b>certifications</b> de vos ingénieurs et leurs <b>assignations</b> — le tableau de bord se remplit tout seul.</Tip>
           <button className="btn mt-2" onClick={() => setTab("config")}><Plus size={14} /> Créer un partenaire</button>
         </Card>
       )}
 
-      {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
-      {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
-      {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
-      {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
-      {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
-      {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
+      {!loadError && !parLoading && <>
+        {tab === "dash" && <Dashboard ca={ca} caHistory={caHistory} pipeline={parPipeline} canSeeCa={canSeeCa} canWrite={canWrite} onEditPartner={goEditPartner} quotas={quotas} alerts={alerts} relances={relances} history={history} partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
+        {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
+        {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
+        {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
+      </>}
     </div>
   );
 };
@@ -168,18 +186,18 @@ const IaTab: FC<{ partnerOpts: { value: string; label: string }[] }> = ({ partne
   const [planPartnerId, setPlanPartnerId] = useState(""); // "" = tous les partenaires (défaut)
   const [partnerId, setPartnerId] = useState("");
   const [periode, setPeriode] = useState("");
-  const [qbr, setQbr] = useState<{ qbr: any; snapshot: any } | null>(null);
+  const [qbr, setQbr] = useState<{ qbr: ParQbr; snapshot: ParQbrSnapshot } | null>(null);
   const [qbrBusy, setQbrBusy] = useState(false);
 
   const genPlan = async () => {
     if (planBusy) return; setPlanBusy(true);
-    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", { partnerId: planPartnerId || undefined }); setPlan(r.plan || []); }
+    try { const r = await callFn<{ plan: PlanItem[] }>("generateParActionPlan", { partnerId: planPartnerId || undefined }, 300_000); setPlan(r.plan || []); }
     catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
     finally { setPlanBusy(false); }
   };
   const genQbr = async () => {
     if (qbrBusy || !partnerId) return; setQbrBusy(true);
-    try { const r = await callFn<{ qbr: any; snapshot: any }>("generateParQbr", { partnerId, periode }); setQbr({ qbr: r.qbr, snapshot: r.snapshot }); }
+    try { const r = await callFn<{ qbr: ParQbr; snapshot: ParQbrSnapshot }>("generateParQbr", { partnerId, periode }, 300_000); setQbr({ qbr: r.qbr, snapshot: r.snapshot }); }
     catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
     finally { setQbrBusy(false); }
   };
@@ -295,8 +313,8 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   const risque = aRisque + nonConformes;
   const stats: { label: string; value: string; color?: string }[] = [
     { label: "Partenaires", value: String(partners.length) },
-    ...(canSeeCa ? [{ label: `CA constructeurs ${ca?.exerciseYear || ""}`.trim(), value: fmt(ca?.totalXof || 0), color: T.emerald }] : []),
-    { label: "Certifs à renouveler", value: String(alerts?.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
+    ...(canSeeCa ? [{ label: `CA constructeurs ${ca?.exerciseYear || ""}`.trim(), value: ca == null ? "\u2014" : fmt(ca.totalXof || 0), color: T.emerald }] : []),
+    { label: "Certifs à renouveler", value: alerts == null ? "\u2014" : String(alerts.total || 0), color: (alerts?.total || 0) > 0 ? T.gold : undefined },
     { label: "Partenariats à risque", value: String(risque), color: risque > 0 ? T.clay : undefined },
   ];
   return (
@@ -305,7 +323,7 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
         <div>
           <Eyebrow>Cockpit partenariats</Eyebrow>
           <div className="mt-1.5 flex items-end gap-2">
-            <span className="font-display leading-none tabnum text-[34px] sm:text-[40px]" style={{ color: ratio == null ? "rgb(var(--muted))" : ratio >= 0.999 ? T.emerald : ratio >= 0.5 ? T.gold : T.clay }}>{ratio == null ? "—" : pct(ratio)}</span>
+            <span className="font-display leading-none tabnum text-[34px] sm:text-[40px]" style={{ color: ratioColor(ratio) }}>{ratio == null ? "—" : pct(ratio)}</span>
             <span className="mb-1 text-[12px] text-muted">conformité des quotas{evalues ? ` · ${conformes}/${evalues}` : ""}</span>
           </div>
         </div>
@@ -337,12 +355,14 @@ const HeroBand: FC<{ partners: Partner[]; ca: CaSummary; canSeeCa: boolean; aler
   );
 };
 
-const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, caHistory, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
+const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; pipeline: PipelineSummary; canSeeCa: boolean; canWrite: boolean; onEditPartner: (id: string) => void; quotas: QuotaSummary; alerts: AlertSummary; relances: RelanceSummary; history: QuotaHistory; partners: Partner[]; certifs: Certif[]; assigns: Assign[]; partnerName: Record<string, string> }> = ({ ca, caHistory, pipeline, canSeeCa, canWrite, onEditPartner, quotas, alerts, relances, history, partners, certifs, assigns, partnerName }) => {
   // Action de ligne « Éditer le partenaire » depuis une vue read-only → bascule Paramétrage + ouvre le formulaire.
   const editCol = (id: (r: any) => string) => colText("", (r: any) => <button className="btn-ghost text-[11px]" onClick={() => onEditPartner(id(r))}>Éditer</button>);
-  const alertItems = alerts?.items || [];
+  // Mémoïsés (identité stable) : ces tableaux sont des DÉPENDANCES de useMemo plus bas (compareRows,
+  // trainRows) — le repli `|| []` recréé à chaque rendu invaliderait les mémos en boucle (eslint react-hooks).
+  const alertItems = useMemo(() => alerts?.items || [], [alerts]);
   const relanceItems = relances?.items || [];
-  const quotaPartners = quotas?.partners || [];
+  const quotaPartners = useMemo(() => quotas?.partners || [], [quotas]);
   // Tendance de conformité (Lot P3) : historique quotidien de la couverture des quotas (30 derniers jours).
   const trend = (history?.days || []).slice(-30).map((d) => ({ name: (d.date || "").slice(5), Conformes: d.conformes, "À risque": d.aRisque, "Non conformes": d.nonConformes }));
   // Plan d'affaires : partenaires portant un BP saisi, avec taux d'atteinte par axe + global (miroir du
@@ -357,6 +377,35 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
   const tp = (r: { partnerId: string; coverage?: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[] }) =>
     tierProgress(tiersByPartner.get(r.partnerId), r.coverage);
   const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => <MiniBar ratio={r.a[ax]} />, (r: typeof bpRows[number]) => r.a[ax] ?? -1);
+  // Écart statut DÉCLARÉ (fiche partenaire, texte libre : « Silver », « Expert »…) vs niveau CALCULÉ
+  // (tierProgress sur la couverture des quotas) — PAR-P4. Comparaison insensible casse/espaces : un badge
+  // signale la divergence (statut affiché au constructeur non soutenu par les certifs, ou l'inverse).
+  const declaredById = useMemo(() => new Map(partners.map((p) => [p.id, (p.status || "").trim()])), [partners]);
+  const normLvl = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  // Renouvellements du PARTENARIAT (renewalDate, J-90/60/30 — partnerRenewalWatch au recompute).
+  const partnerRenewals = alerts?.partnerRenewals || [];
+  // Comparatif inter-constructeurs (PAR-P4) : jointure FRONT des états déjà calculés (CA, conformité,
+  // niveau tenu, certifs valides, renouvellements) — aucune re-dérivation, uniquement une mise côte à côte
+  // pour arbitrer où investir (quel partenariat rapporte, lequel coûte en conformité).
+  const compareRows = useMemo(() => {
+    const caBy = new Map((ca?.byPartner || []).map((g) => [g.partnerId, g]));
+    const quotaBy = new Map(quotaPartners.map((q) => [q.partnerId, q]));
+    const renewBy = new Map<string, number>();
+    for (const a of alertItems) renewBy.set(a.partnerId, (renewBy.get(a.partnerId) || 0) + 1);
+    const certBy = new Map<string, { ok: number; tot: number }>();
+    for (const c of certifs) { const e = certBy.get(c.partnerId) || { ok: 0, tot: 0 }; e.tot++; if (c.status === "active") e.ok++; certBy.set(c.partnerId, e); }
+    return partners.map((p) => {
+      const q = quotaBy.get(p.id);
+      return {
+        partnerId: p.id, name: p.name,
+        caXof: caBy.get(p.id)?.revenueXof || 0, caSource: caBy.get(p.id)?.source,
+        quotaStatus: q?.status || "non_evalue",
+        achieved: q ? tierProgress(p.tiers, q.coverage).achieved?.name || null : null,
+        certOk: certBy.get(p.id)?.ok || 0, certTot: certBy.get(p.id)?.tot || 0,
+        renouv: renewBy.get(p.id) || 0,
+      };
+    }).sort((a, b) => b.caXof - a.caXof || a.name.localeCompare(b.name));
+  }, [partners, ca, quotaPartners, alertItems, certifs]);
   // Plan de formation (PA+ Lot 3) : transforme les écarts de quota en assignations proposées. PUR (parTraining),
   // aucune re-dérivation de la conformité — on lit la couverture du summary.
   const trainRows = useMemo(() => trainingPlan(quotaPartners, partners, certifs, assigns), [quotaPartners, partners, certifs, assigns]);
@@ -395,7 +444,22 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
       <Card title="CA par constructeur — BC dérivé + déclaratif">
         <Tip>Le chiffre d'affaires par partenaire <b>mélange</b> le <b>dérivé des bons de commande fournisseurs</b> (via la correspondance fournisseur→constructeur, Paramétrage) et le <b>CA réalisé déclaré</b> sur la fiche partenaire (repli = booking YTD du plan d'affaires). Règle : le <b>BC prime</b> dès qu'il existe, le déclaratif comble sinon — jamais additionnés. Montants en FCFA.</Tip>
         <Table
-          columns={[colText("Constructeur", (r) => r.name), colNum("CA (FCFA)", (r) => money(r.revenueXof)), colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>), colNum("BC", (r) => String(r.bcCount))]}
+          columns={[
+            colText("Constructeur", (r) => r.name, (r) => r.name),
+            colNum("CA retenu (FCFA)", (r) => money(r.revenueXof), (r) => r.revenueXof),
+            // Écart BC vs déclaré PAR LIGNE (PAR-P4) : les deux mesures coexistent sur la fiche — les voir
+            // côte à côte révèle un déclaratif surestimé (ou un mapping BC incomplet), au lieu d'un seul
+            // chiffre « retenu » qui masque la divergence.
+            colNum("dont BC", (r) => (r.bcXof || 0) > 0 ? money(r.bcXof!) : <span className="text-faint">—</span>, (r) => r.bcXof || 0),
+            colNum("dont déclaré", (r) => (r.declaredXof || 0) > 0 ? money(r.declaredXof!) : <span className="text-faint">—</span>, (r) => r.declaredXof || 0),
+            colNum("Écart BC−déclaré", (r) => {
+              if (!((r.bcXof || 0) > 0 && (r.declaredXof || 0) > 0)) return <span className="text-faint">—</span>;
+              const d = (r.bcXof || 0) - (r.declaredXof || 0);
+              return <span className="tabnum" style={{ color: d < 0 ? T.clay : T.emerald }}>{d > 0 ? "+" : ""}{money(d)}</span>;
+            }, (r) => ((r.bcXof || 0) > 0 && (r.declaredXof || 0) > 0) ? (r.bcXof || 0) - (r.declaredXof || 0) : 0),
+            colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>, (r) => r.source || ""),
+            colNum("BC", (r) => String(r.bcCount), (r) => r.bcCount),
+          ]}
           rows={ca?.byPartner || []} rowKey={(r) => r.partnerId} empty="Aucun CA — ni BC rattaché, ni CA déclaré/booking YTD sur les fiches partenaires."
         />
         {/* Ventilation BC dérivé vs déclaratif (fait voir où le réel a pris le relais du repli). */}
@@ -412,9 +476,9 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
             {money(ca!.offExerciseXof!)} de commandes d'autres millésimes exclues de l'exercice {ca?.exerciseYear || ""} ({ca?.offExerciseCount || 0} BC).
           </div>
         )}
-        {!!(ca?.unmapped || []).length && (
+        {!!(ca?.unmappedCount ?? (ca?.unmapped || []).length) && (
           <div className="mt-2 text-[12px] text-gold">
-            {(ca!.unmapped!).length} fournisseur(s) BC non rattaché(s) à un constructeur (à mapper en Paramétrage) — ex. {(ca!.unmapped!).slice(0, 3).map((u) => u.supplier).join(", ")}.
+            {ca?.unmappedCount ?? (ca!.unmapped!).length} fournisseur(s) BC non rattaché(s) à un constructeur (à mapper en Paramétrage) — ex. {(ca?.unmapped || []).slice(0, 3).map((u) => u.supplier).join(", ")}.
           </div>
         )}
         {/* Tendance du CA (historisé à chaque recalcul) : total + ventilation BC/déclaré. */}
@@ -430,13 +494,46 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
       </Card>
       )}
 
+      {/* Pipeline SOURCÉ PARTENAIRE (PAR-L1) : opps taguées d'un constructeur (formulaire Pipeline) —
+          ouvert + pondéré (même autorité projectionWeight que la prévision) + gagné de l'exercice, avec
+          l'objectif pipeline du plan d'affaires en regard (contrepartie MESURÉE du déclaré). */}
+      {!!(pipeline?.partners || []).length && (
+        <Card title={`Pipeline sourcé partenaire${pipeline?.exerciseYear ? ` · ${pipeline.exerciseYear}` : ""}`} actions={<ExportBtn name="pipeline-source-partenaire" cols={[
+          { header: "Constructeur", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => r.name },
+          { header: "Ouvert (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openXof) },
+          { header: "Pondéré (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openWeightedXof) },
+          { header: "Gagné (FCFA)", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.wonXof) },
+          { header: "Opps ouvertes", render: (r: NonNullable<NonNullable<PipelineSummary>["partners"]>[number]) => String(r.openCount) },
+        ]} rows={pipeline!.partners!} />}>
+          <Tip>Les opportunités <b>taguées d'un constructeur</b> (champ « Constructeur (partenariat) » du formulaire Pipeline) : pipeline <b>ouvert</b>, son <b>pondéré</b> de projection (mêmes paliers que la prévision) et le <b>gagné</b> de l'exercice — à comparer à l'objectif pipeline du plan d'affaires, qui reste déclaratif.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              colNum("Ouvert", (r) => money(r.openXof), (r) => r.openXof),
+              colNum("Pondéré", (r) => money(r.openWeightedXof), (r) => r.openWeightedXof),
+              colNum("Gagné", (r) => r.wonXof ? money(r.wonXof) : <span className="text-faint">—</span>, (r) => r.wonXof),
+              colNum("Opps", (r) => `${r.openCount}${r.wonCount ? ` + ${r.wonCount} gagnée(s)` : ""}`, (r) => r.openCount + r.wonCount),
+              colNum("vs objectif pipeline (BP)", (r) => {
+                const bp = Number(partners.find((p) => p.id === r.partnerId)?.businessPlan?.pipelineBp) || 0;
+                return bp > 0 ? <MiniBar ratio={(r.openXof + r.wonXof) / bp} /> : <span className="text-faint">—</span>;
+              }, (r) => { const bp = Number(partners.find((p) => p.id === r.partnerId)?.businessPlan?.pipelineBp) || 0; return bp > 0 ? (r.openXof + r.wonXof) / bp : -1; }),
+            ]}
+            rows={pipeline!.partners!} rowKey={(r) => r.partnerId} empty="Aucune opportunité taguée d'un constructeur."
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+            <Dot color={T.gold} label={<>Ouvert <b className="tabnum">{money(pipeline?.totalOpenXof || 0)}</b></>} />
+            <Dot color={T.emerald} label={<>Gagné <b className="tabnum">{money(pipeline?.totalWonXof || 0)}</b></>} />
+          </div>
+        </Card>
+      )}
+
       <Card title="Conformité des quotas de certification" actions={<ExportBtn name="conformite-quotas" cols={[
-        { header: "Constructeur", render: (r: any) => r.name },
-        { header: "Statut", render: (r: any) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
-        { header: "Niveau tenu", render: (r: any) => tp(r).achieved?.name || "" },
-        { header: "Prochain niveau", render: (r: any) => tp(r).next?.name || "" },
-        { header: "Écart au prochain", render: (r: any) => tp(r).gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
-        { header: "Exigences couvertes", render: (r: any) => `${(r.coverage || []).filter((c: any) => c.ok).length}/${(r.coverage || []).length}` },
+        { header: "Constructeur", render: (r: QuotaRow) => r.name },
+        { header: "Statut", render: (r: QuotaRow) => label(PARTNERSHIP_STATUS_LABEL, r.status) },
+        { header: "Niveau tenu", render: (r: QuotaRow) => tp(r).achieved?.name || "" },
+        { header: "Prochain niveau", render: (r: QuotaRow) => tp(r).next?.name || "" },
+        { header: "Écart au prochain", render: (r: QuotaRow) => tp(r).gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(" | ") },
+        { header: "Exigences couvertes", render: (r: QuotaRow) => `${(r.coverage || []).filter((c) => c.ok).length}/${(r.coverage || []).length}` },
       ]} rows={quotaPartners} />}>
         <Tip>Le <b>niveau tenu</b> est le plus haut palier dont toutes les exigences (et celles d'en dessous) sont couvertes ; le <b>prochain niveau</b> et son <b>écart</b> disent ce qu'il manque pour monter d'un cran. Dérivé de la couverture des quotas ci-après (mêmes chiffres).</Tip>
         <Table
@@ -444,14 +541,69 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
             colText("Constructeur", (r) => r.name),
             colText("Statut", (r) => <Badge tone={partnershipTone(r.status)}>{label(PARTNERSHIP_STATUS_LABEL, r.status)}</Badge>),
             colText("Niveau tenu", (r) => tp(r).achieved?.name || "—"),
+            // Statut DÉCLARÉ vs niveau CALCULÉ (PAR-P4) : badge quand la fiche revendique un niveau que la
+            // couverture des quotas ne soutient pas (ou l'inverse) — signal de mise à jour de fiche ou de
+            // risque à l'audit constructeur. Simple signal, pas une erreur (les libellés peuvent différer).
+            colText("Déclaré", (r: QuotaRow) => {
+              const d = declaredById.get(r.partnerId) || "";
+              if (!d) return <span className="text-faint">—</span>;
+              const a = tp(r).achieved?.name || "";
+              return normLvl(d) === normLvl(a)
+                ? <span>{d}</span>
+                : <span className="inline-flex items-center gap-1.5" title={`Statut déclaré « ${d} » ≠ niveau calculé « ${a || "aucun"} » (couverture des quotas)`}>{d}<Badge tone="gold">≠ calculé</Badge></span>;
+            }, (r: QuotaRow) => declaredById.get(r.partnerId) || ""),
             colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
-            colText("Exigences couvertes", (r) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c: any) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
-            colText("Écarts", (r) => (r.gaps || []).length ? (r.gaps as any[]).map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
+            colText("Exigences couvertes", (r: QuotaRow) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
+            colText("Écarts", (r: QuotaRow) => (r.gaps || []).length ? r.gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
             ...(canWrite ? [editCol((r) => r.partnerId)] : []),
           ]}
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
         />
       </Card>
+
+      {/* Comparatif inter-constructeurs (PAR-P4) : mise côte à côte des états DÉJÀ calculés — quel
+          partenariat rapporte (CA), lequel coûte (conformité, renouvellements). Aucune re-dérivation. */}
+      {compareRows.length >= 2 && (
+        <Card title="Comparatif inter-constructeurs" actions={<ExportBtn name="comparatif-constructeurs" cols={[
+          { header: "Constructeur", render: (r: typeof compareRows[number]) => r.name },
+          ...(canSeeCa ? [{ header: "CA (FCFA)", render: (r: typeof compareRows[number]) => String(r.caXof) }] : []),
+          { header: "Conformité", render: (r: typeof compareRows[number]) => label(PARTNERSHIP_STATUS_LABEL, r.quotaStatus) },
+          { header: "Niveau tenu", render: (r: typeof compareRows[number]) => r.achieved || "" },
+          { header: "Certifs valides", render: (r: typeof compareRows[number]) => `${r.certOk}/${r.certTot}` },
+          { header: "À renouveler ≤ 90 j", render: (r: typeof compareRows[number]) => String(r.renouv) },
+        ]} rows={compareRows} />}>
+          <Tip>Les constructeurs côte à côte : le <b>CA</b> qu'ils génèrent{canSeeCa ? "" : " (masqué sans droit rentabilité)"}, la <b>conformité</b> des quotas, le <b>niveau tenu</b> et la pression de <b>renouvellement</b>. Mêmes chiffres que les cartes ci-dessus — juste alignés pour arbitrer où investir.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              ...(canSeeCa ? [colNum("CA (FCFA)", (r: typeof compareRows[number]) => r.caXof ? <span className="inline-flex items-center gap-1.5">{money(r.caXof)}{r.caSource === "declare" && <Badge tone="gold">Déclaré</Badge>}</span> : <span className="text-faint">—</span>, (r: typeof compareRows[number]) => r.caXof)] : []),
+              colText("Conformité", (r) => <Badge tone={partnershipTone(r.quotaStatus)}>{label(PARTNERSHIP_STATUS_LABEL, r.quotaStatus)}</Badge>, (r) => r.quotaStatus),
+              colText("Niveau tenu", (r) => r.achieved || "—", (r) => r.achieved || ""),
+              colNum("Certifs valides", (r) => r.certTot ? <MiniBar ratio={r.certOk / r.certTot} label={`${r.certOk}/${r.certTot}`} /> : <span className="text-faint">—</span>, (r) => r.certTot ? r.certOk / r.certTot : -1),
+              colNum("À renouveler", (r) => r.renouv ? <span className="text-gold tabnum">{r.renouv}</span> : "0", (r) => r.renouv),
+            ]}
+            rows={compareRows} rowKey={(r) => r.partnerId} empty="Au moins deux partenaires requis."
+          />
+        </Card>
+      )}
+
+      {/* Renouvellement du PARTENARIAT lui-même (PAR-P4) : renewalDate du référentiel, fenêtres J-90/60/30
+          matérialisées au recompute (partnerRenewalWatch) — le contrat programme se renégocie en amont. */}
+      {!!partnerRenewals.length && (
+        <Card title="Renouvellements de partenariats (≤ 90 j)">
+          <Tip>Échéances de <b>contrat programme</b> constructeur à préparer : renégociation du niveau, quotas et plan d'affaires. Dérivé de la date d'échéance saisie sur chaque fiche partenaire.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              colText("Échéance", (r) => frDate(r.renewalDate), (r) => r.renewalDate),
+              colNum("Jours restants", (r) => r.daysLeft <= 0 ? <span className="text-clay tabnum">échue</span> : <span className="tabnum">{r.daysLeft}</span>, (r) => r.daysLeft),
+              colText("Urgence", (r) => <Badge tone={alertBucketTone(r.bucket)}>{r.bucket === "expired" ? "Échue" : label(ALERT_BUCKET_LABEL, r.bucket)}</Badge>, (r) => r.bucket),
+              ...(canWrite ? [editCol((r) => r.partnerId)] : []),
+            ]}
+            rows={partnerRenewals} rowKey={(r) => r.id} pageSize={10} empty="Aucun partenariat à échéance sous 90 jours."
+          />
+        </Card>
+      )}
 
       {!!trainRows.length && (
         <Card title="Plan de formation — combler les quotas">
@@ -553,13 +705,13 @@ const CertifsTab: FC<{ certifs: Certif[]; partners: Partner[]; partnerName: Reco
     <Card title="Certifications des ingénieurs" actions={<div className="flex items-center gap-2"><ExportBtn name="certifications" cols={exportCols} rows={certifs} />{canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Ajouter</button>}</div>}>
       <Table
         columns={[
-          colText("Ingénieur", (r) => r.consultantName || r.consultantId),
-          colText("BU", (r) => r.consultantBu || "—"),
-          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId),
-          colText("Certification", (r) => r.certName || r.certificationCatalogId),
-          colText("Obtenue", (r) => frDate(r.obtainedDate)),
-          colText("Expire", (r) => r.expiryDate ? frDate(r.expiryDate) : "—"),
-          colText("Statut", (r) => <Badge tone={certStatusTone(r.status)}>{label(CERT_STATUS_LABEL, r.status)}</Badge>),
+          colText("Ingénieur", (r) => r.consultantName || r.consultantId, (r) => r.consultantName || r.consultantId),
+          colText("BU", (r) => r.consultantBu || "—", (r) => r.consultantBu || ""),
+          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId, (r) => partnerName[r.partnerId] || r.partnerId),
+          colText("Certification", (r) => r.certName || r.certificationCatalogId, (r) => r.certName || r.certificationCatalogId),
+          colText("Obtenue", (r) => frDate(r.obtainedDate), (r) => r.obtainedDate || ""),
+          colText("Expire", (r) => r.expiryDate ? frDate(r.expiryDate) : "—", (r) => r.expiryDate || ""),
+          colText("Statut", (r) => <Badge tone={certStatusTone(r.status)}>{label(CERT_STATUS_LABEL, r.status)}</Badge>, (r) => r.status),
           // Actions par ligne (écriture seulement) : réviser la date d'obtention ou retirer la certif.
           ...(canWrite ? [colText("", (r) => (
             <span className="inline-flex items-center gap-2">
@@ -640,10 +792,10 @@ const AssignsTab: FC<{ assigns: Assign[]; partners: Partner[]; partnerName: Reco
       <Tip>Affecter à un ingénieur l'obtention d'une certification à une échéance ; les relances (J-30/14/7) et les retards apparaissent au Tableau de bord.</Tip>
       <Table
         columns={[
-          colText("Ingénieur", (r) => r.consultantName || r.consultantId),
-          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId),
-          colText("Certif visée", (r) => r.cert || r.certificationCatalogId),
-          colText("Échéance", (r) => frDate(r.targetDate)),
+          colText("Ingénieur", (r) => r.consultantName || r.consultantId, (r) => r.consultantName || r.consultantId),
+          colText("Constructeur", (r) => partnerName[r.partnerId] || r.partnerId, (r) => partnerName[r.partnerId] || r.partnerId),
+          colText("Certif visée", (r) => r.cert || r.certificationCatalogId, (r) => r.cert || r.certificationCatalogId),
+          colText("Échéance", (r) => frDate(r.targetDate), (r) => r.targetDate || ""),
           // Écriture : le statut se pilote via le sélecteur (cycle de vie) ; lecture seule : badge.
           canWrite
             ? colText("Statut", (r) => <AssignStatusCell a={r} />, (r) => r.status)
@@ -717,7 +869,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   const runCertImport = async () => {
     if (impBusy) return; setImpBusy(true);
     try {
-      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number }>("importParCertifications", { dryRun: true });
+      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number }>("importParCertifications", { dryRun: true }, 300_000);
       const n = prev?.wouldCreateCount || 0;
       if (n > 0) {
         const names = (prev.wouldCreateConsultants || []).slice(0, 20).join(", ");
@@ -727,10 +879,40 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
         );
         if (!ok) { toast("Import annulé", "info"); return; }
       }
-      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; catalogAdded?: number; skipped?: number }>("importParCertifications", {});
+      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; catalogAdded?: number; skipped?: number }>("importParCertifications", {}, 300_000);
       toast(`${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s) · ${r?.catalogAdded || 0} entrée(s) catalogue${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`, "ok");
     } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
     finally { setImpBusy(false); }
+  };
+  // Import par FICHIER utilisateur (.xlsx/.csv, PAR-L2) : colonnes Ingénieur / Constructeur /
+  // Certification (+ Statut, Date d'obtention, Échéance). MÊME protocole en deux temps que l'import de
+  // référence : dry-run → confirmation (créations de consultants annoncées) → écriture. Le serveur ne crée
+  // NI partenaire NI entrée de catalogue — les lignes non résolues sont écartées et rapportées.
+  const [fileBusy, setFileBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const runFileImport = async (file: File) => {
+    if (fileBusy) return; setFileBusy(true);
+    try {
+      const fileB64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => { const sv = String(r.result || ""); resolve(sv.slice(sv.indexOf(",") + 1)); };
+        r.onerror = () => reject(r.error || new Error("lecture du fichier impossible"));
+        r.readAsDataURL(file);
+      });
+      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number; skipped?: number; skippedDetail?: { reason: string; detail: string }[] }>("importParCertificationsFile", { fileB64, filename: file.name, dryRun: true }, 300_000);
+      const ok = await askImport(
+        <div className="space-y-1 text-[13px]">
+          <div><b>{prev?.certsPlanned || 0}</b> certification(s) et <b>{prev?.assignsPlanned || 0}</b> assignation(s) seront écrites{prev?.skipped ? <> · <b>{prev.skipped}</b> ligne(s) écartée(s)</> : null}.</div>
+          {!!(prev?.wouldCreateCount) && <div>Créera <b>{prev.wouldCreateCount}</b> consultant(s) absent(s) de l'annuaire ESN, en statut <b>actif</b> (comptés dans TACE/occupation) : <span className="text-muted">{(prev.wouldCreateConsultants || []).slice(0, 12).join(", ")}{(prev.wouldCreateCount || 0) > 12 ? " …" : ""}</span></div>}
+          {!!(prev?.skippedDetail || []).length && <div className="text-faint">Écartées (ex.) : {(prev!.skippedDetail!).slice(0, 3).map((x) => `${x.reason} — ${x.detail}`).join(" ; ")}</div>}
+        </div>,
+        { title: `Importer « ${file.name} »`, confirmLabel: "Importer", tone: "gold" },
+      );
+      if (!ok) { toast("Import annulé", "info"); return; }
+      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; skipped?: number }>("importParCertificationsFile", { fileB64, filename: file.name }, 300_000);
+      toast(`${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s)${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`, "ok");
+    } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
+    finally { setFileBusy(false); if (fileRef.current) fileRef.current.value = ""; }
   };
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
@@ -795,7 +977,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
   const suggest = async () => {
     if (suggBusy) return; setSuggBusy(true);
     try {
-      const r = await callFn<{ suggestions: { supplier: string; allocations: { partnerId: string; weight: number }[] }[] }>("suggestParPartnerMap", {});
+      const r = await callFn<{ suggestions: { supplier: string; allocations: { partnerId: string; weight: number }[] }[] }>("suggestParPartnerMap", {}, 300_000);
       const sugg = r.suggestions || [];
       if (!sugg.length) { toast("Aucun rattachement proposé — vérifiez à la main", "info"); return; }
       const byUpper = new Map(sugg.map((s) => [s.supplier.trim().toUpperCase(), s]));
@@ -894,7 +1076,7 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
               // on force donc un recompute synchrone scopé (comme « Recalculer »). Best-effort : réservé
               // direction ; si l'appelant n'y a pas droit, l'amorçage reste bon, le tableau se remplira au
               // prochain recompute nocturne/manuel.
-              try { await callFn("recompute", { only: ["partenariats"] }); } catch { /* droit direction requis — non bloquant */ }
+              try { await callFn("recompute", { only: ["partenariats"] }, 300_000); } catch { /* droit direction requis — non bloquant */ }
             }} />
         )}
         {/* Amorçage des CERTIFICATIONS par ingénieur (2ᵉ fichier direction). Le callable résout les noms contre
@@ -902,6 +1084,13 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
             + assignations, et renvoie un rapport. Réservé au référentiel PEUPLÉ (les partenaires doivent exister). */}
         {canWrite && !!partners.length && (
           <button className="btn-ghost text-[12px]" disabled={impBusy} onClick={runCertImport}>{impBusy ? "Import…" : "Importer les certifications de référence"}</button>
+        )}
+        {/* Import par FICHIER utilisateur (PAR-L2) : classeur arbitraire du steward — dry-run puis confirmation. */}
+        {canWrite && !!partners.length && (
+          <>
+            <input ref={fileRef} type="file" accept=".xlsx,.csv" className="hidden" aria-label="Fichier de certifications à importer" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runFileImport(f); }} />
+            <button className="btn-ghost text-[12px]" disabled={fileBusy} onClick={() => fileRef.current?.click()} title="Classeur .xlsx/.csv — colonnes : Ingénieur, Constructeur, Certification (+ Statut, Date d'obtention, Échéance)">{fileBusy ? "Import…" : "Importer un fichier de certifs…"}</button>
+          </>
         )}
         {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
       </div>}>

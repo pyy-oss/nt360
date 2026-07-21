@@ -94,3 +94,19 @@ describe("reingestBucket — orchestration (bucket simulé)", () => {
     expect(db.sets.some((s) => s.ref.path === "orders/FP_2026_9")).toBe(true);
   });
 });
+
+// Refus actionnable (diagnostic import « Commandes ») : un classeur non reconnu remonte les onglets +
+// en-têtes VUS dans le rapport par fichier — l'appelant compose un message qui nomme le contenu réel.
+describe("parseBuffer — diagnostic d'un classeur non reconnu", () => {
+  it("joint sheets[{sheet, headers}] au rapport quand aucune source n'est détectée", async () => {
+    const { aoaToXlsxBase64 } = require("../lib/xlsxRead");
+    const { parseBuffer } = require("../lib/reingest");
+    // Export d'écran typique (colonnes d'affichage) — PAS une source P&L (« Opp ID »/« CAS »/« RAF Total »).
+    const b64 = await aoaToXlsxBase64([["FP", "Client", "CAS (FCFA)", "Facturé", "RAF"], ["FP/2026/1", "ACME", 100, 40, 60]], "Commandes");
+    const parsed = await parseBuffer(Buffer.from(b64, "base64"), "Commandes.xlsx");
+    expect(parsed.kinds).toEqual([]);
+    expect(parsed.files[0].error).toBe("aucune source reconnue");
+    expect(parsed.files[0].sheets[0].sheet).toBe("Commandes");
+    expect(parsed.files[0].sheets[0].headers).toEqual(["FP", "Client", "CAS (FCFA)", "Facturé", "RAF"]);
+  });
+});

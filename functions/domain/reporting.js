@@ -81,6 +81,38 @@ function factureLines(invoices, ordersByFp) {
   });
 }
 
+// Tendance de MARGE MENSUELLE (perspective Facturé) : marge reconnue par MOIS de facture, au taux de la
+// commande rattachée, avec le MÊME plafond CAS que factureLines — appliqué CHRONOLOGIQUEMENT par affaire
+// (la marge se reconnaît sur les premières factures jusqu'au CAS ; la surfacturation n'en produit plus).
+// Somme télescopique : Σ des mois d'une affaire = rate × min(Σ facturé, CAS) = mb de factureLines (parité
+// testée). Facture sans date → bucket "?" (même convention que facturation.monthly).
+function margeMonthly(invoices, ordersByFp) {
+  const byFp = {};
+  for (const i of invoices || []) {
+    const k = fpKey(i.fp) || i.fp || "—";
+    (byFp[k] = byFp[k] || []).push(i);
+  }
+  const monthly = {};
+  for (const k of Object.keys(byFp)) {
+    const o = ordersByFp[k] || {};
+    const rate = marginRate(o);
+    const cap = o.cas || 0;
+    // Sans date → APRÈS les datées (clé "9999…") : une facture non datée ne consomme pas le plafond
+    // avant les factures datées, sinon elle déplaçait de la marge des mois réels vers le bucket "?".
+    const dk = (i) => (i.date ? String(i.date) : "9999-99-99");
+    const list = byFp[k].slice().sort((a, b) => dk(a).localeCompare(dk(b)));
+    let cum = 0;
+    for (const i of list) {
+      const before = cap > 0 ? Math.min(cum, cap) : cum;
+      cum += i.amountHt || 0;
+      const after = cap > 0 ? Math.min(cum, cap) : cum;
+      const m = i.date ? String(i.date).slice(0, 7) : "?";
+      monthly[m] = (monthly[m] || 0) + rate * (after - before);
+    }
+  }
+  return monthly;
+}
+
 /**
  * Rentabilité (P&L) : deux perspectives (§ module 7).
  *  • Commande : assiette = CAS (prise de commande, cohorte yearPo), marge = marge P&L.
@@ -112,6 +144,13 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
   // Marque aussi les lignes de la perspective Commande (celle que lit le front via `perspectives.commande`).
   // La perspective Facturé (factureLines, sans costTotal) laisse `costMissing` absent → jamais faux positif.
   commande.bottomAffaires = commande.bottomAffaires.map((o) => ({ ...o, costMissing: isCostMissing(o.fp), mbEstimated: isMbEstimated(o.fp) }));
+  // Marge par PM (perspective Commande) : le pilotage PM/PMO n'avait aucune vue marge par responsable de
+  // livraison (audit rentabilité). Repli "—" = commandes sans PM affecté (elles restent comptées).
+  const casByPm = groupSum(orders, (o) => o.pm || "—", (o) => o.cas || 0);
+  const mbByPm = groupSum(orders, (o) => o.pm || "—", (o) => o.mb || 0);
+  const byPm = Object.keys({ ...casByPm, ...mbByPm })
+    .map((pm) => ({ pm, cas: casByPm[pm] || 0, mb: mbByPm[pm] || 0, pmb: casByPm[pm] > 0 ? (mbByPm[pm] || 0) / casByPm[pm] : 0 }))
+    .sort((a, b) => b.cas - a.cas);
   return {
     // Rétro-compat : perspective Commande à plat, assiette nommée `cas`.
     mb: commande.mb, cas: commande.base, pmb: commande.pmb,
@@ -121,6 +160,8 @@ function rentabilite(orders, invoices = [], allOrders = orders) {
     byAm: commande.byAm.map((a) => ({ am: a.am, cas: a.base, mb: a.mb, pmb: a.pmb })),
     bottomAffaires: commande.bottomAffaires.map((o) => ({ fp: o.fp, client: o.client, am: o.am, cas: o.base, mb: o.mb, pmb: o.pmb, costMissing: isCostMissing(o.fp), mbEstimated: isMbEstimated(o.fp) })),
     topClients: commande.topClients,
+    byPm, // marge par PM (perspective Commande)
+    monthly: margeMonthly(invoices, ordersByFp), // marge mensuelle reconnue au facturé (Σ = perspectives.facture.mb)
     // Perspectives génériques (assiette = `base`) pour le sélecteur Commande / Facturé.
     perspectives: { commande, facture },
   };
@@ -169,4 +210,4 @@ function byEntity(orders, invoices, keyFn, opps, tiers) {
   return [...all.slice(0, CAP), other];
 }
 
-module.exports = { facturation, rentabilite, byEntity, topN };
+module.exports = { facturation, rentabilite, byEntity, topN, marginRate };

@@ -34,3 +34,21 @@ describe("parNews — bulletins d'Actualité partenariats (ADR-P09)", () => {
     expect(parNews().bulletins).toEqual([]); // aucun argument
   });
 });
+
+// Bulletins de renouvellement du PARTENARIAT (PAR-P4) — additifs, absents quand rien à signaler.
+describe("parNews — renouvellement du partenariat", () => {
+  it("échu = high, à venir = medium, noms cités ; rien sans items", () => {
+    const r = parNews({ renouvellementsPartenariat: { items: [
+      { partnerId: "f5", name: "F5", bucket: "expired" },
+      { partnerId: "cisco", name: "Cisco", bucket: "j30" },
+      { partnerId: "dell", name: "Dell", bucket: "j90" },
+    ] } });
+    const byId = Object.fromEntries(r.bulletins.map((b) => [b.id, b]));
+    expect(byId.par_partenariats_echus.severity).toBe("high");
+    expect(byId.par_partenariats_echus.detail).toContain("F5");
+    expect(byId.par_partenariats_a_renouveler.severity).toBe("medium");
+    expect(byId.par_partenariats_a_renouveler.title).toContain("2");
+    expect(byId.par_partenariats_a_renouveler.detail).toContain("Cisco");
+    expect(parNews({}).bulletins).toEqual([]); // sans items : aucun bulletin (rétro-compat)
+  });
+});

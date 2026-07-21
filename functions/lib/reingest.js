@@ -34,7 +34,9 @@ async function parseBuffer(buf, filename) {
     // Garde-fou : un classeur à des milliers d'onglets ferait autant de parses → timeout/OOM.
     if ((wb.SheetNames && wb.SheetNames.length || 0) > MAX_SHEETS) { files.push({ file: name, error: `trop d'onglets (> ${MAX_SHEETS})` }); return; }
     const r = buildWrites(wb);
-    if (!r.kinds.length) { files.push({ file: name, error: "aucune source reconnue" }); return; }
+    // Fichier non reconnu : joindre le DIAGNOSTIC (onglets + en-têtes vus) au rapport — l'appelant
+    // (importDelta) compose un message de refus actionnable au lieu d'un « aucune source reconnue » opaque.
+    if (!r.kinds.length) { const { describeSheets } = require("./ingest"); files.push({ file: name, error: "aucune source reconnue", sheets: describeSheets(wb) }); return; }
     r.kinds.forEach((k) => kindsSet.add(k));
     writes.push(...r.writes);
     rowsIn += r.report.rowsIn || 0; rowsOk += r.report.rowsOk || 0; rowsSkipped += r.report.rowsSkipped || 0;

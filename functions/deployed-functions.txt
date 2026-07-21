@@ -157,6 +157,7 @@ generateParActionPlan
 generateParQbr
 suggestParPartnerMap
 importParCertifications
+importParCertificationsFile
 parRelancesSweep
 setEmailNotifyConfig
 sendTestEmail

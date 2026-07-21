@@ -15,8 +15,9 @@ function groupSum(items, keyFn, valFn) {
 /**
  * @param {object[]} orders commandes
  * @param {number} fy année fiscale courante (config/fiscal.currentFy)
+ * @param {object} [opts] { dormantYears } — seuil du dormant (config/alerts, défaut 2 comme thresholds)
  */
-function backlogFy(orders, fy) {
+function backlogFy(orders, fy, opts = {}) {
   const open = orders.filter((o) => (o.raf || 0) > 0);
   const raf = (o) => Math.max(o.raf || 0, 0);
   // Défauts obligatoires : Firestore refuse toute valeur `undefined` dans un document écrit.
@@ -37,8 +38,16 @@ function backlogFy(orders, fy) {
     .slice(0, 25)
     .map((o) => ({
       fp: o.fp || "", client: o.client || "", affaire: o.affaire || "", bu: o.bu || "AUTRE", source: o.source || null,
-      yearPo: o.yearPo || 0, cas: o.cas || 0, facture: o.facture || 0, raf: raf(o),
+      yearPo: plausibleYear(o.yearPo) || 0, cas: o.cas || 0, facture: o.facture || 0, raf: raf(o), // millésime BORNÉ persisté (un consommateur futur ne regroupe jamais sur un brut aberrant)
     }));
+
+  // Commandes DORMANTES (MÊME prédicat que l'alerte backlog_dormant, domain/alerts.js) : millésime
+  // plausible ≤ fy − dormantYears. Liste bornée 25 + VRAI compte — l'alerte routait vers le cockpit
+  // Backlog qui n'offrait AUCUNE liste énumérable (audit backlog M7) ; la voici.
+  const dy = Number(opts.dormantYears) || 2;
+  const dormant = (fy || 0) > 0 ? open.filter((o) => { const py = plausibleYear(o.yearPo); return py > 0 && py <= fy - dy; }) : [];
+  const dormantTop = [...dormant].sort((a, b) => raf(b) - raf(a)).slice(0, 25)
+    .map((o) => ({ fp: o.fp || "", client: o.client || "", affaire: o.affaire || "", bu: o.bu || "AUTRE", yearPo: plausibleYear(o.yearPo) || 0, raf: raf(o) }));
 
   return {
     fy: fy || 0,
@@ -56,6 +65,9 @@ function backlogFy(orders, fy) {
     countExcel: excel.length,
     countDerive: derive.length,
     deriveTop,
+    dormantTop,
+    dormantCount: dormant.length,
+    dormantYears: dy,
   };
 }
 

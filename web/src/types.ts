@@ -80,6 +80,9 @@ export interface BacklogSummary {
   // Diagnostic de fiabilité : RAF curaté Excel vs RAF dérivé (CAS − facturé, surévalué).
   totalExcel?: number; totalDerive?: number; countExcel?: number; countDerive?: number;
   deriveTop?: { fp?: string; client?: string; affaire?: string; bu?: string; source?: string | null; yearPo?: number; cas?: number; facture?: number; raf?: number }[];
+  // Commandes DORMANTES (millésime ≤ fy − dormantYears) — cible énumérable de l'alerte backlog_dormant.
+  dormantTop?: { fp?: string; client?: string; affaire?: string; bu?: string; yearPo?: number; raf?: number }[];
+  dormantCount?: number; dormantYears?: number;
 }
 
 export interface FacturationSummary {
@@ -99,8 +102,10 @@ export interface RentabPerspective {
 export interface RentabiliteSummary {
   // Champs racine = perspective Commande (rétro-compat).
   period?: string; mb?: number; cas?: number; pmb?: number; costMissingCount?: number; mbEstimatedCount?: number;
-  byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
+  byBu?: { bu: string; cas: number; mb: number; pmb?: number }[]; topClients?: { key: string; value: number }[];
   byAm?: { am: string; cas: number; mb: number; pmb: number }[];
+  byPm?: { pm: string; cas: number; mb: number; pmb: number }[]; // marge par PM (perspective Commande)
+  monthly?: Record<string, number>; // marge mensuelle reconnue au facturé (Σ = perspectives.facture.mb)
   bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number; costMissing?: boolean; mbEstimated?: boolean }[];
   // Deux perspectives : Commande (CAS) et Facturé (CAF).
   perspectives?: { commande: RentabPerspective; facture: RentabPerspective };
@@ -249,7 +254,7 @@ export type Order = { id?: string; fp?: string; client?: string; bu?: string; am
 export interface CommandesSummary { count?: number; chunks?: number; rows?: Order[] }
 export interface CommandeChunk { i?: number; rows?: Order[] }
 export type Invoice = { id?: string; numero?: string; fp?: string; client?: string; bu?: string; date?: string; dueDate?: string | null; amountHt?: number; linked?: boolean; prePo?: boolean; paymentStatus?: string; paid?: boolean; lines?: number; dc?: string | null };
-export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; leadSource?: string | null; competitor?: string | null; stale?: boolean; ageDays?: number | null; dateCreation?: string | null; dc?: string | null };
+export type Opportunity = { id?: string; oppId?: string; fp?: string; client?: string; designation?: string; am?: string; bu?: string; amount?: number; stage?: number; stageLabel?: string; probability?: number; weighted?: number; closingDate?: string; source?: string; mbPrev?: number | null; dr?: boolean; nextStep?: string | null; nextStepDate?: string | null; lostReason?: string | null; leadSource?: string | null; competitor?: string | null; parPartnerId?: string | null; stale?: boolean; ageDays?: number | null; dateCreation?: string | null; dc?: string | null };
 export type BcLine = { id?: string; fp?: string; supplier?: string; expenseType?: string; amountXof?: number; status?: string; bcNumber?: string; customer?: string; country?: string; description?: string; currency?: string; amount?: number; fxRate?: number | null; fxSource?: string; dateIn?: string | null; etaContrat?: string | null; etaReel?: string | null; updateDate?: string | null; comment?: string; source?: string };
 export type ProjectSheet = { id?: string; fp?: string; client?: string; affaire?: string; costTotal?: number; saleTotal?: number; margin?: number; marginPct?: number };
 export type Objective = {

@@ -76,6 +76,18 @@ function detectKind(wb) {
   return detectKinds(wb)[0] || null;
 }
 
+/** Diagnostic d'un classeur NON reconnu : onglets + premiers en-têtes VUS (bruts, bornés). Sert à rendre
+ *  le refus « aucune source reconnue » ACTIONNABLE — l'utilisateur voit ce que le fichier porte réellement
+ *  au lieu de rejouer le même import en boucle (constat terrain : « l'import Commandes refuse toujours »,
+ *  typiquement un EXPORT de l'écran Commandes rejoué en entrée, qui n'est pas la source P&L). */
+function describeSheets(wb, maxSheets = 4, maxHeaders = 6) {
+  return (wb.SheetNames || []).slice(0, maxSheets).map((n) => {
+    const aoa = sheetToJson(wb.Sheets[n], { header: 1, range: 0 });
+    const headers = Array.from(aoa[0] || [], (v) => String(v == null ? "" : v).trim()).filter(Boolean).slice(0, maxHeaders);
+    return { sheet: n, headers };
+  });
+}
+
 function pathFor(kind, id) {
   return { pnl: `orders/${id}`, facturationDf: `invoices/${id}`, salesData: `opportunities/${id}`, logistics: `bcLines/${id}` }[kind];
 }
@@ -136,4 +148,4 @@ function fiscalYearFromOrders(orders) {
   return orders.reduce((mx, o) => Math.max(mx, o.yearPo || 0), 0);
 }
 
-module.exports = { detectKind, detectKinds, buildWrites, pathFor, fiscalYearFromOrders, PARSERS };
+module.exports = { detectKind, detectKinds, describeSheets, buildWrites, pathFor, fiscalYearFromOrders, PARSERS };

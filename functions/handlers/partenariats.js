@@ -16,6 +16,14 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   // à jour immédiatement : on force donc un recompute synchrone (comme le bouton « Recalculer »). Repli
   // sur requestRecompute si l'injection manque (émulateur / tests).
   const recomputeParNow = async () => { if (recomputeNow) { await recomputeNow(["partenariats"]); } else { await requestRecompute(["partenariats"]); } };
+  // MÊME logique pour les mutations UNITAIRES (audit partenariats, axe fraîcheur) : `requestRecompute`
+  // étant inerte en prod, chaque écriture par_ doit rafraîchir les summaries EN SYNCHRONE — sinon le
+  // tableau de bord contredit l'action de l'utilisateur pendant 24 h. BEST-EFFORT : la mutation est DÉJÀ
+  // écrite, un échec du recompute ne doit pas la transformer en erreur. Tracé (logOps), jamais remonté.
+  const refreshParBestEffort = async (action) => {
+    try { await recomputeParNow(); }
+    catch (e) { if (logOps) await logOps({ kind: "recompute", action, status: "error", error: (e && e.message) || String(e) }); }
+  };
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -39,20 +47,34 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: false }); // remplace le référentiel (tableaux non fusionnés)
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_partner" : "create_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: { name: v.value.name, tiers: v.value.tiers.length, certifs: v.value.certificationCatalog.length }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nom du partenaire affiché)
+    await refreshParBestEffort("upsertParPartner"); // rafraîchit summaries/par_ca (nom du partenaire affiché)
     return { ok: true, id };
   });
 
   // Supprime un référentiel partenaire. Réservé écriture `partenariats` + drapeau. Idempotent.
+  // GARDE D'INTÉGRITÉ (PA3) : refuse la suppression d'un partenaire encore RATTACHÉ à des certifications
+  // ou assignations — sinon elles deviennent orphelines (partnerId non résoluble) dans quotas/relances/
+  // exports. Le front annonce ce refus (« rattachés à des certifs/assignations ») : le serveur le TIENT.
   const deleteParPartner = onCallG("deleteParPartner", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "partenariats");
     await assertParEnabled();
     const id = slug(req.data && req.data.id);
     if (!id) throw new HttpsError("invalid-argument", "id de partenaire invalide");
+    const [certSnap, assignSnap] = await Promise.all([
+      db.collection("par_certifications").where("partnerId", "==", id).limit(1).get(),
+      db.collection("par_assignments").where("partnerId", "==", id).limit(1).get(),
+    ]);
+    if (!certSnap.empty || !assignSnap.empty) throw new HttpsError("failed-precondition", "partenaire encore rattaché à des certifications/assignations — supprimez-les (ou réaffectez-les) d'abord");
     await db.doc(`par_partners/${id}`).delete().catch(() => {});
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
-    return { ok: true, id };
+    // Purge du mapping fournisseur → partenaire : sans elle, les allocations pointant l'id supprimé
+    // attribueraient du CA à un partenaire fantôme dans summaries/par_ca (orphelin silencieux).
+    const { purgePartnerFromMap } = require("../domain/parPartner");
+    const mapDoc = (await db.doc("config/parPartnerMap").get()).data() || {};
+    const { map: purgedMap, purged } = purgePartnerFromMap(mapDoc.map || {}, id);
+    if (purged) await db.doc("config/parPartnerMap").set({ map: purgedMap, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: { purgedMappings: purged }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("deleteParPartner");
+    return { ok: true, id, purgedMappings: purged };
   });
 
   // Crée/met à jour une certification d'un ingénieur. Idempotent : id = <consultantId>_<catalogId>
@@ -97,7 +119,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_certification" : "create_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) + alertes cycle de vie
+    await refreshParBestEffort("upsertParCertification"); // rafraîchit quotas (couverture) + alertes cycle de vie
     return { ok: true, id, status, expiryDate };
   });
 
@@ -109,7 +131,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!id) throw new HttpsError("invalid-argument", "id de certification invalide");
     await db.doc(`par_certifications/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) — sinon un partenaire reste conforme à tort après suppression
+    await refreshParBestEffort("deleteParCertification"); // rafraîchit quotas (couverture) — sinon un partenaire reste conforme à tort après suppression
     return { ok: true, id };
   });
 
@@ -155,7 +177,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     }
     await db.doc("config/parPartnerMap").set({ map, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length, skipped }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nouveau mapping)
+    await refreshParBestEffort("setParPartnerMap"); // rafraîchit summaries/par_ca (nouveau mapping)
     return { ok: true, entries: Object.keys(map).length, skipped };
   });
 
@@ -190,7 +212,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_assignment" : "create_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status: v.value.status, targetDate: v.value.targetDate }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_relances
+    await refreshParBestEffort("upsertParAssignment"); // rafraîchit summaries/par_relances
     return { ok: true, id };
   });
 
@@ -206,7 +228,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "assignation inconnue");
     await ref.set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_assignment_status", module: "partenariats", entity: "par_assignment", entityId: id, detail: { status }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
+    await refreshParBestEffort("setParAssignmentStatus");
     return { ok: true, id, status };
   });
 
@@ -218,7 +240,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!id) throw new HttpsError("invalid-argument", "id d'assignation invalide");
     await db.doc(`par_assignments/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
+    await refreshParBestEffort("deleteParAssignment");
     return { ok: true, id };
   });
 
@@ -493,7 +515,120 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, ...report, notes: plan.notes, skippedDetail: plan.skipped.slice(0, 40) };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, importParCertifications };
+  // Import des certifications par FICHIER (.xlsx/.csv) déposé par le steward (PAR-L2). Contrairement à
+  // l'amorçage direction (dataset transcrit dans le code), le classeur est ARBITRAIRE : le plan
+  // (domain/parCertFile, pur) résout chaque ligne contre le référentiel par_partners et l'annuaire ESN —
+  // l'import de fichier ne crée NI partenaire NI entrée de catalogue (référentiel piloté par la direction).
+  // DEUX temps (dryRun → confirmation), mêmes règles de propriété que l'import direction : source
+  // « par_cert_import » (ré-import rafraîchit), éditions MANUELLES préservées, création de consultants
+  // nommés manquants sous droit `pipeline` (plafond 300), discipline plausibleYear sur toute date.
+  const importParCertificationsFile = onCallG("importParCertificationsFile", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    if (rateLimit && !(await rateLimit(req.auth.uid, "parCertImport", 3, 300_000))) throw new HttpsError("resource-exhausted", "Import déjà lancé récemment — patientez quelques minutes.");
+    const b64 = req.data && req.data.fileB64;
+    if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+    if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)"); // même plafond qu'importDelta
+    const { readWorkbook, sheetToJson } = require("../lib/xlsxRead");
+    let aoa;
+    try { const wb = await readWorkbook(Buffer.from(b64, "base64")); aoa = sheetToJson(wb.Sheets[wb.SheetNames[0]], { header: 1 }); }
+    catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + ((e && e.message) || e)); }
+
+    const { planCertFileImport } = require("../domain/parCertFile");
+    const { validateConsultant } = require("../domain/consultant");
+    const { normName } = require("../domain/parCertSeed");
+    const { plausibleYear } = require("../lib/ids");
+    const today = new Date().toISOString().slice(0, 10);
+    const [consSnap, partSnap, certSnap, assignSnap] = await Promise.all([
+      db.collection("consultants").select("name").limit(5000).get(),
+      db.collection("par_partners").get(), // catalogue ENTIER requis (résolution code/libellé de certif)
+      db.collection("par_certifications").select("source").limit(5000).get(),
+      db.collection("par_assignments").select("source").limit(5000).get(),
+    ]);
+    const consultants = consSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "" }));
+    const partners = partSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    if (!partners.length) throw new HttpsError("failed-precondition", "aucun partenaire au référentiel — initialisez le référentiel d'abord");
+    const plan = planCertFileImport(aoa, { consultants, partners });
+    if (plan.error) throw new HttpsError("failed-precondition", plan.error);
+    if (!plan.certs.length && !plan.assigns.length) throw new HttpsError("failed-precondition", `aucune ligne exploitable — ${plan.skipped.length} écartée(s)${plan.skipped[0] ? ` (ex. ${plan.skipped[0].reason})` : ""}`);
+
+    // PRÉ-VISUALISATION (même contrat qu'importParCertifications) : QUI serait créé dans l'annuaire ESN
+    // partagé + volumes + lignes écartées — le front demande confirmation avant l'écriture réelle.
+    if (req.data && req.data.dryRun === true) {
+      return { ok: true, dryRun: true,
+        wouldCreateConsultants: plan.needConsultants.map((n) => n.name).slice(0, 300),
+        wouldCreateCount: plan.needConsultants.length,
+        certsPlanned: plan.certs.length, assignsPlanned: plan.assigns.length,
+        skipped: plan.skipped.length, skippedDetail: plan.skipped.slice(0, 40), parsedRows: plan.parsedRows };
+    }
+
+    // Propriété des docs existants : un doc édité À LA MAIN (source ≠ par_cert_import) n'est pas écrasé.
+    const certOwner = new Map(certSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const assignOwner = new Map(assignSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const isManual = (map, id) => map.has(id) && map.get(id) !== "par_cert_import";
+
+    // Consultants nommés manquants — garde RBAC anti-escalade + plafond défensif (comme l'import direction).
+    if (plan.needConsultants.length) {
+      await requireWrite(req, "pipeline");
+      if (plan.needConsultants.length > 300) throw new HttpsError("failed-precondition", `import anormal : ${plan.needConsultants.length} consultants à créer (> 300) — refusé`);
+    }
+    const idxByNorm = new Map();
+    for (const c of consultants) { const n = normName(c.name); if (n && !idxByNorm.has(n)) idxByNorm.set(n, c.id); }
+    const createdConsultants = [];
+    for (const nc of plan.needConsultants) {
+      const v = validateConsultant({ name: nc.name });
+      if (!v.ok) { plan.skipped.push({ reason: "consultant invalide", detail: nc.name }); continue; }
+      const ref = await db.collection("consultants").add({ ...v.value, source: "par_cert_import", createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      idxByNorm.set(nc.norm, ref.id);
+      createdConsultants.push({ id: ref.id, name: nc.name });
+    }
+    const nameById = new Map([...consultants.map((c) => [c.id, c.name]), ...createdConsultants.map((c) => [c.id, c.name])]);
+    const partnerDocs = new Map(partners.map((p) => [p.id, p]));
+    const catEntry = (pid, catalogId) => ((partnerDocs.get(pid) || {}).certificationCatalog || []).find((e) => e.id === catalogId) || null;
+
+    // Certifs détenues (statut/expiration DÉRIVÉS du catalogue — jamais pris du fichier).
+    let certsWritten = 0;
+    for (const c of plan.certs) {
+      const consultantId = idxByNorm.get(c.norm), entry = catEntry(c.partnerId, c.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "certif non écrite (consultant/catalogue non résolu)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      if (!plausibleYear(String(c.obtainedDate).slice(0, 4))) { plan.skipped.push({ reason: "date d'obtention implausible", detail: `${c.name} / ${c.obtainedDate}` }); continue; }
+      const expiryDate = computeExpiry(c.obtainedDate, entry.validityMonths);
+      const status = computeCertStatus(expiryDate, today);
+      const id = `${slug(consultantId) || consultantId}_${c.catalogId}`;
+      if (isManual(certOwner, id)) { plan.skipped.push({ reason: "certif préservée (édition manuelle non écrasée)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      const isNew = !certOwner.has(id);
+      await db.doc(`par_certifications/${id}`).set({
+        consultantId, partnerId: c.partnerId, certificationCatalogId: c.catalogId, obtainedDate: c.obtainedDate, expiryDate, status, inTraining: false,
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
+      }, { merge: true });
+      certsWritten++;
+    }
+
+    // Assignations à obtenir (date cible = échéance du fichier, plausibleYear).
+    let assignsWritten = 0;
+    for (const a of plan.assigns) {
+      const consultantId = idxByNorm.get(a.norm), entry = catEntry(a.partnerId, a.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "assignation non écrite (consultant/catalogue non résolu)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      if (!plausibleYear(String(a.targetDate).slice(0, 4))) { plan.skipped.push({ reason: "date cible implausible", detail: `${a.name} / ${a.targetDate}` }); continue; }
+      const id = `${slug(consultantId) || consultantId}_${a.catalogId}`;
+      if (isManual(assignOwner, id)) { plan.skipped.push({ reason: "assignation préservée (édition manuelle non écrasée)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      const isNew = !assignOwner.has(id);
+      await db.doc(`par_assignments/${id}`).set({
+        consultantId, partnerId: a.partnerId, certificationCatalogId: a.catalogId, targetDate: a.targetDate, status: "planifie", reminderOffsets: [],
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), cert: entry.code || entry.name || a.catalogId, competencyId: entry.competencyId,
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
+      }, { merge: true });
+      assignsWritten++;
+    }
+
+    const report = { createdConsultants: createdConsultants.length, certsWritten, assignsWritten, skipped: plan.skipped.length };
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_par_certifications_file", module: "partenariats", entity: "par_certification", entityId: "batch", detail: { ...report, filename: String(req.data && req.data.filename || "").slice(0, 120) }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("importParCertificationsFile"); // quotas/relances à jour dès le retour
+    return { ok: true, ...report, skippedDetail: plan.skipped.slice(0, 40) };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, suggestParPartnerMap, importParCertifications, importParCertificationsFile };
 }
 
 module.exports = { createPartenariats };

@@ -1,9 +1,9 @@
 // Modules pilotage : Suivi Backlog, Prévision (atterrissage CAS/CAF), liste Commandes.
 import { useState, useMemo, useEffect, type FC, type ReactNode } from "react";
-import { useDocData, useCollectionData } from "../lib/hooks";
+import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
 import { T, fmt, fmtFull, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, TruncationNote, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast, type BulkAction } from "../design/components";
 import { Bars, DonutBU, GroupedBars, MultiLine } from "../design/charts";
 import { DateField, Select } from "../design/inputs";
 import { Combo } from "../design/combo";
@@ -15,7 +15,7 @@ import { fpKey, plausibleYear } from "../lib/ids";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, peekOrderAmount, type BillingMilestone, type AmountPeek } from "../lib/writes";
-import { defaultMilestones } from "../lib/milestones";
+import { defaultMilestones, reportedFromMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
 // Champs de formulaire HISSÉS au scope module : définis dans le corps d'un composant, ils étaient
@@ -32,9 +32,10 @@ const Sel = ({ v, set, opts, ph }: { v: string; set: (s: string) => void; opts: 
 export const Backlog: FC<Props> = () => {
   const { data, loading, error } = useDocData<BacklogSummary>("summaries/backlog_fy");
   const canImport = useCanImport(); // avant tout retour anticipé (règle des hooks)
+  const { active: filterActive } = useFilters(); // bandeau d'honnêteté : ces KPI sont GLOBAUX (audit backlog H2)
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
-  if (!data) return <EmptyState />;
+  if (!data) return <EmptyState label="Aucun backlog calculé — importez le P&L (Admin → Import) ou lancez « Recalculer »." />;
   const total = data.total || 0;
   const derive = data.totalDerive || 0;
   const excel = data.totalExcel ?? (total - derive);
@@ -42,7 +43,10 @@ export const Backlog: FC<Props> = () => {
   const deriveRows = data.deriveTop || [];
   return (
     <div className="flex flex-col gap-4">
-      <div className={grid4}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(total)} tone="steel" sub={`${data.count} commandes`} /></div>
+      {/* Même bandeau d'honnêteté que Facturation/Rentabilité (finance.tsx) : agrégat pré-calculé GLOBAL —
+          un PM filtré sur sa BU croyait lire SON backlog (audit backlog H2). */}
+      {filterActive && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client / PM) ne s'applique pas ici (agrégat pré-calculé). Le backlog filtré est lisible dans la Vue d'ensemble.</div>}
+      <div className={grid4}><Kpi label="Backlog (RAF glissant)" value={fmt(total)} tone="steel" sub={`${data.count} commandes ouvertes · tous millésimes — exercice ${data.fy || ""}`} /></div>
 
       {/* Diagnostic de fiabilité du RAF : curaté Excel (fiable) vs dérivé CAS − facturé (surévalué). */}
       {(data.totalDerive != null || data.totalExcel != null) && (
@@ -69,16 +73,17 @@ export const Backlog: FC<Props> = () => {
           <Table columns={[
             // Essentiels + action EN LIGNE ; BU / Source / Année (secondaires) repliés via det().
             colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp),
-            colText("Client", (t) => t.client),
-            colText("Affaire", (t) => t.affaire || "—"),
-            det(colText("BU", (t) => t.bu)),
-            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—")),
+            colText("Client", (t) => t.client, (t) => t.client || ""),
+            colText("Affaire", (t) => t.affaire || "—", (t) => t.affaire || ""),
+            det(colText("BU", (t) => t.bu, (t) => t.bu || "")),
+            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—", (t) => t.source || "")),
             det(colNum("Année", (t) => plausibleYear(t.yearPo) || "—")), // borné (jamais un millésime aberrant brut)
-            colNum("CAS", (t) => money(t.cas)),
-            colNum("Facturé", (t) => money(t.facture)),
-            colNum("RAF dérivé", (t) => money(t.raf)),
+            colNum("CAS", (t) => money(t.cas), (t) => t.cas || 0),
+            colNum("Facturé", (t) => money(t.facture), (t) => t.facture || 0),
+            colNum("RAF dérivé", (t) => money(t.raf), (t) => t.raf || 0),
             ...(canImport ? [colText("", (t) => <RafValidator row={t} />)] : []),
           ]} rows={deriveRows} colsKey="backlog-derive" />
+          {(data.countDerive ?? 0) > deriveRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {deriveRows.length} premières commandes (sur {data.countDerive}) — triées par RAF dérivé décroissant.</div>}
           <Tip>Ces lignes n'ont pas de RAF curaté dans l'Excel P&L : leur RAF est calculé <code>CAS − facturé</code> (potentiellement surévalué). {canImport
             ? <>Après vérification, cliquez « <b>intégrer</b> » pour <b>valider le RAF</b> (le figer comme curaté → la commande rejoint le backlog fiable et quitte ce lot), ou « <b>Solder</b> » (RAF = 0) si l'affaire est livrée/facturée.</>
             : <>Vérifiez si elles devraient déjà être soldées, ou s'il manque un rattachement N° FP à des factures.</>}</Tip>
@@ -86,8 +91,25 @@ export const Backlog: FC<Props> = () => {
       )}
 
       <Card title="Top commandes ouvertes">
-        <Table columns={[colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp), colText("Client", (t) => t.client), colText("Affaire", (t) => t.affaire || "—"), colText("BU", (t) => t.bu), colNum("RAF", (t) => money(t.raf))]} rows={data.top || []} />
+        <Table columns={[colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp), colText("Client", (t) => t.client, (t) => t.client || ""), colText("Affaire", (t) => t.affaire || "—", (t) => t.affaire || ""), colText("BU", (t) => t.bu, (t) => t.bu || ""), colNum("RAF", (t) => money(t.raf), (t) => t.raf || 0)]} rows={data.top || []} />
       </Card>
+
+      {/* Commandes DORMANTES — cible ÉNUMÉRABLE du drill-through de l'alerte « backlog dormant » (audit
+          backlog M7 : l'alerte routait ici sans liste). Même prédicat que l'alerte (serveur, backlog.js). */}
+      {!!(data.dormantTop || []).length && (
+        <Card title={`Commandes dormantes (millésime ≤ ${(data.fy || 0) - (data.dormantYears || 2)}) · ${data.dormantCount || data.dormantTop!.length}`}>
+          <Tip>Commandes <b>ouvertes</b> d'un millésime ancien : leur RAF est probablement caduc — à <b>solder</b>, <b>annuler</b> ou <b>réviser</b> (liste Commandes → actions de ligne).</Tip>
+          <Table columns={[
+            colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp || ""),
+            colText("Client", (t) => t.client || "—", (t) => t.client || ""),
+            colText("Affaire", (t) => t.affaire || "—", (t) => t.affaire || ""),
+            det(colText("BU", (t) => t.bu || "—", (t) => t.bu || "")),
+            colNum("Année", (t) => t.yearPo || "—", (t) => t.yearPo || 0),
+            colNum("RAF", (t) => money(t.raf || 0), (t) => t.raf || 0),
+          ]} rows={data.dormantTop!} colsKey="backlog-dormant" />
+          {(data.dormantCount ?? 0) > (data.dormantTop || []).length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {(data.dormantTop || []).length} premières commandes (sur {data.dormantCount}) — triées par RAF décroissant.</div>}
+        </Card>
+      )}
       <ClickupDelaysCard />
       <CarryoverCard />
       <Tip>Ancré sur l'année fiscale — inchangé quand on change la période.</Tip>
@@ -99,9 +121,12 @@ export const Backlog: FC<Props> = () => {
 // par statut + RAF échéancé par mois de date prév. de fin. N'apparaît qu'une fois la synchro inverse
 // ClickUp peuplée (bouton « Synchroniser depuis ClickUp » ou tirage quotidien).
 function ClickupDelaysCard() {
-  const { data } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
+  // `error` consommé (audit backlog M4) : une panne/refus rendait la carte simplement ABSENTE,
+  // indiscernable de « pas de données ClickUp ».
+  const { data, error } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
   const byPm = data?.byPm || [], byStatus = data?.byStatus || [], rafByMonth = data?.rafByMonth || [];
   const overdueRows = data?.overdue || [];
+  if (error) return <Card title="Délais & échéances ClickUp"><ErrorState error={error} /></Card>;
   if (!data || (!byPm.length && !byStatus.length && !rafByMonth.length)) return null;
   return (
     <Card title="Délais & échéances ClickUp">
@@ -115,11 +140,11 @@ function ClickupDelaysCard() {
         <div className="mt-3">
           <Eyebrow>Affaires en retard de livraison</Eyebrow>
           <Table columns={[
-            colText("FP", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => <FpLink fp={r.fp} />, (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.fp || ""),
-            colText("Client", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.client || "—"),
-            colText("Statut CU", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.status || "—"),
-            colText("Livraison contractuelle", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => frDate(r.dateContractuelle) || "—", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.dateContractuelle || ""),
-            colNum("RAF", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => money(r.raf)),
+            colText("FP", (r: OverdueRow) => <FpLink fp={r.fp} />, (r: OverdueRow) => r.fp || ""),
+            colText("Client", (r: OverdueRow) => r.client || "—"),
+            colText("Statut CU", (r: OverdueRow) => r.status || "—"),
+            colText("Livraison contractuelle", (r: OverdueRow) => frDate(r.dateContractuelle) || "—", (r: OverdueRow) => r.dateContractuelle || ""),
+            colNum("RAF", (r: OverdueRow) => money(r.raf)),
           ]} rows={overdueRows} />
           {(data.overdueTotal || 0) > overdueRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {overdueRows.length} premières affaires (sur {data.overdueTotal}) — triées par date contractuelle.</div>}
         </div>
@@ -129,10 +154,10 @@ function ClickupDelaysCard() {
           <div>
             <Eyebrow>Par Project Manager</Eyebrow>
             <Table columns={[
-              colText("PM", (r: ClickupPmDelay) => r.pm),
-              colNum("Actifs", (r: ClickupPmDelay) => r.active),
-              colNum("En retard", (r: ClickupPmDelay) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
-              colNum("Retard moy.", (r: ClickupPmDelay) => (r.overdue ? `${r.avgDaysLate} j` : "—")),
+              colText("PM", (r: ClickupPmDelay) => r.pm, (r: ClickupPmDelay) => r.pm || ""),
+              colNum("Actifs", (r: ClickupPmDelay) => r.active, (r: ClickupPmDelay) => r.active || 0),
+              colNum("En retard", (r: ClickupPmDelay) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0), (r: ClickupPmDelay) => r.overdue || 0),
+              colNum("Retard moy.", (r: ClickupPmDelay) => (r.overdue ? `${r.avgDaysLate} j` : "—"), (r: ClickupPmDelay) => r.avgDaysLate || 0),
             ]} rows={byPm} />
           </div>
         )}
@@ -140,9 +165,9 @@ function ClickupDelaysCard() {
           <div>
             <Eyebrow>RAF à facturer par mois (prév. ClickUp)</Eyebrow>
             <Table columns={[
-              colText("Mois", (r: ClickupMonthRaf) => r.month),
-              colNum("Projets", (r: ClickupMonthRaf) => r.count),
-              colNum("RAF", (r: ClickupMonthRaf) => money(r.raf)),
+              colText("Mois", (r: ClickupMonthRaf) => r.month, (r: ClickupMonthRaf) => r.month || ""),
+              colNum("Projets", (r: ClickupMonthRaf) => r.count, (r: ClickupMonthRaf) => r.count || 0),
+              colNum("RAF", (r: ClickupMonthRaf) => money(r.raf), (r: ClickupMonthRaf) => r.raf || 0),
             ]} rows={rafByMonth} />
           </div>
         )}
@@ -151,18 +176,19 @@ function ClickupDelaysCard() {
         <div className="mt-3">
           <Eyebrow>Par statut projet</Eyebrow>
           <Table columns={[
-            colText("Statut", (r: ClickupStatusDist) => r.status),
-            colNum("Projets", (r: ClickupStatusDist) => r.count),
-            colNum("En retard", (r: ClickupStatusDist) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
+            colText("Statut", (r: ClickupStatusDist) => r.status, (r: ClickupStatusDist) => r.status || ""),
+            colNum("Projets", (r: ClickupStatusDist) => r.count, (r: ClickupStatusDist) => r.count || 0),
+            colNum("En retard", (r: ClickupStatusDist) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0), (r: ClickupStatusDist) => r.overdue || 0),
           ]} rows={byStatus} />
         </div>
       )}
-      <Tip>Alimenté par la synchro inverse ClickUp (statut + dates). Le <b>RAF échéancé</b> indique quand le backlog des projets actifs devrait se facturer, selon la <b>date prév. de fin</b> ClickUp.</Tip>
+      <Tip>Alimenté par la synchro inverse ClickUp (statut + dates). Le <b>RAF échéancé</b> indique quand le backlog des projets actifs devrait se facturer, selon la <b>date prév. de fin</b> ClickUp — il <b>ignore les jalons saisis</b> (la Prévision, elle, suit les jalons) : pour un FP à échéancier, les deux ventilations mensuelles peuvent différer.</Tip>
     </Card>
   );
 }
 
 type OpenOrder = Order & { projetable: number };
+type OverdueRow = NonNullable<ClickupDelaysSummary["overdue"]>[number];
 
 // Report de CA sur N+1 & JALONS de facturation par projet (direction / PMO). Deux niveaux :
 //  • report simple : montant du RAF facturé en N+1 (fallback quand pas de jalons) ;
@@ -174,39 +200,51 @@ function CarryoverCard() {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const fy = cfg?.currentFy;
   const cutoff = fy ? `${fy}-12-31` : "9999-12-31";
-  const { rows: orders } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
-  const { rows: mstones } = useCollectionData<BillingMilestonesDoc>(canEdit ? "billingMilestones" : null);
+  const { rows: orders, loading: ordersLoading, error: ordersError, truncated: ordersTrunc } = useCommandesRows(canEdit); // toutes les commandes (chargées seulement si éditeur)
+  const { rows: mstones, loading: msLoading, error: msError, truncated: msTrunc } = useCollectionData<BillingMilestonesDoc>(canEdit ? "billingMilestones" : null);
   const [editFp, setEditFp] = useState<string | null>(null);
   const [seg, setSeg] = useState<"all" | "ms" | "drift" | "none">("all");
-  if (!canEdit) return null;
-  // Rattachement jalon → commande par FP CANONIQUE (fpKey), comme le back (aggregate.js/atterrissage.js) —
-  // et non `toUpperCase()` : un jalon au FP formaté autrement (zéros de tête) était rapproché serveur mais
-  // pas ici → `totalReporte` front aurait divergé de `reporteCaf` back (CLAUDE.md : rapprocher via fpKey).
-  const msBy = new Map<string, BillingMilestone[]>();
-  for (const m of mstones) { const k = fpKey(m.fp); if (k) msBy.set(k, (m.milestones || []) as BillingMilestone[]); }
-  const rateOf = (o: Order) => ((o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : (o.marginPct || 0));
-  // Report N+1 : SOURCE UNIQUE = les jalons (Σ après le 31/12, borné au RAF). Nul sans jalon post-31/12.
-  const repOf = (o: OpenOrder) => {
-    const ms = msBy.get(fpKey(o.fp) || "");
-    if (!ms) return 0;
+  // Dérivations MÉMOÏSÉES (audit backlog, front H2) : map des jalons + tri de TOUT le carnet + totaux
+  // étaient recalculés à CHAQUE rendu (tick onSnapshot, toggle de segment), avec repOf (filter+reduce sur
+  // les jalons) rappelé plusieurs fois PAR LIGNE (totaux + rendu + accesseur de tri). Une seule passe,
+  // report N+1 précalculé par FP, rejouée seulement quand les données changent.
+  const calc = useMemo(() => {
+    // Rattachement jalon → commande par FP CANONIQUE (fpKey), comme le back (aggregate.js/atterrissage.js) —
+    // et non `toUpperCase()` : un jalon au FP formaté autrement (zéros de tête) était rapproché serveur mais
+    // pas ici → `totalReporte` front aurait divergé de `reporteCaf` back (CLAUDE.md : rapprocher via fpKey).
+    const msBy = new Map<string, BillingMilestone[]>();
+    for (const m of mstones) { const k = fpKey(m.fp); if (k) msBy.set(k, (m.milestones || []) as BillingMilestone[]); }
+    const rateOf = (o: Order) => ((o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : (o.marginPct || 0));
+    // Report N+1 : SOURCE UNIQUE = les jalons (Σ après le 31/12, borné au RAF). Nul sans jalon post-31/12.
     // Bornage MIROIR de milestones.js normalizeMilestones : date au format AAAA-MM-JJ ET millésime
     // plausible — sinon un jalon à date aberrante (« 20226-… », > cutoff en comparaison de chaînes) serait
     // compté ici mais pas côté serveur → `totalReporte` (front) divergerait de `reporteCaf` (back).
-    return Math.min(ms.filter((x) => {
-      const d = String(x.date || "").slice(0, 10);
-      return /^\d{4}-\d{2}-\d{2}$/.test(d) && plausibleYear(d.slice(0, 4)) > 0 && d > cutoff;
-    }).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
-  };
+    const repOfImpl = (o: OpenOrder) => reportedFromMilestones(msBy.get(fpKey(o.fp) || ""), cutoff, o.projetable);
+    const open: OpenOrder[] = orders
+      .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
+      .filter((o) => o.projetable > 0)
+      .sort((a, b) => b.projetable - a.projetable);
+    const repBy = new Map<string, number>();
+    for (const o of open) repBy.set(o.fp || "", repOfImpl(o));
+    const withMs = open.filter((o) => msBy.get(fpKey(o.fp) || "")?.length);
+    const driftSet = new Set(open.filter((o) => {
+      const ms = msBy.get(fpKey(o.fp) || "");
+      return !!ms?.length && Math.round(ms.reduce((sm, x) => sm + (x.amount || 0), 0)) !== Math.round(o.projetable);
+    }).map((o) => o.fp || ""));
+    const totalRaf = open.reduce((sm, o) => sm + o.projetable, 0);
+    const totalReporte = open.reduce((sm, o) => sm + (repBy.get(o.fp || "") || 0), 0);
+    const totalMarge = open.reduce((sm, o) => sm + rateOf(o) * (repBy.get(o.fp || "") || 0), 0);
+    return { msBy, open, repBy, withMs, driftSet, totalRaf, totalReporte, totalMarge, rateOf };
+  }, [orders, mstones, cutoff]);
+  if (!canEdit) return null;
+  // Erreur ≠ vide (audit backlog M4) : une panne/refus ne doit pas ressembler à « 0 projet ouvert ».
+  if (ordersError || msError) return <Card title="Jalons de facturation (par projet)"><ErrorState error={(ordersError || msError)!} /></Card>;
+  // Anti-flash (audit backlog M4) : pas de « Projets ouverts 0 » pendant le chargement des chunks.
+  if ((ordersLoading || msLoading) && !orders.length) return <CardSkeleton />;
+  const { msBy, open, repBy, withMs, driftSet, totalRaf, totalReporte, totalMarge, rateOf } = calc;
+  const repOf = (o: OpenOrder) => repBy.get(o.fp || "") || 0;
   const msOf = (o: OpenOrder) => msBy.get(fpKey(o.fp) || "");
-  const driftOf = (o: OpenOrder) => { const ms = msOf(o); return !!ms?.length && Math.round(ms.reduce((s, x) => s + (x.amount || 0), 0)) !== Math.round(o.projetable); };
-  const open: OpenOrder[] = orders
-    .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
-    .filter((o) => o.projetable > 0)
-    .sort((a, b) => b.projetable - a.projetable);
-  const totalRaf = open.reduce((s, o) => s + o.projetable, 0);
-  const totalReporte = open.reduce((s, o) => s + repOf(o), 0);
-  const totalMarge = open.reduce((s, o) => s + rateOf(o) * repOf(o), 0);
-  const withMs = open.filter((o) => msOf(o)?.length);
+  const driftOf = (o: OpenOrder) => driftSet.has(o.fp || "");
   const drifting = open.filter(driftOf);
   // Filtre segmenté : concentrer sur ce qui demande une action (à réconcilier) plutôt que défiler 569 lignes.
   const SEGS = [
@@ -221,6 +259,7 @@ function CarryoverCard() {
   const num = (v: number, tone = "text-steel") => v > 0 ? <span className={cx("tabnum", tone)}>{fmt(v)}</span> : <span className="tabnum text-faint">·</span>;
   return (
     <Card title="Jalons de facturation (par projet)">
+      <TruncationNote show={ordersTrunc || msTrunc} cap={DEFAULT_SUB_CAP} />
       {/* Synthèse : contexte avant les lignes. Total reporté N+1 (et marge) mis en avant s'il existe. */}
       <div className={grid4}>
         <Kpi label="Projets ouverts" value={open.length.toLocaleString("fr-FR")} sub={`${fmt(totalRaf)} RAF projetable`} />
@@ -290,13 +329,19 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
         <button className="btn-ghost !px-2 !py-1 text-xs" onClick={onClose}>Fermer</button>
       </div>
       <div className="flex flex-col gap-2">
-        {rows.map((r, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
-            <DateField className="!py-1 text-xs w-36" value={r.date} onChange={(v) => set(i, { date: v })} ariaLabel="Date du jalon" placeholder="date jalon" />
-            <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label="Montant du jalon" />
-            <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label="Supprimer le jalon">×</button>
+        {rows.map((r, i) => {
+          // Ligne INVALIDE (date hors format/bornes ou montant ≤ 0) : exclue du Σ par `clean` — la marquer
+          // (audit backlog B12) sinon l'utilisateur voit « écart Σ ≠ RAF » sans comprendre pourquoi.
+          const invalid = (r.date !== "" || r.amount !== 0) && !(/^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number(r.amount) > 0);
+          return (
+          <div key={i} className={cx("flex flex-wrap items-center gap-2", invalid && "text-clay")} title={invalid ? "Ligne incomplète ou invalide — exclue du Σ jalons" : undefined}>
+            <DateField className="!py-1 text-xs w-36" value={r.date} onChange={(v) => set(i, { date: v })} ariaLabel={`Date du jalon ${i + 1}`} placeholder="date jalon" />
+            <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label={`Montant du jalon ${i + 1}`} />
+            <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label={`Supprimer le jalon ${i + 1}`}>×</button>
+            {invalid && <span className="text-[11px]">exclue du Σ</span>}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="flex items-center gap-3 mt-2 flex-wrap text-[12px]">
         {rows.length < 15 && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={add}>+ Jalon</button>}
@@ -800,7 +845,9 @@ function RafValidator({ row }: { row: { fp?: string; raf?: number; cas?: number;
       <input className="field w-24 !py-1 text-xs text-right" inputMode="decimal" autoFocus aria-label={`RAF validé de ${row.fp}`} placeholder="RAF" value={raf} onChange={(e) => setRaf(e.target.value)} />
       <Busy variant="ghost" label="Valider" okMsg="RAF validé — intégré au backlog fiable (recalcul lancé)" errMsg="Validation refusée"
         fn={async () => { const v = parseNum(raf); if (!(v >= 0)) throw new Error("saisir un RAF ≥ 0"); await setRafOnOrder(v); setEditing(false); }} />
-      <Busy variant="ghost" label="Solder (0)" okMsg="Commande soldée (recalcul lancé)" errMsg="Solde refusé"
+      {/* Confirmation (audit backlog M6) : solder efface le RAF d'un geste — récupérable seulement en
+          re-saisissant la valeur. Même friction volontaire qu'Annuler/Supprimer (DangerBtn). */}
+      <DangerBtn label="Solder (0)" confirm={`Solder ${row.fp} ? Le RAF passe à 0 — la commande quitte le backlog (réversible en re-saisissant un RAF).`} okMsg="Commande soldée (recalcul lancé)"
         fn={async () => { await setRafOnOrder(0); setEditing(false); }} />
       <input className="field w-28 !py-1 text-xs" aria-label={`Corriger le N° FP de ${row.fp}`} placeholder="nouveau N° FP" value={nf} onChange={(e) => setNf(e.target.value)} />
       {nf.trim() && <Busy variant="ghost" label="Corriger FP" okMsg="N° FP corrigé (recalcul lancé)" errMsg="Correction FP refusée"
@@ -1042,14 +1089,17 @@ function OrderPmFixer({ row }: { row: Order }) {
 // (CAS = montant de l'opp), en un clic. Chargé uniquement pour les profils habilités « import ».
 function ReconcileWonOpps({ commandeFps, canPipelineWrite }: { commandeFps: Set<string>; canPipelineWrite: boolean }) {
   const oppScope = useRecordScope("opportunities");
-  const { rows: opps, loading } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  // `truncated` consommé (audit backlog M8) : au-delà du cap d'abonnement, des gagnées sans P&L
+  // disparaîtraient de la réconciliation sans avertissement — contraire au contrat hooks.ts.
+  const { rows: opps, loading, truncated } = useCollectionData<Opportunity>(oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
   // FP CANONIQUE des deux côtés (comme dataQuality.opps_gagnees_sans_pnl) : sinon une opp au FP
   // formaté autrement (zéros de tête, espaces) est réconciliée par mergeCommandes côté serveur mais
   // reste listée « sans commande P&L » ici → action « Inscrire au P&L » redondante/trompeuse.
   const won = opps.filter((o) => { const k = fpKey(o.fp); return o.stage === 6 && k && !commandeFps.has(k); });
-  if (loading || !won.length) return null;
+  if (loading || (!won.length && !truncated)) return null;
   return (
     <Card title={`Opportunités gagnées sans commande P&L · ${won.length}`}>
+      <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       <Table columns={[
         // FP corrigeable en place UNIQUEMENT avec pipeline:write (patchOpportunity l'exige serveur) — sinon
         // affichage seul. Les commerciaux saisissent parfois une mauvaise version du N° FP → correction = recalcul.
@@ -1114,8 +1164,9 @@ const pnlBadge = (s?: string | null) => {
 // Bandeau des commandes ANNULÉES (statut « Annulée » persistant, hors agrégats) : listées à part
 // avec rétablissement. La liste principale ne les contient plus (le recompute les écarte).
 function CancelledOrders() {
-  const { data: cxl } = useDocData<CancellationsDoc>("config/cancelOrders");
+  const { data: cxl, error } = useDocData<CancellationsDoc>("config/cancelOrders");
   const items = cxl?.items || [];
+  if (error) return <Card title="Commandes annulées"><ErrorState error={error} /></Card>;
   if (!items.length) return null;
   return (
     <Card title={`Commandes annulées · ${items.length}`}>
@@ -1136,9 +1187,10 @@ function CancelledOrders() {
 // Charge par Project Manager : agrégat serveur (summaries/pms) des commandes affectées — nombre,
 // CAS, RAF (backlog). Cliquer une ligne applique le filtre PM transverse (isole les listes sur ce PM).
 function PmWorkload() {
-  const { data } = useDocData<PmsSummary>("summaries/pms");
+  const { data, error } = useDocData<PmsSummary>("summaries/pms");
   const { f, set } = useFilters();
   const rows = data?.rows || [];
+  if (error) return <Card title="Charge par Project Manager"><ErrorState error={error} /></Card>;
   if (!rows.length) return null;
   const pick = (pm: string) => set({ pm: f.pm === pm ? "" : pm });
   return (
@@ -1172,14 +1224,27 @@ const factBucket = (r: Order): "none" | "todo" | "wip" | "done" => {
 const CARNET_ECART_TOL = 0.10;
 
 export const OrderList: FC<Props> = () => {
-  const { rows: all, loading } = useCommandesRows();
+  // error/truncated consommés (audit backlog H3) : un refus de droit ne se déguise plus en « Aucune
+  // commande » avec bouton d'import, et un cap d'abonnement se signale (TruncationNote plus bas).
+  const { rows: all, loading, error: rowsError, truncated: rowsTrunc } = useCommandesRows();
   const { match } = useFilters();
   // Filtre MÉMOÏSÉ : sur un gros carnet (toute la collection en mémoire), refiltrer à CHAQUE render
   // (frappe, ouverture de modale…) est coûteux. Recalculé seulement si les données/filtres changent.
   const rows = useMemo(() => all.filter((r) => match(r, ["bu", "am", "client", "pm"])), [all, match]);
   // Filtre de FACTURATION (suivi aval) : concentrer sur les commandes à facturer sans quitter l'écran.
   const [factSeg, setFactSeg] = useState<"all" | "todo" | "wip" | "done">("all");
-  const shown = useMemo(() => (factSeg === "all" ? rows : rows.filter((r) => factBucket(r) === factSeg)), [rows, factSeg]);
+  // Filtre MARGE NÉGATIVE — cible du drill-through de l'alerte « marge négative » (Centre d'alertes),
+  // qui atterrissait jusqu'ici sur la liste complète, laissant l'utilisateur rechercher lui-même les
+  // commandes fautives (audit rentabilité RB2). Visible seulement avec l'accès marge.
+  const canMargin = useCanSeeMargin();
+  const { intent } = useNav();
+  const [negOnly, setNegOnly] = useState(intent?.segment === "negmb");
+  useEffect(() => { if (intent?.segment === "negmb") setNegOnly(true); }, [intent]);
+  const negRows = useMemo(() => (canMargin ? rows.filter((r) => (r.mb || 0) < 0) : []), [rows, canMargin]);
+  const shown = useMemo(() => {
+    const base = factSeg === "all" ? rows : rows.filter((r) => factBucket(r) === factSeg);
+    return negOnly && canMargin ? base.filter((r) => (r.mb || 0) < 0) : base;
+  }, [rows, factSeg, negOnly, canMargin]);
   const FACT_SEGS = useMemo(() => {
     let todo = 0, wip = 0, done = 0;
     for (const r of rows) { const b = factBucket(r); if (b === "todo") todo++; else if (b === "wip") wip++; else if (b === "done") done++; }
@@ -1200,10 +1265,8 @@ export const OrderList: FC<Props> = () => {
     return { cas, fact, raf, ecart: cas - fact - raf, todo, done };
   }, [rows]);
   const canImport = useCanImport();
-  const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation LIT les opportunités (droit pipeline)
   const canPipelineWrite = useCan("pipeline") === "write"; // ÉCRIRE une opp (corriger FP / annuler / sync ⇄) exige pipeline:write
-  const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => fpKey(r.fp)).filter(Boolean) as string[]), [all]);
   // Suggestions d'affectation PM (datalist) = référentiel Admin ∪ PM déjà affectés.
@@ -1257,11 +1320,19 @@ export const OrderList: FC<Props> = () => {
         <Kpi label="Σ RAF" value={fmt(coh.raf)} tone="steel" />
         <Kpi label="Écart CAS − (Fact + RAF)" value={fmt(coh.ecart)} tone={Math.abs(coh.ecart) > coh.cas * CARNET_ECART_TOL ? "clay" : "steel"} />
       </div>
-      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé. <b>Vue grossière</b> : l'écart net peut masquer des incohérences par ligne qui se compensent — le détail est au <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées.</Tip>
+      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé. <b>Vue grossière</b> : l'écart net peut masquer des incohérences par ligne qui se compensent — le détail est au <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées. NB : le <b>Σ RAF</b> de cette carte est <b>signé</b> (les avoirs comptent en négatif — identité comptable CAS = Facturé + RAF) : il peut différer du « Backlog (RAF glissant) », qui ne somme que les RAF positifs.</Tip>
     </Card>
     <Card title={`Commandes · ${shown.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
+      {/* Erreur ≠ vide (audit backlog H3) : un permission-denied/panne affichait « Aucune commande » avec
+          bouton d'import — mensonger. La liste reste rendue dessous (données partielles éventuelles). */}
+      {rowsError && <ErrorState error={rowsError} />}
+      <TruncationNote show={rowsTrunc} cap={DEFAULT_SUB_CAP} />
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
-      <div className="mb-2"><Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" /></div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" />
+        {canMargin && <Segmented value={negOnly ? "neg" : "all"} onChange={(v) => setNegOnly(v === "neg")} ariaLabel="Filtrer par marge"
+          options={[{ value: "all", label: "Toutes marges" }, { value: "neg", label: "Marge négative", count: negRows.length }]} />}
+      </div>
       {/* Suggestions d'auto-complétion partagées par les champs d'affectation PM de chaque ligne. */}
       <datalist id="pm-options">{pmOptions.map((p) => <option key={p} value={p} />)}</datalist>
       <ListView
@@ -1300,9 +1371,9 @@ export const OrderList: FC<Props> = () => {
           det(colText("Source", (r) => SRC_LABEL[r.source || ""] || r.source || "—", (r) => r.source || "")),
           // Synchro inverse ClickUp : statut en ligne principale, dates dans le détail.
           colText("Statut CU", (r) => (r.clickupStatus ? <Badge tone="steel">{r.clickupStatus}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupStatus || ""),
-          det(colText("D. commande", (r) => r.dateCommande || "—", (r) => r.dateCommande || "")),
-          det(colText("D. contract.", (r) => r.dateContractuelle || "—", (r) => r.dateContractuelle || "")),
-          det(colText("D. prév. fin", (r) => r.dateFinPrev || "—", (r) => r.dateFinPrev || "")),
+          det(colText("D. commande", (r) => r.dateCommande ? frDate(r.dateCommande) : "—", (r) => r.dateCommande || "")),
+          det(colText("D. contract.", (r) => r.dateContractuelle ? frDate(r.dateContractuelle) : "—", (r) => r.dateContractuelle || "")),
+          det(colText("D. prév. fin", (r) => r.dateFinPrev ? frDate(r.dateFinPrev) : "—", (r) => r.dateFinPrev || "")),
           // Enrichissements ClickUp → app (Lot 4) : avancement (checklists), priorité, blocage, temps passé.
           det(colNum("Avancement", (r) => (r.clickupProgress != null ? `${r.clickupProgress}%` : "—"), (r) => (r.clickupProgress ?? -1))),
           det(colText("Priorité CU", (r) => (r.clickupPriority ? <Badge tone={/urgent/i.test(r.clickupPriority) ? "clay" : "steel"}>{r.clickupPriority}</Badge> : <span className="text-faint">—</span>), (r) => r.clickupPriority || "")),

@@ -6,12 +6,13 @@
 // marge) sont OMIS de la réponse pour le PM / tout rôle sans droit « rentabilité » (masquage serveur).
 import { useState, useEffect, useCallback, type FC, type ReactNode } from "react";
 import { useClaims } from "../lib/rbac";
-import { Card, Badge, Busy, Table, Modal, money, cx, useToast, EmptyState, colText, colNum } from "../design/components";
+import { Card, Badge, Busy, Table, Modal, money, cx, useToast, EmptyState, ErrorState, colText, colNum } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { useAmOptions, useClientOptions } from "./_shared";
-import { fmt } from "../design/tokens";
-import { relTime } from "../lib/format";
+import { fmt, pct } from "../design/tokens";
+import { relTime, frDate } from "../lib/format";
+import { FIXED_PEG } from "../lib/fx"; // parité fixe légale — source unique (miroir functions/lib/fx.js)
 import {
   listFiches, getFiche, createFiche, updateFiche, ficheAdvance, ficheReject,
   type Fiche, type FicheLine, type FicheEvent,
@@ -43,7 +44,7 @@ const roleActs = (role: string, etape: number) => STEPS[etape]?.role === role;
 const EMPTY_LINE = (): FicheLine => ({ description: "", fournisseur: "", type_charge: "Prestation", devise: "XOF", montant: 0, numero_bc: null });
 const EMPTY_FICHE = (): Partial<Fiche> => ({
   numero_fp: "", client: "", affaire: "", commercial: "", date_fiche: null, editeur_ac: "",
-  taux_usd: 590, taux_eur: 655.957, seuil_marge_pct: 15, provisions_xof: 0, autres_frais_financiers_xof: 0,
+  taux_usd: 590, taux_eur: FIXED_PEG.EUR, seuil_marge_pct: 15, provisions_xof: 0, autres_frais_financiers_xof: 0,
   prix_vente_ht_xof: 0, memo: "", lignes: [EMPTY_LINE()],
 });
 
@@ -82,7 +83,8 @@ function Financials({ fin }: { fin: NonNullable<Fiche["financials"]> }) {
     ["Prix de revient HT", money(fin.prix_de_revient_ht)],
     ["Prix de vente HT", money(fin.prix_vente_ht)],
     ["Marge brute", <span className={cx("tabnum", fin.marge_brute < 0 && "text-clay")}>{fmt(fin.marge_brute)}</span>],
-    ["% marge brute", <span className={cx("tabnum", fin.below_threshold && "text-clay")}>{fin.pct_marge.toFixed(1)} %</span>],
+    // pct() attend un RATIO (pct_marge serveur est en %) — même format que le reste de l'app (« 12,3% »).
+    ["% marge brute", <span className={cx("tabnum", fin.below_threshold && "text-clay")}>{pct(fin.pct_marge / 100)}</span>],
   ];
   return (
     <div className="rounded-lg border border-line bg-panel2/40 p-3">
@@ -191,14 +193,18 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
     const r = await getFiche(id);
     setFiche(r.fiche); setHistory(r.history || []); setDraft(r.fiche); setDc(r.fiche.numero_dc || "");
   }, [id]);
-  useEffect(() => { load().catch(() => toast("Fiche introuvable", "err")); }, [load, toast]);
+  // Erreur nommée (pas un « Fiche introuvable » générique sur une panne réseau / un refus de droit).
+  useEffect(() => { load().catch((e: unknown) => toast((e as { message?: string })?.message || "Fiche introuvable", "err")); }, [load, toast]);
 
   if (!fiche || !draft) return <Modal open title="Fiche d'affaire" onClose={onClose}><div className="py-8 text-center text-faint">Chargement…</div></Modal>;
 
   const etape = fiche.etape_courante || 0;
   const terminee = !!fiche.terminee;
-  const canAct = !terminee && role != null && roleActs(role, etape);
-  const showMontant = !fiche.pmMasked; // le PM voit les lignes ; le montant reste visible (périmètre kit)
+  // Fiche masquée (montants OMIS par le serveur) : l'étape 0 édite les montants → agir dessus écraserait
+  // en aveugle des valeurs jamais reçues. Le serveur refuse (updateFiche) ; on n'offre pas l'action.
+  const maskedEdit = etape === 0 && !!fiche.pmMasked;
+  const canAct = !terminee && role != null && roleActs(role, etape) && !maskedEdit;
+  const showMontant = !fiche.pmMasked; // montants omis par le serveur quand masquée
   const mode: "edit" | "bc" | "ro" = terminee ? "ro" : etape === 0 && canAct ? "edit" : etape === 3 && canAct ? "bc" : "ro";
 
   const saveDraft = async () => {
@@ -230,7 +236,7 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
           <Info k="Affaire" v={editVal(mode === "edit", <TxtField value={draft.affaire} onChange={(v) => setDraft({ ...draft, affaire: v })} aria="Affaire" w="w-full" />, fiche.affaire)} />
           <Info k="Commercial" v={editVal(mode === "edit", <Combo value={draft.commercial} onChange={(v) => setDraft({ ...draft, commercial: v })} ariaLabel="Commercial" placeholder="Commercial" allowCreate className="w-full" options={amOpts.map((a) => ({ value: a, label: a }))} />, fiche.commercial)} />
           <Info k="N° DC" v={etape === 2 && canAct ? <TxtField value={dc} onChange={setDc} aria="N° de DC" w="w-full" placeholder="N° de DC" /> : (fiche.numero_dc || <span className="text-faint">— (défini par le DRO)</span>)} />
-          <Info k="Date fiche" v={editVal(mode === "edit", <DateField value={draft.date_fiche || ""} onChange={(v) => setDraft({ ...draft, date_fiche: v })} ariaLabel="Date fiche" />, fiche.date_fiche || "—")} />
+          <Info k="Date fiche" v={editVal(mode === "edit", <DateField value={draft.date_fiche || ""} onChange={(v) => setDraft({ ...draft, date_fiche: v })} ariaLabel="Date fiche" />, frDate(fiche.date_fiche))} />
           <Info k="Éditée par" v={editVal(mode === "edit", <TxtField value={draft.editeur_ac || ""} onChange={(v) => setDraft({ ...draft, editeur_ac: v })} aria="Éditée par" />, fiche.editeur_ac || "—")} />
         </div>
 
@@ -277,7 +283,13 @@ function FicheDetail({ id, role, onClose, onChanged }: { id: string; role: strin
             )}
           </div>
         )}
-        {!canAct && !terminee && <div className="text-[12px] text-faint border-t border-line pt-2">En attente de l'action « {stepInfo?.label} » — vous n'êtes pas l'acteur de cette étape.</div>}
+        {!canAct && !terminee && (
+          <div className="text-[12px] text-faint border-t border-line pt-2">
+            {maskedEdit && role != null && roleActs(role, etape)
+              ? "Édition des montants réservée à un rôle habilité « rentabilité » (les montants vous sont masqués)."
+              : <>En attente de l'action « {stepInfo?.label} » — vous n'êtes pas l'acteur de cette étape.</>}
+          </div>
+        )}
         {terminee && <div className="text-[12px] text-emerald border-t border-line pt-2">Fiche validée — verrouillée. Le P&L de la commande {fiche.numero_fp} est alimenté.</div>}
 
         {/* Journal */}
@@ -336,16 +348,18 @@ export const Fiches: FC<Props> = () => {
   const canCreate = role === "assistante" || role === "direction";
   const [rows, setRows] = useState<Fiche[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null); // refus de droit / panne ≠ « Aucune fiche »
   const [statut, setStatut] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try { const r = await listFiches(statut ? { statut } : {}); setRows(r.fiches || []); }
+    catch (e) { setError(e as Error); }
     finally { setLoading(false); }
   }, [statut]);
-  useEffect(() => { load().catch(() => setLoading(false)); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const cols = [
     colText("N° FP", (r: Fiche) => <button className="text-ink hover:text-gold underline decoration-dotted" onClick={() => setOpenId(r._id!)}>{r.numero_fp}</button>, (r: Fiche) => r.numero_fp),
@@ -354,8 +368,9 @@ export const Fiches: FC<Props> = () => {
     colText("Commercial", (r: Fiche) => r.commercial, (r: Fiche) => r.commercial),
     colText("Étape", (r: Fiche) => <Stepper etape={r.etape_courante || 0} terminee={r.terminee} />, (r: Fiche) => r.etape_courante || 0),
     colText("Statut", (r: Fiche) => <Badge tone={(STATUT_TONE[r.statut] || "neutral") as any}>{STATUT_LABEL[r.statut] || r.statut}</Badge>, (r: Fiche) => r.statut),
-    colNum("Vente HT", (r: Fiche) => (r.financials ? money(r.financials.prix_vente_ht) : <span className="tabnum">{fmt(r.prix_vente_ht_xof || 0)}</span>), (r: Fiche) => r.financials?.prix_vente_ht ?? r.prix_vente_ht_xof ?? 0),
-    colNum("% MB", (r: Fiche) => (r.financials ? <span className={cx("tabnum", r.financials.below_threshold && "text-clay")}>{r.financials.pct_marge.toFixed(1)} %</span> : <span className="text-faint">—</span>), (r: Fiche) => r.financials?.pct_marge ?? -999),
+    // Fiche masquée : la vente est OMISE par le serveur (marge dérivable) → « — », jamais un faux « 0 ».
+    colNum("Vente HT", (r: Fiche) => (r.financials ? money(r.financials.prix_vente_ht) : r.pmMasked ? <span className="text-faint">—</span> : <span className="tabnum">{fmt(r.prix_vente_ht_xof || 0)}</span>), (r: Fiche) => r.financials?.prix_vente_ht ?? r.prix_vente_ht_xof ?? 0),
+    colNum("% MB", (r: Fiche) => (r.financials ? <span className={cx("tabnum", r.financials.below_threshold && "text-clay")}>{pct(r.financials.pct_marge / 100)}</span> : <span className="text-faint">—</span>), (r: Fiche) => r.financials?.pct_marge ?? -999),
   ];
 
   return (
@@ -371,6 +386,7 @@ export const Fiches: FC<Props> = () => {
           Circuit à 6 étapes (AC → DC → DRO → AC → DGA → CDG/DF). Champs financiers masqués pour les rôles non habilités.
         </p>
         {loading ? <div className="py-8 text-center text-faint">Chargement…</div>
+          : error ? <ErrorState error={error} />
           : <Table columns={cols} rows={rows} colsKey="fiches" empty="Aucune fiche d'affaire — créez-en une pour numériser une affaire." searchKeys={[(r: Fiche) => r.numero_fp, (r: Fiche) => r.client, (r: Fiche) => r.affaire, (r: Fiche) => r.commercial]} rowKey={(r: Fiche) => r._id || r.numero_fp || ""} bulk={[]} />}
       </Card>
 

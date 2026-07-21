@@ -44,3 +44,29 @@ describe("parAlert — cycle de vie des certifications", () => {
     expect(watchCounts(items)).toEqual({ expired: 1, j7: 2, j30: 0, j60: 0, j90: 1 });
   });
 });
+
+// Renouvellement du PARTENARIAT lui-même (PAR-P4) : fenêtres J-90/60/30 sur renewalDate du référentiel.
+describe("parAlert — partnerRenewalWatch (renouvellement du partenariat)", () => {
+  const { partnerRenewalWatch } = require("../domain/parAlert");
+
+  it("classe par fenêtre J-90/60/30 + échu, trié par urgence ; pas de palier J-7", () => {
+    const items = partnerRenewalWatch([
+      { id: "cisco", name: "Cisco", renewalDate: "2026-07-25" },      // 7 j → j30 (pas de palier j7)
+      { id: "dell", name: "Dell", renewalDate: "2026-09-01" },        // 44 j → j60
+      { id: "hpe", name: "HPE", renewalDate: "2026-10-10" },          // 83 j → j90
+      { id: "f5", name: "F5", renewalDate: "2026-07-01" },            // échu
+      { id: "far", name: "Loin", renewalDate: "2026-12-31" },         // > 90 j → hors liste
+    ], "2026-07-18");
+    expect(items.map((i) => i.id)).toEqual(["f5", "cisco", "dell", "hpe"]); // urgence croissante
+    expect(items.map((i) => i.bucket)).toEqual(["expired", "j30", "j60", "j90"]);
+  });
+
+  it("ignore un partenaire sans renewalDate (échéance inconnue ≠ échue)", () => {
+    expect(partnerRenewalWatch([{ id: "x", name: "X" }], "2026-07-18")).toEqual([]);
+  });
+
+  it("watchCounts fonctionne sur ses paliers (sous-ensemble des paliers certifs)", () => {
+    const items = partnerRenewalWatch([{ id: "a", renewalDate: "2026-07-01" }, { id: "b", renewalDate: "2026-08-01" }], "2026-07-18");
+    expect(watchCounts(items)).toEqual({ expired: 1, j7: 0, j30: 1, j60: 0, j90: 0 });
+  });
+});

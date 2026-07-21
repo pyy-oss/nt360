@@ -4,7 +4,7 @@
 // Le COÛT (CJM) n'est visible que si l'utilisateur a le droit « rentabilité » (confidentialité serveur).
 import { useState, useEffect, useCallback, createContext, useContext, type FC, type ReactNode } from "react";
 import { useCan } from "../lib/rbac";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, money, det, cx } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, ErrorState, colText, colNum, money, det, cx } from "../design/components";
 import { PctLine } from "../design/charts";
 import { T } from "../design/tokens";
 import { Select } from "../design/inputs";
@@ -127,9 +127,20 @@ function ActivityCockpit() {
 function ResourcePnlCard() {
   const [p, setP] = useState<ResourcePnl | null>(null);
   const [loading, setLoading] = useState(true);
+  // « denied » (droit rentabilite absent → carte masquée) ≠ « error » (panne réseau/serveur → signalée) :
+  // l'ancien catch unique affichait le Tip d'onboarding « Saisissez des CRA… » sur une simple panne —
+  // mensonger pour un utilisateur dont les CRA existent (audit rentabilité RB2, même patron que la
+  // Marge de livraison).
+  const [failure, setFailure] = useState<"denied" | "error" | null>(null);
   const { nonce, bump } = useStaffingRefresh();
   const canSetModel = useCan("rentabilite") === "write"; // seul un droit rentabilite en écriture pilote le taux
-  useEffect(() => { resourcePnl().then(setP).catch(() => setP(null)).finally(() => setLoading(false)); }, [nonce]);
+  useEffect(() => {
+    resourcePnl().then((r) => { setP(r); setFailure(null); })
+      .catch((e: unknown) => { setP(null); setFailure((e as { code?: string })?.code === "functions/permission-denied" ? "denied" : "error"); })
+      .finally(() => setLoading(false));
+  }, [nonce]);
+  if (failure === "denied") return null;
+  if (failure === "error") return <Card title="Rentabilité par ressource (6 mois)"><ErrorState error={new Error("Le calcul n'a pas pu être chargé — réessayez (panne réseau ou serveur).")} /></Card>;
   if (loading) return <Card title="Rentabilité par ressource (6 mois)"><div className="text-[13px] text-muted py-2">Calcul…</div></Card>;
   if (!p || !p.global.headcount) return <Card title="Rentabilité par ressource (6 mois)"><Tip>Saisissez des CRA (jours facturés) et renseignez TJM/CJM des consultants pour obtenir le P&L par ressource.</Tip></Card>;
   const g = p.global;

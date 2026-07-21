@@ -41,6 +41,7 @@ function deliveryMargin(carnetRows, marginRows, laborByFp, hasCost, astreinteCos
     const e = byFp.get(k);
     e.mb += Number(m.mb) || 0;
     e.costTotal += Number(m.costTotal) || 0;
+    if (m.mbSource === "opp") e.mbEstimated = true; // marge carnet ESTIMÉE (MB prév. de l'opp, ADR-056) → badge front
   }
   for (const l of laborByFp || []) {
     const k = fpKey(l && l.fp); if (!k || !byFp.has(k)) continue; // labor sur une affaire hors carnet → ignoré
@@ -60,6 +61,7 @@ function deliveryMargin(carnetRows, marginRows, laborByFp, hasCost, astreinteCos
       fp: e.fp, client: e.client, bu: e.bu, am: e.am,
       vente: Math.round(e.vente), facture: Math.round(e.facture),
       margeCarnet: hasCost ? margeCarnet : null,
+      mbEstimated: !!e.mbEstimated, // provenance de la marge carnet (estimée pipeline vs P&L/fiche)
       coutLabor: hasCost ? coutLabor : null,
       coutAstreintes: hasCost ? coutAstreintes : null,
       joursLabor: Math.round(e.laborDays * 10) / 10, // les JOURS ne sont pas confidentiels (comme mntContratPnl)

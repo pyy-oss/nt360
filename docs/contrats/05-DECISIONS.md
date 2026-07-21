@@ -3,6 +3,98 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-061 — Rentabilité RB2 : reliquats ADR-060 soldés (masque fiche étanche, auditLog sans montants, tendance/byPm marge, purge summaries, honnêteté front)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« on corrige tout cible 10/10 partout » — exécution des reliquats notés en ADR-060 §Conséquences)
+
+### Contexte
+L'ADR-060 avait corrigé les HAUTE/MOYENNE de l'audit Rentabilité (RB1) et listé les reliquats. RB2 les solde tous.
+
+### Décisions
+- **Masque fiche ÉTANCHE.** `presentFor` masqué omet désormais AUSSI `prix_vente_ht_xof`, `taux_usd/taux_eur` et le `montant` de chaque ligne : vente + montants + taux suffisaient à RE-DÉRIVER la marge « masquée » (provisions souvent nulles). `updateFiche` refuse l'édition d'étape 0 (montants) à un rôle qui ne voit pas la marge — sinon son patch réécrivait en aveugle des montants jamais reçus (perte de données). Front : « — » (jamais un faux 0) sur la vente masquée, mode lecture + message dédié pour l'acteur masqué. Effet de bord assumé : une assistante SANS droit `rentabilite` ne peut plus éditer l'étape 0 — c'est une incohérence de matrice à corriger dans Habilitations, plus un contournement silencieux.
+- **auditLog en DRAPEAUX, pas en montants.** `patch_fiche` (vente/revient), `set_cost_model` (taux de structure) et `astreinte_submit` (charge) n'écrivent plus les valeurs : l'auditLog se lit au droit `habilitations` (⊉ `rentabilite`) — les montants y contournaient le cloisonnement de la marge. Les entrées HISTORIQUES ne sont pas réécrites (append-only) : fuite passée actée, colmatée pour l'avenir.
+- **Tendance de marge mensuelle + marge par PM** dans `summaries/rentabilite_*` (gaté `rentabilite`) : `monthly` = marge reconnue par MOIS de facture (taux de la commande × facturé du mois, plafond CAS appliqué CHRONOLOGIQUEMENT, factures non datées après les datées — Σ des mois = mb de la perspective Facturé, testé) ; `byPm` = cas/mb/pmb par PM affecté (« — » = sans PM). Deux cartes front (Rentabilité).
+- **Purge des summaries de marge de millésimes disparus** (`rentabilite_`/`overviewMargin_`/`clientsMargin_`/`domainesMargin_` hors `periods`, jamais `_all`), aux MÊMES gates `want(...)` que l'écriture — un recompute scopé ne détruit pas ce qu'il n'a pas régénéré.
+- **Badge « marge estimée » propagé** (mbSource "opp", ADR-056) : FP 360° (sub du KPI MB) et Marge de livraison (`mbEstimated` par affaire, badge) — l'estimation pipeline n'est plus présentée comme une marge P&L.
+- **Honnêteté front.** Erreur ≠ vide sur : liste Factures, Créances & DSO, Objectifs, liste Fiches, Rentabilité par ressource (denied→carte masquée / error→signalée, même patron que la Marge de livraison) ; message d'erreur nommé sur le détail de fiche. `useReloadOnWrite` sur la Marge de livraison (vue callable figée après mutation). Drill-through `marge_negative` → segment « Marge négative » pré-sélectionné sur la liste Commandes (visible au droit marge). Recherche (searchKeys) sur les tables Affaires à faible marge et Marge de livraison.
+- **Cohérence de forme.** Cible %MB validée en ratio [0..1] à la saisie (0,21, pas 21) ; `date_fiche` en frDate ; % des fiches via `pct()` ; peg EUR 655,957 centralisé dans `web/src/lib/fx.ts` (3e copie de fiches.tsx supprimée, operations.tsx migré) ; `byBu.pmb` typé (fin du `any`).
+
+### Conséquences
+- Additif et à effet immédiat au prochain recompute/déploiement ; les docs de marge périmés disparaissent au premier recompute complet.
+- Le refus d'édition étape 0 sans droit marge peut SURPRENDRE si la matrice donnait `overview` sans `rentabilite` à l'assistante — le message la renvoie aux Habilitations.
+
+### Ce qu'on saura dans six mois
+Si une donnée confidentielle « fuit » encore, chercher les canaux SECONDAIRES (auditLog, exports, summaries périmés) : le masquage du canal principal ne suffit jamais.
+
+## ADR-060 — Remédiation Backlog (B1→B4) + correctifs Rentabilité (RB1) + refus d'import actionnable
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« on corrige tout cible 10/10 partout ; on lance audit rentabilité en parallèle ; import Commandes refuse toujours »)
+
+### Contexte
+Audit Backlog (4 auditeurs, 36 axes — 7,1/10 : PM/PMO 7 · Chiffres 7,5 · Backend 6,5 · Front 7,5) et audit Rentabilité (4 auditeurs — 7,75/10 : Chiffres 8,5 · Utilisateur 7,5 · Backend 7 · Front 8), plus un constat terrain : l'import « Commandes » refuse systématiquement sans dire pourquoi.
+
+### Décisions
+- **Import actionnable.** Le refus « aucune source reconnue » d'importDelta nomme désormais les onglets/en-têtes VUS (describeSheets joint au rapport parseBuffer) et les signatures ATTENDUES par source, avec le rappel qu'un export d'écran n'est pas ré-importable (cause la plus probable du refus répété).
+- **B1 — fraîcheur & vérité serveur.** Les mutations du carnet (Solder/patchOrder, createOrder, jalons, PM, montants, alias FP/DC, rattachement facture, suppressions/annulations, importDelta) passent au recompute SYNCHRONE best-effort (`refreshNowBestEffort` — le différé est inerte en prod : RECOMPUTE_REGION posé côté runtime mais trigger absent du déploiement). Jalons rapprochés par FP CANONIQUE dans aggregate (invariant fpKey) ; miroir « Répartir par défaut » réaligné sur le repli serveur (courbe pondérée + closeMs, tests de parité) ; gardes serveur RAF ≤ CAS, RAF validé à la création, Σ jalons ≤ CAS/RAF.
+- **B2 — honnêteté d'affichage.** frDate sur les dates ClickUp ; bandeau filtre transverse sur le cockpit ; error/truncated propagés (useCommandesRows) — refus de droit ≠ « Aucune commande » ; anti-flash + mémoïsation CarryoverCard ; bornes dites (« 25 sur N ») ; confirmation Solder (0) ; liste ÉNUMÉRABLE des commandes dormantes (dormantTop, même prédicat que l'alerte).
+- **B3 — parité & filet.** RAF clampé dans summaries/pms ; libellés « Backlog (RAF glissant) » (cockpit + CODIR) + note « Σ RAF signé » sur la Cohérence du carnet ; reportedFromMilestones extrait et testé ; test de PARITÉ CROISÉE backlogFy ⇄ overview sur fixture partagée ; millésime borné persisté dans deriveTop.
+- **B4 — finitions.** Tris des tables secondaires, erreurs des cartes consommées, aria jalons indexés, lignes de jalon invalides marquées, auditLog au module RBAC réel (« import »). **Frontière RBAC actée** : les JALONS relèvent de `backlog:write` ; Solder/intégrer/corriger FP passent par patchOrder/createOrder = `import:write` (héritage de la curation P&L — la migration ensureImportPermission maintient pmo en écriture backlog). Assumé en l'état : changer la frontière imposerait une migration de matrice — à réviser si un rôle backlog:write sans import apparaît.
+- **RB1 — Rentabilité (HAUTE/MOYENNE).** reporteMarge via l'AUTORITÉ marginRate (fin de la réimplémentation non normalisée, latente) ; effet ASTREINTE appliqué en synchrone dans decideApproval (le trigger env-gaté absent laissait la charge « en attente » à jamais → marge surestimée) ; tjmBilled retiré de staffingPlan sans droit `rentabilite` (fuite du CA par ressource sous `overview`) ; mutations CRA/CJM → recompute prebilling/maintenance synchrone best-effort ; capped propagé et affiché sur la marge de livraison ; upsertMntTicket/decideApproval 300 s.
+
+### Conséquences
+- Les mutations carnet gagnent la latence d'un recompute (verrou/coalescing) — assumé : la fraîcheur prime, et si le différé est un jour réellement déployé (secret RECOMPUTE_REGION du workflow), ces sites peuvent y revenir.
+- Reliquats Rentabilité notés (non corrigés ici) : badge « marge estimée » à propager à FP 360°/livraison (mbSource déjà dans les rows), fiche masquée à la marge dérivable (lignes+vente exposées), montants confidentiels en clair dans auditLog (habilitations ⊉ rentabilite), formats de % divergents (pct() à généraliser), tendance de marge mensuelle + marge par PM absentes, summaries marge de millésimes disparus jamais purgés, 3e copie du peg dans fiches.tsx.
+
+### Ce qu'on saura dans six mois
+Si un module semble « figé 24 h » après une action : chercher un `requestRecompute` (différé inerte) — le patron `refreshNowBestEffort` est la réponse tant que le trigger n'est pas réellement déployé.
+
+## ADR-059 — Pipeline sourcé partenaire + import de certifications par fichier (PAR-L1/L2)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« pipeline sourcé partenaire, et import de certifs par fichier » — 2 des 3 efforts L reportés par ADR-058 ; MDF/rebates reste en attente)
+
+### Contexte
+Le plan d'affaires partenaire porte un `pipelineYtd` DÉCLARÉ (saisi à la main) sans contrepartie mesurée ; et l'amorçage des certifications ne connaissait que le dataset direction transcrit dans le code (parCertSeed) — aucun moyen pour le steward d'importer son propre fichier.
+
+### Décisions
+- **PAR-L1 — pipeline sourcé partenaire.** Champ ADDITIF `parPartnerId` (slug par_partners) sur l'opportunité (upsert/patch) ; agrégat PUR `domain/parPipeline` → `summaries/par_pipeline` : ouvert (étapes 1-5) + pondéré via la MÊME autorité `projectionWeight`/tiers que la prévision (jamais le `weighted` linéaire) + gagné de l'exercice (millésime `closingDate` via plausibleYear ; non daté conservé). Scope opp → `partenariats` (coût nul drapeau éteint). Front : sélecteur au formulaire Pipeline (visible drapeau allumé + droit partenariats — aucun abonnement sinon) ; carte au dashboard avec l'objectif pipeline du BP en regard. Limites assumées : millésime civil (pas la fenêtre fiscale constructeur — le sourçage se pilote à l'année commerciale), imports Odoo/fichier ne portent pas encore le tag.
+- **PAR-L2 — import de certifs par fichier.** Parser PUR `domain/parCertFile` (en-têtes FR tolérants, résolution partenaire par slug/nom et certif par code/libellé) : le fichier ne crée NI partenaire NI entrée de catalogue — lignes non résolues écartées et rapportées (« n'invente aucune donnée ») ; détenue sans date d'obtention rétro-calculée de l'échéance (validité catalogue). Callable `importParCertificationsFile` : dry-run → confirmation, MÊMES règles de propriété que l'import direction (source `par_cert_import`, éditions manuelles préservées, consultants créés sous droit `pipeline`, plafond 300), recompute synchrone best-effort. Lecture xlsx via `xlsxRead` (exceljs paresseux — la « session exceljs dédiée » envisagée n'était plus nécessaire, la migration CVE étant faite).
+
+### Conséquences
+- `summaries/par_pipeline` se lit sous le seul droit `partenariats` (montants d'opps, pas de marge — le verrou `rentabilite` reste réservé à par_ca*).
+- Réserve : le tag `parPartnerId` est manuel — le sourcé est un plancher tant que les opps historiques ne sont pas taguées.
+
+### Ce qu'on saura dans six mois
+Si le « pipeline sourcé » paraît faible, vérifier le TAUX DE TAG des opps avant de conclure à un partenariat sous-performant.
+
+## ADR-058 — Remédiation audit 34 axes partenariats (PAR-P1→P4 : chiffres justes, fraîcheur, câblage, valeur channel)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« tout » après audit channel manager / responsable partenariats, verdict 7,4/10)
+
+### Contexte
+Audit 4 auditeurs × 34 axes du module partenariats (par_). 9 HAUTE consolidés, trois familles : chiffres du CA constructeur inexacts (achats planifiés `source:"fiche"` comptés, alias fournisseurs ignorés, `fiscalStartMonth` saisi mais inappliqué), fraîcheur (recompute DIFFÉRÉ inerte en prod → summaries figés jusqu'au recompute nocturne, statut certif persisté jamais réécrit, suppressions sans garde ni cascade), câblage (`suggestParPartnerMap` défini mais absent du return de la fabrique → export `undefined` invisible de check-deploy-targets, timeouts client 70 s sur des callables serveur 300 s).
+
+### Décisions (4 lots)
+- **P1 — chiffres justes.** `revenueByPartner` exclut `source:"fiche"` (parité SOA/cash/relances — fin du double-compte achat planifié + BC réel) ; résolveur d'alias fournisseurs injecté (`resolveSupplier`, MÊME autorité que le SOA, ADR-046 ; rétro-compat clé brute) ; **exercice FISCAL constructeur enfin appliqué** : `exerciseStartIso` + décision d'appartenance PAR ALLOCATION (fenêtre datée via `dateIn`, approximation millésime sinon ; civil inchangé sans `fiscalStartMonth` et pour les non-mappés) ; `unmappedCount` (vrai compte) + `declaredRawXof` exposés.
+- **P2 — fraîcheur & cycle de vie.** Les 8 mutations par_ passent au recompute SYNCHRONE best-effort (`refreshParBestEffort` — la mutation écrite ne devient jamais une erreur de recompute) ; `setParFeature(on)` → recompute scopé (module utilisable dès l'allumage) ; `deleteParPartner` : garde d'intégrité serveur (refus si certifs/assignations rattachées — le front l'annonçait sans que le serveur le tienne) + purge du mapping (`purgePartnerFromMap`, pur) ; staffing : renommage consultant → resynchronisation des dénormalisations par_, suppression → cascade (gatée drapeau) ; statut certif PERSISTÉ réécrit au recompute quand le dérivé diffère.
+- **P3 — câblage & robustesse.** `suggestParPartnerMap` au return + **test de câblage fabrique→exports** (la garde regex ne voit pas un export `undefined`) ; timeouts client 300 s alignés serveur (IA, imports, recompute) ; gardes loading/error + TruncationNote sur les 3 collections ; hero « — » quand résumé non chargé ; tri des tables ; seuils `ratioColor` unifiés ; types au lieu d'any.
+- **P4 — valeur channel.** `partnerRenewalWatch` (renewalDate du programme, J-90/60/30, pas de J-7) → par_alerts + 2 bulletins parNews ; badge « ≠ calculé » (statut déclaré vs niveau `tierProgress`) ; carte comparatif inter-constructeurs (jointure front, zéro re-dérivation) ; colonnes dont BC / dont déclaré / écart par constructeur.
+
+### Conséquences
+- Additif strict ; comportement byte-identique quand `fiscalStartByPartner` est vide (tests historiques verts).
+- Les mutations par_ coûtent désormais un recompute synchrone (~s) — assumé : la fraîcheur du cockpit prime, l'import massif gardait déjà ce patron.
+- Reportés en sessions dédiées (efforts L) : avantages programme (MDF/rebates/deal registration), pipeline sourcé partenaire, import certifs par fichier.
+
+### Ce qu'on saura dans six mois
+Si un callable « existe dans le code mais pas en prod », vérifier le RETURN de la fabrique avant le déploiement : la garde par nom ne détecte pas un export `undefined` — c'est le test de câblage qui le tient désormais.
+
 ## ADR-057 — Remédiation audit 40 axes facturation/revenu/exécution (R1→R4, cible « même métrique = même nombre » partout)
 
 - **Date :** 2026-07-21

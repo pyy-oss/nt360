@@ -48,4 +48,23 @@ function watchCounts(items) {
   return counts;
 }
 
-module.exports = { ALERT_THRESHOLDS_DAYS, alertBucket, certRenewalWatch, watchCounts };
+/**
+ * Renouvellement du PARTENARIAT lui-même (renewalDate du référentiel par_partners) : même mécanique que
+ * certRenewalWatch, fenêtres J-90/60/30 seulement — un contrat programme constructeur se renégocie en
+ * amont, un palier J-7 n'aurait aucune valeur d'anticipation. Un partenariat SANS renewalDate n'alerte
+ * jamais (échéance inconnue ≠ échue). Matérialisé au recompute dans summaries/par_alerts.
+ */
+function partnerRenewalWatch(partners, todayIso) {
+  const items = [];
+  for (const p of partners || []) {
+    if (!p || !p.renewalDate) continue;
+    const daysLeft = daysBetween(p.renewalDate, todayIso);
+    const bucket = daysLeft <= 0 ? "expired" : daysLeft <= 30 ? "j30" : daysLeft <= 60 ? "j60" : daysLeft <= 90 ? "j90" : null;
+    if (!bucket) continue;
+    items.push({ id: p.id, partnerId: p.id, name: p.name || p.id, renewalDate: p.renewalDate, daysLeft, bucket });
+  }
+  items.sort((a, b) => a.daysLeft - b.daysLeft);
+  return items;
+}
+
+module.exports = { ALERT_THRESHOLDS_DAYS, alertBucket, certRenewalWatch, partnerRenewalWatch, watchCounts };

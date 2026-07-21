@@ -1,6 +1,6 @@
 // Modules finance : Objectifs / R-O, Facturation, liste Factures, Rentabilité.
 import { useState, useEffect, useMemo, type FC } from "react";
-import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
+import { useDocData, useCollectionData, useReloadOnWrite, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
@@ -28,7 +28,9 @@ const SCOPES = [
 const EMPTY_OBJ = { fiscalYear: "", scope: "global", scopeValue: "all", label: "", targetCas: "", targetInvoiced: "", targetMargin: "", targetMarginPct: "" };
 
 export const Objectifs: FC<Props> = () => {
-  const { rows, loading: objLoading } = useCollectionData<Objective>("objectives");
+  // error/truncated consommés (audit rentabilité RB2) : un refus de droit se déguisait en « Aucun
+  // objectif défini » — mensonger pour un rôle en lecture seule mal habilité.
+  const { rows, loading: objLoading, error: objError, truncated: objTrunc } = useCollectionData<Objective>("objectives");
   const canWrite = useCan("objectifs") === "write";
   const toast = useToast();
   const [f, setF] = useState({ ...EMPTY_OBJ });
@@ -48,11 +50,15 @@ export const Objectifs: FC<Props> = () => {
   const save = async () => {
     const fiscalYear = Number(f.fiscalYear) || 0;
     if (fiscalYear < 2000) { toast("Année invalide (ex. 2026).", "err"); return; }
+    // Cible %MB en RATIO 0..1 (comme pct() partout) : « 21 » saisi pour 21 % donnait un objectif à
+    // 2100 % et des R/O absurdes, sans aucun signal (audit rentabilité RB2).
+    const targetMarginPct = Number(f.targetMarginPct) || 0;
+    if (targetMarginPct < 0 || targetMarginPct > 1) { toast("Cible %MB attendue en ratio 0..1 (ex. 0,21 pour 21 %).", "err"); return; }
     const scopeValue = f.scope === "global" ? "all" : (f.scopeValue.trim() || "all");
     const payload = {
       fiscalYear, scope: f.scope, scopeValue, label: f.label.trim() || undefined,
       targetCas: Number(f.targetCas) || 0, targetInvoiced: Number(f.targetInvoiced) || 0,
-      targetMargin: Number(f.targetMargin) || 0, targetMarginPct: Number(f.targetMarginPct) || 0,
+      targetMargin: Number(f.targetMargin) || 0, targetMarginPct,
     };
     // ORDRE SÛR : écrire le nouveau doc AVANT de supprimer l'ancien (édition à clé changée). Si l'upsert
     // échoue, l'objectif d'origine reste intact ; l'inverse (delete-puis-upsert) détruisait l'objectif quand
@@ -88,6 +94,8 @@ export const Objectifs: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Objectifs annuels par univers / dimension">
+        {objError && <ErrorState error={objError} />}
+        <TruncationNote show={objTrunc} cap={DEFAULT_SUB_CAP} />
         <Table columns={cols} rows={rows} empty={objLoading ? "Chargement…" : "Aucun objectif défini."} searchKeys={[(x: Objective) => String(x.fiscalYear || ""), (x: Objective) => x.scope || "", (x: Objective) => x.scopeValue || ""]} rowKey={(x: Objective) => objectiveId({ fiscalYear: x.fiscalYear || 0, scope: x.scope, scopeValue: x.scopeValue })} bulk={[]} />
         <Tip>Cette page sert uniquement à <b>définir les objectifs</b> (global, par BU, par client, par commercial). Le <b>R/O (Réalisé / Objectif)</b> se suit désormais sur la vue de chaque périmètre : global → Vue d'ensemble · BU → Domaines · client → Clients · commercial → AM 360°.</Tip>
       </Card>
@@ -128,7 +136,10 @@ export const Objectifs: FC<Props> = () => {
 // à chaque recompute mais AFFICHÉ NULLE PART (audit 40 axes, axe 3) — le pilotage du recouvrement
 // reposait sur la seule liste Relances. Balance âgée + DSO + top créances, avoirs nettés par client.
 function ReceivablesCard() {
-  const { data } = useDocData<ReceivablesSummary>("summaries/receivables");
+  // Erreur ≠ absence (audit rentabilité RB2) : un refus de droit / une panne faisait disparaître la
+  // carte en silence — indiscernable de « aucune créance ». On la signale.
+  const { data, error } = useDocData<ReceivablesSummary>("summaries/receivables");
+  if (error) return <Card title="Créances & DSO"><ErrorState error={error} /></Card>;
   if (!data || !((data.totalAR || 0) > 0 || (data.openCount || 0) > 0)) return null;
   const b = data.buckets || {};
   const buckets = [
@@ -213,7 +224,8 @@ function InvoiceDateFixer({ inv }: { inv: Invoice }) {
 
 // Liste Factures (drill-down)
 export const InvoiceList: FC<Props> = () => {
-  const { rows: allRows, loading, truncated } = useCollectionData<Invoice>("invoices");
+  // `error` consommé (audit rentabilité RB2) : un refus de droit / une panne se déguisait en liste vide.
+  const { rows: allRows, loading, truncated, error: invError } = useCollectionData<Invoice>("invoices");
   // Overlay des factures ANNULÉES (statut persistant, hors agrégats). La facture reste lisible ici
   // (collection brute) mais est exclue côté serveur de la facturation/cash/créances/qualité.
   const { data: cxl } = useDocData<CancellationsDoc>("config/cancelInvoices");
@@ -249,6 +261,7 @@ export const InvoiceList: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-3">
       <FilterNote dims="BU / client" />
+      {invError && <ErrorState error={invError} />}
       <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       {orphan.length > 0 && (
         <div className={grid4}>
@@ -332,25 +345,30 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
 // (jours CRA imputés aux affaires via les affectations, keystone). Callable à la demande, gouverné
 // « rentabilite » : sans le droit, l'appel est refusé → la carte ne s'affiche pas (dégradation silencieuse).
 // Défini ICI (module lazy) plutôt que dans writes.ts pour ne pas alourdir le chunk d'entrée (budget 120 KB).
-type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; coutAstreintes: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
+type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; mbEstimated?: boolean; coutLabor: number | null; coutAstreintes: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
 async function deliveryMarginByAffaire() {
   const res = await httpsCallable(functions, "deliveryMarginByAffaire", { timeout: 120_000 })({});
-  return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
+  return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[]; capped?: boolean };
 }
 function DeliveryMarginCard() {
   const [rows, setRows] = useState<DeliveryMarginRow[] | null>(null);
   const [unassigned, setUnassigned] = useState(0);
   const [missingCjm, setMissingCjm] = useState<string[]>([]);
+  const [capped, setCapped] = useState(false); // troncature de scan serveur — labor partiellement compté
   // « denied » (droit rentabilite absent → carte masquée) ≠ « error » (panne réseau/serveur → signalée) :
   // l'ancien catch unique faisait disparaître la carte sur une simple panne, sans signal (audit axe 37).
   const [state, setState] = useState<"loading" | "ok" | "denied" | "error">("loading");
+  const [nonce, setNonce] = useState(0); // rechargement après écriture (useReloadOnWrite)
   useEffect(() => {
     let live = true;
     deliveryMarginByAffaire()
-      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setState("ok"); })
+      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setCapped(r.capped === true); setState("ok"); })
       .catch((e: unknown) => { if (live) setState((e as { code?: string })?.code === "functions/permission-denied" ? "denied" : "error"); });
     return () => { live = false; };
-  }, []);
+  }, [nonce]);
+  // Vue CALLABLE (état local, pas de temps réel) : recharge après chaque mutation de l'app — un CRA
+  // saisi / une commande soldée figeaient la carte jusqu'au rechargement de page (audit rentabilité RB2).
+  useReloadOnWrite(() => setNonce((n) => n + 1), state === "ok");
   if (state === "denied") return null;
   if (state === "error") return <Card title="Marge de livraison par affaire (après main-d'œuvre)"><ErrorState error={new Error("Le calcul n'a pas pu être chargé — réessayez (panne réseau ou serveur).")} /></Card>;
   const hasAst = (rows || []).some((a) => (a.coutAstreintes || 0) > 0);
@@ -360,9 +378,12 @@ function DeliveryMarginCard() {
         <>
           {/* CJM manquants = marge SOUS-COSTÉE (coût 0 sur ces consultants) — même ⚠ que le module contrats.
               Le signal revenait du serveur mais n'était jamais affiché (audit axe 14). */}
+          {capped && <div className="text-[11px] text-gold mb-2">⚠ Données tronquées au cap de scan serveur — le coût de main-d'œuvre est partiellement compté (marge possiblement surestimée).</div>}
           {missingCjm.length > 0 && <div className="text-[11px] text-clay mb-2">⚠ Marge sous-costée : {missingCjm.length} consultant(s) sans CJM (coût compté 0) — {missingCjm.slice(0, 5).join(", ")}{missingCjm.length > 5 ? "…" : ""}. Renseignez le CJM dans Consultants.</div>}
           <Table columns={[
-            colText("FP", (a: DeliveryMarginRow) => <FpLink fp={a.fp} />, (a: DeliveryMarginRow) => a.fp),
+            // Badge « marge estimée » (mbSource "opp", ADR-056) : la marge carnet retranchée ici peut être
+            // une estimation pipeline — même signal que la vue Rentabilité, sinon la décomposition semblait P&L.
+            colText("FP", (a: DeliveryMarginRow) => <span className="inline-flex items-center gap-1"><FpLink fp={a.fp} />{a.mbEstimated && <Badge tone="gold">marge estimée</Badge>}</span>, (a: DeliveryMarginRow) => a.fp),
             colText("Client", (a: DeliveryMarginRow) => a.client || "—", (a: DeliveryMarginRow) => a.client || ""),
             colNum("Vente", (a: DeliveryMarginRow) => money(a.vente), (a: DeliveryMarginRow) => a.vente),
             colNum("Marge carnet", (a: DeliveryMarginRow) => money(a.margeCarnet || 0), (a: DeliveryMarginRow) => a.margeCarnet || 0),
@@ -373,7 +394,7 @@ function DeliveryMarginCard() {
             ...(hasAst ? [colNum("Astreintes", (a: DeliveryMarginRow) => money(a.coutAstreintes || 0), (a: DeliveryMarginRow) => a.coutAstreintes || 0)] : []),
             colNum("Marge livraison", (a: DeliveryMarginRow) => <span className={cx("tabnum", (a.margeLivraison || 0) < 0 ? "text-clay" : "text-emerald")}>{money(a.margeLivraison || 0)}</span>, (a: DeliveryMarginRow) => a.margeLivraison || 0),
             colNum("%", (a: DeliveryMarginRow) => (a.margeLivraisonPct == null ? "—" : pct(a.margeLivraisonPct)), (a: DeliveryMarginRow) => a.margeLivraisonPct || 0),
-          ]} rows={(rows || []).slice(0, 30)} colsKey="delivery-margin" empty="Aucune affaire avec de la main-d'œuvre imputée (renseigner les affectations avec un N° FP)." />
+          ]} rows={(rows || []).slice(0, 30)} colsKey="delivery-margin" searchKeys={[(a: DeliveryMarginRow) => a.fp, (a: DeliveryMarginRow) => a.client || "", (a: DeliveryMarginRow) => a.am || ""]} rowKey={(a: DeliveryMarginRow) => a.fp} bulk={[]} empty="Aucune affaire avec de la main-d'œuvre imputée (renseigner les affectations avec un N° FP)." />
           {(rows || []).length > 30 && <div className="text-[11px] text-faint mt-1">Les 30 marges les plus basses (sur {(rows || []).length} affaires).</div>}
           <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier{hasAst ? ", et des astreintes validées" : ""}). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
         </>
@@ -431,6 +452,22 @@ export const Rentabilite: FC<Props> = ({ period }) => {
         </Card>
       </div>
       <MarginWaterfall byBu={p.byBu || []} />
+      {/* Marge par PM (perspective Commande) : le pilotage PM/PMO n'avait aucune vue marge par responsable
+          de livraison (audit rentabilité RB2). « — » = commandes sans PM affecté. */}
+      {view === "commande" && (data.byPm || []).length > 0 && (
+        <Card title="CAS vs MB par PM (livraison)">
+          <GroupedBars data={(data.byPm || []).slice(0, 10).map((x) => ({ name: x.pm, CAS: x.cas, MB: x.mb }))} series={[{ key: "CAS", color: T.steel, name: "CAS" }, { key: "MB", color: T.emerald, name: "MB" }]} />
+          <Tip>Perspective <b>Commande</b> par PM affecté aux commandes (affectation dans le carnet). « — » regroupe les commandes <b>sans PM</b> — les affecter fiabilise cette vue.</Tip>
+        </Card>
+      )}
+      {/* Tendance de marge mensuelle (reconnue au facturé) : la marge n'avait aucune vue temporelle —
+          impossible de voir une érosion (audit rentabilité RB2). Σ des mois = marge perspective Facturé. */}
+      {data.monthly && Object.keys(data.monthly).length > 0 && (
+        <Card title="Tendance de marge mensuelle (reconnue au facturé)">
+          <AreaTrend data={monthsAsc(data.monthly)} color={T.gold} name="Marge" />
+          <Tip>Marge <b>reconnue</b> par mois de facture : taux de marge de la commande rattachée × facturé du mois, <b>plafonnée au CAS</b> de l'affaire (pas de marge sur la surfacturation). La somme des mois égale la marge de la perspective <b>Facturé</b>.</Tip>
+        </Card>
+      )}
       <Card title="Affaires à faible marge (à surveiller)">
         <Table columns={[
           colText("FP", (a) => <span className="inline-flex items-center gap-1"><FpLink fp={a.fp} />{a.costMissing && <Badge tone="clay">coût absent</Badge>}{(a as { mbEstimated?: boolean }).mbEstimated && <Badge tone="gold">marge estimée</Badge>}</span>, (a) => a.fp || ""),
@@ -439,7 +476,7 @@ export const Rentabilite: FC<Props> = ({ period }) => {
           colNum(baseLbl, (a) => money(a.base), (a) => a.base),
           colNum("MB", (a) => money(a.mb), (a) => a.mb),
           colNum("%MB", (a) => <Badge tone={(a.pmb < MARGIN.LOW ? "clay" : a.pmb < MARGIN.OK ? "gold" : "emerald") as any}>{pct(a.pmb)}</Badge>, (a) => a.pmb),
-        ]} rows={p.bottomAffaires || []} empty={`Aucune affaire à ${baseLbl} positif.`} />
+        ]} rows={p.bottomAffaires || []} searchKeys={[(a) => a.fp || "", (a) => a.client || "", (a) => a.am || ""]} rowKey={(a) => a.fp || `${a.client}-${a.base}`} bulk={[]} empty={`Aucune affaire à ${baseLbl} positif.`} />
       </Card>
       <DeliveryMarginCard />
       <Card title="Top clients (marge)"><HBars rows={topArr(p.topClients).slice(0, 10)} colorFn={() => T.gold} /></Card>

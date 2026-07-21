@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor, bcYear, normalizeSupplier } = require("../domain/parRevenue");
+const { resolvePartner, revenueByPartner, revenueProgress, blendRevenue, allocationsFor, bcYear, normalizeSupplier, exerciseStartIso } = require("../domain/parRevenue");
 
 // Audit adverse #4 : la clé fournisseur doit être ROBUSTE à l'espacement variable selon la source du BC.
 describe("normalizeSupplier — clé robuste (compacte espaces + MAJUSCULES)", () => {
@@ -154,5 +154,73 @@ describe("bcYear + revenueByPartner scopé à l'exercice", () => {
     const out = revenueByPartner(bc, { "HDF": "cisco" });
     expect(out.partners[0].revenueXof).toBe(500);
     expect(out.offExerciseXof).toBe(0);
+  });
+});
+
+describe("revenueByPartner — exclusion des achats planifiés de fiche (audit partenariats, axe 2)", () => {
+  const MAP = { "DISTRI": "cisco" };
+  it("une ligne source:\"fiche\" n'entre ni dans le CA ni dans les non-rattachés", () => {
+    const r = revenueByPartner([
+      { supplier: "Distri", amountXof: 1000, source: "fiche" },   // planifié → exclu
+      { supplier: "Distri", amountXof: 400, source: "logistics" }, // BC réel → compté
+      { supplier: "Autre", amountXof: 300, source: "fiche" },      // planifié non mappé → exclu aussi
+    ], MAP);
+    expect(r.partners).toEqual([{ partnerId: "cisco", revenueXof: 400, bcCount: 1 }]);
+    expect(r.unmapped).toEqual([]); // pas de « non rattaché » fantôme depuis une fiche
+  });
+});
+
+describe("revenueByPartner — alias fournisseurs (même autorité que le SOA, ADR-046)", () => {
+  it("un fournisseur fusionné par alias résout vers le mapping de sa graphie CANONIQUE", () => {
+    const resolve = (s) => (String(s || "").trim().toUpperCase().includes("SAMSUNG") ? "SAMSUNG" : String(s || "").trim().toUpperCase());
+    const r = revenueByPartner([
+      { supplier: "SAMSUNG ELECTRONICS", amountXof: 500 },
+      { supplier: "Samsung", amountXof: 300 },
+    ], { "SAMSUNG": "samsung" }, { resolveSupplier: resolve });
+    expect(r.partners).toEqual([{ partnerId: "samsung", revenueXof: 800, bcCount: 2 }]);
+  });
+  it("rétro-compat : un mapping posé sur la graphie BRUTE matche encore (repli clé brute)", () => {
+    const resolve = () => "CANONIQUE SANS MAPPING";
+    const r = revenueByPartner([{ supplier: "Distri", amountXof: 200 }], { "DISTRI": "hpe" }, { resolveSupplier: resolve });
+    expect(r.partners).toEqual([{ partnerId: "hpe", revenueXof: 200, bcCount: 1 }]);
+  });
+});
+
+describe("revenueByPartner — exercice FISCAL constructeur (fiscalStartMonth, audit axe 3)", () => {
+  // Cisco : exercice août→juillet (startMonth 8). asOf mars 2026 → fenêtre [2025-08-01, 2026-03-15].
+  const OPTS = { year: 2026, asOf: "2026-03-15", fiscalStartByPartner: { cisco: 8 } };
+  const MAP = { "DISTRI": "cisco", "AUTRE": "hpe" };
+  it("un BC DATÉ dans la fenêtre fiscale est compté même si son millésime civil est N-1", () => {
+    const r = revenueByPartner([
+      { supplier: "Distri", bcNumber: "BC/2025/10", dateIn: "2025-12-10", amountXof: 700 }, // déc. 2025 ∈ exercice Cisco
+    ], MAP, OPTS);
+    expect(r.partners).toEqual([{ partnerId: "cisco", revenueXof: 700, bcCount: 1 }]);
+    expect(r.offExerciseXof).toBe(0);
+  });
+  it("un BC daté AVANT le début d'exercice est écarté (hors exercice, jamais silencieux)", () => {
+    const r = revenueByPartner([
+      { supplier: "Distri", bcNumber: "BC/2026/2", dateIn: "2025-06-01", amountXof: 900 }, // juin 2025 < août 2025
+    ], MAP, OPTS);
+    expect(r.partners).toEqual([]);
+    expect(r.offExerciseXof).toBe(900);
+    expect(r.offExerciseCount).toBe(1);
+  });
+  it("sans dateIn : approximation par millésime — les deux années civiles chevauchantes sont retenues", () => {
+    const r = revenueByPartner([
+      { supplier: "Distri", bcNumber: "BC/2026/3", amountXof: 100 }, // 2026 chevauche [août 2025, juil. 2026]
+    ], MAP, OPTS);
+    expect(r.partners).toEqual([{ partnerId: "cisco", revenueXof: 100, bcCount: 1 }]);
+  });
+  it("partenaire SANS fiscalStartMonth : année civile inchangée (comportement historique)", () => {
+    const r = revenueByPartner([
+      { supplier: "Autre", bcNumber: "BC/2025/9", dateIn: "2025-12-10", amountXof: 300 }, // millésime 2025 ≠ 2026
+    ], MAP, OPTS);
+    expect(r.partners).toEqual([]);
+    expect(r.offExerciseXof).toBe(300); // écarté au millésime civil, comme avant
+  });
+  it("exerciseStartIso : frontière correcte des deux côtés du mois de bascule", () => {
+    expect(exerciseStartIso("2026-03-15", 8)).toBe("2025-08-01"); // avant août → exercice commencé l'an passé
+    expect(exerciseStartIso("2026-09-02", 8)).toBe("2026-08-01"); // après août → exercice courant
+    expect(exerciseStartIso("2026-03-15", 1)).toBeNull();          // année civile → pas de fenêtre datée
   });
 });

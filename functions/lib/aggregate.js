@@ -314,7 +314,12 @@ async function recomputeCore(db, only) {
   // supprimé, il redevient actif si la commande est rétablie.
   const orderFps = new Set(orders.map((o) => o.fp));
   const milestonesByFp = {};
-  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && orderFps.has(v.fp) && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
+  // Rapprochement par FP CANONIQUE (invariant fpKey — audit backlog H2) : `orders` porte des FP canonisés
+  // (et aliasés le cas échéant) alors qu'un doc de jalons LEGACY peut porter une graphie brute
+  // (« FP/2026/007 ») — comparé brut, il était écarté EN SILENCE de l'atterrissage/billingTrend/relances,
+  // tandis que le front (backlog.tsx, via fpKey) l'affichait. Même résolution d'alias que les collections.
+  const canonMsFp = Object.keys(fpAliasMap).length ? buildFpAliasResolver(fpAliasMap) : fpKey;
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; const k = canonMsFp(v.fp); if (k && orderFps.has(k) && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[k] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);
@@ -379,7 +384,7 @@ async function recomputeCore(db, only) {
   const supAliasPairs = ((await db.doc("config/supplierAliases").get()).data() || {}).pairs || [];
   const resolveSupplier = buildSupplierResolver(supAliasPairs);
   const sup = suppliers(orders, bcLines, creditLines, supplierInvoices, { soaFromInvoices, resolveSupplier });
-  const bf = backlogFy(orders, currentFy); // backlog GLISSANT global (RAF de toutes les commandes ouvertes)
+  const bf = backlogFy(orders, currentFy, { dormantYears: alertThr.dormantYears }); // backlog GLISSANT global (RAF de toutes les commandes ouvertes) + dormantes (même seuil que l'alerte)
   if (want("backlog")) w.push({ path: "summaries/backlog_fy", data: { ...bf, ...stamp } });
   // Doc GLOBAL = pipeline « Tout » (rétro-compat ; Actualité + export CODIR). MÊME assiette que
   // summaries/pipeline_all : dormantes exclues si le drapeau est actif, sinon le « Pipeline actif pondéré »
@@ -668,7 +673,7 @@ async function recomputeCore(db, only) {
       const pm = orderPmMap[safeId(o.fp)];
       if (!pm) continue;
       const e = byPm.get(pm) || { pm, count: 0, cas: 0, raf: 0 };
-      e.count += 1; e.cas += o.cas || 0; e.raf += o.raf || 0;
+      e.count += 1; e.cas += o.cas || 0; e.raf += Math.max(o.raf || 0, 0); // CLAMPÉ (audit backlog M3) : même population que backlog_fy — un RAF négatif (avoir) n'ampute pas la charge du PM
       byPm.set(pm, e);
     }
     const pmRows = [...byPm.values()].sort((a, b) => b.cas - a.cas);
@@ -889,7 +894,7 @@ async function recomputeCore(db, only) {
     if (isParEnabled(parCfg)) {
       const { revenueByPartner, blendRevenue } = require("../domain/parRevenue");
       const { coverageAll } = require("../domain/parQuota");
-      const { certRenewalWatch, watchCounts } = require("../domain/parAlert");
+      const { certRenewalWatch, partnerRenewalWatch, watchCounts } = require("../domain/parAlert");
       const { assignmentWatch, watchCounts: assignCounts } = require("../domain/parAssignment");
       const [parPartners, parCertifs, parAssigns] = await Promise.all([
         readAll(db, "par_partners", true), readAll(db, "par_certifications", true), readAll(db, "par_assignments", true),
@@ -902,7 +907,14 @@ async function recomputeCore(db, only) {
       // une certif écrite « active » il y a deux ans peut être expirée aujourd'hui. C'est le sweep quotidien
       // annoncé par domain/parCertification — source UNIQUE du statut « à date » (jamais le champ persisté).
       const { computeCertStatus } = require("../domain/parCertification");
-      for (const c of parCertifs) c.status = computeCertStatus(c.expiryDate, asOf);
+      for (const c of parCertifs) {
+        const derived = computeCertStatus(c.expiryDate, asOf);
+        // Statut PERSISTÉ réécrit quand le temps l'a changé (drapeau figé sinon — audit partenariats) :
+        // les lecteurs DIRECTS de par_certifications (onglet Certifications, exports, requêtes par statut)
+        // voient alors le même statut que quotas/alertes. Écriture ciblée (merge), uniquement en cas d'écart.
+        if (derived !== c.status && c.id) w.push({ path: `par_certifications/${c.id}`, data: { status: derived } });
+        c.status = derived;
+      }
 
       // CA par constructeur : MÉLANGE BC dérivé + déclaratif (ADR-P02/P10). Le déclaratif d'un partenaire =
       // caDeclaredXof s'il est renseigné, sinon le réalisé booking YTD du plan d'affaires (repli sur la donnée
@@ -910,7 +922,11 @@ async function recomputeCore(db, only) {
       // CA scopé à l'EXERCICE COURANT (année civile du n° BC, ADR-P16) : un BC d'un millésime antérieur ne
       // gonfle plus le « CA YTD ». Le montant écarté (autres millésimes) est remonté (offExerciseXof), jamais ignoré.
       const exerciseYear = Number(String(asOf).slice(0, 4)) || new Date().getFullYear();
-      const { partners: caPartners, unmapped, offExerciseXof, offExerciseCount } = revenueByPartner(bcLines, partnerMap, { year: exerciseYear });
+      // Exercice FISCAL par constructeur (fiscalStartMonth 2-12, audit partenariats axe 3 — saisi mais
+      // inappliqué jusqu'ici) + ALIAS fournisseurs (resolveSupplier, MÊME autorité que le SOA, ADR-046).
+      const fiscalStartByPartner = {};
+      for (const p of parPartners) { const m = Math.trunc(Number(p.fiscalStartMonth)) || 0; if (m >= 2 && m <= 12) fiscalStartByPartner[p.id] = m; }
+      const { partners: caPartners, unmapped, offExerciseXof, offExerciseCount } = revenueByPartner(bcLines, partnerMap, { year: exerciseYear, asOf, fiscalStartByPartner, resolveSupplier });
       const declaredByPartner = {};
       for (const p of parPartners) {
         const d = p.caDeclaredXof != null ? p.caDeclaredXof : (p.businessPlan && p.businessPlan.bookingYtd);
@@ -920,8 +936,13 @@ async function recomputeCore(db, only) {
       const byPartner = blendRevenue(caPartners, declaredByPartner).map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId }));
       const totalXof = byPartner.reduce((s, g) => s + g.revenueXof, 0);
       const bcXof = byPartner.reduce((s, g) => s + (g.source === "bc" ? g.revenueXof : 0), 0); // part réellement dérivée des BC
-      const declaredXof = totalXof - bcXof; // le reste vient du déclaratif (repli)
-      w.push({ path: "summaries/par_ca", data: { asOf, exerciseYear, byPartner, unmapped: unmapped.slice(0, 20), totalXof, bcXof, declaredXof, offExerciseXof, offExerciseCount, ...stamp } });
+      const declaredXof = totalXof - bcXof; // part RETENUE du déclaratif (repli quand aucun BC ne prime)
+      // Σ des déclarés SAISIS (indépendant du blend) : l'écart « BC vs déclaré » par partenaire (byPartner
+      // porte bcXof/declaredXof par ligne) et son total se lisent sans confondre composition et comparaison.
+      const declaredRawXof = Object.values(declaredByPartner).reduce((s, n) => s + Math.round(n), 0);
+      // unmappedCount = VRAI compte (la liste, elle, reste bornée à 20 pour le payload) — le front affichait
+      // un compte plafonné à 20 même avec 50 fournisseurs non rattachés (audit axe 2).
+      w.push({ path: "summaries/par_ca", data: { asOf, exerciseYear, byPartner, unmapped: unmapped.slice(0, 20), unmappedCount: unmapped.length, totalXof, bcXof, declaredXof, declaredRawXof, offExerciseXof, offExerciseCount, ...stamp } });
 
       // Historisation quotidienne du CA (PA+ Lot 2, patron par_quotasHistory) : total + ventilation BC/déclaré,
       // pour la tendance. CONFIDENTIEL (préfixe par_ca ⇒ verrou `rentabilite` par les rules, comme par_ca).
@@ -931,14 +952,26 @@ async function recomputeCore(db, only) {
       caDays.sort((a, b) => (a.date < b.date ? -1 : 1));
       w.push({ path: "summaries/par_caHistory", data: { days: caDays.slice(-90), ...stamp } });
 
+      // Pipeline SOURCÉ PARTENAIRE (PAR-L1) : opps taguées `parPartnerId` (dédupliquées — même population
+      // `opps` que summaries/pipeline) → ouvert + pondéré (MÊME autorité projectionWeight/tiers que la
+      // prévision) + gagné de l'exercice. Contrepartie MESURÉE du pipelineYtd déclaré du plan d'affaires.
+      const { pipelineByPartner } = require("../domain/parPipeline");
+      const pp = pipelineByPartner(opps, { year: exerciseYear, tiers });
+      w.push({ path: "summaries/par_pipeline", data: { asOf, exerciseYear,
+        partners: pp.partners.map((g) => ({ ...g, name: nameById[g.partnerId] || g.partnerId })),
+        totalOpenXof: pp.totalOpenXof, totalWonXof: pp.totalWonXof, ...stamp } });
+
       // Quotas de certification (couverture par exigence) + statut de conformité par partenaire (ADR-P04).
       const certsByPartner = {}; for (const c of parCertifs) { (certsByPartner[c.partnerId] = certsByPartner[c.partnerId] || []).push(c); }
       const quotas = coverageAll(parPartners, certsByPartner);
       w.push({ path: "summaries/par_quotas", data: { asOf, partners: quotas, ...stamp } });
 
-      // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0).
+      // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0)
+      // + renouvellement du PARTENARIAT lui-même (renewalDate du référentiel, J-90/60/30 — PAR-P4).
       const watch = certRenewalWatch(parCertifs, asOf);
-      w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length, ...stamp } });
+      const partnerWatch = partnerRenewalWatch(parPartners, asOf);
+      w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length,
+        partnerRenewals: partnerWatch.slice(0, 50), partnerRenewalCounts: watchCounts(partnerWatch), partnerRenewalTotal: partnerWatch.length, ...stamp } });
 
       // Relances d'assignation : assignations en retard ou dans une fenêtre de relance (J-30/14/7).
       const relances = assignmentWatch(parAssigns, asOf);
@@ -951,7 +984,7 @@ async function recomputeCore(db, only) {
       // au fil Actualité (comme newsFacturation/…). Contrairement à maintenance, le module CONTRIBUE au fil.
       const { parNews } = require("../domain/parNews");
       const renouv = { counts: watchCounts(watch), total: watch.length };
-      const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts } });
+      const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts }, renouvellementsPartenariat: { items: partnerWatch } });
       w.push({ path: "summaries/par_news", data: { asOf, ...news, ...stamp } });
 
       // Historisation quotidienne de la couverture des quotas (tendance, Lot P3) — patron qualityHistory :
@@ -992,6 +1025,27 @@ async function recomputeCore(db, only) {
     if (++n % 400 === 0) { await batch.commit(); batch = db.batch(); }
   }
   await batch.commit();
+
+  // Purge des summaries de MARGE de millésimes DISPARUS : `periods` dérive des commandes présentes —
+  // quand un millésime disparaît (ré-import, annulations), son doc rentabilite_/xxxMargin_ n'était plus
+  // réécrit mais restait LISIBLE (marge périmée, confidentielle, hors sélecteur de périodes). On ne purge
+  // que les familles recalculées dans CE recompute (mêmes gates que l'écriture — un recompute scopé ne
+  // détruit pas ce qu'il n'a pas régénéré). Lecture par IDs seuls (select() vide), jamais les contenus.
+  {
+    const MARGIN_PREFIX_SCOPE = { rentabilite: "rentabilite", overviewMargin: "overview", clientsMargin: "clients", domainesMargin: "domaines" };
+    const validPeriods = new Set(periods);
+    const ids = (await db.collection("summaries").select().get()).docs.map((d) => d.id);
+    let purge = db.batch(), p = 0;
+    for (const id of ids) {
+      const m = id.match(/^([A-Za-z]+)_(\d+)$/); // suffixe numérique = millésime ("all" jamais purgé)
+      if (!m) continue;
+      const scope = MARGIN_PREFIX_SCOPE[m[1]];
+      if (!scope || !want(scope) || validPeriods.has(m[2])) continue;
+      purge.delete(db.doc(`summaries/${id}`));
+      if (++p % 400 === 0) { await purge.commit(); purge = db.batch(); }
+    }
+    if (p % 400 !== 0) await purge.commit();
+  }
 
   // Purge des chunks de commandes ORPHELINS (base ET marge) si le nombre de chunks a diminué depuis
   // le dernier recompute, sinon d'anciennes lignes resteraient lues par le front.

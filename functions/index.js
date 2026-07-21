@@ -221,7 +221,10 @@ async function recomputeSummaries(only) {
 // nourrit que les summaries réellement dérivés des opportunités — pipeline (+ funnel), ams, atterrissage
 // (le pondéré nourrit le projeté CAS), overview (certitudes/conversion), news, alerts, dataQuality (compte
 // + « gagnées sans FP/P&L ») — et saute commandes/backlog/rentabilité/clients/domaines/fournisseurs/cash.
-const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality"];
+// + "partenariats" : le pipeline SOURCÉ PARTENAIRE (summaries/par_pipeline, PAR-L1) dérive des opps
+// taguées parPartnerId — sans ce scope, taguer/gagner une opp laisserait le sourcé figé. Coût nul drapeau
+// éteint (le bloc par_ d'aggregate sort immédiatement).
+const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "alerts", "dataQuality", "partenariats"];
 
 // MAIS une opp GAGNÉE (stage 6) dont le N° FP matche une ligne P&L RÉCONCILIE la commande dans
 // mergeCommandes (domain/commandes.js) — c'est un AGRÉGAT, pas une jointure d'affichage : elle écrase
@@ -253,6 +256,23 @@ async function requestRecompute(scope) {
     await db.doc("config/recomputeRequest").set({ scope: scope || null, ts: FieldValue.serverTimestamp() });
   } else {
     await recomputeSummaries(scope); // repli : recompute synchrone (comportement par défaut, inchangé)
+  }
+}
+
+// Recompute SYNCHRONE best-effort pour les mutations du CARNET (audit backlog, constat H1) : en prod le
+// canal DIFFÉRÉ est inerte (RECOMPUTE_REGION posé côté runtime mais trigger onRecomputeRequest absent du
+// déploiement) → une demande déposée n'est JAMAIS traitée et backlog_fy/commandesRows/alertes contredisent
+// l'action (« Solder ») pendant des heures, alors que le toast promet « recalcul lancé ». On force donc le
+// recompute DANS le chemin de réponse (verrou/coalescing inclus), BEST-EFFORT : la donnée est DÉJÀ écrite,
+// un échec du recompute est tracé (opsLog), jamais remonté en faux « internal » (patron refreshParBestEffort,
+// handlers/partenariats.js). Si le différé est un jour réellement déployé, repasser ces sites à
+// requestRecompute (ADR-060).
+async function refreshNowBestEffort(action, scope) {
+  const t0 = Date.now();
+  try { await recomputeSummaries(scope); }
+  catch (e) {
+    logger.error("refreshNowBestEffort : recompute en échec (mutation déjà écrite)", { action, message: e && e.message });
+    await logOps({ kind: "recompute", trigger: action, status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
   }
 }
 
@@ -571,16 +591,32 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
   const fp = fpKey(req.data?.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const milestones = normalizeMilestones(req.data?.milestones);
+  // GARDE Σ jalons ≤ CAS/RAF (audit backlog M3) : la règle « Σ = RAF » n'était tenue qu'à l'ÉDITEUR — un
+  // appel direct du callable persistait des jalons arbitraires qui gonflaient billingTrend/relancesJalons.
+  // Bornes serveur : jamais au-delà du CAS de la commande, ni du RAF curaté s'il existe (tolérance 1 XOF
+  // d'arrondi). Commande introuvable (jalons posés en avance d'un import) : tolérée, le recompute écarte
+  // déjà les jalons sans commande active.
+  {
+    const ordSnap = await db.doc(`orders/${safeId(fp)}`).get();
+    if (ordSnap.exists) {
+      const o = ordSnap.data() || {};
+      const total = milestones.reduce((s, m) => s + m.amount, 0);
+      const cas = Number(o.cas);
+      if (Number.isFinite(cas) && cas > 0 && total > cas + 1) throw new HttpsError("invalid-argument", `Σ jalons (${Math.round(total)}) supérieure au CAS de la commande (${Math.round(cas)})`);
+      const raf = Number(o.raf);
+      if (o.raf != null && Number.isFinite(raf) && raf >= 0 && total > raf + 1) throw new HttpsError("invalid-argument", `Σ jalons (${Math.round(total)}) supérieure au RAF curaté (${Math.round(raf)}) — réajustez le RAF d'abord`);
+    }
+  }
   await db.doc(`billingMilestones/${safeId(fp)}`).set({ fp, milestones, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "billing_milestones", module: "backlog",
-    entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0) }, ts: FieldValue.serverTimestamp(),
+    entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0), firstDate: milestones[0] ? milestones[0].date : null, lastDate: milestones.length ? milestones[milestones.length - 1].date : null }, ts: FieldValue.serverTimestamp(),
   });
   // 'atterrissage' (report N+1 + tendance de facturation) ET 'news' : sinon l'Actualité (retard de
   // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
   // 'relances' inclus (cf. audit cycle de vie) : les jalons pilotent summaries/relancesJalons (jalons échus
   // non facturés) ; sans lui, éditer les jalons ne rafraîchissait pas le plan de relance sur échéances.
-  await requestRecompute(["atterrissage", "news", "relances"]);
+  await refreshNowBestEffort("setBillingMilestones", ["atterrissage", "news", "relances"]);
   return { ok: true, fp, milestones };
 });
 
@@ -1121,7 +1157,21 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   try { parsed = await parseBuffer(buf, filename); }
   catch (e) { throw new HttpsError(e.code || "invalid-argument", e.message || "fichier illisible"); }
   const { kinds, writes, files, rowsIn, rowsOk, rowsSkipped } = parsed;
-  if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
+  // Refus ACTIONNABLE (constat terrain : « l'import Commandes refuse toujours ») : nommer ce que le fichier
+  // porte RÉELLEMENT (onglets + premiers en-têtes, joints par parseBuffer) et les signatures ATTENDUES.
+  // Cas fréquent : un EXPORT de l'écran Commandes (colonnes FP/Client/CAS/RAF d'affichage) rejoué en
+  // entrée — ce n'est PAS la source P&L (« Opp ID » + « CAS » + « RAF Total ») ; les exports de l'app ne
+  // sont pas des sources d'import.
+  if (!kinds.length) {
+    const seen = (files || [])
+      .flatMap((f) => (f.sheets || []).map((s) => `« ${s.sheet} » (${(s.headers || []).join(" · ") || "sans en-têtes"})`))
+      .slice(0, 4).join(" ; ");
+    throw new HttpsError("failed-precondition",
+      `aucune source reconnue dans le fichier${seen ? ` — onglets vus : ${seen}` : ""}. Sources attendues : `
+      + "P&L (en-têtes « Opp ID », « CAS », « RAF Total »), LIVE pipeline (« IdC » ou « Statut » + « D Prev »), "
+      + "Facturation DF (« Numéro » + « Montant HT »), PO List BC (« N° BC » + « Fournisseur »), ou une Fiche d'affaire. "
+      + "NB : un fichier EXPORTÉ depuis un écran de l'application n'est pas ré-importable — repartez du classeur source.");
+  }
 
   // LIVE écarté du canal delta (cf. stripLiveOpps) : les opportunités ne sont écrites QUE par la synchro
   // Sales_DATA (staling des fantômes) → un ré-import delta ne peut plus créer de doublon de pipeline.
@@ -1153,7 +1203,7 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   // client), les agrégats se rafraîchissent via onRecomputeRequest. Un échec est journalisé, pas remonté.
   try {
     if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-    await requestRecompute();
+    await recomputeSummaries(); // SYNCHRONE (différé inerte en prod, cf. refreshNowBestEffort) — le try englobant reste best-effort
   } catch (e) {
     logger.error("importDelta : post-traitement (fisc/recompute) échoué — données importées, agrégats au prochain recompute", { message: e && e.message, stack: e && e.stack });
   }
@@ -1200,7 +1250,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds:
     uid: req.auth.uid, action: "set_invoice_fp", module: "facturation", entity: "invoice", entityId: id,
     detail: { fp }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setInvoiceFp");
   return { ok: true, id, fp };
 });
 
@@ -1240,7 +1290,7 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setFpAlias");
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
@@ -1272,7 +1322,7 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setDcAlias");
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
@@ -1586,7 +1636,7 @@ exports.aiSuggestClientMerges = onCallG(
 // Consultants (Lot 11) + Plan de charge / staffing (Lot 12) EXTRAITS dans handlers/staffing.js
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom).
 const { createStaffing } = require("./handlers/staffing");
-const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId });
+const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow: recomputeSummaries, logOps });
 exports.upsertConsultant = _staffing.upsertConsultant;
 exports.deleteConsultant = _staffing.deleteConsultant;
 exports.listConsultants = _staffing.listConsultants;
@@ -1637,6 +1687,7 @@ exports.generateParActionPlan = _partenariats.generateParActionPlan;
 exports.generateParQbr = _partenariats.generateParQbr;
 exports.suggestParPartnerMap = _partenariats.suggestParPartnerMap;
 exports.importParCertifications = _partenariats.importParCertifications;
+exports.importParCertificationsFile = _partenariats.importParCertificationsFile;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
@@ -1720,7 +1771,7 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
 // handlers/timesheets.js (patron R3). CRA mensuel → TACE/occupation réels, tendance, auto-CRA ClickUp,
 // P&L par ressource et pré-facturation. Deps injectées ; exports déclarés ici (déploiement par nom).
 const { createTimesheets } = require("./handlers/timesheets");
-const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM });
+const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow: recomputeSummaries, logOps });
 exports.upsertTimesheet = _timesheets.upsertTimesheet;
 exports.deleteTimesheet = _timesheets.deleteTimesheet;
 exports.timesheetKpis = _timesheets.timesheetKpis;
@@ -2185,7 +2236,7 @@ exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIEN
   return { ok: true, id: ref.id, approverUid };
 });
 
-exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.decideApproval = onCallG("decideApproval", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   // DÉCIDER ≠ ÉDITER une opp : droit LECTURE `pipeline` suffit (le manager approbateur peut n'avoir que
   // la lecture). QUI peut décider reste borné dur ci-dessous (approbateur désigné OU direction) → aucune
   // fuite. Corrige le workflow d'approbation bloqué quand le décideur n'a pas `pipeline:write` (audit).
@@ -2204,6 +2255,27 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeco
   if (cur.requestedBy === req.auth.uid && !isDir) throw new HttpsError("permission-denied", "un demandeur ne peut pas approuver sa propre demande");
   await ref.set({ status: decision, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), decisionNote: String(req.data?.note || "").trim().slice(0, 1000) }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "approval_decide", module: "pipeline", entity: "approval", entityId: id, detail: { decision, entityId: cur.entityId }, ts: FieldValue.serverTimestamp() });
+  // EFFET ASTREINTE APPLIQUÉ EN SYNCHRONE (audit rentabilité H2) : le trigger onMntApprovalDecided est
+  // env-gaté (RECOMPUTE_REGION) et ABSENT du déploiement — sans lui, une astreinte approuvée restait
+  // « en_attente » POUR TOUJOURS : sa charge n'était jamais comptée (mntContratPnl, marge de livraison,
+  // mnt_risque) → marge SURESTIMÉE en silence. Best-effort (la décision est déjà écrite) ; idempotent
+  // (on ne mute que si l'astreinte n'est pas déjà décidée — le trigger, s'il est un jour déployé,
+  // réécrira les mêmes valeurs). L'effet CONTRAT (renouvellement/résiliation) reste porté par le trigger.
+  if (cur.entityType === "astreinte" && cur.entityId) {
+    try {
+      const { isMntEnabled } = require("./domain/mntFeature");
+      if (isMntEnabled((await db.doc("config/mntFeature").get()).data())) {
+        const statut = decision === "approved" ? "validee" : "rejetee";
+        const aRef = db.doc(`mnt_astreintes/${cur.entityId}`);
+        const aSnap = await aRef.get();
+        if (aSnap.exists && !["validee", "rejetee"].includes(String((aSnap.data() || {}).statut))) {
+          await aRef.set({ statut, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          await db.collection("auditLog").add({ uid: req.auth.uid, action: "astreinte_decide", module: "maintenance", entity: "astreinte", entityId: cur.entityId, detail: { statut, approvalId: id }, ts: FieldValue.serverTimestamp() });
+          if (statut === "validee") await refreshNowBestEffort("decideApproval", ["maintenance"]); // la charge validée pèse dans la marge
+        }
+      }
+    } catch (e) { logger.error("decideApproval : effet astreinte en échec (décision enregistrée)", { id, message: e && e.message }); }
+  }
   await fireOutbound("approval_decided", { approvalId: id, decision, kind: cur.kind, entityId: cur.entityId, amount: cur.amount ?? null }); // Lot 7b
   return { ok: true, id, status: decision };
 });
@@ -2690,7 +2762,7 @@ exports.runAutomations = _automations.runAutomations;
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
 // pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
 const { createSanitize } = require("./handlers/sanitize");
-const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
+const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow: recomputeSummaries, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
 exports.deleteRecords = _sanitize.deleteRecords;
 exports.setCancellation = _sanitize.setCancellation;
 exports.purgeCollections = _sanitize.purgeCollections;
@@ -2758,7 +2830,9 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeo
   await db.doc(`projectSheetsMargin/${id}`).set({ _id: id, fp, saleTotal: m.saleTotal, costTotal: m.costTotal, margin: m.margin, marginPct: m.marginPct }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_fiche", module: "rentabilite", entity: "projectSheet", entityId: id,
-    detail: { fp, saleTotal: m.saleTotal, costTotal: m.costTotal }, ts: FieldValue.serverTimestamp(),
+    // DRAPEAUX, pas de montants : l'auditLog se lit au droit « habilitations » (⊉ « rentabilite ») —
+    // y écrire vente/revient en clair contournait le cloisonnement de la marge (audit rentabilité).
+    detail: { fp, saleChanged: provided(d.saleTotal), costChanged: provided(d.costTotal) }, ts: FieldValue.serverTimestamp(),
   });
   await requestRecompute(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
   return { ok: true, fp };
@@ -2833,6 +2907,15 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     if (!Number.isFinite(rf) || rf < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
     patch.raf = rf;
   }
+  // RAF ≤ CAS (audit backlog M1) : un RAF supérieur au montant signé n'a pas de sens comptable —
+  // « intégrer » avec un RAF de 500 M sur un CAS de 10 M gonflait backlog_fy, seulement signalé a
+  // posteriori par l'alerte raf_incoherent. Comparé au CAS EFFECTIF après patch (patché sinon existant).
+  {
+    const effCas = patch.cas != null ? patch.cas : Number((snap.data() || {}).cas);
+    if (patch.raf != null && Number.isFinite(effCas) && effCas > 0 && patch.raf > effCas) {
+      throw new HttpsError("invalid-argument", `RAF (${Math.round(patch.raf)}) supérieur au CAS (${Math.round(effCas)}) — corrigez le CAS d'abord si la commande a été révisée à la hausse`);
+    }
+  }
   // Champs descriptifs éditables (source P&L/manuelle). Sur une ligne opp_won/fiche, client/am sont
   // gouvernés à la source → ré-écrasés au recompute ; l'UI ne propose l'édition que sur pnl/manuel.
   if (d.client !== undefined) patch.client = String(d.client || "").trim();
@@ -2872,10 +2955,10 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     throw new HttpsError("invalid-argument", "rien à modifier (année, CAS, RAF, client/AM/BU ou nouveau FP requis)");
   }
   await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
+    uid: req.auth.uid, action: "patch_order", module: "import", entity: "order", entityId: safeId(fp), // module RBAC réel de la mutation (audit backlog B1 — « overview » faussait le filtrage du journal)
     detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null, client: patch.client ?? null, am: patch.am ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("patchOrder");
   return { ok: true, fp: newFp || fp };
 });
 
@@ -2894,6 +2977,14 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   if (!fp) throw new HttpsError("invalid-argument", "N° FP requis (format FP/AAAA/N)");
   const cas = Number(d.cas);
   if (!Number.isFinite(cas) || cas <= 0) throw new HttpsError("invalid-argument", "CAS (> 0) requis");
+  // RAF explicite : VALIDÉ (audit backlog M2 — l'ancien `Math.max(Number(d.raf) || 0, 0)` coerçait un RAF
+  // non numérique en 0 : la commande naissait « soldée » sans erreur). Absent/vide = RAF plein (= CAS).
+  let rafIn = null;
+  if (d.raf != null && String(d.raf) !== "") {
+    rafIn = Number(d.raf);
+    if (!Number.isFinite(rafIn) || rafIn < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
+    if (rafIn > cas) throw new HttpsError("invalid-argument", "RAF supérieur au CAS");
+  }
   const id = safeId(fp);
   const ref = db.doc(`orders/${id}`);
   if ((await ref.get()).exists) throw new HttpsError("already-exists", "une commande existe déjà pour ce FP — utilisez la correction (CAS/RAF/année)");
@@ -2906,7 +2997,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
     if (!y.ok) throw new HttpsError("invalid-argument", "année de PO invalide");
     yearPo = y.value;
   }
-  const raf = d.raf != null && String(d.raf) !== "" ? Math.max(Number(d.raf) || 0, 0) : null; // null → RAF dérivé (CAS − facturé)
+  const raf = rafIn; // validé plus haut ; null → RAF dérivé (CAS − facturé)
   const order = {
     _id: id, fp,
     client: String(d.client || "").trim(),
@@ -2922,14 +3013,14 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   };
   await ref.set(order, { merge: true });
   await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "create_order", module: "overview", entity: "order", entityId: id,
+    uid: req.auth.uid, action: "create_order", module: "import", entity: "order", entityId: id,
     detail: { fp, cas, source: "manuel" }, ts: FieldValue.serverTimestamp(),
   });
   // Recompute BEST-EFFORT (« n'échoue jamais l'action appelante ») : la commande EST créée (intention de
   // l'utilisateur, écrite ci-dessus). Un échec/lenteur du recompute — verrou de bail, transitoire — NE DOIT
   // PAS remonter en faux « internal » et pousser l'utilisateur à recliquer (→ already-exists). Le carnet se
   // rafraîchit au prochain recompute (planifié 05:00 ou action suivante). L'échec reste tracé (logger/opsLog).
-  try { await requestRecompute(); } catch (e) { logger.error("createOrder : recompute en échec (commande créée quand même)", { fp, msg: e && e.message }); }
+  await refreshNowBestEffort("createOrder");
   return { ok: true, fp };
 });
 
@@ -3010,7 +3101,7 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
     uid: req.auth.uid, action: "generate_from_invoices", module: "import", entity: "order", entityId: "*",
     detail: { orders: createdOrders, opps: createdOpps, all: wantAll, skippedNoFp, skippedExisting }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("generateFromInvoices");
   return { ok: true, created: { orders: createdOrders, opps: createdOpps }, skippedNoFp, skippedExisting, plan };
 });
 
@@ -3071,7 +3162,7 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: pm ? "assign_pm" : "unassign_pm", module: "import", entity: "order", entityId: id,
     detail: { fp, pm: pm || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setOrderPm");
   return { ok: true, fp, pm: pm || null };
 });
 
@@ -3083,7 +3174,7 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
 //    persistante (overlay config/orderCasOverride) qui PRIME sur P&L/fiche et SURVIT aux ré-imports
 //    (comme l'affectation PM / les alias FP). Gouverné « import ».
 //  • clear                     : retire la surcharge (la commande reprend son CAS P&L/opp/fiche).
-exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const { oppWeighted } = require("./domain/mutations");
@@ -3122,7 +3213,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
     await requireWrite(req, "import");
     await db.doc("config/orderCasOverride").set({ map: { [id]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_clear", module: "import", entity: "order", entityId: id, detail: { fp }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute();
+    await refreshNowBestEffort("syncOrderAmount");
     return { ok: true, fp, direction, cas: null };
   }
 
@@ -3143,7 +3234,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
     if (!Number.isFinite(cas) || cas < 0) throw new HttpsError("invalid-argument", "montant de la commande invalide");
     await db.doc(`opportunities/${opp.id}`).set({ amount: cas, weighted: oppWeighted(cas, opp.probability || 0), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_amount_to_opp", module: "pipeline", entity: "opportunity", entityId: opp.id, detail: { fp, cas }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute();
+    await refreshNowBestEffort("syncOrderAmount");
     return { ok: true, fp, direction, oppId: opp.id, cas };
   }
 
@@ -3153,7 +3244,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
   if (!(amount > 0)) throw new HttpsError("failed-precondition", "l'opportunité liée n'a pas de montant exploitable");
   await db.doc("config/orderCasOverride").set({ map: { [id]: amount }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_set", module: "import", entity: "order", entityId: id, detail: { fp, cas: amount, oppId: opp.id }, ts: FieldValue.serverTimestamp() });
-  await requestRecompute();
+  await refreshNowBestEffort("syncOrderAmount");
   return { ok: true, fp, direction, oppId: opp.id, cas: amount };
 });
 
@@ -3338,11 +3429,16 @@ exports.setMntCalendar = onCallG("setMntCalendar", { memoryMiB: 256, timeoutSeco
 // setMntFeature. ÉTEINT (défaut) ⇒ l'ERP est STRICTEMENT celui d'avant (aucune surface par_*). Édité en
 // Habilitations, DIRECTION uniquement. Écriture Admin SDK (les rules gardent config/parFeature en
 // write:false). Audité. Le module s'allume/s'éteint sans redéploiement.
-exports.setParFeature = onCallG("setParFeature", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.setParFeature = onCallG("setParFeature", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const enabled = req.data?.enabled === true;
   await db.doc("config/parFeature").set({ enabled, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_feature", module: "habilitations", entity: "config", entityId: "parFeature", detail: { enabled }, ts: FieldValue.serverTimestamp() });
+  // À l'ALLUMAGE : recompute synchrone scopé pour matérialiser les summaries par_* immédiatement — sinon
+  // le module s'ouvre sur des cartes vides (ou figées d'une activation passée) jusqu'au recompute nocturne.
+  // BEST-EFFORT : le drapeau est DÉJÀ posé, un échec du recompute ne doit pas transformer l'activation en
+  // erreur. À l'extinction, rien à recalculer : le bloc par_ d'aggregate est gaté par le drapeau.
+  if (enabled) { try { await recomputeSummaries(["partenariats"]); } catch (e) { await logOps({ kind: "recompute", action: "setParFeature", status: "error", error: e?.message || String(e) }); } }
   return { ok: true, enabled };
 });
 
@@ -4788,7 +4884,8 @@ exports.setCostModel = onCallG("setCostModel", { memoryMiB: 256, timeoutSeconds:
   const r = Number(req.data?.structureRate);
   if (!Number.isFinite(r) || r < 0 || r > 1) throw new HttpsError("invalid-argument", "structureRate ∈ [0..1] requis");
   await db.doc("config/costModel").set({ structureRate: r, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_cost_model", module: "rentabilite", entity: "config", entityId: "costModel", detail: { structureRate: r }, ts: FieldValue.serverTimestamp() });
+  // Drapeau, pas la valeur : le taux de structure est une donnée de MARGE (auditLog lisible « habilitations » ⊉ « rentabilite »).
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_cost_model", module: "rentabilite", entity: "config", entityId: "costModel", detail: { defined: r > 0 }, ts: FieldValue.serverTimestamp() });
   return { ok: true, structureRate: r };
 });
 

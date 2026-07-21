@@ -325,6 +325,45 @@ describe("reporting — facturation/rentabilité/entités", () => {
     const f = facturation(invoices);
     expect(r.perspectives.facture.base).toBe(f.total); // 1000 — assiette Facturé cohérente avec la vue Facturation
   });
+  it("tendance de marge mensuelle : Σ des mois = mb Facturé, plafond CAS appliqué chronologiquement", () => {
+    const orders = [{ fp: "FP/1", client: "A", bu: "ICT", am: "X", cas: 1000, mb: 200 }]; // taux 20 %
+    const invoices = [
+      { fp: "FP/1", amountHt: 600, date: "2026-01-10" }, // 600 × 20 % = 120
+      { fp: "FP/1", amountHt: 600, date: "2026-02-10" }, // plafond CAS : min(1200,1000)−600 = 400 → 80
+      { fp: "FP/1", amountHt: 300, date: "2026-03-10" }, // au-delà du CAS → 0 (plus de marge reconnue)
+      { fp: "FP/1", amountHt: 100 },                     // sans date → bucket "?" (déjà plafonné → 0)
+    ];
+    const r = rentabilite(orders, invoices, orders);
+    expect(r.monthly["2026-01"]).toBeCloseTo(120, 6);
+    expect(r.monthly["2026-02"]).toBeCloseTo(80, 6);
+    expect(r.monthly["2026-03"]).toBeCloseTo(0, 6);
+    const total = Object.values(r.monthly).reduce((s, v) => s + v, 0);
+    expect(total).toBeCloseTo(r.perspectives.facture.mb, 6); // parité stricte avec la perspective Facturé
+  });
+  it("marge par PM (perspective Commande) : agrégat cas/mb/pmb, repli « — » sans PM", () => {
+    const orders = [
+      { fp: "FP/1", client: "A", bu: "ICT", am: "X", pm: "KOFFI", cas: 1000, mb: 200 },
+      { fp: "FP/2", client: "B", bu: "ICT", am: "Y", pm: "KOFFI", cas: 500, mb: 50 },
+      { fp: "FP/3", client: "C", bu: "ICT", am: "Z", cas: 400, mb: 40 }, // sans PM → « — »
+    ];
+    const r = rentabilite(orders);
+    const koffi = r.byPm.find((p) => p.pm === "KOFFI");
+    expect(koffi.cas).toBe(1500);
+    expect(koffi.mb).toBe(250);
+    expect(koffi.pmb).toBeCloseTo(250 / 1500, 6);
+    expect(r.byPm.find((p) => p.pm === "—").cas).toBe(400);
+    expect(r.byPm[0].pm).toBe("KOFFI"); // trié CAS décroissant
+  });
+  it("marge estimée (mbSource opp) marquée sur la marge de livraison", () => {
+    const { deliveryMargin } = require("../domain/deliveryMargin");
+    const rows = deliveryMargin(
+      [{ fp: "FP/2026/1", client: "A", bu: "ICT", am: "X", cas: 1000, facture: 0 }, { fp: "FP/2026/2", client: "B", bu: "ICT", am: "Y", cas: 500, facture: 0 }],
+      [{ fp: "FP/2026/1", mb: 200, costTotal: 800, mbSource: "opp" }, { fp: "FP/2026/2", mb: 100, costTotal: 400 }],
+      [], true, {},
+    );
+    expect(rows.find((r) => r.fp === "FP/2026/1").mbEstimated).toBe(true);
+    expect(rows.find((r) => r.fp === "FP/2026/2").mbEstimated).toBe(false);
+  });
   it("byEntity client agrège cas/facturé/backlog", () => {
     const rows = byEntity(ORDERS, INVOICES, (x) => x.client);
     const acme = rows.find((r) => r.key === "ACME");

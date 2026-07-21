@@ -33,6 +33,7 @@ export type OppInput = {
   nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null;
   forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[];
   leadSource?: string; competitor?: string;
+  parPartnerId?: string; // constructeur sourceur (module Partenariats, PAR-L1)
 };
 // LIGNES PRODUIT / CPQ-lite (Lot 8) — quand des lignes existent, le montant de l'opp est DÉRIVÉ.
 export type OppLine = { product: string; qty: number; unitPrice: number; discountPct: number; lineTotal?: number };
@@ -54,7 +55,7 @@ export async function deleteOpportunity(id: string) {
 
 /** Corrige une opportunité EXISTANTE (importée ou saisie) sans changer sa source : N° FP, D Prev,
  *  montant, étape, AM, BU. Comble le cas « opp gagnée importée sans N° FP ». onCall : recalcule. */
-export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string }) {
+export async function patchOpportunity(data: { id: string; fp?: string; closingDate?: string | null; amount?: number; stage?: number; am?: string; bu?: string; probability?: number; nextStep?: string; nextStepDate?: string | null; lostReason?: string; ownerUid?: string | null; forecastCategory?: ForecastCategory | null; custom?: Record<string, unknown>; lines?: OppLine[]; leadSource?: string; competitor?: string; parPartnerId?: string }) {
   // Timeout client aligné sur le serveur (timeoutSeconds: 120) : l'écriture déclenche un recompute
   // synchrone (repli) qui peut dépasser le défaut de 70 s → faux « internal » alors que le patch a réussi.
   await httpsCallable(functions, "patchOpportunity", { timeout: 120_000 })(data);
@@ -594,7 +595,7 @@ export async function setOrderPm(fp: string, pm: string) {
  *  - "toOrder" : le montant de l'opp devient le CAS de la commande (surcharge persistante) ;
  *  - "clear"   : retire la surcharge (la commande reprend son CAS P&L/opp/fiche). */
 export async function syncOrderAmount(fp: string, direction: "toOpp" | "toOrder" | "clear", cas?: number) {
-  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 120_000 })({ fp, direction, cas });
+  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 300_000 })({ fp, direction, cas });
   return res.data as { ok: boolean; fp: string; direction: string; oppId?: string; cas: number | null };
 }
 export type AmountPeek = {
@@ -604,7 +605,7 @@ export type AmountPeek = {
 };
 /** Lecture seule : montant de l'opportunité liée (même N° FP) + état, pour comparer avant de synchroniser. */
 export async function peekOrderAmount(fp: string): Promise<AmountPeek> {
-  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 120_000 })({ fp, direction: "peek" });
+  const res = await httpsCallable(functions, "syncOrderAmount", { timeout: 300_000 })({ fp, direction: "peek" });
   return res.data as AmountPeek;
 }
 
@@ -1025,7 +1026,8 @@ export async function callExportReport(period: string) {
 // masquage serveur des champs confidentiels (le PM / rôle sans « rentabilité » les reçoit OMIS).
 export type FicheLine = {
   id?: string | null; ordre?: number; description: string; fournisseur: string;
-  type_charge: string; devise: "XOF" | "USD" | "EUR"; montant: number; numero_bc?: string | null;
+  // `montant` OMIS par le serveur quand la fiche est masquée (pmMasked) — donnée de marge dérivable.
+  type_charge: string; devise: "XOF" | "USD" | "EUR"; montant?: number; numero_bc?: string | null;
 };
 export type FicheFinancials = {
   lignes_xof: number; prix_de_revient_ht: number; prix_vente_ht: number;
