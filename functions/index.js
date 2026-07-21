@@ -1,8 +1,17 @@
 // Cloud Functions 2nd gen — Node.js 20 (codebase unique). BUILD_KIT §9, §10, §11, §14.
-const { onObjectFinalized } = require("firebase-functions/v2/storage");
-const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
-const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onObjectFinalized: _onObjectFinalized } = require("firebase-functions/v2/storage");
+const { onCall: _onCall, onRequest: _onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule: _onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions/v2");
+// Traduction CENTRALE `memoryMiB` → `memory` (lib/fnopts) : l'option maison `memoryMiB` était IGNORÉE
+// par firebase-functions v2 (availableMemoryMb null) — toutes les fonctions tournaient au défaut 256 Mio,
+// et importDelta (2 Gio voulus) mourait en OOM (503 sans CORS) sur tout fichier réel. Les builders sont
+// enveloppés SOUS LEUR NOM d'origine : les ~175 sites gardent leur forme, la mémoire est enfin appliquée.
+const { withMemory } = require("./lib/fnopts");
+const onObjectFinalized = (opts, handler) => _onObjectFinalized(withMemory(opts), handler);
+const onCall = (opts, handler) => (typeof opts === "function" ? _onCall(opts) : _onCall(withMemory(opts), handler));
+const onRequest = (opts, handler) => (typeof opts === "function" ? _onRequest(opts) : _onRequest(withMemory(opts), handler));
+const onSchedule = (opts, handler) => _onSchedule(typeof opts === "string" ? opts : withMemory(opts), handler);
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
@@ -120,7 +129,7 @@ if (process.env.INGEST_REGION) {
 if (process.env.RECOMPUTE_REGION) {
   const { onDocumentWritten } = require("firebase-functions/v2/firestore");
   exports.onRecomputeRequest = onDocumentWritten(
-    { document: "config/recomputeRequest", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 1024, timeoutSeconds: 540, retry: false },
+    withMemory({ document: "config/recomputeRequest", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 1024, timeoutSeconds: 540, retry: false }),
     async (event) => {
       const after = event.data && event.data.after && event.data.after.data();
       if (!after) return; // suppression du doc → rien à faire
@@ -145,7 +154,7 @@ if (process.env.RECOMPUTE_REGION) {
 if (process.env.RECOMPUTE_REGION) {
   const { onDocumentWritten } = require("firebase-functions/v2/firestore");
   exports.onMntApprovalDecided = onDocumentWritten(
-    { document: "approvals/{id}", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 256, timeoutSeconds: 120, retry: false },
+    withMemory({ document: "approvals/{id}", database: FIRESTORE_DB, region: process.env.RECOMPUTE_REGION, memoryMiB: 256, timeoutSeconds: 120, retry: false }),
     async (event) => {
       const before = event.data && event.data.before && event.data.before.data();
       const after = event.data && event.data.after && event.data.after.data();

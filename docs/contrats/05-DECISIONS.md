@@ -3,6 +3,27 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-063 — HOTFIX « échec import » : l'option maison `memoryMiB` était ignorée par firebase-functions v2 — toutes les fonctions tournaient à 256 Mio
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« echec import » / « même erreur pour import » — 503 persistant sur importDelta, hors fenêtre de déploiement)
+
+### Contexte
+L'import « Commandes » échouait en `503 Service Unavailable` sans en-têtes CORS, systématiquement, AVANT d'atteindre le code (ni refus métier, ni log applicatif). Diagnostic : l'ERP déclare partout `memoryMiB: N`, mais cette option **n'existe pas** dans firebase-functions v2 (l'option s'appelle `memory` et prend `"512MiB"`/`"2GiB"`). Le SDK l'ignorait **en silence** (`availableMemoryMb: null` sur l'endpoint) : les ~175 déclarations étaient sans effet et **toutes les fonctions tournaient au défaut de 256 Mio** — `importDelta` (2 Gio voulus) mourait en OOM au parse de tout fichier réel. C'est la cause racine du « ça refuse toujours » historique (le carnet n'a jamais pu être importé), masquée jusqu'ici par le diagnostic « fichier non reconnu » (ADR-060) qui, lui, supposait que l'appel aboutissait.
+
+### Décisions
+- **Traduction CENTRALE** `memoryMiB` → `memory` dans `lib/fnopts.withMemory` (pur, testé) ; les builders v2 (`onCall`/`onRequest`/`onSchedule`/`onObjectFinalized`) sont enveloppés **sous leur nom d'origine** dans index.js — les ~175 sites gardent leur forme `memoryMiB` (« la règle de l'ERP gagne »), la mémoire est enfin appliquée. Les 2 triggers env-gatés (`onDocumentWritten`) passent par `withMemory` à leur site.
+- **Fail-fast** : une valeur `memoryMiB` hors table (128/256/512/1024/2048/4096) lève au chargement — un silence du SDK ne doit plus jamais se reproduire.
+- **Filet** : `test/fnopts.test.js` fige `onCall(withMemory({memoryMiB:2048})).__endpoint.availableMemoryMb === 2048` — le test qui aurait attrapé ce bug — et documente que la forme non traduite ne pose jamais la mémoire.
+
+### Conséquences
+- Au prochain déploiement, chaque fonction reçoit ENFIN sa mémoire déclarée (importDelta/reingest 2 Gio, recompute 512 Mio, ingest/onRecomputeRequest 1 Gio…). Coût Cloud Run en légère hausse (instances mieux dotées) — c'est le budget qui avait toujours été voulu.
+- Bénéfice collatéral probable : les callables lourds (recompute, IA, imports certifs) gagnent en stabilité — d'éventuels 503/latences sporadiques passés avaient la même cause.
+
+### Ce qu'on saura dans six mois
+Une option de config qui ne CHANGE RIEN d'observable est peut-être une option que le runtime ignore : vérifier `__endpoint`/l'état déployé, pas seulement l'absence d'erreur.
+
 ## ADR-062 — Avantages programme partenaires (PAR-L3) : deal registrations, MDF, rebates
 
 - **Date :** 2026-07-21

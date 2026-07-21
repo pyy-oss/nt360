@@ -2060,3 +2060,21 @@ tsc/eslint, no-undef (163), deploy-targets (199), indexes, bundle 120,9 ≤ 122 
 **En parallèle (prod).** PR #555 fusionnée (squash 8d20265), Firebase Deploy success 12:49, smoke prod
 success. « échec import » rapporté à 13:02 : 503 + CORS sur importDelta = fenêtre du déploiement glissant
 (l'appel n'a pas atteint le code) — à rejouer ; si 503 persiste, lire les logs de la fonction.
+
+---
+
+## 2026-07-21 — HOTFIX : memoryMiB ignoré par firebase-functions v2 → import 503 (ADR-063)
+
+**Fait.** Cause racine de l'« échec import » ENFIN trouvée : `memoryMiB` n'est pas une option v2 (c'est
+`memory`, en "2GiB") — le SDK l'ignorait en silence, toutes les fonctions tournaient à 256 Mio, et
+importDelta (2 Gio voulus) mourait en OOM (503 sans CORS) avant d'atteindre le code. Traduction centrale
+lib/fnopts.withMemory + builders enveloppés sous leur nom (les ~175 sites inchangés), fail-fast sur valeur
+inconnue, filet test __endpoint.availableMemoryMb === 2048.
+
+**Appris.** Deux leçons : (1) un 503 sans en-têtes CORS = l'infrastructure a tué l'appel — chercher côté
+conteneur (mémoire, démarrage), pas côté code ; (2) un SDK qui IGNORE une option inconnue sans erreur rend
+le bug invisible pendant des mois — le filet doit vérifier l'état RÉSOLU (__endpoint), pas la déclaration.
+Le diagnostic précédent (« fichier non reconnu », ADR-060) supposait que l'appel aboutissait — faux : il
+n'a jamais abouti, d'où le carnet vide.
+
+**Vérifs.** Functions 1338/1338 (fnopts 4), no-undef (164), deploy-targets (199).
