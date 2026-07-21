@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fpKey, isAgedLost, isDormantClosing, plausibleYear } from "./ids";
+import { bcCompareKey, fpKey, isAgedLost, isDormantClosing, plausibleYear } from "./ids";
 
 // Parité avec le serveur (functions/lib/ids.js fpKey, functions/domain/oppLifecycle.js isAgedLost).
 // Ces helpers existent pour que le frontal canonise les N° FP EXACTEMENT comme mergeCommandes, sinon
@@ -70,5 +70,19 @@ describe("isDormantClosing (miroir serveur)", () => {
     expect(isDormantClosing({ stage: 6, closingDate: "2023-01-01" }, FY)).toBe(false);
     expect(isDormantClosing({ stage: 3, closingDate: "1900-01-01" }, FY)).toBe(false);
     expect(isDormantClosing({ stage: 3, closingDate: "2024-01-01" }, 0)).toBe(false);
+  });
+});
+
+describe("bcCompareKey (miroir serveur)", () => {
+  it("assimile tirets/points/underscores aux espaces puis canonise — mêmes équivalences que le recompute", () => {
+    expect(bcCompareKey("BC-2026-001")).toBe(bcCompareKey("BC/2026/1"));
+    expect(bcCompareKey("BC 2026 001")).toBe("BC20261");
+    expect(bcCompareKey("BC-001")).toBe(bcCompareKey("BC 001"));
+    expect(bcCompareKey("bc n° 06457")).toBe(bcCompareKey("BC N° 06457")); // casse indifférente
+  });
+  it("chaîne vide / null → clé vide (ligne sans N° BC jamais évincée)", () => {
+    expect(bcCompareKey("")).toBe("");
+    expect(bcCompareKey(null)).toBe("");
+    expect(bcCompareKey(undefined)).toBe("");
   });
 });

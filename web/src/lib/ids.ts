@@ -21,6 +21,19 @@ export function cleanName(s?: string | null): string {
   return String(s ?? "").replace(/\s+/g, " ").trim().toUpperCase();
 }
 
+/** Clé de COMPARAISON inter-graphies d'un N° BC (miroir de functions/lib/ids.js `bcCompareKey`) :
+ *  tirets/points/underscores assimilés à des espaces pour reconnaître la forme structurée
+ *  (« BC-2026-001 » ≡ « BC/2026/1 »), puis réduction aux alphanumériques MAJUSCULES. Sert à l'ÉVICTION
+ *  miroir des amorçages ClickUp dans le Σ engagé du FP 360° — même règle que le recompute (aggregate),
+ *  sinon un BC amorcé ClickUp puis importé en comptable compterait DEUX fois au Kpi et pas à l'alerte. */
+export function bcCompareKey(v?: string | null): string {
+  const s = String(v ?? "").replace(/[-._]/g, " ").trim();
+  if (!s) return "";
+  const m = s.match(/BC\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);
+  const key = m && !/^0+$/.test(m[2]) ? `BC/${m[1]}/${String(parseInt(m[2], 10))}` : s.toUpperCase();
+  return key.replace(/[^A-Z0-9]/g, "");
+}
+
 /** Normalise un N° FP → forme canonique "FP/AAAA/N" (miroir exact de functions/lib/ids.js). */
 export function fpKey(v?: string | null): string | null {
   const m = String(v || "").match(/FP\/?\s*(\d{4})(?!\d)\/?\s*(\d+)/i);

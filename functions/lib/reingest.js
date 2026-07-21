@@ -5,7 +5,7 @@
 // enregistrements existants. Partagé par le callable `reingest` et le script GHA.
 const { readWorkbook } = require("./xlsxRead");
 const { buildWrites, fiscalYearFromOrders } = require("./ingest");
-const { applyWrites, stripLiveOpps } = require("./apply");
+const { applyWrites, stripLiveOpps, resolveBcDc } = require("./apply");
 
 // Gardes anti-abus (mêmes valeurs que l'import delta) — bornent le travail par classeur/ZIP.
 const MAX_SHEETS = 60;                     // onglets par classeur
@@ -137,6 +137,10 @@ async function reingestBucket({ db, storage, bucketName, prefix }) {
   // de la synchro Sales_DATA. On retire les écritures opportunities/ du lot.
   const { writes: nonLive } = stripLiveOpps(allWrites);
   if (nonLive.length) await applyWrites(db, nonLive);
+  // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — même filet que l'import
+  // delta/trigger (cf. resolveBcDc, post-applyWrites) : sans lui, une ré-ingestion laissait les docs
+  // sans fp (agrégats rattachés en mémoire, vues front aveugles). Best-effort par construction.
+  if (nonLive.length) await resolveBcDc(db, nonLive);
 
   const kinds = [...kindsSet];
   // Réancre config/fiscal.currentFy = max(yearPo) des commandes (comme le trigger d'ingestion).

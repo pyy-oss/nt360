@@ -5,7 +5,7 @@ import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { fpKey, cleanName } from "../lib/ids";
+import { fpKey, cleanName, bcCompareKey } from "../lib/ids";
 import { FIXED_PEG } from "../lib/fx"; // repli parité fixe légale — source unique (miroir functions/lib/fx.js)
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
@@ -742,9 +742,17 @@ export const Fp360: FC<Props> = () => {
   const { rows: supInv } = useCollectionData<SupplierInvoice>(key && canMargin && canFournisseurs && soaOn ? "supplierInvoices" : null, cons, key);
   const coutReel = supInv.filter((x) => fpKey(x.fp) === key).reduce((s, i) => s + (i.amountXof || 0), 0);
   // ENGAGÉ = Σ BC RÉELS du FP, tous statuts (un BC payé reste un coût), lignes de fiche exclues (achats
-  // PLANIFIÉS, déjà dans costTotal) — miroir exact de domain/fournisseurs.bcCostByFp (alerte
-  // achat_bc_sup_planifie) : même assiette, même nombre.
-  const engage = bc.filter((b) => b.source !== "fiche").reduce((s, x) => s + (x.amountXof || 0), 0);
+  // PLANIFIÉS, déjà dans costTotal) — miroir de l'assiette de l'alerte achat_bc_sup_planifie
+  // (bcCostByFp sur les bcLines du recompute). Comme au recompute (aggregate), les AMORÇAGES ClickUp
+  // dont le N° BC existe aussi via une source comptable sont ÉVINCÉS (bcCompareKey) — sinon le Kpi
+  // double-comptait ce que l'alerte ne voit pas. Limite assumée (comme Factures/Opportunités de cet
+  // écran) : un BC saisi sous un FP ALIAS source est compté par l'alerte (canonisation au recompute)
+  // mais invisible ici (requête sur le fp brut du doc).
+  const bcReal = bc.filter((b) => b.source !== "fiche");
+  const bcCmpSet = new Set(bcReal.filter((b) => b.source !== "clickup" && b.bcNumber).map((b) => bcCompareKey(b.bcNumber)).filter(Boolean));
+  const engage = bcReal
+    .filter((b) => b.source !== "clickup" || !b.bcNumber || !bcCmpSet.has(bcCompareKey(b.bcNumber)))
+    .reduce((s, x) => s + (Number(x.amountXof) || 0), 0);
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recherche par N° FP">

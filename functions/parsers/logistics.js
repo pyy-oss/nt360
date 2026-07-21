@@ -78,7 +78,11 @@ function parseLogistics(wb) {
     dupSeq.set(mkey, seq + 1);
     const doc = {
       _id: "bc_" + hashId(...idParts, seq),
-      fp,
+      // fp ABSENT (et non null) quand la colonne est vide : le merge au ré-import PRÉSERVE un fp posé
+      // autrement (backfill DC, correction manuelle) au lieu de l'écraser à null, et une ligne sans FP
+      // n'entre jamais dans la garde anti-orphelins d'applyWrites (elle ne « représente » aucune
+      // affaire à balayer). Même patron conditionnel que amountXof/dc.
+      ...(fp ? { fp } : {}),
       bcNumber: poNumber,
       supplier,
       customer: cleanName(val(r, keys, "customer", "client")),

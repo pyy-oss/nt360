@@ -86,13 +86,14 @@ async function ingestHandler(event) {
     // correction manuelle (cf. resolveLogisticsFx) — la conversion USD/GBP se fait à l'ingestion.
     const fxConverted = await resolveLogisticsFx(db, deltaWrites);
     if (fxConverted) report.fxConverted = fxConverted;
-    // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — même règle que le
-    // webhook Odoo à l'ingestion : le doc arrive déjà rattaché (cf. resolveBcDc).
+
+    await applyWrites(db, deltaWrites); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
+
+    // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — APRÈS applyWrites,
+    // posé sur les DOCS (jamais dans les écritures : garde anti-orphelins, cf. resolveBcDc).
     const dcResolved = await resolveBcDc(db, deltaWrites);
     if (dcResolved) report.dcResolved = dcResolved;
     logger.info("ingest", { name, kinds, liveSkipped, fxConverted, dcResolved, ...report });
-
-    await applyWrites(db, deltaWrites); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
     await db.collection("imports").add({
       uid: null, kinds, filename: name, objectKey: `${bucket}/${name}`,
@@ -1198,9 +1199,10 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   // Taux paramétrés (config/fxRates) appliqués aux lignes logistics « à saisir » sans écraser de correction
   // manuelle (cf. resolveLogisticsFx) — conversion USD/GBP à l'import.
   const fxConverted = await resolveLogisticsFx(db, deltaWrites);
-  // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — cf. resolveBcDc.
-  const dcResolved = await resolveBcDc(db, deltaWrites);
   await applyWrites(db, deltaWrites); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
+  // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — APRÈS applyWrites,
+  // posé sur les DOCS (jamais dans les écritures : garde anti-orphelins, cf. resolveBcDc).
+  const dcResolved = await resolveBcDc(db, deltaWrites);
 
   const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}), ...(fxConverted ? { fxConverted } : {}), ...(dcResolved ? { dcResolved } : {}) };
   await db.collection("imports").add({
@@ -1342,9 +1344,14 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
   if (to) {
     try {
       const snap = await db.collection("bcLines").where("dc", "==", from).limit(1000).get();
-      const batch = db.batch();
-      for (const d of snap.docs) { const v = d.data() || {}; if (v.fp == null || v.fp === "") { batch.update(d.ref, { fp: to }); backfilled++; } }
-      if (backfilled) await batch.commit();
+      const targets = snap.docs.filter((d) => { const v = d.data() || {}; return v.fp == null || v.fp === ""; });
+      // Batchs de 400 (idiome maison, cf. backfillBcFpFromDc) — un batch unique plafonnerait à 500 écritures.
+      for (let i = 0; i < targets.length; i += 400) {
+        const batch = db.batch();
+        targets.slice(i, i + 400).forEach((d) => batch.update(d.ref, { fp: to }));
+        await batch.commit();
+      }
+      backfilled = targets.length;
     } catch (e) { logger.warn("setDcAlias : backfill bcLines en échec (non bloquant)", { from, msg: e && e.message }); }
   }
   await db.collection("auditLog").add({
@@ -1395,16 +1402,16 @@ exports.importDcAliases = onCallG("importDcAliases", { memoryMiB: 512, timeoutSe
   // RATTACHEMENT PERSISTANT (audit BC/DC × rentabilité) : matérialise le fp sur les docs bcLines encore
   // sans fp dont le DC résout désormais — sans quoi FP 360° / Exécution BC (champ brut) ne montreraient
   // pas les BC que les agrégats rattachent. Jamais d'écrasement d'un fp existant. Best-effort.
-  let backfilled = 0;
-  try { backfilled = await backfillBcFpFromDc(db, map); }
+  let backfilled = 0, backfillTruncated = false;
+  try { const bf = await backfillBcFpFromDc(db, map); backfilled = bf.backfilled; backfillTruncated = bf.truncated; }
   catch (e) { logger.warn("importDcAliases : backfill bcLines en échec (non bloquant)", { msg: e && e.message }); }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "import_dc_aliases", module: "import", entity: "dcAlias", entityId: "batch",
-    detail: { added: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length, skipped: plan.skipped.length, backfilled, filename: String(req.data && req.data.filename || "").slice(0, 120) },
+    detail: { added: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length, skipped: plan.skipped.length, backfilled, backfillTruncated, filename: String(req.data && req.data.filename || "").slice(0, 120) },
     ts: FieldValue.serverTimestamp(),
   });
   await refreshNowBestEffort("importDcAliases"); // les BC historiques à DC connu se rattachent au recalcul
-  return { ok: true, added: plan.toAdd.length, aliasCount: Object.keys(map).length, backfilled, ...summary };
+  return { ok: true, added: plan.toAdd.length, aliasCount: Object.keys(map).length, backfilled, backfillTruncated, ...summary };
 });
 
 // --- DOSSIER CLIENT (rapprochement) : regroupe Opportunités / Commandes P&L / Factures par CLIENT
