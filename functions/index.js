@@ -1609,7 +1609,10 @@ exports.aiSuggestClientMerges = onCallG(
   "aiSuggestClientMerges",
   { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 300 },
   async (req) => {
-    await requireWrite(req, "import");
+    // Entité du référentiel : "client" (historique) ou "fournisseur" (atelier fournisseurs « dopé à
+    // l'IA ») — même pipeline, prompt/clé de dédup adaptés, droit gouverné par le module de la donnée.
+    const entity = req.data?.entity === "fournisseur" ? "fournisseur" : "client";
+    await requireWrite(req, entity === "fournisseur" ? "fournisseurs" : "import");
     if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
     const apiKey = ANTHROPIC_API_KEY.value();
     if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
@@ -1626,13 +1629,13 @@ exports.aiSuggestClientMerges = onCallG(
     const { aiSuggestClientMerges: runAi } = require("./lib/aiClientNorm");
     let out;
     try {
-      out = await runAi(apiKey, names);
+      out = await runAi(apiKey, names, { entity });
     } catch (e) {
       if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
-      logger.error("aiSuggestClientMerges a échoué", { message: e && e.message });
+      logger.error("aiSuggestClientMerges a échoué", { entity, message: e && e.message });
       throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de suggestions (réessayez).");
     }
-    await logOps({ kind: "ai", action: "suggestClientMerges", status: "ok", uid: req.auth.uid, detail: { names: names.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
+    await logOps({ kind: "ai", action: "suggestClientMerges", status: "ok", uid: req.auth.uid, detail: { entity, names: names.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
     return { ok: true, suggestions: out.suggestions, model: out.model, truncated, analyzed: names.length, total: rawNames.length };
   },
 );
