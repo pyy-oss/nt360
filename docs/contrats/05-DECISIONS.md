@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-056 — Le MB de l'opportunité alimente la marge de la commande (dernier rang, après MB TOTAL P&L et fiche)
+
+- **Date :** 2026-07-20
+- **Statut :** Accepté
+- **Décideur :** Direction (« confirmer la colonne MB à l'import des opportunités ; MB sera considéré en l'absence de MB TOTAL (à ramener en %) dans P&L et en l'absence de fiche affaire »)
+
+### Contexte
+L'onglet **LIVE** des opportunités porte une colonne **`MB`** (marge brute prévisionnelle en **%**, ex. 20 = 20 %) qui n'était **pas reconnue** à l'import (le parseur n'acceptait que `MB prév…`). Par ailleurs une commande dont la ligne P&L n'a **pas** de `MB TOTAL` (montant absolu FCFA) **et** sans fiche affaire se retrouve avec une marge nulle → taux `mb/CAS` = 0 partout (Rentabilité, atterrissage, backlog).
+
+### Décision
+- **Import (parseur opps).** La colonne **`MB`** (nue, égalité exacte — « mb » en sous-chaîne capterait « Nombre… ») et **`MB TOTAL`** deviennent des alias de `mbPrev` (%). Round-trip export inchangé. **Odoo** alimente aussi `mbPrev` (webhook `mapOpportunity`, champ `mbPrev`/`mb`/`margin`/`marge`, garde-chiffre + bornage [0,100]) → le repli marche quelle que soit la source de l'opp (LIVE Excel ou Odoo).
+- **Autorité marge (mergeCommandes).** Dernier rang, après fiche et P&L : `marginPct` **fiche** > `MB TOTAL / CAS` **P&L** > `mbPrev` **opp**. Le repli ne s'applique que si **pas de fiche** ET **MB TOTAL EXPLICITEMENT absent** (`mbPresent === false` du parseur P&L) ET `CAS > 0` ET une opp du même FP porte un `mbPrev`. Une ligne P&L **pas encore ré-importée** (`mbPresent` inconnu) est ambiguë (0 réel vs absent) → **aucune estimation** : on n'estime jamais sur des données legacy, et aucune marge P&L réelle (fût-elle 0) n'est écrasée.
+- **Levier = `mb` (montant), pas `marginPct`.** Dès que `CAS > 0`, tous les consommateurs calculent le taux via `mb/CAS` et **ignorent** `marginPct` (qui ne sert qu'au cas `CAS = 0`). On pose donc `mb = round(mbPrev% × CAS)` — cohérent d'échelle (pas de mélange %/montant), aucune ambiguïté ratio-vs-pourcentage.
+- **Provenance signalée.** Flag `mbSource = "opp"` porté du carnet jusqu'au front : marge **ESTIMÉE** (badge « marge estimée » + note en Rentabilité), jamais confondue avec une marge P&L réelle. Coût laissé inconnu (`costTotal` non posé) mais **exclu** du flag « coût absent » (sa provenance est connue → un seul signal par affaire).
+
+### Conséquences
+- Une commande orpheline de marge (ni MB TOTAL ni fiche) affiche désormais une marge estimée depuis le pipeline, intégrée aux agrégats (`overviewCalc` la somme via l'overlay `mb` — cohérence front/back). À confirmer par le P&L / la fiche.
+- Additif : `mbPresent` (P&L), `mbSource` (order → chunk marge → front), `mbEstimatedCount`/`mbEstimated` (Rentabilité). Aucune donnée existante réécrite ; réappliqué au prochain recompute/ré-import.
+- Tests : reconnaissance `MB`/`MB TOTAL` (+ non-capture de « Nombre »), repli marge (fiche/P&L/opp, mbPresent, multi-opps). Suite functions 1275/1275.
+
+### Ce qu'on saura dans six mois
+Si les marges estimées (`mbSource="opp"`) restent nombreuses et durables → la saisie du MB TOTAL P&L / des fiches est lacunaire ; l'estimation pipeline masque un trou de données à combler à la source.
+
+---
+
 ## ADR-055 — Remédiation audit intégrité FP + systèmes de correction (6 correctifs H1→M4)
 
 - **Date :** 2026-07-20

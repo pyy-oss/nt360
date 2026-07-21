@@ -142,6 +142,26 @@ describe("oppImport — cellules vides / bruit ne touchent PAS le champ (audit H
   });
 });
 
+describe("oppImport — colonne MB de l'onglet LIVE reconnue comme mbPrev (%)", () => {
+  it("un en-tête « MB » NU alimente mbPrev (en %) — et « Nombre… » (⊇ mb) n'est PAS confondu", () => {
+    const aoa = [
+      ["N° FP", "Client", "MB", "Nombre de sites"],
+      ["FP/2026/50", "ORANGE", 20, 8],
+    ];
+    const { rows } = parseOpportunitiesImport(wbFromAoa(aoa));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].values.mbPrev).toBe(20); // « MB » capté par égalité exacte, pas « Nombre de sites »
+  });
+  it("un en-tête « MB TOTAL » est aussi reconnu (décimales préservées)", () => {
+    const { rows } = parseOpportunitiesImport(wbFromAoa([["N° FP", "MB TOTAL"], ["FP/2026/51", 23.42]]));
+    expect(rows[0].values.mbPrev).toBeCloseTo(23.42, 2);
+  });
+  it("cellule MB vide → champ non fourni (mise à jour non effaçante)", () => {
+    const { rows } = parseOpportunitiesImport(wbFromAoa([["N° FP", "MB"], ["FP/2026/52", ""]]));
+    expect(rows[0].values).not.toHaveProperty("mbPrev");
+  });
+});
+
 describe("oppImport — dérivations (finalize + create)", () => {
   it("un changement d'étape SEUL ajoute stageLabel sans toucher au pondéré (montant/proba inchangés)", () => {
     const cur = { amount: 100000, probability: 0.6, stage: 4 };

@@ -633,7 +633,7 @@ async function recomputeCore(db, only) {
         clickupLastComment: cu && cu.lastComment ? cu.lastComment : null, // dernière note ops ClickUp (webhook)
       };
     });
-    const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null }));
+    const margin = orders.map((o) => ({ fp: o.fp, mb: o.mb || 0, costTotal: o.costTotal ?? null, marginPct: o.marginPct ?? null, mbSource: o.mbSource || null }));
     const CHUNK = 800; // ~800 lignes/doc reste très en deçà de la limite 1 Mio
     commandeChunks = Math.max(1, Math.ceil(base.length / CHUNK));
     // rows: delete() purge l'ancien champ inline (écritures merge) — sinon la méta resterait ~1 Mio.

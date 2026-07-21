@@ -37,6 +37,7 @@ function parsePnl(wb) {
     const fp = fpKey(val(r, keys, "opp id"));
     const cas = num(val(r, keys, "cas"));
     if (!fp || cas <= 0) continue; // quarantaine : FP malformé / CAS non positif
+    const mbRaw = val(r, keys, "mb total"); // cellule brute (avant num) → sert aussi au flag mbPresent
     const suppliers = [];
     for (let i = 1; i <= 10; i++) {
       const amt = num(val(r, keys, `frns${i}`));
@@ -53,7 +54,11 @@ function parsePnl(wb) {
       yearPo: plausibleYear(parseInt(val(r, keys, "year po")) || 0), // fenêtre glissante, rejet sentinelles 1900
       cas,
       raf: rafOf(val(r, keys, "raf total")),
-      mb: num(val(r, keys, "mb total")), // MB TOTAL, pas MB Réel / Manuel (§18.2)
+      mb: num(mbRaw), // MB TOTAL, pas MB Réel / Manuel (§18.2)
+      // PRÉSENCE du MB TOTAL (cellule renseignée, « 0 » compris) : distingue une marge P&L RÉELLE (même
+      // nulle) d'une marge ABSENTE. mergeCommandes ne dérive un repli (MB de l'opp) QUE si mbPresent=false
+      // → on ne remplace jamais une marge P&L saisie (fût-elle 0) par une estimation pipeline.
+      mbPresent: mbRaw != null && String(mbRaw).trim() !== "",
       am: cleanPerson(val(r, keys, "am")),
       suppliers,
       source: "pnl",
