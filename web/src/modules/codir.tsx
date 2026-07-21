@@ -505,7 +505,7 @@ export const Codir: FC<Props> = () => {
             {/* KPI — tuiles d'accent */}
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               <StatTile label="CAF YTD" value={fmt(cafYtd)} color={T.emerald} sub="facturé — exercice" />
-              <StatTile label="Backlog YTD" value={fmt(backlogYtd)} color={T.clay} sub="RAF glissant" />
+              <StatTile label="Backlog (glissant)" value={fmt(backlogYtd)} color={T.clay} sub="RAF ouvert, tous millésimes" />
               <StatTile label="CAF acquis" value={fmt(cafEst)} color={T.steel} sub="facturé + backlog projetable" />
               <StatTile label="Projeté CAF" value={fmt(cafEstYcForecast)} color={T.gold} sub={`acquis + ${fmt(forecast)} pipeline pondéré`} />
             </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultMilestones } from "./milestones";
+import { defaultMilestones, reportedFromMilestones } from "./milestones";
 
 // MIROIR EXACT du repli serveur (functions/domain/milestones.js) — mêmes entrées, mêmes jalons (audit
 // backlog H1) : « Répartir par défaut » doit proposer EXACTEMENT ce que billingTrend appliquerait sans
@@ -25,5 +25,21 @@ describe("defaultMilestones (miroir client = repli serveur)", () => {
     expect(defaultMilestones(120, "2025-11-01", 2026)[0].date).toBe("2026-01-28");
     expect(defaultMilestones(120, "2027-02-01", 2026)).toEqual([{ date: "2026-12-28", amount: 120 }]);
     expect(defaultMilestones(0, "2026-07-15", 2026)).toEqual([]);
+  });
+});
+
+// Report N+1 extrait de CarryoverCard (audit backlog, axe 9) — parité serveur reportedFromMilestones.
+describe("reportedFromMilestones (miroir client, extrait de CarryoverCard)", () => {
+  it("Σ des jalons datés APRÈS le cutoff, bornée au RAF projetable", () => {
+    const ms = [{ date: "2026-11-28", amount: 40 }, { date: "2027-02-28", amount: 60 }, { date: "2027-05-28", amount: 30 }];
+    expect(reportedFromMilestones(ms, "2026-12-31", 1000)).toBe(90);
+    expect(reportedFromMilestones(ms, "2026-12-31", 50)).toBe(50); // borné au projetable
+  });
+  it("jalon à date aberrante (millésime implausible) écarté — comme normalizeMilestones serveur", () => {
+    expect(reportedFromMilestones([{ date: "20226-01-28", amount: 999 }, { date: "2027-01-28", amount: 10 }], "2026-12-31", 1000)).toBe(10);
+  });
+  it("sans jalons / cap négatif → 0 (jamais négatif, parité Math.max(0, …) serveur)", () => {
+    expect(reportedFromMilestones(undefined, "2026-12-31", 100)).toBe(0);
+    expect(reportedFromMilestones([{ date: "2027-01-28", amount: 10 }], "2026-12-31", -5)).toBe(0);
   });
 });

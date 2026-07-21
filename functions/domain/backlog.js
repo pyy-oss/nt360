@@ -38,7 +38,7 @@ function backlogFy(orders, fy, opts = {}) {
     .slice(0, 25)
     .map((o) => ({
       fp: o.fp || "", client: o.client || "", affaire: o.affaire || "", bu: o.bu || "AUTRE", source: o.source || null,
-      yearPo: o.yearPo || 0, cas: o.cas || 0, facture: o.facture || 0, raf: raf(o),
+      yearPo: plausibleYear(o.yearPo) || 0, cas: o.cas || 0, facture: o.facture || 0, raf: raf(o), // millésime BORNÉ persisté (un consommateur futur ne regroupe jamais sur un brut aberrant)
     }));
 
   // Commandes DORMANTES (MÊME prédicat que l'alerte backlog_dormant, domain/alerts.js) : millésime

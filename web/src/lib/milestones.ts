@@ -3,6 +3,22 @@
 // ce miroir ne sert qu'à PRÉ-REMPLIR l'éditeur (l'utilisateur ajuste puis enregistre).
 export type Milestone = { date: string; amount: number };
 
+import { plausibleYear } from "./ids";
+
+/** Report N+1 dérivé des jalons — MIROIR de functions/domain/milestones.js:reportedFromMilestones, avec
+ *  le MÊME bornage que normalizeMilestones (date AAAA-MM-JJ + millésime plausible — un jalon « 20226-… »
+ *  n'est compté d'aucun côté) : Σ des jalons datés APRÈS `cutoff` (31/12 de l'exercice), bornée à
+ *  [0, cap] (RAF projetable). Extrait de CarryoverCard (backlog.tsx) pour être TESTABLE — la logique
+ *  miroir inline dans le composant n'était couverte par aucun test (audit backlog, axe 9). */
+export function reportedFromMilestones(ms: Milestone[] | null | undefined, cutoff: string, cap: number): number {
+  if (!ms || !ms.length) return 0;
+  const after = ms.filter((x) => {
+    const d = String(x.date || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && plausibleYear(d.slice(0, 4)) > 0 && d > cutoff;
+  }).reduce((s, x) => s + (x.amount || 0), 0);
+  return Math.max(0, Math.min(after, cap));
+}
+
 export const DEFAULT_MILESTONE_COUNT = 3;
 
 /** Échéancier par défaut — MIROIR EXACT du repli serveur (functions/domain/milestones.js:defaultMilestones,

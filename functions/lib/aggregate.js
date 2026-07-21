@@ -673,7 +673,7 @@ async function recomputeCore(db, only) {
       const pm = orderPmMap[safeId(o.fp)];
       if (!pm) continue;
       const e = byPm.get(pm) || { pm, count: 0, cas: 0, raf: 0 };
-      e.count += 1; e.cas += o.cas || 0; e.raf += o.raf || 0;
+      e.count += 1; e.cas += o.cas || 0; e.raf += Math.max(o.raf || 0, 0); // CLAMPÉ (audit backlog M3) : même population que backlog_fy — un RAF négatif (avoir) n'ampute pas la charge du PM
       byPm.set(pm, e);
     }
     const pmRows = [...byPm.values()].sort((a, b) => b.cas - a.cas);

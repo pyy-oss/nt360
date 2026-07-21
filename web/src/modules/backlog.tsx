@@ -15,7 +15,7 @@ import { fpKey, plausibleYear } from "../lib/ids";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { patchOrder, createOrder, deleteRecord, fpDocId, setBillingMilestones, setCancellation, patchOpportunity, setOrderPm, pushOrderToClickup, syncOrderAmount, peekOrderAmount, type BillingMilestone, type AmountPeek } from "../lib/writes";
-import { defaultMilestones } from "../lib/milestones";
+import { defaultMilestones, reportedFromMilestones } from "../lib/milestones";
 import type { BacklogSummary, PipelineSummary, AtterrissageSummary, PeriodsConfig, TrendsSummary, Order, CashflowSummary, CashScenarioSummary, BillingMilestonesDoc, BillingTrendSummary, Opportunity, CancellationsDoc, PmsSummary, PmRow, ClickupDelaysSummary, ClickupPmDelay, ClickupStatusDist, ClickupMonthRaf } from "../types";
 
 // Champs de formulaire HISSÉS au scope module : définis dans le corps d'un composant, ils étaient
@@ -46,7 +46,7 @@ export const Backlog: FC<Props> = () => {
       {/* Même bandeau d'honnêteté que Facturation/Rentabilité (finance.tsx) : agrégat pré-calculé GLOBAL —
           un PM filtré sur sa BU croyait lire SON backlog (audit backlog H2). */}
       {filterActive && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client / PM) ne s'applique pas ici (agrégat pré-calculé). Le backlog filtré est lisible dans la Vue d'ensemble.</div>}
-      <div className={grid4}><Kpi label={`Backlog FY ${data.fy || ""}`} value={fmt(total)} tone="steel" sub={`${data.count} commandes`} /></div>
+      <div className={grid4}><Kpi label="Backlog (RAF glissant)" value={fmt(total)} tone="steel" sub={`${data.count} commandes ouvertes · tous millésimes — exercice ${data.fy || ""}`} /></div>
 
       {/* Diagnostic de fiabilité du RAF : curaté Excel (fiable) vs dérivé CAS − facturé (surévalué). */}
       {(data.totalDerive != null || data.totalExcel != null) && (
@@ -179,7 +179,7 @@ function ClickupDelaysCard() {
           ]} rows={byStatus} />
         </div>
       )}
-      <Tip>Alimenté par la synchro inverse ClickUp (statut + dates). Le <b>RAF échéancé</b> indique quand le backlog des projets actifs devrait se facturer, selon la <b>date prév. de fin</b> ClickUp.</Tip>
+      <Tip>Alimenté par la synchro inverse ClickUp (statut + dates). Le <b>RAF échéancé</b> indique quand le backlog des projets actifs devrait se facturer, selon la <b>date prév. de fin</b> ClickUp — il <b>ignore les jalons saisis</b> (la Prévision, elle, suit les jalons) : pour un FP à échéancier, les deux ventilations mensuelles peuvent différer.</Tip>
     </Card>
   );
 }
@@ -215,14 +215,7 @@ function CarryoverCard() {
     // Bornage MIROIR de milestones.js normalizeMilestones : date au format AAAA-MM-JJ ET millésime
     // plausible — sinon un jalon à date aberrante (« 20226-… », > cutoff en comparaison de chaînes) serait
     // compté ici mais pas côté serveur → `totalReporte` (front) divergerait de `reporteCaf` (back).
-    const repOfImpl = (o: OpenOrder) => {
-      const ms = msBy.get(fpKey(o.fp) || "");
-      if (!ms) return 0;
-      return Math.min(ms.filter((x) => {
-        const d = String(x.date || "").slice(0, 10);
-        return /^\d{4}-\d{2}-\d{2}$/.test(d) && plausibleYear(d.slice(0, 4)) > 0 && d > cutoff;
-      }).reduce((s, x) => s + (x.amount || 0), 0), o.projetable);
-    };
+    const repOfImpl = (o: OpenOrder) => reportedFromMilestones(msBy.get(fpKey(o.fp) || ""), cutoff, o.projetable);
     const open: OpenOrder[] = orders
       .map((o) => ({ ...o, projetable: Math.max(Math.min(o.raf || 0, (o.cas || 0) - (o.facture || 0)), 0) }))
       .filter((o) => o.projetable > 0)
@@ -1306,7 +1299,7 @@ export const OrderList: FC<Props> = () => {
         <Kpi label="Σ RAF" value={fmt(coh.raf)} tone="steel" />
         <Kpi label="Écart CAS − (Fact + RAF)" value={fmt(coh.ecart)} tone={Math.abs(coh.ecart) > coh.cas * CARNET_ECART_TOL ? "clay" : "steel"} />
       </div>
-      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé. <b>Vue grossière</b> : l'écart net peut masquer des incohérences par ligne qui se compensent — le détail est au <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées.</Tip>
+      <Tip>Identité <b>CAS = Facturé + RAF</b> agrégée sur la vue courante (filtre BU/AM/client/PM appliqué). Un écart notable trahit un rattachement facture→FP partiel (RAF dérivé surévalué) ou un RAF curaté ≠ dérivé. <b>Vue grossière</b> : l'écart net peut masquer des incohérences par ligne qui se compensent — le détail est au <b>Centre d'alertes</b> (« RAF incohérent ») et <b>Qualité &amp; correction</b>. Couverture : <b>{coh.todo.toLocaleString("fr-FR")}</b> à facturer · <b>{coh.done.toLocaleString("fr-FR")}</b> soldées. NB : le <b>Σ RAF</b> de cette carte est <b>signé</b> (les avoirs comptent en négatif — identité comptable CAS = Facturé + RAF) : il peut différer du « Backlog (RAF glissant) », qui ne somme que les RAF positifs.</Tip>
     </Card>
     <Card title={`Commandes · ${shown.length.toLocaleString("fr-FR")}`} actions={canImport ? <button className="btn-ghost" onClick={() => setShowNew((v) => !v)}>{showNew ? "Fermer" : "+ Nouvelle commande"}</button> : undefined}>
       {/* Erreur ≠ vide (audit backlog H3) : un permission-denied/panne affichait « Aucune commande » avec
