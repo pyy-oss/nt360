@@ -1893,3 +1893,39 @@ bundle d'entrée 120.7 KB ≤ 122.
 **Appris.** La capture (« MB TOTAL ») mentait sur l'en-tête réel (« MB ») — toujours ouvrir le fichier. Et
 `Order.marginPct` a une échelle ambiguë par conception (ratio canonique + tolérance pourcentage) : ne jamais
 y injecter un nouveau %, passer par `mb` absolu.
+
+## Audit 40 axes facturation/revenu/exécution + remédiation complète R1→R4 (ADR-057) — 2026-07-21
+
+**Demande.** « on audite le module facturation-revenu-exécution : évaluation sur 40 axes user facing et
+technique » puis « on corrige tout. cible 10 sur 10 ».
+
+**Audit (5 auditeurs lecture seule, 8 axes chacun).** Verdict 8,2/10 — socle rigoureux (autorités pures
+testées, miroirs commentés, overlays non destructifs), défauts concentrés sur UNE famille : un consommateur
+secondaire pas à jour de l'autorité principale. 8 HAUTE : tauxEncaissement non persisté ; export CODIR
+objectif/écart figés (isolation RBAC + merge:true) ; dédup live divergente correctionQueue⇄recompute ;
+triple canonicalisation N° BC (double engagement SOA possible) ; écritures BC sans invalidation par_ca ;
+receivables calculé jamais affiché ; vue Facturation ignorant le filtre sans bandeau ; alerte livraison
+sans liste énumérable.
+
+**Fait (4 commits, R1→R4 — détail en ADR-057).** Tous les HAUTE + MOYENNE calc + finitions : source unique
+domain/liveOpps (nouveau, testé), bcCompareKey (lib/ids), purge des champs isolés de l'atterrissage public,
+scopes partenariats/recognition, carte Créances & DSO, liste overdue persistée+affichée, miroir marginRate
+CAS=0 + 4 cas de parité, missingCjm/astreintes affichés, soaFromInvoices → décaissements (needCredit étendu),
+toast/flashs/frDate/indetermine/troncatures/tokens --hair.
+
+**Appris.**
+- Le patron de défaut dominant n'est PAS le calcul faux mais le consommateur orphelin d'une évolution :
+  isolation RBAC sans purge des résidus merge:true, summary calculé sans vue, scope de recompute non étendu.
+- `merge:true` + déplacement de champs = résidus FIGÉS invisibles ; toute isolation doit purger
+  (FieldValue.delete) y compris les clés de maps fusionnées récursivement.
+- Deux clés « canoniques » concurrentes (safeId vs bcKey) = trou d'éviction ; la comparaison inter-graphies
+  doit assimiler les séparateurs AVANT canonisation (« BC-2026-001 » ≡ « BC/2026/1 »).
+
+**Non corrigé (assumé, signalé) :** parités MRR/ARR front/back par convention (PERIOD_MONTHS triplé, pas de
+fixtures partagées) ; « Backlog » cohorte vs glissant sans note UI sur les vues entités ; `o.marginPct || 0`
+non normalisé dans atterrissage.js:105/backlog.tsx:170 (branche prouvée morte — rep borné à 0 quand CAS≤0 —
+à unifier si un avoir net négatif la réveille) ; colonne « source » absente de la liste BC ; overlay
+clickupBcSync par clé safeId (le push/pull écrit depuis les lignes app → clés alignées en pratique).
+
+**Vérifs.** Functions 1291/1291 (dont liveOpps 12, décaissements drapeau 2), web 297/297 (dont parité 15),
+no-undef (160), deploy-targets (191), indexes, bundle 120,8 Ko ≤ 122.
