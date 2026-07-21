@@ -332,7 +332,7 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
 // (jours CRA imputés aux affaires via les affectations, keystone). Callable à la demande, gouverné
 // « rentabilite » : sans le droit, l'appel est refusé → la carte ne s'affiche pas (dégradation silencieuse).
 // Défini ICI (module lazy) plutôt que dans writes.ts pour ne pas alourdir le chunk d'entrée (budget 120 KB).
-type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
+type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; coutAstreintes: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
 async function deliveryMarginByAffaire() {
   const res = await httpsCallable(functions, "deliveryMarginByAffaire", { timeout: 120_000 })({});
   return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
@@ -340,19 +340,27 @@ async function deliveryMarginByAffaire() {
 function DeliveryMarginCard() {
   const [rows, setRows] = useState<DeliveryMarginRow[] | null>(null);
   const [unassigned, setUnassigned] = useState(0);
-  const [state, setState] = useState<"loading" | "ok" | "denied">("loading");
+  const [missingCjm, setMissingCjm] = useState<string[]>([]);
+  // « denied » (droit rentabilite absent → carte masquée) ≠ « error » (panne réseau/serveur → signalée) :
+  // l'ancien catch unique faisait disparaître la carte sur une simple panne, sans signal (audit axe 37).
+  const [state, setState] = useState<"loading" | "ok" | "denied" | "error">("loading");
   useEffect(() => {
     let live = true;
     deliveryMarginByAffaire()
-      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setState("ok"); })
-      .catch(() => { if (live) setState("denied"); });
+      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setState("ok"); })
+      .catch((e: unknown) => { if (live) setState((e as { code?: string })?.code === "functions/permission-denied" ? "denied" : "error"); });
     return () => { live = false; };
   }, []);
   if (state === "denied") return null;
+  if (state === "error") return <Card title="Marge de livraison par affaire (après main-d'œuvre)"><ErrorState error={new Error("Le calcul n'a pas pu être chargé — réessayez (panne réseau ou serveur).")} /></Card>;
+  const hasAst = (rows || []).some((a) => (a.coutAstreintes || 0) > 0);
   return (
     <Card title="Marge de livraison par affaire (après main-d'œuvre)">
       {state === "loading" ? <EmptyState label="Calcul de la main-d'œuvre imputée…" /> : (
         <>
+          {/* CJM manquants = marge SOUS-COSTÉE (coût 0 sur ces consultants) — même ⚠ que le module contrats.
+              Le signal revenait du serveur mais n'était jamais affiché (audit axe 14). */}
+          {missingCjm.length > 0 && <div className="text-[11px] text-clay mb-2">⚠ Marge sous-costée : {missingCjm.length} consultant(s) sans CJM (coût compté 0) — {missingCjm.slice(0, 5).join(", ")}{missingCjm.length > 5 ? "…" : ""}. Renseignez le CJM dans Consultants.</div>}
           <Table columns={[
             colText("FP", (a: DeliveryMarginRow) => <FpLink fp={a.fp} />, (a: DeliveryMarginRow) => a.fp),
             colText("Client", (a: DeliveryMarginRow) => a.client || "—", (a: DeliveryMarginRow) => a.client || ""),
@@ -360,10 +368,14 @@ function DeliveryMarginCard() {
             colNum("Marge carnet", (a: DeliveryMarginRow) => money(a.margeCarnet || 0), (a: DeliveryMarginRow) => a.margeCarnet || 0),
             colNum("Jours-h.", (a: DeliveryMarginRow) => String(a.joursLabor), (a: DeliveryMarginRow) => a.joursLabor),
             colNum("Coût M-O", (a: DeliveryMarginRow) => money(a.coutLabor || 0), (a: DeliveryMarginRow) => a.coutLabor || 0),
+            // Astreintes : colonne visible dès qu'une ligne en porte — sinon la décomposition affichée ne
+            // « bouclait » pas (marge carnet − M-O ≠ marge livraison) sans explication (audit axe 14).
+            ...(hasAst ? [colNum("Astreintes", (a: DeliveryMarginRow) => money(a.coutAstreintes || 0), (a: DeliveryMarginRow) => a.coutAstreintes || 0)] : []),
             colNum("Marge livraison", (a: DeliveryMarginRow) => <span className={cx("tabnum", (a.margeLivraison || 0) < 0 ? "text-clay" : "text-emerald")}>{money(a.margeLivraison || 0)}</span>, (a: DeliveryMarginRow) => a.margeLivraison || 0),
             colNum("%", (a: DeliveryMarginRow) => (a.margeLivraisonPct == null ? "—" : pct(a.margeLivraisonPct)), (a: DeliveryMarginRow) => a.margeLivraisonPct || 0),
           ]} rows={(rows || []).slice(0, 30)} colsKey="delivery-margin" empty="Aucune affaire avec de la main-d'œuvre imputée (renseigner les affectations avec un N° FP)." />
-          <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
+          {(rows || []).length > 30 && <div className="text-[11px] text-faint mt-1">Les 30 marges les plus basses (sur {(rows || []).length} affaires).</div>}
+          <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier{hasAst ? ", et des astreintes validées" : ""}). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
         </>
       )}
     </Card>

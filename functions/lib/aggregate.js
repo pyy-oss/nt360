@@ -113,7 +113,10 @@ async function recomputeCore(db, only) {
   // 'partenariats' inclus : le CA partenaire (summaries/par_ca) est DÉRIVÉ des bcLines (ADR-P02). Sans ça,
   // un recompute scopé only=['partenariats'] chargerait bcLines=[] et écraserait par_ca à vide.
   const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news", "overview", "partenariats"]);
-  const needCredit = need(["suppliers", "alerts", "news"]);
+  // + 'cashflow'/'facturation' : les DÉCAISSEMENTS (summaries/cashflow, gate facturation|cashflow) consomment
+  // désormais supplierInvoices quand le drapeau ADR-P21 est actif — un recompute partiel only=['cashflow']
+  // les reconstruirait sinon avec supplierInvoices=[] → payable cash effacé (même piège que needBc, P0-D).
+  const needCredit = need(["suppliers", "alerts", "news", "cashflow", "facturation"]);
   // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
   // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces
   // agrégats avec objectives=[] → alertes d'écart réelles effacées + faux « objectif absent ». Même
@@ -404,7 +407,9 @@ async function recomputeCore(db, only) {
   // FUTUR (plus de biais pessimiste). Le backlog reste INDICATIF, hors du net (jamais mêlé à l'AR).
   if (want("facturation") || want("cashflow")) {
     const cf = cashflow(invoices, orders, asOf);
-    const dec = decaissements(bcLines, asOf);
+    // Drapeau ADR-P21 propagé (même sémantique que le solde SOA) : sans lui, drapeau actif, le SOA disait
+    // « factures réelles » quand le payable cash lisait encore le statut BC « facturé » — deux vérités du dû.
+    const dec = decaissements(bcLines, asOf, { soaFromInvoices, supplierInvoices });
     const decBy = Object.fromEntries(dec.months.map((m) => [m.month, m.out]));
     let cumNet = 0;
     const monthsNet = cf.months.map((m) => {

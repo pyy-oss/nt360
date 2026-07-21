@@ -119,3 +119,32 @@ describe("decaissements — payable = BC FACTURÉ (règle SOA), engagement à pa
     expect(empty.engagedTotal).toBe(500);
   });
 });
+
+describe("decaissements — VÉRITÉ DU COÛT (ADR-P21) : drapeau soaFromInvoices propagé au payable cash", () => {
+  // Même sémantique que le solde SOA (domain/fournisseurs) : drapeau actif → le payable dérive des
+  // FACTURES FOURNISSEUR RÉELLES ; le statut BC « facturé » est SUPERSEDÉ (ni payable ni engagement).
+  // Sans cette symétrie, SOA et cash portaient DEUX vérités du dû fournisseur (audit 40 axes).
+  const BC = [
+    { bcNumber: "BC-1", supplier: "S", amountXof: 1000, status: "facture", etaReel: "2026-08-10" }, // supersedé
+    { bcNumber: "BC-2", supplier: "S", amountXof: 700, status: "emis", etaReel: "2026-08-15" },     // engagement inchangé
+  ];
+  const INV = [
+    { supplier: "S", amountXof: 400, date: "2026-08-05" },  // payable août
+    { supplier: "S", amountXof: 250, date: "2026-05-01" },  // date passée → échu
+    { supplier: "S", amountXof: 150 },                       // sans date → mois courant
+  ];
+  it("drapeau ACTIF : payable = factures réelles, BC « facturé » ignoré, engagement conservé", () => {
+    const d = decaissements(BC, "2026-07-01", { soaFromInvoices: true, supplierInvoices: INV });
+    expect(d.total).toBe(800);            // 400 + 250 + 150 — PAS le BC facturé (1000)
+    expect(d.overdue).toBe(250);
+    expect(d.months[1].out).toBe(400);    // août
+    expect(d.months[0].out).toBe(150);    // sans date → mois courant
+    expect(d.noEtaCount).toBe(1);
+    expect(d.engagedTotal).toBe(700);     // l'engagement BC ne change pas
+  });
+  it("drapeau OFF (défaut) : comportement historique intact (BC facturé = payable, factures ignorées)", () => {
+    const d = decaissements(BC, "2026-07-01", { supplierInvoices: INV });
+    expect(d.total).toBe(1000);
+    expect(d.engagedTotal).toBe(700);
+  });
+});

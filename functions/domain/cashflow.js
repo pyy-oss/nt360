@@ -103,6 +103,10 @@ function cashflow(invoices, orders, asOf, opts = {}) {
 const COMMITTED_BC = new Set(["a_emettre", "emis", "livre"]);
 function decaissements(bcLines, asOf, opts = {}) {
   const horizon = Math.max(1, opts.horizon || 6);
+  // VÉRITÉ DU COÛT (ADR-P21) : drapeau `soaFromInvoices` + `supplierInvoices` (pièces réelles) — même
+  // sémantique que domain/fournisseurs (le solde SOA). OFF (défaut) → comportement historique.
+  const soaFromInvoices = !!opts.soaFromInvoices;
+  const supplierInvoices = opts.supplierInvoices || [];
   const today = asOf || new Date().toISOString().slice(0, 10);
   const months = monthList(today, horizon);
   const curMonth = months[0];
@@ -123,7 +127,11 @@ function decaissements(bcLines, asOf, opts = {}) {
     const eta = b.etaReel || b.etaContrat;
     const mk = eta ? String(eta).slice(0, 7) : null;
     if (b.status === "facture") {
-      // PAYABLE : facture fournisseur due (règle SOA).
+      // PAYABLE : facture fournisseur due (règle SOA). VÉRITÉ DU COÛT (ADR-P21) : drapeau actif → le
+      // statut BC « facturé » est SUPERSEDÉ par les factures fournisseur réelles (ajoutées plus bas) —
+      // sans cette symétrie, le solde SOA et le payable cash portaient DEUX vérités du dû fournisseur
+      // (audit 40 axes, axes 29/31). Le BC « facturé » ne bascule pas non plus en engagement (comme au SOA).
+      if (soaFromInvoices) continue;
       total += amt; payableCount++;
       if (!eta) { out[curMonth] += amt; noEtaCount++; continue; }
       etaKnown += amt;
@@ -136,6 +144,22 @@ function decaissements(bcLines, asOf, opts = {}) {
       if (inHorizon.has(mk)) engagedOut[mk] += amt; else engagedBeyond += amt;
     }
     // status 'solde' (payé) → hors compte.
+  }
+  // PAYABLE = FACTURES FOURNISSEUR RÉELLES (drapeau actif) — miroir du solde SOA (fournisseurs.js) :
+  // la pièce comptable fait autorité. Pas de dueDate sur ces pièces → échéance = date de facture
+  // (passée → échu ; absente → mois courant, comme une facture client sans échéance).
+  if (soaFromInvoices) {
+    for (const inv of supplierInvoices) {
+      const amt = Number(inv && inv.amountXof) || 0;
+      if (amt <= 0) continue;
+      total += amt; payableCount++;
+      const d = inv.date ? String(inv.date).slice(0, 10) : null;
+      const mk = d ? d.slice(0, 7) : null;
+      if (!d) { out[curMonth] += amt; noEtaCount++; continue; }
+      etaKnown += amt;
+      if (cmpDay(d) < today) { overdue += amt; overdueCount++; continue; }
+      if (inHorizon.has(mk)) out[mk] += amt; else beyond += amt;
+    }
   }
   return {
     months: months.map((m) => ({ month: m, out: out[m], engaged: engagedOut[m] })),

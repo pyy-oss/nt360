@@ -93,12 +93,21 @@ export function computeFilteredOverview(
   const encaisse = S(invP.filter((i) => i.paid), (i) => i.amountHt);
   // Perspective FACTURÉ : marge reconnue = taux(mb/CAS) de la commande × min(facturé_FP, CAS_FP)
   // (plafond au CAS = pas de marge sur la surfacturation, miroir reporting.factureLines).
+  // MIROIR EXACT de marginRate (reporting.js:53-57) : CAS=0 → repli marginPct NORMALISÉ (p>1 ⇒
+  // pourcentage → ratio, audit P2-1) et marge SANS plafond (cap=0, miroir factureLines). L'ancien
+  // miroir ignorait ce repli → « Marge brute (facturé) » filtrée ≠ serveur dès qu'une commande CAS=0
+  // à marginPct était facturée (audit 40 axes, axes 9/16).
   const rateByFp = new Map<string, { rate: number; cas: number }>();
-  for (const o of cmdRows) { const k = fpKey(o.fp); if (k) rateByFp.set(k, { rate: (o.cas || 0) > 0 ? (o.mb || 0) / (o.cas || 0) : 0, cas: o.cas || 0 }); }
+  for (const o of cmdRows) {
+    const k = fpKey(o.fp); if (!k) continue;
+    const cas = o.cas || 0;
+    const p = Number(o.marginPct) || 0;
+    rateByFp.set(k, { rate: cas > 0 ? (o.mb || 0) / cas : (p > 1 ? p / 100 : p), cas });
+  }
   const facByFp = new Map<string, number>();
   for (const i of invP) { const k = fpKey(i.fp); if (k) facByFp.set(k, (facByFp.get(k) || 0) + (i.amountHt || 0)); }
   let factureMb = 0;
-  for (const [fp, base] of facByFp) { const r = rateByFp.get(fp); if (r && r.cas > 0) factureMb += r.rate * Math.min(base, r.cas); }
+  for (const [fp, base] of facByFp) { const r = rateByFp.get(fp); if (!r) continue; factureMb += r.rate * (r.cas > 0 ? Math.min(base, r.cas) : base); }
   const facturePmb = facture > 0 ? factureMb / facture : 0;
   // Exclusion « déjà au carnet » (miroir chaine.js) : une opp active dont le FP porte déjà une commande
   // DE LA PÉRIODE est comptée dans `commandes` (CAS) ; la garder au pipeline la double-compterait au
