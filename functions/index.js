@@ -1586,7 +1586,7 @@ exports.aiSuggestClientMerges = onCallG(
 // Consultants (Lot 11) + Plan de charge / staffing (Lot 12) EXTRAITS dans handlers/staffing.js
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom).
 const { createStaffing } = require("./handlers/staffing");
-const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId });
+const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow: recomputeSummaries, logOps });
 exports.upsertConsultant = _staffing.upsertConsultant;
 exports.deleteConsultant = _staffing.deleteConsultant;
 exports.listConsultants = _staffing.listConsultants;
@@ -3338,11 +3338,16 @@ exports.setMntCalendar = onCallG("setMntCalendar", { memoryMiB: 256, timeoutSeco
 // setMntFeature. ÉTEINT (défaut) ⇒ l'ERP est STRICTEMENT celui d'avant (aucune surface par_*). Édité en
 // Habilitations, DIRECTION uniquement. Écriture Admin SDK (les rules gardent config/parFeature en
 // write:false). Audité. Le module s'allume/s'éteint sans redéploiement.
-exports.setParFeature = onCallG("setParFeature", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.setParFeature = onCallG("setParFeature", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const enabled = req.data?.enabled === true;
   await db.doc("config/parFeature").set({ enabled, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_feature", module: "habilitations", entity: "config", entityId: "parFeature", detail: { enabled }, ts: FieldValue.serverTimestamp() });
+  // À l'ALLUMAGE : recompute synchrone scopé pour matérialiser les summaries par_* immédiatement — sinon
+  // le module s'ouvre sur des cartes vides (ou figées d'une activation passée) jusqu'au recompute nocturne.
+  // BEST-EFFORT : le drapeau est DÉJÀ posé, un échec du recompute ne doit pas transformer l'activation en
+  // erreur. À l'extinction, rien à recalculer : le bloc par_ d'aggregate est gaté par le drapeau.
+  if (enabled) { try { await recomputeSummaries(["partenariats"]); } catch (e) { await logOps({ kind: "recompute", action: "setParFeature", status: "error", error: e?.message || String(e) }); } }
   return { ok: true, enabled };
 });
 

@@ -16,6 +16,14 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
   // à jour immédiatement : on force donc un recompute synchrone (comme le bouton « Recalculer »). Repli
   // sur requestRecompute si l'injection manque (émulateur / tests).
   const recomputeParNow = async () => { if (recomputeNow) { await recomputeNow(["partenariats"]); } else { await requestRecompute(["partenariats"]); } };
+  // MÊME logique pour les mutations UNITAIRES (audit partenariats, axe fraîcheur) : `requestRecompute`
+  // étant inerte en prod, chaque écriture par_ doit rafraîchir les summaries EN SYNCHRONE — sinon le
+  // tableau de bord contredit l'action de l'utilisateur pendant 24 h. BEST-EFFORT : la mutation est DÉJÀ
+  // écrite, un échec du recompute ne doit pas la transformer en erreur. Tracé (logOps), jamais remonté.
+  const refreshParBestEffort = async (action) => {
+    try { await recomputeParNow(); }
+    catch (e) { if (logOps) await logOps({ kind: "recompute", action, status: "error", error: (e && e.message) || String(e) }); }
+  };
   // Le module doit être ALLUMÉ pour toute écriture. Sans ça, aucune donnée par_* ne se crée : l'ERP
   // reste strictement celui d'avant même si un rôle porte le droit `partenariats`.
   async function assertParEnabled() {
@@ -39,20 +47,34 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: false }); // remplace le référentiel (tableaux non fusionnés)
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_partner" : "create_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: { name: v.value.name, tiers: v.value.tiers.length, certifs: v.value.certificationCatalog.length }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nom du partenaire affiché)
+    await refreshParBestEffort("upsertParPartner"); // rafraîchit summaries/par_ca (nom du partenaire affiché)
     return { ok: true, id };
   });
 
   // Supprime un référentiel partenaire. Réservé écriture `partenariats` + drapeau. Idempotent.
+  // GARDE D'INTÉGRITÉ (PA3) : refuse la suppression d'un partenaire encore RATTACHÉ à des certifications
+  // ou assignations — sinon elles deviennent orphelines (partnerId non résoluble) dans quotas/relances/
+  // exports. Le front annonce ce refus (« rattachés à des certifs/assignations ») : le serveur le TIENT.
   const deleteParPartner = onCallG("deleteParPartner", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "partenariats");
     await assertParEnabled();
     const id = slug(req.data && req.data.id);
     if (!id) throw new HttpsError("invalid-argument", "id de partenaire invalide");
+    const [certSnap, assignSnap] = await Promise.all([
+      db.collection("par_certifications").where("partnerId", "==", id).limit(1).get(),
+      db.collection("par_assignments").where("partnerId", "==", id).limit(1).get(),
+    ]);
+    if (!certSnap.empty || !assignSnap.empty) throw new HttpsError("failed-precondition", "partenaire encore rattaché à des certifications/assignations — supprimez-les (ou réaffectez-les) d'abord");
     await db.doc(`par_partners/${id}`).delete().catch(() => {});
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
-    return { ok: true, id };
+    // Purge du mapping fournisseur → partenaire : sans elle, les allocations pointant l'id supprimé
+    // attribueraient du CA à un partenaire fantôme dans summaries/par_ca (orphelin silencieux).
+    const { purgePartnerFromMap } = require("../domain/parPartner");
+    const mapDoc = (await db.doc("config/parPartnerMap").get()).data() || {};
+    const { map: purgedMap, purged } = purgePartnerFromMap(mapDoc.map || {}, id);
+    if (purged) await db.doc("config/parPartnerMap").set({ map: purgedMap, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_partner", module: "partenariats", entity: "par_partner", entityId: id, detail: { purgedMappings: purged }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("deleteParPartner");
+    return { ok: true, id, purgedMappings: purged };
   });
 
   // Crée/met à jour une certification d'un ingénieur. Idempotent : id = <consultantId>_<catalogId>
@@ -97,7 +119,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_certification" : "create_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) + alertes cycle de vie
+    await refreshParBestEffort("upsertParCertification"); // rafraîchit quotas (couverture) + alertes cycle de vie
     return { ok: true, id, status, expiryDate };
   });
 
@@ -109,7 +131,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!id) throw new HttpsError("invalid-argument", "id de certification invalide");
     await db.doc(`par_certifications/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_certification", module: "partenariats", entity: "par_certification", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit quotas (couverture) — sinon un partenaire reste conforme à tort après suppression
+    await refreshParBestEffort("deleteParCertification"); // rafraîchit quotas (couverture) — sinon un partenaire reste conforme à tort après suppression
     return { ok: true, id };
   });
 
@@ -155,7 +177,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     }
     await db.doc("config/parPartnerMap").set({ map, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_partner_map", module: "partenariats", entity: "config", entityId: "parPartnerMap", detail: { entries: Object.keys(map).length, skipped }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_ca (nouveau mapping)
+    await refreshParBestEffort("setParPartnerMap"); // rafraîchit summaries/par_ca (nouveau mapping)
     return { ok: true, entries: Object.keys(map).length, skipped };
   });
 
@@ -190,7 +212,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (exists) await ref.set(doc, { merge: true });
     else await ref.set({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: exists ? "update_par_assignment" : "create_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: { consultantId, partnerId, certificationCatalogId, status: v.value.status, targetDate: v.value.targetDate }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]); // rafraîchit summaries/par_relances
+    await refreshParBestEffort("upsertParAssignment"); // rafraîchit summaries/par_relances
     return { ok: true, id };
   });
 
@@ -206,7 +228,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "assignation inconnue");
     await ref.set({ status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_assignment_status", module: "partenariats", entity: "par_assignment", entityId: id, detail: { status }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
+    await refreshParBestEffort("setParAssignmentStatus");
     return { ok: true, id, status };
   });
 
@@ -218,7 +240,7 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     if (!id) throw new HttpsError("invalid-argument", "id d'assignation invalide");
     await db.doc(`par_assignments/${id}`).delete().catch(() => {});
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_assignment", module: "partenariats", entity: "par_assignment", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
-    await requestRecompute(["partenariats"]);
+    await refreshParBestEffort("deleteParAssignment");
     return { ok: true, id };
   });
 

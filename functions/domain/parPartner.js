@@ -227,8 +227,40 @@ function computeExpiry(obtainedDateIso, validityMonths) {
   return d.toISOString().slice(0, 10);
 }
 
+// Purge un partenaire SUPPRIMÉ du mapping fournisseur → partenaire (config/parPartnerMap). Sans purge,
+// les allocations pointant l'id supprimé deviendraient des orphelines silencieuses : du CA attribué à un
+// partnerId non résoluble (ligne fantôme dans summaries/par_ca). Une entrée simple (string) vers ce
+// partenaire est retirée ; une répartition pondérée perd cette part et GARDE les autres (les poids sont
+// re-normalisés à la lecture par allocationsFor) ; une répartition réduite à un seul constructeur reprend
+// la forme simple (canonique, comme setParPartnerMap). Pur. Renvoie { map, purged } (entrées touchées).
+function purgePartnerFromMap(map, partnerId) {
+  const id = slug(partnerId);
+  const next = {};
+  let purged = 0;
+  for (const [key, val] of Object.entries(map || {})) {
+    if (typeof val === "string") {
+      if (slug(val) === id) { purged++; continue; }
+      next[key] = val;
+    } else if (val && typeof val === "object" && !Array.isArray(val)) {
+      const alloc = {};
+      let touched = false;
+      for (const [pid, w] of Object.entries(val)) {
+        if (slug(pid) === id) { touched = true; continue; }
+        alloc[pid] = w;
+      }
+      if (touched) purged++;
+      const ids = Object.keys(alloc);
+      if (!ids.length) continue;                       // plus aucun constructeur → entrée retirée
+      next[key] = ids.length === 1 ? ids[0] : alloc;   // forme simple canonique si un seul reste
+    } else {
+      next[key] = val;
+    }
+  }
+  return { map: next, purged };
+}
+
 module.exports = {
   LEVELS, DEFAULT_VALIDITY_MONTHS, VALIDATION_STATUSES, BP_AXES, slug,
   validateTier, validateCompetency, validateCatalogEntry, validateRequirement, validatePartner,
-  validateBusinessPlan, bpAchievement, computeExpiry,
+  validateBusinessPlan, bpAchievement, computeExpiry, purgePartnerFromMap,
 };

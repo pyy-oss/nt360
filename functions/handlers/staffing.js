@@ -5,7 +5,52 @@
 // Exports déclarés dans index.js (garde-fou de déploiement par nom). Comportement identique.
 const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 
-function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId }) {
+function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow, logOps }) {
+  // ── Pont vers le module Partenariats (par_, gaté drapeau config/parFeature). Les certifs/assignations
+  // DÉNORMALISENT nom/BU/grade du consultant (+ managerUid destinataire des relances) pour s'afficher sous
+  // le seul droit `partenariats` : une fiche renommée ou supprimée doit se PROPAGER, sinon les vues
+  // partenariats montrent un nom périmé ou des lignes orphelines (audit partenariats, cycle de vie).
+  // Drapeau ÉTEINT ⇒ no-op strict (aucune lecture/écriture par_ : l'ERP reste celui d'avant). BEST-EFFORT :
+  // la mutation consultant est DÉJÀ écrite — un échec de propagation est tracé (logOps), jamais remonté.
+  async function parEnabled() {
+    const { isParEnabled } = require("../domain/parFeature");
+    return isParEnabled((await db.doc("config/parFeature").get()).data());
+  }
+  const refreshPar = async (action) => {
+    try { if (recomputeNow) await recomputeNow(["partenariats"]); }
+    catch (e) { if (logOps) await logOps({ kind: "recompute", action, status: "error", error: (e && e.message) || String(e) }); }
+  };
+  // Réécrit les dénormalisations par_ du consultant — MÊMES champs que upsertParCertification (nom/BU/grade
+  // + managerUid) et upsertParAssignment (nom/BU ; managerUid non touché : il peut y être saisi à la main).
+  async function syncParDenorm(id, cons) {
+    const [certSnap, assignSnap] = await Promise.all([
+      db.collection("par_certifications").where("consultantId", "==", id).limit(200).get(),
+      db.collection("par_assignments").where("consultantId", "==", id).limit(200).get(),
+    ]);
+    if (certSnap.empty && assignSnap.empty) return 0;
+    const name = String(cons.name || "").slice(0, 120), bu = String(cons.bu || "").slice(0, 40), grade = String(cons.grade || "").slice(0, 40);
+    const managerUid = cons.managerUid ? String(cons.managerUid).slice(0, 128) : null;
+    const batch = db.batch();
+    for (const d of certSnap.docs) batch.set(d.ref, { consultantName: name, consultantBu: bu, consultantGrade: grade, managerUid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    for (const d of assignSnap.docs) batch.set(d.ref, { consultantName: name, consultantBu: bu, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await batch.commit();
+    return certSnap.size + assignSnap.size;
+  }
+  // Supprime les certifs/assignations du consultant supprimé — sans cascade elles resteraient comptées
+  // dans quotas/relances au nom d'une personne qui n'existe plus dans l'annuaire.
+  async function cascadeParDelete(id) {
+    const [certSnap, assignSnap] = await Promise.all([
+      db.collection("par_certifications").where("consultantId", "==", id).limit(200).get(),
+      db.collection("par_assignments").where("consultantId", "==", id).limit(200).get(),
+    ]);
+    if (certSnap.empty && assignSnap.empty) return { certs: 0, assigns: 0 };
+    const batch = db.batch();
+    for (const d of certSnap.docs) batch.delete(d.ref);
+    for (const d of assignSnap.docs) batch.delete(d.ref);
+    await batch.commit();
+    return { certs: certSnap.size, assigns: assignSnap.size };
+  }
+
   const upsertConsultant = onCallG("upsertConsultant", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
     await requireWrite(req, "pipeline");
     const { validateConsultant } = require("../domain/consultant");
@@ -13,9 +58,19 @@ function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, req
     if (!v.ok) throw new HttpsError("invalid-argument", v.error);
     const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
     let id = req.data?.id ? assertPlainId(req.data.id, "id consultant") : null;
-    if (id) { await db.doc(`consultants/${id}`).set(doc, { merge: true }); }
+    let parChanged = false;
+    if (id) {
+      // Lecture AVANT écriture : ne propager vers par_ que si un champ dénormalisé a réellement changé.
+      const before = (await db.doc(`consultants/${id}`).get()).data() || {};
+      await db.doc(`consultants/${id}`).set(doc, { merge: true });
+      parChanged = ["name", "bu", "grade", "managerUid"].some((k) => (before[k] ?? null) !== (v.value[k] ?? null));
+    }
     else { const ref = await db.collection("consultants").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_consultant", module: "pipeline", entity: "consultant", entityId: id, detail: { name: v.value.name, status: v.value.status }, ts: FieldValue.serverTimestamp() });
+    if (parChanged) {
+      try { if (await parEnabled()) { const n = await syncParDenorm(id, v.value); if (n) await refreshPar("upsertConsultant"); } }
+      catch (e) { if (logOps) await logOps({ kind: "partenariats", action: "upsertConsultantParSync", status: "error", error: (e && e.message) || String(e) }); }
+    }
     return { ok: true, id };
   });
 
@@ -23,7 +78,10 @@ function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, req
     await requireWrite(req, "pipeline");
     const id = assertPlainId(req.data?.id, "id consultant");
     await db.doc(`consultants/${id}`).delete();
-    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_consultant", module: "pipeline", entity: "consultant", entityId: id, ts: FieldValue.serverTimestamp() });
+    let cascade = { certs: 0, assigns: 0 };
+    try { if (await parEnabled()) { cascade = await cascadeParDelete(id); if (cascade.certs + cascade.assigns) await refreshPar("deleteConsultant"); } }
+    catch (e) { if (logOps) await logOps({ kind: "partenariats", action: "deleteConsultantParCascade", status: "error", error: (e && e.message) || String(e) }); }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_consultant", module: "pipeline", entity: "consultant", entityId: id, detail: { parCertifs: cascade.certs, parAssigns: cascade.assigns }, ts: FieldValue.serverTimestamp() });
     return { ok: true };
   });
 

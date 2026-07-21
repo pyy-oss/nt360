@@ -102,3 +102,34 @@ describe("parPartner — validation du référentiel", () => {
     expect(v.value.businessPlan).toEqual({ pipelineBp: 300000, pipelineYtd: 3000000 });
   });
 });
+
+// Purge d'un partenaire supprimé du mapping fournisseur → partenaire (PAR-P2) : aucune allocation
+// orpheline ne doit survivre à la suppression d'un référentiel (CA fantôme dans summaries/par_ca).
+describe("parPartner — purgePartnerFromMap", () => {
+  const { purgePartnerFromMap } = require("../domain/parPartner");
+
+  it("retire les entrées simples pointant le partenaire supprimé, conserve les autres", () => {
+    const { map, purged } = purgePartnerFromMap({ "SUPPLIER A": "cisco", "SUPPLIER B": "dell" }, "cisco");
+    expect(map).toEqual({ "SUPPLIER B": "dell" });
+    expect(purged).toBe(1);
+  });
+
+  it("une répartition pondérée perd la part supprimée et garde les autres ; forme simple si un seul reste", () => {
+    const { map, purged } = purgePartnerFromMap({
+      "DISTRI 3": { cisco: 0.5, dell: 0.3, hpe: 0.2 },   // 3 constructeurs → il en reste 2
+      "DISTRI 2": { cisco: 0.6, dell: 0.4 },              // 2 constructeurs → forme simple canonique
+      "DISTRI 1": { cisco: 1 },                            // seul constructeur → entrée retirée
+    }, "cisco");
+    expect(map["DISTRI 3"]).toEqual({ dell: 0.3, hpe: 0.2 });
+    expect(map["DISTRI 2"]).toBe("dell");
+    expect(map["DISTRI 1"]).toBeUndefined();
+    expect(purged).toBe(3);
+  });
+
+  it("aucune entrée concernée → mapping inchangé, purged 0 (pas d'écriture inutile)", () => {
+    const src = { "SUPPLIER B": "dell", "DISTRI": { dell: 0.5, hpe: 0.5 } };
+    const { map, purged } = purgePartnerFromMap(src, "cisco");
+    expect(map).toEqual(src);
+    expect(purged).toBe(0);
+  });
+});

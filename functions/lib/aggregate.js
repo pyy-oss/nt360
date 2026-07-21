@@ -902,7 +902,14 @@ async function recomputeCore(db, only) {
       // une certif écrite « active » il y a deux ans peut être expirée aujourd'hui. C'est le sweep quotidien
       // annoncé par domain/parCertification — source UNIQUE du statut « à date » (jamais le champ persisté).
       const { computeCertStatus } = require("../domain/parCertification");
-      for (const c of parCertifs) c.status = computeCertStatus(c.expiryDate, asOf);
+      for (const c of parCertifs) {
+        const derived = computeCertStatus(c.expiryDate, asOf);
+        // Statut PERSISTÉ réécrit quand le temps l'a changé (drapeau figé sinon — audit partenariats) :
+        // les lecteurs DIRECTS de par_certifications (onglet Certifications, exports, requêtes par statut)
+        // voient alors le même statut que quotas/alertes. Écriture ciblée (merge), uniquement en cas d'écart.
+        if (derived !== c.status && c.id) w.push({ path: `par_certifications/${c.id}`, data: { status: derived } });
+        c.status = derived;
+      }
 
       // CA par constructeur : MÉLANGE BC dérivé + déclaratif (ADR-P02/P10). Le déclaratif d'un partenaire =
       // caDeclaredXof s'il est renseigné, sinon le réalisé booking YTD du plan d'affaires (repli sur la donnée
