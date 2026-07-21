@@ -1342,9 +1342,14 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
   if (to) {
     try {
       const snap = await db.collection("bcLines").where("dc", "==", from).limit(1000).get();
-      const batch = db.batch();
-      for (const d of snap.docs) { const v = d.data() || {}; if (v.fp == null || v.fp === "") { batch.update(d.ref, { fp: to }); backfilled++; } }
-      if (backfilled) await batch.commit();
+      const targets = snap.docs.filter((d) => { const v = d.data() || {}; return v.fp == null || v.fp === ""; });
+      // Batchs de 400 (idiome maison, cf. backfillBcFpFromDc) — un batch unique plafonnerait à 500 écritures.
+      for (let i = 0; i < targets.length; i += 400) {
+        const batch = db.batch();
+        targets.slice(i, i + 400).forEach((d) => batch.update(d.ref, { fp: to }));
+        await batch.commit();
+      }
+      backfilled = targets.length;
     } catch (e) { logger.warn("setDcAlias : backfill bcLines en échec (non bloquant)", { from, msg: e && e.message }); }
   }
   await db.collection("auditLog").add({

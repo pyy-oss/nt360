@@ -2250,4 +2250,5 @@ stade « engagé » manquait alors que la donnée était déjà à l'écran, lis
 résolution d'overlay « en mémoire au recompute » doit se demander : les vues front qui lisent le champ
 brut verront-elles la même chose ? Sinon, backfill persistant.
 
-**Vérifs.** Functions + web complets (voir PR), miroir front `engage` = assiette exacte de bcCostByFp.
+**Vérifs.** Functions 1353/1353 (alertsBcEngage 2, bcCostByFp 3, logistics DC 1), web 301/301, tsc/eslint 0,
+no-undef (165), deploy-targets (200/200), bundle 121,1 ≤ 122 Ko. Miroir front `engage` = assiette exacte de bcCostByFp.

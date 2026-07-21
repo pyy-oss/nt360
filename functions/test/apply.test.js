@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-const { applyWrites, stripLiveOpps, resolveLogisticsFx } = require("../lib/apply");
+const { applyWrites, stripLiveOpps, resolveLogisticsFx, resolveBcDc, backfillBcFpFromDc } = require("../lib/apply");
 
 // Faux Firestore minimal : un store `bcLines/{id} → data`, avec upsert (merge), delete et
 // requête `collection("bcLines").where("fp", op, v)` (op "==" OU "in" — le balayage anti-orphelins
@@ -156,5 +156,75 @@ describe("applyWrites — chemin DELTA/partiel : ne mass-stalise JAMAIS les oppo
     expect(db.store.get("opportunities/o2").stale).toBeUndefined(); // intacte
     expect(db.store.get("opportunities/o3").stale).toBeUndefined(); // intacte
     expect(db.store.get("opportunities/o1").amount).toBe(999);      // upsert appliqué
+  });
+});
+
+describe("resolveBcDc / backfillBcFpFromDc — rattachement DC → N° FP persistant (ADR-067)", () => {
+  // fakeDb minimal avec doc().get() : l'overlay config/dcAliases seul suffit à resolveBcDc.
+  const aliasDb = (seed) => ({
+    doc: (path) => ({ async get() { return { data: () => seed[path] }; } }),
+  });
+
+  it("resolveBcDc : une écriture bcLines SANS fp à DC connu arrive rattachée (fp canonisé) ; un fp existant PRIME", async () => {
+    const db = aliasDb({ "config/dcAliases": { map: { DC1: "FP/2026/0007" } } });
+    const writes = [
+      { path: "bcLines/a", data: { dc: "DC1" } },                  // sans fp → résolu (fpKey canonise)
+      { path: "bcLines/b", data: { dc: "DC1", fp: "FP/2026/9" } }, // fp existant → intouché (primauté)
+      { path: "bcLines/c", data: { dc: "DCX" } },                  // DC inconnu de l'overlay → intouché
+      { path: "orders/o1", data: { dc: "DC1" } },                  // hors bcLines → hors périmètre
+    ];
+    expect(await resolveBcDc(db, writes)).toBe(1);
+    expect(writes[0].data.fp).toBe("FP/2026/7");
+    expect(writes[1].data.fp).toBe("FP/2026/9");
+    expect(writes[2].data.fp).toBeUndefined();
+    expect(writes[3].data.fp).toBeUndefined();
+  });
+
+  it("resolveBcDc : overlay vide ou illisible → aucun effet (best-effort, jamais bloquant)", async () => {
+    const writes = [{ path: "bcLines/a", data: { dc: "DC1" } }];
+    expect(await resolveBcDc(aliasDb({ "config/dcAliases": { map: {} } }), writes)).toBe(0);
+    const broken = { doc: () => ({ async get() { throw new Error("indisponible"); } }) };
+    expect(await resolveBcDc(broken, writes)).toBe(0);
+    expect(writes[0].data.fp).toBeUndefined();
+  });
+
+  // fakeDb pour le backfill : store id → data, select/limit projetés, batch.update fusionné au commit.
+  const bfDb = (docs) => {
+    const store = new Map(Object.entries(docs));
+    return {
+      store,
+      collection: () => ({
+        select: () => ({ limit: () => ({
+          async get() { return { docs: [...store].map(([id, data]) => ({ ref: { id }, data: () => data })) }; },
+        }) }),
+      }),
+      batch: () => {
+        const ops = [];
+        return {
+          update(ref, data) { ops.push([ref.id, data]); },
+          async commit() { for (const [id, data] of ops) store.set(id, { ...store.get(id), ...data }); },
+        };
+      },
+    };
+  };
+
+  it("backfillBcFpFromDc : pose fp sur les docs SANS fp dont le DC résout — jamais d'écrasement d'un fp existant", async () => {
+    const map = { DC1: "FP/2026/0012", DC2: "FP/2026/2" };
+    const db = bfDb({
+      a: { dc: "DC1" },                   // sans fp → backfillé (canonisé)
+      b: { dc: "DC1", fp: "FP/2026/99" }, // fp existant → intouché (primauté resolveBcFp)
+      c: { dc: "DCX" },                   // DC hors overlay → intouché
+      d: { fp: "", dc: "DC2" },           // fp vide = absent → backfillé
+    });
+    expect(await backfillBcFpFromDc(db, map)).toBe(2);
+    expect(db.store.get("a").fp).toBe("FP/2026/12");
+    expect(db.store.get("b").fp).toBe("FP/2026/99");
+    expect(db.store.get("c").fp).toBeUndefined();
+    expect(db.store.get("d").fp).toBe("FP/2026/2");
+  });
+
+  it("backfillBcFpFromDc : overlay vide → aucun scan, 0", async () => {
+    expect(await backfillBcFpFromDc(null, {})).toBe(0);
+    expect(await backfillBcFpFromDc(null, undefined)).toBe(0);
   });
 });
