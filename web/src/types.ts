@@ -102,8 +102,10 @@ export interface RentabPerspective {
 export interface RentabiliteSummary {
   // Champs racine = perspective Commande (rétro-compat).
   period?: string; mb?: number; cas?: number; pmb?: number; costMissingCount?: number; mbEstimatedCount?: number;
-  byBu?: { bu: string; cas: number; mb: number }[]; topClients?: { key: string; value: number }[];
+  byBu?: { bu: string; cas: number; mb: number; pmb?: number }[]; topClients?: { key: string; value: number }[];
   byAm?: { am: string; cas: number; mb: number; pmb: number }[];
+  byPm?: { pm: string; cas: number; mb: number; pmb: number }[]; // marge par PM (perspective Commande)
+  monthly?: Record<string, number>; // marge mensuelle reconnue au facturé (Σ = perspectives.facture.mb)
   bottomAffaires?: { fp?: string; client?: string; am?: string; cas: number; mb: number; pmb: number; costMissing?: boolean; mbEstimated?: boolean }[];
   // Deux perspectives : Commande (CAS) et Facturé (CAF).
   perspectives?: { commande: RentabPerspective; facture: RentabPerspective };

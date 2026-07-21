@@ -1026,7 +1026,8 @@ export async function callExportReport(period: string) {
 // masquage serveur des champs confidentiels (le PM / rôle sans « rentabilité » les reçoit OMIS).
 export type FicheLine = {
   id?: string | null; ordre?: number; description: string; fournisseur: string;
-  type_charge: string; devise: "XOF" | "USD" | "EUR"; montant: number; numero_bc?: string | null;
+  // `montant` OMIS par le serveur quand la fiche est masquée (pmMasked) — donnée de marge dérivable.
+  type_charge: string; devise: "XOF" | "USD" | "EUR"; montant?: number; numero_bc?: string | null;
 };
 export type FicheFinancials = {
   lignes_xof: number; prix_de_revient_ht: number; prix_vente_ht: number;

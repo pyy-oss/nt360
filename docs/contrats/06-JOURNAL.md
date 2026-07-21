@@ -2011,3 +2011,28 @@ formats %, tendance/byPm marge, purge summaries marge périmés, 3e copie du peg
 
 **Vérifs.** Functions 1323/1323, web 301/301, tsc/eslint, no-undef (162), deploy-targets (192), indexes,
 bundle ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — RB2 : reliquats Rentabilité soldés (ADR-061)
+
+**Fait.** Les 7 reliquats de l'ADR-060 : masque fiche ÉTANCHE (vente + taux + montants de lignes omis,
+garde serveur anti-écrasement aveugle sur updateFiche étape 0) ; auditLog en drapeaux (patch_fiche /
+set_cost_model / astreinte_submit sans montants) ; tendance de marge mensuelle (plafond CAS chronologique,
+Σ mois = mb Facturé, testé) + marge par PM dans rentabilite_* + 2 cartes front ; purge des summaries de
+marge de millésimes disparus (mêmes gates que l'écriture) ; badge « marge estimée » propagé à FP 360° et
+à la Marge de livraison (mbEstimated) ; erreurs front honnêtes (Factures, Créances & DSO, Objectifs,
+Fiches, Rentabilité par ressource denied≠error) + useReloadOnWrite sur la Marge de livraison ; cible %MB
+validée [0..1], date_fiche frDate, % fiches via pct(), peg centralisé (web/src/lib/fx.ts), drill-through
+marge_negative segmenté, searchKeys des tables marge, byBu.pmb typé.
+
+**Appris.** La marge « masquée » restait dérivable par un canal secondaire (lignes + vente + taux) et
+fuyait par un troisième (auditLog) : masquer le canal principal ne suffit jamais — inventorier les canaux.
+Un masquage serveur qui omet des champs ÉDITABLES impose une garde d'écriture symétrique, sinon le client
+réécrit en aveugle ce qu'il n'a pas reçu.
+
+**Échoué puis corrigé.** Tendance mensuelle : les factures non datées, triées en tête (clé vide),
+consommaient le plafond CAS avant les factures datées → clé de tri « 9999-99-99 » (test rouge → vert).
+
+**Vérifs.** Functions 1326/1326, web 301/301, tsc/eslint, no-undef (162), deploy-targets (192), indexes,
+bundle 120,9 ≤ 122 Ko.

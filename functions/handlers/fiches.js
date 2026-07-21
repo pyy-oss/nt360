@@ -85,7 +85,15 @@ function createFiches({ onCallG, HttpsError, db, FieldValue, requestRecompute })
     if (!id) throw new HttpsError("invalid-argument", "identifiant de fiche requis");
     const snap = await db.doc(`fiches/${id}`).get();
     if (!snap.exists) throw new HttpsError("not-found", "fiche introuvable");
-    const r = applyEdit({ _id: id, ...snap.data() }, (req.data || {}).patch || {}, req.auth.token?.nt360Role);
+    const cur = { _id: id, ...snap.data() };
+    // Étape 0 = édition des MONTANTS (lignes, vente, provisions). Un rôle qui ne VOIT pas la marge reçoit
+    // une fiche aux montants OMIS (presentFor) : le laisser réécrire les lignes détruirait des montants
+    // qu'il n'a jamais vus (écrasement aveugle → montants à 0). On refuse — sans effet pour les habilités,
+    // et l'étape 3 (saisie des N° de BC, sans montant) reste ouverte au rôle de l'étape.
+    if ((cur.etape_courante || 0) === 0 && !(await ficheCanSeeMargin(req))) {
+      throw new HttpsError("permission-denied", "édition des montants réservée à un rôle habilité « rentabilité »");
+    }
+    const r = applyEdit(cur, (req.data || {}).patch || {}, req.auth.token?.nt360Role);
     if (!r.ok) throw new HttpsError("permission-denied", r.error);
     await db.doc(`fiches/${id}`).set({ ...r.fiche, _id: id, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return { ok: true, id };

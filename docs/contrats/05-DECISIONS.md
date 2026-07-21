@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-061 — Rentabilité RB2 : reliquats ADR-060 soldés (masque fiche étanche, auditLog sans montants, tendance/byPm marge, purge summaries, honnêteté front)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« on corrige tout cible 10/10 partout » — exécution des reliquats notés en ADR-060 §Conséquences)
+
+### Contexte
+L'ADR-060 avait corrigé les HAUTE/MOYENNE de l'audit Rentabilité (RB1) et listé les reliquats. RB2 les solde tous.
+
+### Décisions
+- **Masque fiche ÉTANCHE.** `presentFor` masqué omet désormais AUSSI `prix_vente_ht_xof`, `taux_usd/taux_eur` et le `montant` de chaque ligne : vente + montants + taux suffisaient à RE-DÉRIVER la marge « masquée » (provisions souvent nulles). `updateFiche` refuse l'édition d'étape 0 (montants) à un rôle qui ne voit pas la marge — sinon son patch réécrivait en aveugle des montants jamais reçus (perte de données). Front : « — » (jamais un faux 0) sur la vente masquée, mode lecture + message dédié pour l'acteur masqué. Effet de bord assumé : une assistante SANS droit `rentabilite` ne peut plus éditer l'étape 0 — c'est une incohérence de matrice à corriger dans Habilitations, plus un contournement silencieux.
+- **auditLog en DRAPEAUX, pas en montants.** `patch_fiche` (vente/revient), `set_cost_model` (taux de structure) et `astreinte_submit` (charge) n'écrivent plus les valeurs : l'auditLog se lit au droit `habilitations` (⊉ `rentabilite`) — les montants y contournaient le cloisonnement de la marge. Les entrées HISTORIQUES ne sont pas réécrites (append-only) : fuite passée actée, colmatée pour l'avenir.
+- **Tendance de marge mensuelle + marge par PM** dans `summaries/rentabilite_*` (gaté `rentabilite`) : `monthly` = marge reconnue par MOIS de facture (taux de la commande × facturé du mois, plafond CAS appliqué CHRONOLOGIQUEMENT, factures non datées après les datées — Σ des mois = mb de la perspective Facturé, testé) ; `byPm` = cas/mb/pmb par PM affecté (« — » = sans PM). Deux cartes front (Rentabilité).
+- **Purge des summaries de marge de millésimes disparus** (`rentabilite_`/`overviewMargin_`/`clientsMargin_`/`domainesMargin_` hors `periods`, jamais `_all`), aux MÊMES gates `want(...)` que l'écriture — un recompute scopé ne détruit pas ce qu'il n'a pas régénéré.
+- **Badge « marge estimée » propagé** (mbSource "opp", ADR-056) : FP 360° (sub du KPI MB) et Marge de livraison (`mbEstimated` par affaire, badge) — l'estimation pipeline n'est plus présentée comme une marge P&L.
+- **Honnêteté front.** Erreur ≠ vide sur : liste Factures, Créances & DSO, Objectifs, liste Fiches, Rentabilité par ressource (denied→carte masquée / error→signalée, même patron que la Marge de livraison) ; message d'erreur nommé sur le détail de fiche. `useReloadOnWrite` sur la Marge de livraison (vue callable figée après mutation). Drill-through `marge_negative` → segment « Marge négative » pré-sélectionné sur la liste Commandes (visible au droit marge). Recherche (searchKeys) sur les tables Affaires à faible marge et Marge de livraison.
+- **Cohérence de forme.** Cible %MB validée en ratio [0..1] à la saisie (0,21, pas 21) ; `date_fiche` en frDate ; % des fiches via `pct()` ; peg EUR 655,957 centralisé dans `web/src/lib/fx.ts` (3e copie de fiches.tsx supprimée, operations.tsx migré) ; `byBu.pmb` typé (fin du `any`).
+
+### Conséquences
+- Additif et à effet immédiat au prochain recompute/déploiement ; les docs de marge périmés disparaissent au premier recompute complet.
+- Le refus d'édition étape 0 sans droit marge peut SURPRENDRE si la matrice donnait `overview` sans `rentabilite` à l'assistante — le message la renvoie aux Habilitations.
+
+### Ce qu'on saura dans six mois
+Si une donnée confidentielle « fuit » encore, chercher les canaux SECONDAIRES (auditLog, exports, summaries périmés) : le masquage du canal principal ne suffit jamais.
+
 ## ADR-060 — Remédiation Backlog (B1→B4) + correctifs Rentabilité (RB1) + refus d'import actionnable
 
 - **Date :** 2026-07-21

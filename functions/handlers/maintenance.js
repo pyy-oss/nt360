@@ -569,7 +569,9 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     const visibleTo = Array.from(new Set([...ownerChain(usersMap, requester), approverUid]));
     const apRef = await db.collection("approvals").add({ ...va.value, status: "pending", requestedBy: requester, requestedByName: (usersMap[requester] && usersMap[requester].name) || null, approverUid, visibleTo, at: new Date().toISOString().slice(0, 10), createdAt: FieldValue.serverTimestamp() });
     await aRef.set({ approvalId: apRef.id }, { merge: true });
-    await db.collection("auditLog").add({ uid: requester, action: "astreinte_submit", module: "maintenance", entity: "astreinte", entityId: aRef.id, detail: { fp: v.value.fp, montant: v.value.montant, approvalId: apRef.id, approverUid }, ts: FieldValue.serverTimestamp() });
+    // Pas de montant dans l'auditLog : la charge d'astreinte est CONFIDENTIELLE (masquée « rentabilite »
+    // dans listAstreintes) alors que l'auditLog se lit au droit « habilitations » — l'y écrire la fuyait.
+    await db.collection("auditLog").add({ uid: requester, action: "astreinte_submit", module: "maintenance", entity: "astreinte", entityId: aRef.id, detail: { fp: v.value.fp, approvalId: apRef.id, approverUid }, ts: FieldValue.serverTimestamp() });
     return { ok: true, id: aRef.id, approvalId: apRef.id, approverUid };
   });
 

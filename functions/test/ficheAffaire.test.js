@@ -181,9 +181,15 @@ describe("masquage PM (côté serveur)", () => {
     expect("autres_frais_financiers_xof" in view).toBe(false);
     expect("seuil_marge_pct" in view).toBe(false);
     expect(view.financials).toBe(null); // pas de prix de revient / marge / %
-    // ...mais l'identification reste visible (FP, client, prix de vente).
+    // Vente, taux et montants de lignes AUSSI omis : sinon la marge « masquée » se re-dérivait
+    // côté client (vente − Σ montants×taux, provisions souvent nulles) — audit rentabilité RB2.
+    expect("prix_vente_ht_xof" in view).toBe(false);
+    expect("taux_usd" in view).toBe(false);
+    expect("taux_eur" in view).toBe(false);
+    for (const l of view.lignes) expect("montant" in l).toBe(false);
+    // ...mais l'identification reste visible (FP, lignes hors montant : description/fournisseur/BC).
     expect(view.numero_fp).toBe("FP/2026/11969");
-    expect(view.prix_vente_ht_xof).toBe(37624064);
+    expect(view.lignes[0].fournisseur).toBeTruthy();
   });
   it("les autres rôles reçoivent la fiche complète + agrégats calculés", () => {
     const view = presentFor(baseFiche(), "direction");

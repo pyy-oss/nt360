@@ -6,6 +6,7 @@ import { useCan, useCanImport, useCanSeeMargin } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { fpKey, cleanName } from "../lib/ids";
+import { FIXED_PEG } from "../lib/fx"; // repli parité fixe légale — source unique (miroir functions/lib/fx.js)
 import { T, BU_COL, BC_COL, fmt, pct } from "../design/tokens";
 import { Upload } from "lucide-react";
 import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
@@ -21,11 +22,6 @@ import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, SupplierInvoice, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
-
-// Parités fixes légales (repli quand aucun taux n'est paramétré dans config/fxRates). DOIT rester
-// aligné sur functions/lib/fx.js (peg EUR 655,957). Partagé par l'aperçu d'import ET le correcteur de
-// montant BC, sinon un BC en devise sans taux affiche « 0 » à un endroit et sa contre-valeur ailleurs.
-const FIXED_PEG: Record<string, number> = { EUR: 655.957, XAF: 1 };
 
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
   const m: Record<string, number> = {};
@@ -759,7 +755,9 @@ export const Fp360: FC<Props> = () => {
               <Kpi label="Client" value={o.client || "—"} />
               <Kpi label="CAS" value={fmt(o.cas)} />
               <Kpi label="RAF" value={fmt(o.raf)} tone="steel" />
-              {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
+              {/* mbSource "opp" = marge ESTIMÉE (MB prév. de l'opportunité, ADR-056) — même signal que la
+                  vue Rentabilité, sinon FP 360° présentait l'estimation comme une marge P&L réelle. */}
+              {canMargin ? <Kpi label="MB" value={fmt(o.mb)} sub={o.mbSource === "opp" ? [o.bu, "marge estimée (opp)"].filter(Boolean).join(" · ") : o.bu} tone="gold" /> : <Kpi label="BU" value={o.bu || "—"} />}
             </div>
           ) : (
             <Tip><b>Aucune commande</b> (carnet P&L) pour {key} — ce N° FP existe <b>hors carnet</b> : opportunité gagnée non adossée, facture ou BC orphelin. Les maillons rattachés sont listés ci-dessous ; corrigez le rattachement dans <b>Qualité &amp; correction</b>.</Tip>

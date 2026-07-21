@@ -1233,7 +1233,18 @@ export const OrderList: FC<Props> = () => {
   const rows = useMemo(() => all.filter((r) => match(r, ["bu", "am", "client", "pm"])), [all, match]);
   // Filtre de FACTURATION (suivi aval) : concentrer sur les commandes à facturer sans quitter l'écran.
   const [factSeg, setFactSeg] = useState<"all" | "todo" | "wip" | "done">("all");
-  const shown = useMemo(() => (factSeg === "all" ? rows : rows.filter((r) => factBucket(r) === factSeg)), [rows, factSeg]);
+  // Filtre MARGE NÉGATIVE — cible du drill-through de l'alerte « marge négative » (Centre d'alertes),
+  // qui atterrissait jusqu'ici sur la liste complète, laissant l'utilisateur rechercher lui-même les
+  // commandes fautives (audit rentabilité RB2). Visible seulement avec l'accès marge.
+  const canMargin = useCanSeeMargin();
+  const { intent } = useNav();
+  const [negOnly, setNegOnly] = useState(intent?.segment === "negmb");
+  useEffect(() => { if (intent?.segment === "negmb") setNegOnly(true); }, [intent]);
+  const negRows = useMemo(() => (canMargin ? rows.filter((r) => (r.mb || 0) < 0) : []), [rows, canMargin]);
+  const shown = useMemo(() => {
+    const base = factSeg === "all" ? rows : rows.filter((r) => factBucket(r) === factSeg);
+    return negOnly && canMargin ? base.filter((r) => (r.mb || 0) < 0) : base;
+  }, [rows, factSeg, negOnly, canMargin]);
   const FACT_SEGS = useMemo(() => {
     let todo = 0, wip = 0, done = 0;
     for (const r of rows) { const b = factBucket(r); if (b === "todo") todo++; else if (b === "wip") wip++; else if (b === "done") done++; }
@@ -1254,10 +1265,8 @@ export const OrderList: FC<Props> = () => {
     return { cas, fact, raf, ecart: cas - fact - raf, todo, done };
   }, [rows]);
   const canImport = useCanImport();
-  const canMargin = useCanSeeMargin();
   const canPipeline = useCan("pipeline") !== "none"; // la réconciliation LIT les opportunités (droit pipeline)
   const canPipelineWrite = useCan("pipeline") === "write"; // ÉCRIRE une opp (corriger FP / annuler / sync ⇄) exige pipeline:write
-  const { intent } = useNav();
   const [showNew, setShowNew] = useState(false);
   const commandeFps = useMemo(() => new Set(all.map((r) => fpKey(r.fp)).filter(Boolean) as string[]), [all]);
   // Suggestions d'affectation PM (datalist) = référentiel Admin ∪ PM déjà affectés.
@@ -1319,7 +1328,11 @@ export const OrderList: FC<Props> = () => {
       {rowsError && <ErrorState error={rowsError} />}
       <TruncationNote show={rowsTrunc} cap={DEFAULT_SUB_CAP} />
       {showNew && <OrderForm onDone={() => setShowNew(false)} />}
-      <div className="mb-2"><Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" /></div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Segmented value={factSeg} onChange={setFactSeg} options={FACT_SEGS} ariaLabel="Filtrer par état de facturation" />
+        {canMargin && <Segmented value={negOnly ? "neg" : "all"} onChange={(v) => setNegOnly(v === "neg")} ariaLabel="Filtrer par marge"
+          options={[{ value: "all", label: "Toutes marges" }, { value: "neg", label: "Marge négative", count: negRows.length }]} />}
+      </div>
       {/* Suggestions d'auto-complétion partagées par les champs d'affectation PM de chaque ligne. */}
       <datalist id="pm-options">{pmOptions.map((p) => <option key={p} value={p} />)}</datalist>
       <ListView

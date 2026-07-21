@@ -1026,6 +1026,27 @@ async function recomputeCore(db, only) {
   }
   await batch.commit();
 
+  // Purge des summaries de MARGE de millésimes DISPARUS : `periods` dérive des commandes présentes —
+  // quand un millésime disparaît (ré-import, annulations), son doc rentabilite_/xxxMargin_ n'était plus
+  // réécrit mais restait LISIBLE (marge périmée, confidentielle, hors sélecteur de périodes). On ne purge
+  // que les familles recalculées dans CE recompute (mêmes gates que l'écriture — un recompute scopé ne
+  // détruit pas ce qu'il n'a pas régénéré). Lecture par IDs seuls (select() vide), jamais les contenus.
+  {
+    const MARGIN_PREFIX_SCOPE = { rentabilite: "rentabilite", overviewMargin: "overview", clientsMargin: "clients", domainesMargin: "domaines" };
+    const validPeriods = new Set(periods);
+    const ids = (await db.collection("summaries").select().get()).docs.map((d) => d.id);
+    let purge = db.batch(), p = 0;
+    for (const id of ids) {
+      const m = id.match(/^([A-Za-z]+)_(\d+)$/); // suffixe numérique = millésime ("all" jamais purgé)
+      if (!m) continue;
+      const scope = MARGIN_PREFIX_SCOPE[m[1]];
+      if (!scope || !want(scope) || validPeriods.has(m[2])) continue;
+      purge.delete(db.doc(`summaries/${id}`));
+      if (++p % 400 === 0) { await purge.commit(); purge = db.batch(); }
+    }
+    if (p % 400 !== 0) await purge.commit();
+  }
+
   // Purge des chunks de commandes ORPHELINS (base ET marge) si le nombre de chunks a diminué depuis
   // le dernier recompute, sinon d'anciennes lignes resteraient lues par le front.
   if (commandeChunks != null) {

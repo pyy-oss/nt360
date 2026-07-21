@@ -14,7 +14,9 @@ const DEFAULT_SEUIL = 15; // seuil de marge par défaut (%), alerte NON bloquant
 
 // Champs financiers CONFIDENTIELS — OMIS (pas null) de la réponse servie au rôle PM (lecture).
 // cf. BUSINESS_RULES §6 / api-spec « principe transversal ». Masquage CÔTÉ SERVEUR obligatoire.
-const CONFIDENTIAL_KEYS = ["provisions_xof", "autres_frais_financiers_xof", "prix_de_revient_ht", "marge_brute", "pct_marge", "seuil_marge_pct"];
+// `prix_vente_ht_xof`, les taux de change et le `montant` de CHAQUE ligne sont aussi omis : avec
+// vente + montants de lignes + taux, la marge « masquée » se RE-DÉRIVAIT côté client (audit rentabilité).
+const CONFIDENTIAL_KEYS = ["provisions_xof", "autres_frais_financiers_xof", "prix_de_revient_ht", "marge_brute", "pct_marge", "seuil_marge_pct", "prix_vente_ht_xof", "taux_usd", "taux_eur"];
 
 // Circuit de validation à 6 étapes (etape_courante 0..5). Rôles du kit MAPPÉS sur les rôles nt360
 // existants (claim nt360Role) : AC→assistante · DC→commercial_dir · DRO→pmo · DGA/CDGDF→direction ·
@@ -246,8 +248,12 @@ function presentFor(fiche, role, canSeeMargin) {
   const f = fiche || {};
   const see = canSeeMargin === undefined ? String(role || "") !== "lecture" : !!canSeeMargin;
   if (!see) {
-    const { provisions_xof, autres_frais_financiers_xof, seuil_marge_pct, ...rest } = f;
-    return { ...rest, financials: null, pmMasked: true };
+    const { provisions_xof, autres_frais_financiers_xof, seuil_marge_pct, prix_vente_ht_xof, taux_usd, taux_eur, ...rest } = f;
+    // Le MONTANT de chaque ligne est aussi omis : vente + montants + taux suffisaient à RE-DÉRIVER la
+    // marge masquée (provisions souvent nulles). Les autres champs de ligne (description, fournisseur,
+    // N° BC) restent visibles — nécessaires au suivi et à la saisie des BC (étape 3).
+    const lignes = (Array.isArray(f.lignes) ? f.lignes : []).map((l) => { const { montant, ...keep } = l || {}; return keep; });
+    return { ...rest, lignes, financials: null, pmMasked: true };
   }
   return { ...f, financials: computeFinancials(f), pmMasked: false };
 }

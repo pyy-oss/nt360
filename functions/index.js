@@ -2830,7 +2830,9 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeo
   await db.doc(`projectSheetsMargin/${id}`).set({ _id: id, fp, saleTotal: m.saleTotal, costTotal: m.costTotal, margin: m.margin, marginPct: m.marginPct }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_fiche", module: "rentabilite", entity: "projectSheet", entityId: id,
-    detail: { fp, saleTotal: m.saleTotal, costTotal: m.costTotal }, ts: FieldValue.serverTimestamp(),
+    // DRAPEAUX, pas de montants : l'auditLog se lit au droit « habilitations » (⊉ « rentabilite ») —
+    // y écrire vente/revient en clair contournait le cloisonnement de la marge (audit rentabilité).
+    detail: { fp, saleChanged: provided(d.saleTotal), costChanged: provided(d.costTotal) }, ts: FieldValue.serverTimestamp(),
   });
   await requestRecompute(); // fiche → CAS (si commande=fiche) + marge → recalcul complet
   return { ok: true, fp };
@@ -4882,7 +4884,8 @@ exports.setCostModel = onCallG("setCostModel", { memoryMiB: 256, timeoutSeconds:
   const r = Number(req.data?.structureRate);
   if (!Number.isFinite(r) || r < 0 || r > 1) throw new HttpsError("invalid-argument", "structureRate ∈ [0..1] requis");
   await db.doc("config/costModel").set({ structureRate: r, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_cost_model", module: "rentabilite", entity: "config", entityId: "costModel", detail: { structureRate: r }, ts: FieldValue.serverTimestamp() });
+  // Drapeau, pas la valeur : le taux de structure est une donnée de MARGE (auditLog lisible « habilitations » ⊉ « rentabilite »).
+  await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_cost_model", module: "rentabilite", entity: "config", entityId: "costModel", detail: { defined: r > 0 }, ts: FieldValue.serverTimestamp() });
   return { ok: true, structureRate: r };
 });
 
