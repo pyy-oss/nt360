@@ -195,6 +195,15 @@ describe("mergeCommandes — repli marge : MB de l'opp quand ni MB TOTAL ni fich
     expect(c.mbSource).toBeUndefined();
   });
 
+  it("legacy AMBIGU (mbPresent absent, mb=0) : PAS d'estimation — on attend le ré-import (0 réel vs absent)", () => {
+    const c = one(
+      [{ ...base, fp: "FP/2026/16", cas: 1000, mb: 0 }], // ni mbPresent ni marge : ambigu → ne pas estimer
+      [{ fp: "FP/2026/16", mbPrev: 25, stage: 4 }],
+    );
+    expect(c.mb).toBe(0);            // aucune estimation tant que le P&L n'a pas confirmé l'absence
+    expect(c.mbSource).toBeUndefined();
+  });
+
   it("plusieurs opps d'un même FP : la plus avancée (stage) prime, puis le mbPrev le plus élevé", () => {
     const c = one(
       [{ ...base, fp: "FP/2026/14", cas: 1000, mb: 0, mbPresent: false }],

@@ -104,8 +104,10 @@ function mergeCommandes(orders, opps, sheets, invoices) {
   }
   for (const [fp, cmd] of byFp) {
     if (cmd.pnlSource === "fiche") continue; // la fiche fait autorité sur la marge
-    if (cmd.mbPresent === true) continue;    // MB TOTAL renseigné (même 0) → marge P&L réelle, on n'y touche pas
-    if (Number(cmd.mb) > 0) continue;        // legacy sans mbPresent : un mb>0 est déjà une marge P&L à conserver
+    // On n'estime QUE si le parseur P&L a EXPLICITEMENT confirmé l'absence de MB TOTAL (mbPresent === false).
+    // Une ligne P&L pas encore ré-importée (mbPresent absent/undefined) est AMBIGUË (0 réel vs absent) → on ne
+    // touche à rien : jamais d'estimation sur des données legacy, aucune marge P&L réelle (fût-elle 0) écrasée.
+    if (cmd.mbPresent !== false) continue;
     const cas = Number(cmd.cas) || 0;
     if (cas <= 0) continue;                  // CAS 0 = hors périmètre rentabilité (taux via marginPct, non concerné)
     const est = oppMbByFp.get(fp);
