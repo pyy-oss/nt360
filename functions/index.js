@@ -259,6 +259,23 @@ async function requestRecompute(scope) {
   }
 }
 
+// Recompute SYNCHRONE best-effort pour les mutations du CARNET (audit backlog, constat H1) : en prod le
+// canal DIFFÉRÉ est inerte (RECOMPUTE_REGION posé côté runtime mais trigger onRecomputeRequest absent du
+// déploiement) → une demande déposée n'est JAMAIS traitée et backlog_fy/commandesRows/alertes contredisent
+// l'action (« Solder ») pendant des heures, alors que le toast promet « recalcul lancé ». On force donc le
+// recompute DANS le chemin de réponse (verrou/coalescing inclus), BEST-EFFORT : la donnée est DÉJÀ écrite,
+// un échec du recompute est tracé (opsLog), jamais remonté en faux « internal » (patron refreshParBestEffort,
+// handlers/partenariats.js). Si le différé est un jour réellement déployé, repasser ces sites à
+// requestRecompute (ADR-060).
+async function refreshNowBestEffort(action, scope) {
+  const t0 = Date.now();
+  try { await recomputeSummaries(scope); }
+  catch (e) {
+    logger.error("refreshNowBestEffort : recompute en échec (mutation déjà écrite)", { action, message: e && e.message });
+    await logOps({ kind: "recompute", trigger: action, status: "error", ms: Date.now() - t0, error: (e && e.message) || String(e) });
+  }
+}
+
 // Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
 // échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
 async function logOps(entry) {
@@ -574,6 +591,22 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
   const fp = fpKey(req.data?.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const milestones = normalizeMilestones(req.data?.milestones);
+  // GARDE Σ jalons ≤ CAS/RAF (audit backlog M3) : la règle « Σ = RAF » n'était tenue qu'à l'ÉDITEUR — un
+  // appel direct du callable persistait des jalons arbitraires qui gonflaient billingTrend/relancesJalons.
+  // Bornes serveur : jamais au-delà du CAS de la commande, ni du RAF curaté s'il existe (tolérance 1 XOF
+  // d'arrondi). Commande introuvable (jalons posés en avance d'un import) : tolérée, le recompute écarte
+  // déjà les jalons sans commande active.
+  {
+    const ordSnap = await db.doc(`orders/${safeId(fp)}`).get();
+    if (ordSnap.exists) {
+      const o = ordSnap.data() || {};
+      const total = milestones.reduce((s, m) => s + m.amount, 0);
+      const cas = Number(o.cas);
+      if (Number.isFinite(cas) && cas > 0 && total > cas + 1) throw new HttpsError("invalid-argument", `Σ jalons (${Math.round(total)}) supérieure au CAS de la commande (${Math.round(cas)})`);
+      const raf = Number(o.raf);
+      if (o.raf != null && Number.isFinite(raf) && raf >= 0 && total > raf + 1) throw new HttpsError("invalid-argument", `Σ jalons (${Math.round(total)}) supérieure au RAF curaté (${Math.round(raf)}) — réajustez le RAF d'abord`);
+    }
+  }
   await db.doc(`billingMilestones/${safeId(fp)}`).set({ fp, milestones, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "billing_milestones", module: "backlog",
@@ -583,7 +616,7 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
   // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
   // 'relances' inclus (cf. audit cycle de vie) : les jalons pilotent summaries/relancesJalons (jalons échus
   // non facturés) ; sans lui, éditer les jalons ne rafraîchissait pas le plan de relance sur échéances.
-  await requestRecompute(["atterrissage", "news", "relances"]);
+  await refreshNowBestEffort("setBillingMilestones", ["atterrissage", "news", "relances"]);
   return { ok: true, fp, milestones };
 });
 
@@ -1170,7 +1203,7 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   // client), les agrégats se rafraîchissent via onRecomputeRequest. Un échec est journalisé, pas remonté.
   try {
     if (kinds.includes("pnl") || kinds.includes("fiche")) await updateFiscalYearFromOrders();
-    await requestRecompute();
+    await recomputeSummaries(); // SYNCHRONE (différé inerte en prod, cf. refreshNowBestEffort) — le try englobant reste best-effort
   } catch (e) {
     logger.error("importDelta : post-traitement (fisc/recompute) échoué — données importées, agrégats au prochain recompute", { message: e && e.message, stack: e && e.stack });
   }
@@ -1217,7 +1250,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds:
     uid: req.auth.uid, action: "set_invoice_fp", module: "facturation", entity: "invoice", entityId: id,
     detail: { fp }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setInvoiceFp");
   return { ok: true, id, fp };
 });
 
@@ -1257,7 +1290,7 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "set_fp_alias", module: "import", entity: "fpAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setFpAlias");
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
@@ -1289,7 +1322,7 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
     detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setDcAlias");
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
@@ -2708,7 +2741,7 @@ exports.runAutomations = _automations.runAutomations;
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
 // pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
 const { createSanitize } = require("./handlers/sanitize");
-const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
+const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow: recomputeSummaries, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
 exports.deleteRecords = _sanitize.deleteRecords;
 exports.setCancellation = _sanitize.setCancellation;
 exports.purgeCollections = _sanitize.purgeCollections;
@@ -2851,6 +2884,15 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     if (!Number.isFinite(rf) || rf < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
     patch.raf = rf;
   }
+  // RAF ≤ CAS (audit backlog M1) : un RAF supérieur au montant signé n'a pas de sens comptable —
+  // « intégrer » avec un RAF de 500 M sur un CAS de 10 M gonflait backlog_fy, seulement signalé a
+  // posteriori par l'alerte raf_incoherent. Comparé au CAS EFFECTIF après patch (patché sinon existant).
+  {
+    const effCas = patch.cas != null ? patch.cas : Number((snap.data() || {}).cas);
+    if (patch.raf != null && Number.isFinite(effCas) && effCas > 0 && patch.raf > effCas) {
+      throw new HttpsError("invalid-argument", `RAF (${Math.round(patch.raf)}) supérieur au CAS (${Math.round(effCas)}) — corrigez le CAS d'abord si la commande a été révisée à la hausse`);
+    }
+  }
   // Champs descriptifs éditables (source P&L/manuelle). Sur une ligne opp_won/fiche, client/am sont
   // gouvernés à la source → ré-écrasés au recompute ; l'UI ne propose l'édition que sur pnl/manuel.
   if (d.client !== undefined) patch.client = String(d.client || "").trim();
@@ -2893,7 +2935,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
     detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null, client: patch.client ?? null, am: patch.am ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("patchOrder");
   return { ok: true, fp: newFp || fp };
 });
 
@@ -2912,6 +2954,14 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   if (!fp) throw new HttpsError("invalid-argument", "N° FP requis (format FP/AAAA/N)");
   const cas = Number(d.cas);
   if (!Number.isFinite(cas) || cas <= 0) throw new HttpsError("invalid-argument", "CAS (> 0) requis");
+  // RAF explicite : VALIDÉ (audit backlog M2 — l'ancien `Math.max(Number(d.raf) || 0, 0)` coerçait un RAF
+  // non numérique en 0 : la commande naissait « soldée » sans erreur). Absent/vide = RAF plein (= CAS).
+  let rafIn = null;
+  if (d.raf != null && String(d.raf) !== "") {
+    rafIn = Number(d.raf);
+    if (!Number.isFinite(rafIn) || rafIn < 0) throw new HttpsError("invalid-argument", "RAF (≥ 0) invalide");
+    if (rafIn > cas) throw new HttpsError("invalid-argument", "RAF supérieur au CAS");
+  }
   const id = safeId(fp);
   const ref = db.doc(`orders/${id}`);
   if ((await ref.get()).exists) throw new HttpsError("already-exists", "une commande existe déjà pour ce FP — utilisez la correction (CAS/RAF/année)");
@@ -2924,7 +2974,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
     if (!y.ok) throw new HttpsError("invalid-argument", "année de PO invalide");
     yearPo = y.value;
   }
-  const raf = d.raf != null && String(d.raf) !== "" ? Math.max(Number(d.raf) || 0, 0) : null; // null → RAF dérivé (CAS − facturé)
+  const raf = rafIn; // validé plus haut ; null → RAF dérivé (CAS − facturé)
   const order = {
     _id: id, fp,
     client: String(d.client || "").trim(),
@@ -2947,7 +2997,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   // l'utilisateur, écrite ci-dessus). Un échec/lenteur du recompute — verrou de bail, transitoire — NE DOIT
   // PAS remonter en faux « internal » et pousser l'utilisateur à recliquer (→ already-exists). Le carnet se
   // rafraîchit au prochain recompute (planifié 05:00 ou action suivante). L'échec reste tracé (logger/opsLog).
-  try { await requestRecompute(); } catch (e) { logger.error("createOrder : recompute en échec (commande créée quand même)", { fp, msg: e && e.message }); }
+  await refreshNowBestEffort("createOrder");
   return { ok: true, fp };
 });
 
@@ -3028,7 +3078,7 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
     uid: req.auth.uid, action: "generate_from_invoices", module: "import", entity: "order", entityId: "*",
     detail: { orders: createdOrders, opps: createdOpps, all: wantAll, skippedNoFp, skippedExisting }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("generateFromInvoices");
   return { ok: true, created: { orders: createdOrders, opps: createdOpps }, skippedNoFp, skippedExisting, plan };
 });
 
@@ -3089,7 +3139,7 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
     uid: req.auth.uid, action: pm ? "assign_pm" : "unassign_pm", module: "import", entity: "order", entityId: id,
     detail: { fp, pm: pm || null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute();
+  await refreshNowBestEffort("setOrderPm");
   return { ok: true, fp, pm: pm || null };
 });
 
@@ -3101,7 +3151,7 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
 //    persistante (overlay config/orderCasOverride) qui PRIME sur P&L/fiche et SURVIT aux ré-imports
 //    (comme l'affectation PM / les alias FP). Gouverné « import ».
 //  • clear                     : retire la surcharge (la commande reprend son CAS P&L/opp/fiche).
-exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
+exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   const { fpKey } = require("./lib/ids");
   const { safeId } = require("./lib/sheets");
   const { oppWeighted } = require("./domain/mutations");
@@ -3140,7 +3190,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
     await requireWrite(req, "import");
     await db.doc("config/orderCasOverride").set({ map: { [id]: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_clear", module: "import", entity: "order", entityId: id, detail: { fp }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute();
+    await refreshNowBestEffort("syncOrderAmount");
     return { ok: true, fp, direction, cas: null };
   }
 
@@ -3161,7 +3211,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
     if (!Number.isFinite(cas) || cas < 0) throw new HttpsError("invalid-argument", "montant de la commande invalide");
     await db.doc(`opportunities/${opp.id}`).set({ amount: cas, weighted: oppWeighted(cas, opp.probability || 0), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "sync_amount_to_opp", module: "pipeline", entity: "opportunity", entityId: opp.id, detail: { fp, cas }, ts: FieldValue.serverTimestamp() });
-    await requestRecompute();
+    await refreshNowBestEffort("syncOrderAmount");
     return { ok: true, fp, direction, oppId: opp.id, cas };
   }
 
@@ -3171,7 +3221,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
   if (!(amount > 0)) throw new HttpsError("failed-precondition", "l'opportunité liée n'a pas de montant exploitable");
   await db.doc("config/orderCasOverride").set({ map: { [id]: amount }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "order_cas_override_set", module: "import", entity: "order", entityId: id, detail: { fp, cas: amount, oppId: opp.id }, ts: FieldValue.serverTimestamp() });
-  await requestRecompute();
+  await refreshNowBestEffort("syncOrderAmount");
   return { ok: true, fp, direction, oppId: opp.id, cas: amount };
 });
 

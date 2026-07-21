@@ -314,7 +314,12 @@ async function recomputeCore(db, only) {
   // supprimé, il redevient actif si la commande est rétablie.
   const orderFps = new Set(orders.map((o) => o.fp));
   const milestonesByFp = {};
-  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; if (v.fp && orderFps.has(v.fp) && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[v.fp] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
+  // Rapprochement par FP CANONIQUE (invariant fpKey — audit backlog H2) : `orders` porte des FP canonisés
+  // (et aliasés le cas échéant) alors qu'un doc de jalons LEGACY peut porter une graphie brute
+  // (« FP/2026/007 ») — comparé brut, il était écarté EN SILENCE de l'atterrissage/billingTrend/relances,
+  // tandis que le front (backlog.tsx, via fpKey) l'affichait. Même résolution d'alias que les collections.
+  const canonMsFp = Object.keys(fpAliasMap).length ? buildFpAliasResolver(fpAliasMap) : fpKey;
+  (await db.collection("billingMilestones").get()).forEach((doc) => { const v = doc.data() || {}; const k = canonMsFp(v.fp); if (k && orderFps.has(k) && Array.isArray(v.milestones) && v.milestones.length) milestonesByFp[k] = v.milestones.map((m) => ({ ...m, amount: num(m && m.amount) })); });
   // currentFy = max des années de PO, BORNÉ à la fenêtre plausible (un yearPo aberrant ne doit pas
   // ancrer tout l'exercice sur une année fantôme).
   const currentFy = fiscal.currentFy || orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || 0), 0);

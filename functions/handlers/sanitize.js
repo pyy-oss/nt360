@@ -49,7 +49,15 @@ function purgePlan(rawTargets) {
   return { targets, collections: [...cols], configDocs: [...cfgs], filtered: [...filtMap.values()] };
 }
 
-function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit }) {
+function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit }) {
+  // Recompute SYNCHRONE best-effort (audit backlog H1) : le canal différé est inerte en prod — sans
+  // recompute immédiat, supprimer/annuler laisse carnet et agrégats CONTREDIRE l'action pendant des heures.
+  // La donnée est déjà écrite : un échec du recompute est tracé, jamais remonté. Repli requestRecompute
+  // si l'injection manque (tests).
+  const refreshNow = async (action) => {
+    try { if (recomputeNow) await recomputeNow(); else await requestRecompute(); }
+    catch (e) { if (logOps) await logOps({ kind: "recompute", trigger: action, status: "error", error: (e && e.message) || String(e) }); }
+  };
   // SUPPRESSION d'un/plusieurs enregistrement(s) erroné(s)/fantôme(s). Les imports delta n'effacent JAMAIS
   // → seul l'app peut retirer un record obsolète. Le DELTA reste prioritaire (ré-import réintroduit).
   const deleteRecords = onCallG("deleteRecords", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
@@ -89,7 +97,7 @@ function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, ass
       // Traçabilité au NIVEAU RECORD : ids réellement supprimés (bornés à 500 pour rester sous la limite du doc).
       detail: { collection, count: ids.length, ids: ids.slice(0, 500), truncated: ids.length > 500 }, ts: FieldValue.serverTimestamp(),
     });
-    await requestRecompute();
+    await refreshNow("deleteRecords");
     return { ok: true, count: ids.length };
   });
 
@@ -119,7 +127,7 @@ function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, ass
       uid: req.auth.uid, action: cancelled ? "cancel_record" : "restore_record", module: spec.module,
       entity: collection, entityId: id, detail: { collection }, ts: FieldValue.serverTimestamp(),
     });
-    await requestRecompute(); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
+    await refreshNow("setCancellation"); // exclusion → impacte carnet/CAS/backlog/facturation/cash/rentabilité/qualité
     return { ok: true, id, cancelled };
   });
 
