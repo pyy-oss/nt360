@@ -206,7 +206,7 @@ export const STAGE_SHORT: Record<number, string> = { 1: "Qualif", 2: "Montage", 
 
 // Libellés FR des statuts techniques (jamais de code brut à l'écran).
 export const BC_LABEL: Record<string, string> = { a_emettre: "À émettre", emis: "Émis", livre: "Livré", facture: "Facturé", solde: "Soldé" };
-export const SUP_LABEL: Record<string, string> = { saturation: "Saturé", tension: "Tendu", ok: "OK", non_suivi: "Non suivi" };
+export const SUP_LABEL: Record<string, string> = { saturation: "Saturé", tension: "Tendu", ok: "OK", non_suivi: "Non suivi", indetermine: "À fiabiliser" };
 export const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
 export const bcLabel = (s?: string) => BC_LABEL[s || "a_emettre"] || (s || "a_emettre");
 

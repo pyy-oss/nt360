@@ -10,6 +10,9 @@ export default {
         panel: "rgb(var(--panel) / <alpha-value>)",
         panel2: "rgb(var(--panel2) / <alpha-value>)",
         line: "rgb(var(--line) / <alpha-value>)",
+        // Filet discret (`border-hair`) : classe déjà utilisée par 10 modules mais jamais définie —
+        // les bordures retombaient sur la couleur par défaut (token fantôme, audit 40 axes, axe 40).
+        hair: "rgb(var(--hair) / <alpha-value>)",
         ink: "rgb(var(--ink) / <alpha-value>)",
         muted: "rgb(var(--muted) / <alpha-value>)",
         faint: "rgb(var(--faint) / <alpha-value>)",

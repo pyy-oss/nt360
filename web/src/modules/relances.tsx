@@ -4,6 +4,7 @@
 // n'est affichée que si le rôle a le droit correspondant (facturation / fournisseurs / backlog),
 // sinon l'abonnement n'est pas ouvert (name null) et la carte est masquée. Aucune donnée de marge.
 import { type FC, type ReactNode } from "react";
+import { frDate } from "../lib/format";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
@@ -52,7 +53,7 @@ export const Relances: FC<Props> = () => {
         {canFact && <Kpi label="Créances échues" value={(cre?.count || 0).toLocaleString("fr-FR")} tone={cre?.count ? "clay" : "ink"} sub={`${money(cre?.total || 0)} à recouvrer`} />}
         {canFour && <Kpi label="BC en retard" value={(bc?.count || 0).toLocaleString("fr-FR")} tone={bc?.count ? "gold" : "ink"} sub={`${money(bc?.total || 0)} exposés`} />}
         {canBack && <Kpi label="Jalons échus non facturés" value={(jal?.count || 0).toLocaleString("fr-FR")} tone={jal?.count ? "gold" : "ink"} sub={`${money(jal?.total || 0)} à émettre`} />}
-        <Kpi label="À date" value={asOf ? asOf.slice(8, 10) + "/" + asOf.slice(5, 7) : "—"} sub="dernier recalcul" />
+        <Kpi label="À date" value={frDate(asOf) || "—"} sub="dernier recalcul" />
       </div>
 
       {canFact && (
@@ -60,7 +61,7 @@ export const Relances: FC<Props> = () => {
           <RespChips rows={cre?.byResp} />
           {cre?.items?.length ? (
             <Table columns={[
-              colText("Échéance", (r: any) => <span className="tabnum">{r.dueDate}</span>, (r: any) => r.dueDate),
+              colText("Échéance", (r: any) => <span className="tabnum">{frDate(r.dueDate) || "—"}</span>, (r: any) => r.dueDate),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               colText("Client", (r: any) => r.client, (r: any) => r.client),
               colText("Commercial", (r: any) => <Badge tone="steel">{r.am}</Badge>, (r: any) => r.am),
@@ -77,7 +78,7 @@ export const Relances: FC<Props> = () => {
           <RespChips rows={bc?.byResp} />
           {bc?.items?.length ? (
             <Table columns={[
-              colText("ETA", (r: any) => <span className="tabnum">{r.eta}</span>, (r: any) => r.eta),
+              colText("ETA", (r: any) => <span className="tabnum">{frDate(r.eta) || "—"}</span>, (r: any) => r.eta),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               colText("Fournisseur", (r: any) => r.supplier, (r: any) => r.supplier),
               colText("Client", (r: any) => r.customer, (r: any) => r.customer),
@@ -95,7 +96,7 @@ export const Relances: FC<Props> = () => {
           <RespChips rows={jal?.byResp} />
           {jal?.items?.length ? (
             <Table columns={[
-              colText("Échéance", (r: any) => <span className="tabnum">{r.dueDate}</span>, (r: any) => r.dueDate),
+              colText("Échéance", (r: any) => <span className="tabnum">{frDate(r.dueDate) || "—"}</span>, (r: any) => r.dueDate),
               colText("Retard", (r: any) => lateBadge(r.daysLate), (r: any) => r.daysLate),
               det(colText("FP", (r: any) => <FpLink fp={r.fp} />, (r: any) => r.fp)),
               colText("Client", (r: any) => r.client, (r: any) => r.client),

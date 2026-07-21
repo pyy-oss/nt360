@@ -79,8 +79,8 @@ export const Overview: FC<Props> = ({ period }) => {
   const canPipe = useCan("pipeline") !== "none";
   const canFac = useCan("facturation") !== "none";
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
-  const { rows: allOpps } = useCollectionData<Opportunity>(active && canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
-  const { rows: allInvoices } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
+  const { rows: allOpps, truncated: oppsTrunc } = useCollectionData<Opportunity>(active && canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: allInvoices, truncated: invTrunc } = useCollectionData<Invoice>(active && canFac ? "invoices" : null);
   // Overlay des factures ANNULÉES : le serveur les EXCLUT des agrégats (aggregate.js splice) ; sans la
   // même exclusion ici, le CAF de la vue FILTRÉE inclut les annulées → supérieur à l'agrégat serveur et
   // à la liste Factures (qui les exclut aussi, finance.tsx). Miroir de finance.tsx.
@@ -143,6 +143,9 @@ export const Overview: FC<Props> = ({ period }) => {
       {active && (
         <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-[12px] text-muted">
           Vue recalculée pour le périmètre <b className="text-ink">{filterLabel}</b> : chaîne de valeur & KPI ci-dessous filtrés. L'<b>atterrissage</b> et la <b>trajectoire</b> restent globaux (projection d'exercice).
+          {/* Cap de sécurité des abonnements (hooks.ts) : au-delà, le recalcul filtré SOUS-COMPTE vs le
+              serveur qui lit tout — jamais de troncature silencieuse (audit 40 axes, axe 35). */}
+          {(oppsTrunc || invTrunc) && <div className="mt-1 text-clay">⚠ Données d'entrée tronquées (cap de sécurité) — les chiffres filtrés peuvent sous-compter ; fiez-vous à la vue globale.</div>}
         </div>
       )}
 

@@ -28,7 +28,7 @@ const SCOPES = [
 const EMPTY_OBJ = { fiscalYear: "", scope: "global", scopeValue: "all", label: "", targetCas: "", targetInvoiced: "", targetMargin: "", targetMarginPct: "" };
 
 export const Objectifs: FC<Props> = () => {
-  const { rows } = useCollectionData<Objective>("objectives");
+  const { rows, loading: objLoading } = useCollectionData<Objective>("objectives");
   const canWrite = useCan("objectifs") === "write";
   const toast = useToast();
   const [f, setF] = useState({ ...EMPTY_OBJ });
@@ -88,7 +88,7 @@ export const Objectifs: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Objectifs annuels par univers / dimension">
-        <Table columns={cols} rows={rows} empty="Aucun objectif défini." searchKeys={[(x: Objective) => String(x.fiscalYear || ""), (x: Objective) => x.scope || "", (x: Objective) => x.scopeValue || ""]} rowKey={(x: Objective) => objectiveId({ fiscalYear: x.fiscalYear || 0, scope: x.scope, scopeValue: x.scopeValue })} bulk={[]} />
+        <Table columns={cols} rows={rows} empty={objLoading ? "Chargement…" : "Aucun objectif défini."} searchKeys={[(x: Objective) => String(x.fiscalYear || ""), (x: Objective) => x.scope || "", (x: Objective) => x.scopeValue || ""]} rowKey={(x: Objective) => objectiveId({ fiscalYear: x.fiscalYear || 0, scope: x.scope, scopeValue: x.scopeValue })} bulk={[]} />
         <Tip>Cette page sert uniquement à <b>définir les objectifs</b> (global, par BU, par client, par commercial). Le <b>R/O (Réalisé / Objectif)</b> se suit désormais sur la vue de chaque périmètre : global → Vue d'ensemble · BU → Domaines · client → Clients · commercial → AM 360°.</Tip>
       </Card>
       {canWrite && (
