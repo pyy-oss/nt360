@@ -7,7 +7,7 @@ import { useDocData } from "../lib/hooks";
 import { Card, Table, Badge, Tip, Busy, Toggle, colText, cx, useToast, useConfirm } from "../design/components";
 import { Select } from "../design/inputs";
 import { trackWrite } from "../lib/activity";
-import { setClickupConfig, syncClickupCaf, syncFromClickup, reconcileClickupLinks, clickupHealth, pushAllOrdersToClickup, dedupeClickupTasks, dedupeBcTasks, enrichClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, pushAllBcToClickup, setupClickupWebhook, deleteClickupWebhook } from "../lib/writes";
+import { setClickupConfig, syncClickupCaf, syncFromClickup, reconcileClickupLinks, clickupHealth, pushAllOrdersToClickup, pushOrderToClickup, dedupeClickupTasks, dedupeBcTasks, enrichClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, pushAllBcToClickup, setupClickupWebhook, deleteClickupWebhook } from "../lib/writes";
 import type { ClickupHealthSummary } from "../types";
 
 // Intégration ClickUp : activation + liste cible. Le token vit dans Secret Manager (CLICKUP_TOKEN),
@@ -19,7 +19,8 @@ const CLICKUP_LISTS = [
   { id: "901216066964", label: "Sandbox (test)" },
 ];
 // Cockpit de QUALITÉ de l'intégration ClickUp : couverture, tâches orphelines, écarts CAF, synchro.
-function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }) {
+// `listId` = liste cible des push unitaires ; `onBulkPush` = raccourci « tout créer » (push en masse).
+function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHealthSummary | null; listId?: string; onBulkPush?: () => void }) {
   if (!health) return null;
   // Bandeau d'échec de la dernière vérification (raison PERSISTÉE par le callable clickupHealth) — rend
   // la cause VISIBLE au lieu d'un KO muet dans le journal. Affiché même si aucune synchro n'a jamais réussi.
@@ -68,11 +69,27 @@ function ClickupHealthPanel({ health }: { health?: ClickupHealthSummary | null }
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
           {!!health.unlinkedSample?.length && (
             <div>
-              <div className="text-[11px] text-muted mb-1">Commandes non liées (échantillon)</div>
+              {/* Action UNITAIRE par ligne (créer/lier UNE tâche) + raccourci EN MASSE en tête — plus
+                  besoin de quitter le diagnostic. Le push unitaire ADOPTE une tâche existante (Opp ID
+                  = FP) au lieu de dupliquer ; l'échantillon se rafraîchit au prochain diagnostic. */}
+              <div className="flex items-center gap-2 mb-1">
+                <div className="text-[11px] text-muted grow">Commandes non liées (échantillon)</div>
+                {onBulkPush && (health.unlinked || 0) > 0 && (
+                  <button type="button" className="text-gold hover:underline text-[11px]" onClick={onBulkPush}
+                    title="Créer les tâches de TOUTES les commandes non liées (les tâches existantes sont adoptées, pas dupliquées)">
+                    ⚡ tout créer ({health.unlinked})
+                  </button>
+                )}
+              </div>
               <Table colsKey="clickup-unlinked" columns={[
                 colText("FP", (r: { fp?: string }) => r.fp || "—"),
                 colText("Client", (r: { client?: string }) => r.client || "—"),
                 colText("Tâche existante", (r: { matchable?: boolean }) => (r.matchable ? <Badge tone="gold">à rattacher</Badge> : <span className="text-faint">non</span>)),
+                colText("", (r: { fp?: string; client?: string; matchable?: boolean }) => r.fp ? (
+                  <Busy variant="ghost" label={r.matchable ? "Lier la tâche" : "Créer la tâche"}
+                    okMsg="Tâche ClickUp créée/liée — relancez « Diagnostic qualité » pour rafraîchir la liste" errMsg="Push refusé"
+                    fn={async () => { await pushOrderToClickup({ fp: r.fp, client: r.client }, { listId }); }} />
+                ) : null),
               ]} rows={health.unlinkedSample} />
             </div>
           )}
@@ -359,7 +376,7 @@ export function ClickupCard() {
           </button>
         </ClickupActionRow>
       </div>
-      <ClickupHealthPanel health={health} />
+      <ClickupHealthPanel health={health} listId={list} onBulkPush={() => bulkPush(false)} />
       {(health?.unlinkedMatchable || 0) > 0 && <div className="text-[12px] text-gold mt-1">{health!.unlinkedMatchable} commande(s) non liée(s) ont pourtant une tâche existante → lance « Rattacher les tâches existantes ».</div>}
       <div className="mt-4 pt-3 border-t border-line">
         <div className="text-[13px] font-medium text-ink mb-2">Bons de commande fournisseurs (liste « Commandes Fournisseurs »)</div>

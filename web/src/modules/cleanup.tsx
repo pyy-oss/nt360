@@ -11,12 +11,15 @@ import { useDocData, useCollectionData, useReloadOnWrite } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast } from "../design/components";
-import { DateField } from "../design/inputs";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast, Modal } from "../design/components";
+import { DateField, Select } from "../design/inputs";
 import { T, pct } from "../design/tokens";
+import { frDate } from "../lib/format";
+import { plausibleYear } from "../lib/ids";
 import {
   deleteRecords, callDedupe, setFpAlias, setDcAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
+  setCancellation, fpDocId,
   aiSuggestCorrections,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
 } from "../lib/writes";
@@ -24,7 +27,10 @@ import {
 // Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
 // d'abord d'une correction du N° FP. Aligné sur fpKey côté serveur (validation finale par le callable).
 const looksCanonicalFp = (fp?: string) => /FP\/?\s*\d{4}(?!\d)\/?\s*\d+/i.test(String(fp || ""));
-import { Props, relTime } from "./_shared";
+// Année portée par le N° FP (FP/AAAA/N), BORNÉE — miroir de yearOfFp (domain/commandes.js). Sert au
+// pré-remplissage HONNÊTE de « Année de PO » (l'année de l'affaire elle-même, jamais une année en dur).
+const yearOfFp = (fp?: string) => { const m = /\/(\d{4})\//.exec(String(fp || "")); return m ? plausibleYear(m[1]) : 0; };
+import { Props, relTime, STAGE_SHORT } from "./_shared";
 import type { DataQualitySummary, QualityHistory, AuditLog, BcLine, Opportunity } from "../types";
 
 // Sparkline SVG minimaliste (aucune dépendance chart dans ce chunk admin). points ∈ [0,1].
@@ -83,14 +89,31 @@ function PurgeRow({ label, hint, ids, collection, confirm, okMsg }: { label: str
 
 const DEDUPE_LABEL: Record<string, string> = { invoices: "Factures", opportunities: "Opportunités", bcLines: "BC fournisseurs" };
 
+// Section REPLIABLE du Centre de correction — les outils de rapprochement / réconciliation / doublons
+// vivent DANS le point unique (plus de cartes séparées à chercher sur la page). Même entête que les
+// blocs d'anomalies (toggle « ▸ ouvrir / ▾ masquer »).
+function CorrSection({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-hair pt-2">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 text-[13px] py-0.5 text-left">
+        <span className="text-ink font-medium grow min-w-0 truncate">{title}</span>
+        {hint && <span className="text-faint text-[11px] shrink-0">{hint}</span>}
+        <span className="text-faint text-[11px] shrink-0">{open ? "▾ masquer" : "▸ ouvrir"}</span>
+      </button>
+      {open && <div className="mt-1.5 flex flex-col gap-3 pl-1">{children}</div>}
+    </div>
+  );
+}
+
 // Dédoublonnage intégré : analyse d'abord (aperçu), puis suppression (le meilleur représentant de
 // chaque groupe est conservé). Réservé à la direction (le callable dedupe est direction-only).
-function DedupeCard() {
+function DedupeSection() {
   const [res, setRes] = useState<DedupeResult | null>(null);
   const totalDup = res ? Object.values(res.result).reduce((s, r) => s + r.duplicates, 0) : 0;
   return (
-    <Card title="Doublons (factures / opportunités / BC)" actions={
-      <div className="flex gap-2">
+    <CorrSection title="Doublons (factures / opportunités / BC)" hint="direction">
+      <div className="flex gap-2 flex-wrap items-center">
         <Busy variant="ghost" label="Analyser" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={async () => { setRes(await callDedupe(undefined, false)); }} />
         {res && !res.applied && totalDup > 0 && (
           // Suppression IRRÉVERSIBLE (cf. audit intégral F1) : confirmation via DangerBtn, masquée une
@@ -100,7 +123,6 @@ function DedupeCard() {
             fn={async () => { setRes(await callDedupe(undefined, true)); }} />
         )}
       </div>
-    }>
       {res ? (
         <div className="flex flex-col gap-2">
           <Table columns={[
@@ -133,7 +155,7 @@ function DedupeCard() {
       ) : (
         <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement de chaque groupe.</Tip>
       )}
-    </Card>
+    </CorrSection>
   );
 }
 
@@ -144,39 +166,49 @@ function DedupeCard() {
 // patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder). Après correction on
 // rescanne (l'anomalie se résorbe en direct).
 const CORR_SEV: Record<string, "clay" | "gold" | "steel"> = { high: "clay", medium: "gold", low: "steel" };
-// Cartographie type d'anomalie → mode de correction + droit requis (module de la donnée).
-const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "rentabilite"; module?: string }> = {
-  factures_orphelines: { kind: "fp-invoice", cap: "import" },
-  factures_sans_date: { kind: "date-invoice", cap: "import" },
-  factures_sans_echeance: { kind: "date-invoice-due", cap: "import" },
-  surfacturation: { kind: "nav", module: "invoicelist" },
-  // N° FP illisible : la correction (fixer le N° FP) se fait à la source, sur l'écran Commandes pré-filtré.
+// Cartographie type d'anomalie → mode de correction + droit requis (module de la donnée) + ENTITÉ de
+// l'enregistrement (`ent`) : elle porte les ACTIONS de ligne (modale de correction, requalification,
+// annulation, renvoi vers l'écran source) — corriger ICI, sans se promener dans l'application.
+type FixEnt = "order" | "opp" | "invoice" | "bc" | "sheet";
+const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "rentabilite"; module?: string; ent?: FixEnt }> = {
+  factures_orphelines: { kind: "fp-invoice", cap: "import", ent: "invoice" },
+  factures_sans_date: { kind: "date-invoice", cap: "import", ent: "invoice" },
+  factures_sans_echeance: { kind: "date-invoice-due", cap: "import", ent: "invoice" },
+  surfacturation: { kind: "nav", module: "invoicelist", ent: "order" },
+  // N° FP illisible : la correction (fixer le N° FP) se fait à la source, sur l'écran Commandes pré-filtré
+  // (patchOrder/annulation ciblent orders/{safeId(fp)} — un FP illisible n'y est pas adressable sûrement).
   commandes_fp_illisible: { kind: "nav", module: "orderlist" },
-  commandes_sans_annee: { kind: "num-order-year", cap: "import" },
-  commandes_sans_client: { kind: "text-order-client", cap: "import" },
-  commandes_sans_am: { kind: "text-order-am", cap: "import" },
-  am_invalide: { kind: "text-order-am", cap: "import" },
-  opps_sans_dprev: { kind: "date-opp", cap: "pipeline" },
-  opps_sans_montant: { kind: "num-opp-amount", cap: "pipeline" },
-  opps_gagnees_sans_fp: { kind: "fp-opp", cap: "pipeline" },
-  opps_gagnees_sans_pnl: { kind: "reconcile-pnl", cap: "import" },
-  opps_fantomes: { kind: "nav", module: "opplist" },
-  opps_agees: { kind: "nav", module: "opplist" },
-  // Cohérence AMONT (opportunité ↔ commande) — non corrigeable en une valeur : drill vers l'écran concerné
-  // (revoir le CAS retenu sur Commandes / requalifier l'opp sur Pipeline).
-  ecart_valorisation: { kind: "nav", module: "orderlist" },
-  opp_active_carnet: { kind: "nav", module: "opplist" },
-  bc_sans_fp: { kind: "fp-bc", cap: "bc" },
-  bc_sans_fournisseur: { kind: "text-bc-supplier", cap: "bc" },
-  bc_montant_zero: { kind: "amount-bc", cap: "bc" },
-  fiches_sans_vente: { kind: "num-sheet-sale", cap: "rentabilite" },
+  commandes_sans_annee: { kind: "num-order-year", cap: "import", ent: "order" },
+  commandes_sans_client: { kind: "text-order-client", cap: "import", ent: "order" },
+  commandes_sans_am: { kind: "text-order-am", cap: "import", ent: "order" },
+  am_invalide: { kind: "text-order-am", cap: "import", ent: "order" },
+  opps_sans_dprev: { kind: "date-opp", cap: "pipeline", ent: "opp" },
+  opps_sans_montant: { kind: "num-opp-amount", cap: "pipeline", ent: "opp" },
+  opps_gagnees_sans_fp: { kind: "fp-opp", cap: "pipeline", ent: "opp" },
+  opps_gagnees_sans_pnl: { kind: "reconcile-pnl", cap: "import", ent: "opp" },
+  opps_fantomes: { kind: "nav", module: "opplist", ent: "opp" },
+  opps_agees: { kind: "nav", module: "opplist", ent: "opp" },
+  // Cohérence AMONT (opportunité ↔ commande) : la modale « modifier » (CAS ligne P&L) / « requalifier »
+  // porte désormais la correction ; « ouvrir » reste pour le contexte complet.
+  ecart_valorisation: { kind: "nav", module: "orderlist", ent: "order" },
+  opp_active_carnet: { kind: "nav", module: "opplist", ent: "opp" },
+  bc_sans_fp: { kind: "fp-bc", cap: "bc", ent: "bc" },
+  // FP renseigné mais inconnu du carnet : même correction qu'un FP absent (poser le BON N° FP).
+  bc_fp_inconnu: { kind: "fp-bc", cap: "bc", ent: "bc" },
+  bc_sans_fournisseur: { kind: "text-bc-supplier", cap: "bc", ent: "bc" },
+  bc_montant_zero: { kind: "amount-bc", cap: "bc", ent: "bc" },
+  fiches_sans_vente: { kind: "num-sheet-sale", cap: "rentabilite", ent: "sheet" },
   opps_doublons: { kind: "dedupe" },
   bc_doublons: { kind: "dedupe" },
-  // Incohérences ClickUp ↔ app (rapatriées ici — source unique). Non corrigeables en une valeur : drill vers
-  // l'écran commandes pré-filtré (rattacher la facture / solder le RAF selon le cas).
-  clickup_facture_sans_caf: { kind: "nav", module: "orderlist" },
-  clickup_cloture_avec_raf: { kind: "nav", module: "orderlist" },
+  // Incohérences ClickUp ↔ app (rapatriées ici — source unique). « facturé sans CAF » = facture à
+  // rattacher (drill) ; « clôturé avec RAF » = solder le RAF, en un clic ici (patchOrder raf: 0).
+  clickup_facture_sans_caf: { kind: "nav", module: "orderlist", ent: "order" },
+  clickup_cloture_avec_raf: { kind: "raf-order-zero", cap: "import", ent: "order" },
 };
+// Écran source d'une entité (« ouvrir » pré-filtré) — modifier là-bas quand la ligne ne suffit pas.
+const ENT_MODULE: Record<FixEnt, string> = { order: "orderlist", opp: "opplist", invoice: "invoicelist", bc: "bc", sheet: "fiches" };
+// Provenance lisible d'un enregistrement (source technique → libellé court).
+const SRC_LABEL: Record<string, string> = { pnl: "P&L", opp_won: "opp gagnée", fiche: "fiche", saisie: "saisie", odoo: "Odoo", salesData: "LIVE" };
 
 // Éditeur générique une valeur → un bouton (texte / nombre).
 // `initial` = valeur RECOMMANDÉE pré-remplie (l'IA propose, l'humain vérifie puis enregistre) — jamais
@@ -312,28 +344,170 @@ function AiSuggestionRow({ item, s, canFix, onDone, onDismiss }: { item: Correct
   );
 }
 
-// Une ligne à corriger : réf + client + le contrôle idoine selon le type. `canFix` = droit d'écriture
-// sur le module de la donnée (sinon la ligne reste visible, mais en lecture avec une note). `suggestion`
+const Fld = ({ label, children }: { label: string; children: ReactNode }) => (
+  <label className="flex flex-col gap-1 text-[12px] text-muted">{label}{children}</label>
+);
+
+// MODALE de correction d'une COMMANDE (ligne P&L) — tout corriger ici, sans quitter le Centre. Chaque
+// champ est PRÉ-REMPLI avec la valeur actuelle (année : celle du N° FP en repli — jamais une année en
+// dur) ; seuls les champs MODIFIÉS sont envoyés (patchOrder, gouverné « import », audité, recalcul).
+function OrderFixModal({ item, onClose, onDone }: { item: CorrectionItem; onClose: () => void; onDone: () => Promise<void> }) {
+  const init = {
+    yearPo: plausibleYear(item.yearPo) ? String(plausibleYear(item.yearPo)) : yearOfFp(item.fp) ? String(yearOfFp(item.fp)) : "",
+    client: item.client || "", am: item.am || "", designation: item.designation || item.affaire || "",
+    cas: (item.casPnl ?? item.cas) ? String(item.casPnl ?? item.cas) : "",
+    raf: item.raf != null ? String(item.raf) : "",
+  };
+  const [f, setF] = useState(init);
+  const changed = (k: keyof typeof init) => f[k].trim() !== init[k].trim();
+  const anyChanged = (Object.keys(init) as (keyof typeof init)[]).some(changed);
+  const set = (k: keyof typeof init) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const save = async () => {
+    const patch: Parameters<typeof patchOrder>[0] = { fp: item.fp! };
+    if (changed("yearPo")) { const y = Math.trunc(Number(f.yearPo)); if (!(y >= 2000)) throw new Error("année invalide"); patch.yearPo = y; }
+    if (changed("client") && f.client.trim()) patch.client = f.client.trim();
+    if (changed("am") && f.am.trim()) patch.am = f.am.trim();
+    if (changed("designation") && f.designation.trim()) patch.designation = f.designation.trim();
+    if (changed("cas")) { const n = parseAmt(f.cas); if (!(n > 0)) throw new Error("CAS > 0 requis"); patch.cas = n; }
+    if (changed("raf")) { const n = parseAmt(f.raf); if (!(n >= 0)) throw new Error("RAF ≥ 0 requis"); patch.raf = n; }
+    await patchOrder(patch);
+    onClose(); await onDone();
+  };
+  return (
+    <Modal open onClose={onClose} size="form" title={<>Corriger la commande <span className="text-gold">{item.fp}</span></>}
+      actions={<>
+        <button className="btn-ghost" onClick={onClose}>Fermer</button>
+        {anyChanged && <Busy label="Enregistrer" okMsg="Commande corrigée (recalcul lancé)" errMsg="Correction refusée" fn={save} />}
+      </>}>
+      <div className="grid grid-cols-2 gap-3 mt-1">
+        <Fld label="Année de PO"><input className="field !py-1.5" inputMode="numeric" aria-label={`Année de PO ${item.fp}`} placeholder="AAAA" value={f.yearPo} onChange={set("yearPo")} /></Fld>
+        <Fld label="Client"><input className="field !py-1.5" aria-label={`Client ${item.fp}`} placeholder="nom du client" value={f.client} onChange={set("client")} /></Fld>
+        <Fld label="AM"><input className="field !py-1.5" aria-label={`AM ${item.fp}`} placeholder="commercial" value={f.am} onChange={set("am")} /></Fld>
+        <Fld label="Affaire (désignation)"><input className="field !py-1.5" aria-label={`Désignation ${item.fp}`} placeholder="désignation" value={f.designation} onChange={set("designation")} /></Fld>
+        <Fld label="CAS (ligne P&L)"><input className="field !py-1.5" inputMode="decimal" aria-label={`CAS ${item.fp}`} placeholder="montant" value={f.cas} onChange={set("cas")} /></Fld>
+        <Fld label="RAF"><input className="field !py-1.5" inputMode="decimal" aria-label={`RAF ${item.fp}`} placeholder="reste à facturer" value={f.raf} onChange={set("raf")} /></Fld>
+      </div>
+      {(item.source === "opp_won" || item.source === "fiche") && (
+        <p className="text-[11px] text-faint mt-2">Le CAS retenu au carnet vient de {item.source === "fiche" ? "la fiche affaire" : "l'opp gagnée"} ; le CAS saisi ici corrige la <b>ligne P&L d'origine</b> (l'écart signalé se résorbe en alignant l'un ou l'autre).</p>
+      )}
+    </Modal>
+  );
+}
+
+// MODALE de REQUALIFICATION / correction d'une OPPORTUNITÉ — étape (gagnée / perdue / suspendue /
+// annulée), montant, D Prev, N° FP, motif de perte. patchOpportunity (gouverné « pipeline », audité,
+// recalcul) ; seuls les champs modifiés sont envoyés.
+function OppFixModal({ item, onClose, onDone }: { item: CorrectionItem; onClose: () => void; onDone: () => Promise<void> }) {
+  const init = {
+    stage: item.stage ? String(item.stage) : "", amount: item.amount ? String(item.amount) : "",
+    closingDate: String(item.closingDate || "").slice(0, 10), fp: item.fp || "", lostReason: "",
+  };
+  const [f, setF] = useState(init);
+  const changed = (k: keyof typeof init) => f[k].trim() !== init[k].trim();
+  const anyChanged = (Object.keys(init) as (keyof typeof init)[]).some(changed);
+  const save = async () => {
+    const patch: Parameters<typeof patchOpportunity>[0] = { id: item.id! };
+    if (changed("stage")) { const s = Number(f.stage); if (!(s >= 1 && s <= 9)) throw new Error("étape invalide"); patch.stage = s; }
+    if (changed("amount")) { const n = parseAmt(f.amount); if (!(n > 0)) throw new Error("montant > 0 requis"); patch.amount = n; }
+    if (changed("closingDate") && f.closingDate) patch.closingDate = f.closingDate;
+    if (changed("fp") && f.fp.trim()) patch.fp = f.fp.trim();
+    if (f.lostReason.trim()) patch.lostReason = f.lostReason.trim();
+    await patchOpportunity(patch);
+    onClose(); await onDone();
+  };
+  return (
+    <Modal open onClose={onClose} size="form" title={<>Requalifier l'opportunité <span className="text-gold">{item.fp || item.client || "—"}</span></>}
+      actions={<>
+        <button className="btn-ghost" onClick={onClose}>Fermer</button>
+        {anyChanged && <Busy label="Enregistrer" okMsg="Opportunité mise à jour (recalcul lancé)" errMsg="Correction refusée" fn={save} />}
+      </>}>
+      <div className="grid grid-cols-2 gap-3 mt-1">
+        <Fld label="Étape">
+          <Select className="!py-1.5" value={f.stage} onChange={(v) => setF({ ...f, stage: v })} ariaLabel="Étape de l'opportunité" placeholder="Étape…"
+            options={Object.entries(STAGE_SHORT).map(([v, l]) => ({ value: v, label: `${v} — ${l}` }))} />
+        </Fld>
+        <Fld label="Montant"><input className="field !py-1.5" inputMode="decimal" aria-label="Montant de l'opportunité" placeholder="montant" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Fld>
+        <Fld label="D Prev"><DateField value={f.closingDate} onChange={(v) => setF({ ...f, closingDate: v })} ariaLabel="D Prev" className="!py-1.5" /></Fld>
+        <Fld label="N° FP"><input className="field !py-1.5" aria-label="N° FP de l'opportunité" placeholder="FP/2026/…" value={f.fp} onChange={(e) => setF({ ...f, fp: e.target.value })} /></Fld>
+        {Number(f.stage) === 7 && (
+          <Fld label="Motif de perte"><input className="field !py-1.5" aria-label="Motif de perte" placeholder="prix, délai, concurrent…" value={f.lostReason} onChange={(e) => setF({ ...f, lostReason: e.target.value })} /></Fld>
+        )}
+      </div>
+      <p className="text-[11px] text-faint mt-2">Requalifier en <b>7 — Perdu</b> / <b>9 — Annulé</b> sort l'opportunité du pipeline ; <b>8 — Suspendu</b> la met en pause. Une opp active sur un FP déjà au carnet se clôture ici (la commande existe déjà).</p>
+    </Modal>
+  );
+}
+
+// Une ligne à corriger : réf + client + CONTEXTE IDENTIFIANT (affaire, montant, AM, date, source — sans
+// lui la ligne est inexploitable) + le contrôle idoine selon le type + ACTIONS de ligne (modale de
+// correction, annulation, renvoi vers l'écran source). `canFix` = droit d'écriture sur le module de la
+// donnée (sinon la ligne reste visible, mais en lecture avec une note). `suggestion`
 // (optionnelle) = proposition IA à afficher sous la ligne (appliquée uniquement sur clic humain).
-function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSuggestion }: { item: CorrectionItem; kind: string; module?: string; canFix: boolean; onDone: () => Promise<void>; suggestion?: AiSuggestion; onDismissSuggestion?: () => void }) {
+function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, onDismissSuggestion }: { item: CorrectionItem; kind: string; module?: string; ent?: FixEnt; canFix: boolean; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void>; suggestion?: AiSuggestion; onDismissSuggestion?: () => void }) {
   const { go, canGo } = useNav();
+  const [edit, setEdit] = useState(false);
   const ref = item.numero || item.fp || item.bcNumber || item.client || "—";
   const done = () => onDone();
+  // CONTEXTE IDENTIFIANT : affaire, montant, étape, AM, date, provenance — pour reconnaître l'affaire
+  // sans ouvrir un autre écran (une ligne « client seul » n'est pas exploitable).
+  const affaire = item.designation || item.affaire || "";
+  const amt = item.amount ?? item.cas ?? item.amountHt ?? item.amountXof ?? item.saleTotal;
+  const when = item.closingDate || item.date;
+  const ctx = (
+    <>
+      {affaire && <span className="text-muted truncate max-w-[26ch]" title={affaire}>{affaire}</span>}
+      {(amt || 0) > 0 && <span className="tabnum text-ink">{money(amt!)}</span>}
+      {ent === "opp" && item.stage != null && <span className="text-faint text-[11px]">{item.stageLabel || STAGE_SHORT[item.stage] || `étape ${item.stage}`}</span>}
+      {item.am && <span className="text-faint text-[11px]">{item.am}</span>}
+      {when && <span className="tabnum text-faint text-[11px]">{frDate(when)}</span>}
+      {item.source && <span className="text-faint text-[11px]">· {SRC_LABEL[item.source] || item.source}</span>}
+    </>
+  );
+  // ACTIONS DE LIGNE par entité — écritures gouvernées par le module de la donnée (caps), renvoi par canGo.
+  const navModule = ent ? ENT_MODULE[ent] : module;
+  const navSearch = ent === "invoice" ? (item.numero || item.fp || "") : ent === "bc" ? (item.bcNumber || item.fp || "") : (item.fp || item.client || "");
+  const actions = (ent || kind === "nav") ? (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      {ent === "order" && item.fp && caps.import && (
+        <>
+          <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Corriger la commande (année, client, AM, CAS, RAF) sans quitter le Centre">modifier</button>
+          <DangerBtn label="annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
+            confirm={`Annuler la commande ${item.fp}${item.client ? ` (${item.client})` : ""} ? Elle sort du carnet et du P&L. Overlay non destructif : rétablissable depuis Commandes → Annulées, et il survit aux ré-imports.`}
+            fn={async () => { await setCancellation("orders", fpDocId(item.fp!), true, { label: affaire || undefined, client: item.client }); await done(); }} />
+        </>
+      )}
+      {ent === "opp" && item.id && caps.pipeline && (
+        <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Requalifier (perdue / suspendue / annulée) ou corriger l'opportunité sans quitter le Centre">requalifier</button>
+      )}
+      {ent === "invoice" && item.id && caps.import && (
+        <DangerBtn label="annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
+          confirm={`Annuler la facture ${item.numero || item.id}${item.client ? ` (${item.client})` : ""} ? Elle sort du CA facturé et du cash. Overlay non destructif : rétablissable depuis Factures → Annulées.`}
+          fn={async () => { await setCancellation("invoices", item.id!, true, { label: item.numero, client: item.client }); await done(); }} />
+      )}
+      {navModule && canGo(navModule) && (
+        <button type="button" className="text-faint hover:underline text-[11px]" onClick={() => go(navModule, { search: navSearch || ref })} title="Ouvrir l'écran source pré-filtré">ouvrir</button>
+      )}
+    </span>
+  ) : null;
   const row = (control: ReactNode) => (
     <div>
       <div className="flex items-center gap-2 flex-wrap text-[13px]">
         <span className="tabnum text-faint">{ref}</span>
         {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
+        {ctx}
         {control}
+        {actions}
       </div>
       {/* Recommandation concrète déterministe (valeur + base) — pré-remplit le champ ci-dessus ou guide l'action. */}
       {item.rec && <RecNote rec={item.rec} />}
       {suggestion && <AiSuggestionRow item={item} s={suggestion} canFix={canFix} onDone={onDone} onDismiss={() => onDismissSuggestion?.()} />}
+      {edit && ent === "order" && <OrderFixModal item={item} onClose={() => setEdit(false)} onDone={done} />}
+      {edit && ent === "opp" && <OppFixModal item={item} onClose={() => setEdit(false)} onDone={done} />}
     </div>
   );
-  // Renvois (drill) — pas d'écriture, gouvernés par canGo.
-  if (kind === "nav") return row(canGo(module!) ? <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => go(module!, { search: ref })} title="Ouvrir l'écran pré-filtré">ouvrir</button> : <span className="text-faint text-[11px]">accès requis</span>);
-  if (kind === "dedupe") return row(<span className="text-faint text-[11px]">→ carte « Doublons » (direction)</span>);
+  // Renvois (drill) : les actions de ligne (modale, annulation, « ouvrir ») portent désormais la correction.
+  if (kind === "nav") return row(actions ? null : <span className="text-faint text-[11px]">accès requis</span>);
+  if (kind === "dedupe") return row(<span className="text-faint text-[11px]">→ section « Doublons » ci-dessous (direction)</span>);
   if (!canFix) return row(<span className="text-faint text-[11px]">correction hors de vos droits</span>);
   switch (kind) {
     case "fp-invoice": return row(
@@ -346,7 +520,12 @@ function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSugg
       </span>);
     case "date-invoice": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, date: v }); await done(); }} />);
     case "date-invoice-due": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, dueDate: v }); await done(); }} />);
-    case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="2026" save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
+    // Pré-rempli avec l'année portée par le N° FP lui-même (FP/AAAA/N) — jamais une année en dur.
+    case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="AAAA" initial={yearOfFp(item.fp) ? String(yearOfFp(item.fp)) : undefined} save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
+    // « Projet ClickUp clôturé mais RAF non nul » : l'action attendue est de SOLDER — un clic, ici.
+    case "raf-order-zero": return row(
+      <Busy variant="ghost" label={`Solder le RAF${(item.raf || 0) > 0 ? ` (${money(item.raf!)} → 0)` : ""}`} okMsg="RAF soldé (recalcul lancé)" errMsg="Correction refusée"
+        fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); await patchOrder({ fp: item.fp, raf: 0 }); await done(); }} />);
     case "text-order-client": return row(<FieldFix label="Client" placeholder="Client" save={async (v) => { if (!v.trim()) throw new Error("client requis"); await patchOrder({ fp: item.fp!, client: v.trim() }); await done(); }} />);
     case "text-order-am": return row(<FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />);
     case "fp-opp": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchOpportunity({ id: item.id!, fp: v.trim() }); await done(); }} />);
@@ -360,7 +539,7 @@ function ItemFix({ item, kind, module, canFix, onDone, suggestion, onDismissSugg
       <span className="inline-flex items-center gap-2">
         <Busy variant="ghost" label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée"
           fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); if (!((item.amount || 0) > 0)) throw new Error("montant de l'opp manquant"); await createOrder({ fp: item.fp, cas: item.amount!, client: item.client, am: item.am, designation: item.designation }); await done(); }} />
-        <span className="text-faint text-[11px]">ou « Dossier client » pour réconcilier vers un FP existant</span>
+        <span className="text-faint text-[11px]">ou section « Dossier client » ci-dessous pour réconcilier vers un FP existant</span>
       </span>);
     default: return row(<span className="text-faint text-[11px]">correction à la source</span>);
   }
@@ -374,7 +553,7 @@ const refKeyOf = (it: CorrectionItem) => String(it.id || it.numero || it.fp || i
 // en dessous, elles restent visibles pour un arbitrage ligne à ligne. Réglé prudent (l'IA propose).
 const AI_BULK_CONF = 0.85;
 
-function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; onDone: () => Promise<void> }) {
+function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void> }) {
   const cfg = FIX[bucket.type] || { kind: "" };
   const [confirmBulk, setConfirmBulk] = useState(false);
   // Propositions IA indexées par ref (l'IA propose, l'humain applique via les écritures gouvernées).
@@ -454,7 +633,7 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, onDone }: { bucket: C
             </div>
           )}
           {bucket.items.map((it, i) => (
-            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} canFix={canFix} onDone={onDone}
+            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} ent={cfg.ent} canFix={canFix} caps={caps} onDone={onDone}
               suggestion={sugg[refKeyOf(it)]} onDismissSuggestion={() => setSugg((m) => { const n = { ...m }; delete n[refKeyOf(it)]; return n; })} />
           ))}
           {bucket.count > bucket.items.length && (
@@ -505,11 +684,11 @@ function RemediationPlanCard({ plan, onGo }: { plan: RemediationPlan; onGo: (typ
   );
 }
 
-function CorrectionCenter() {
+function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
   const [buckets, setBuckets] = useState<CorrectionBucket[] | null>(null);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" } as const;
+  const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" };
   const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); setPlan(r.plan || null); };
   const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
   return (
@@ -520,13 +699,18 @@ function CorrectionCenter() {
       </div>
     }>
       <div className="flex flex-col gap-2">
-        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…), une <b>💡 recommandation chiffrée</b> quand elle est déductible, et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
+        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec le contexte de l'affaire, l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…), les <b>actions de ligne</b> (modifier, requalifier, annuler, ouvrir), une <b>💡 recommandation chiffrée</b> quand elle est déductible, et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
         {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine. 🎉</div>}
         {plan && buckets && buckets.length > 0 && <RemediationPlanCard plan={plan} onGo={(t) => setOpen((o) => ({ ...o, [t]: true }))} />}
         {buckets && buckets.map((b) => (
-          <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} onDone={load} />
+          <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} caps={caps} onDone={load} />
         ))}
-        {buckets && buckets.length > 0 && <Tip>Chaque correction appelle le service gouverné par le <b>module de la donnée</b> (droits respectés) et relance le recalcul ; l'anomalie se résorbe après « Rafraîchir ». Les <b>doublons</b> se traitent via la carte dédiée ; « <b>ouvrir</b> » renvoie à l'écran pré-filtré pour les cas non corrigeables en une valeur.</Tip>}
+        {buckets && buckets.length > 0 && <Tip>Chaque correction appelle le service gouverné par le <b>module de la donnée</b> (droits respectés) et relance le recalcul ; l'anomalie se résorbe après « Rafraîchir ». « <b>modifier</b> » / « <b>requalifier</b> » ouvrent la modale de correction ici même ; « <b>annuler</b> » sort l'enregistrement des chiffres (overlay rétablissable) ; « <b>ouvrir</b> » renvoie à l'écran source pré-filtré.</Tip>}
+        {/* OUTILS DE RAPPROCHEMENT — intégrés au point unique (plus de cartes séparées sur la page). */}
+        <ClientReconcileSection />
+        <FpReconcileSection />
+        <DcReconcileSection />
+        {isDirection && <DedupeSection />}
       </div>
     </Card>
   );
@@ -537,7 +721,7 @@ function CorrectionCenter() {
 // `source → cible P&L` : à chaque recalcul, les lignes portant la source sont ré-étiquetées vers la
 // cible EN MÉMOIRE (overlay config/fpAliases, non destructif → survit aux ré-imports delta, comme les
 // alias clients). La cible reste seule au P&L ; la source cesse d'apparaître comme une commande à part.
-function FpReconcileCard() {
+function FpReconcileSection() {
   const { data } = useDocData<{ map?: Record<string, string> }>("config/fpAliases");
   const map = data?.map || {};
   const entries = Object.entries(map);
@@ -545,7 +729,7 @@ function FpReconcileCard() {
   const [to, setTo] = useState("");
   const ready = from.trim() && to.trim() && from.trim() !== to.trim();
   return (
-    <Card title="Réconciliation N° FP (opp gagnée ↔ P&L)">
+    <CorrSection title="Réconciliation N° FP (opp gagnée ↔ P&L)" hint={entries.length ? `${entries.length} alias` : undefined}>
       <div className="flex flex-col gap-3">
         <div className="flex items-end gap-2 flex-wrap text-[13px]">
           <label className="flex flex-col gap-1">
@@ -575,7 +759,7 @@ function FpReconcileCard() {
         )}
         <Tip>Quand une commande est <b>déjà au P&L sous un autre N° FP</b> (le P&L, lié à la facturation, est la référence) : indiquez le N° FP de l'<b>opp/commande à réconcilier</b> puis le N° FP <b>P&L définitif</b>. Overlay non destructif (survit aux ré-imports) : à chaque recalcul, les lignes de la source sont rattachées à la cible ; on évite ainsi de compter deux fois la même affaire. Laissez le N° FP cible vide en retirant une réconciliation pour l'annuler.</Tip>
       </div>
-    </Card>
+    </CorrSection>
   );
 }
 
@@ -584,7 +768,7 @@ function FpReconcileCard() {
 // Le webhook entrant rattache alors le BC à ce N° FP (overlay config/dcAliases, non destructif, survit aux
 // ré-imports). Même esprit que la réconciliation N° FP, keyé par le DC. Le cas NORMAL (Odoo envoie FP+DC)
 // n'a pas besoin de cet overlay : le FP explicite prime toujours.
-function DcReconcileCard() {
+function DcReconcileSection() {
   const { data } = useDocData<{ map?: Record<string, string> }>("config/dcAliases");
   const map = data?.map || {};
   const entries = Object.entries(map);
@@ -592,7 +776,7 @@ function DcReconcileCard() {
   const [to, setTo] = useState("");
   const ready = from.trim() && to.trim();
   return (
-    <Card title="Rapprochement DC → N° FP (BC fournisseur Odoo)">
+    <CorrSection title="Rapprochement DC → N° FP (BC fournisseur Odoo)" hint={entries.length ? `${entries.length} rapprochements` : undefined}>
       <div className="flex flex-col gap-3">
         <div className="flex items-end gap-2 flex-wrap text-[13px]">
           <label className="flex flex-col gap-1">
@@ -622,7 +806,7 @@ function DcReconcileCard() {
         )}
         <Tip>Filet pour les BC fournisseurs <b>Odoo</b> : quand un BC arrive avec un <b>DC</b> mais sans N° FP exploitable, ce rapprochement le rattache à l'affaire. Le cas normal (Odoo envoie FP <i>et</i> DC) n'en a pas besoin — le N° FP fourni fait foi. Overlay non destructif : il survit aux ré-imports.</Tip>
       </div>
-    </Card>
+    </CorrSection>
   );
 }
 
@@ -650,7 +834,7 @@ function clusterState(c: ReconCluster): { label: string; tone: "clay" | "gold" |
   return { label: "—", tone: "neutral" };
 }
 
-function ClientReconcileCard() {
+function ClientReconcileSection() {
   const [list, setList] = useState<ReconListItem[] | null>(null);
   const [scanned, setScanned] = useState<{ orders: number; invoices: number; opps: number } | null>(null);
   const [dossier, setDossier] = useState<ReconDossier | null>(null);
@@ -664,14 +848,13 @@ function ClientReconcileCard() {
   useReloadOnWrite(() => { if (dossier) openClient(dossier.client); }, !!dossier);
 
   return (
-    <Card title="Dossier client — rapprochement Opp / Commande / Facture" actions={
+    <CorrSection title="Dossier client — rapprochement Opp / Commande / Facture">
       <div className="flex items-center gap-2 flex-wrap">
         <input className="field w-44 !py-1 text-xs" aria-label="Ouvrir le dossier d'un client" placeholder="Nom du client…"
           value={q} onChange={(e) => setQ(e.target.value)} />
         {q.trim() && <Busy variant="ghost" label="Ouvrir" okMsg="Dossier chargé" errMsg="Chargement refusé" fn={() => openClient(q.trim())} />}
         <Busy variant="ghost" label="Clients à rapprocher" okMsg="Analyse terminée" errMsg="Analyse refusée" fn={refreshList} />
       </div>
-    }>
       <div className="flex flex-col gap-3">
         {/* Triage : clients porteurs d'un écart, du plus au moins prioritaire. */}
         {list && (
@@ -732,7 +915,7 @@ function ClientReconcileCard() {
 
         <Tip>Vue par <b>client</b> alignant <b>opportunités, commandes P&amp;L et factures</b> sur le même N° FP. Le <b>FP de la facture fait foi</b> (facturation) devant le FP commande, lui-même devant le FP opp. « <b>Clients à rapprocher</b> » liste ceux dont un flux est sous un N° FP divergent ; ouvrez un dossier puis cliquez « <b>Réconcilier</b> » sur une proposition (overlay non destructif, recalcul immédiat). Chaque proposition indique son signal : <b>montant concordant</b>, <b>même affaire</b> (désignation) ou <b>facture partielle</b> (acompte, appariement unique) — toujours à confirmer d'un clic.</Tip>
       </div>
-    </Card>
+    </CorrSection>
   );
 }
 
@@ -849,15 +1032,9 @@ export const Cleanup: FC<Props> = () => {
         </div>
       </Card>
 
-      {canImport && <CorrectionCenter />}
-
-      {canImport && <ClientReconcileCard />}
-
-      {canImport && <FpReconcileCard />}
-
-      {canImport && <DcReconcileCard />}
-
-      {isDirection && <DedupeCard />}
+      {/* Point unique : les outils de rapprochement (Dossier client, réconciliations FP/DC) et les
+          doublons vivent en SECTIONS dans le Centre de correction — plus de cartes séparées. */}
+      {canImport && <CorrectionCenter isDirection={isDirection} />}
 
       {isDirection && <CleanupJournal />}
     </div>

@@ -415,7 +415,8 @@ export async function reconClient(client?: string): Promise<ReconResult> {
 export type CorrectionRec = { field: string | null; value: number | null; basis: string };
 export type CorrectionItem = {
   id?: string; fp?: string; client?: string; am?: string; numero?: string; amountHt?: number; amount?: number;
-  cas?: number; yearPo?: number; date?: string; dueDate?: string; stage?: number; stageLabel?: string;
+  cas?: number; casPnl?: number; raf?: number; yearPo?: number; date?: string; dueDate?: string; closingDate?: string;
+  stage?: number; stageLabel?: string;
   designation?: string; supplier?: string; bcNumber?: string; currency?: string; amountXof?: number;
   saleTotal?: number; affaire?: string; source?: string; rec?: CorrectionRec;
 };

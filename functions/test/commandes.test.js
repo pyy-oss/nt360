@@ -74,6 +74,27 @@ describe("mergeCommandes — P&L strict : commande = ligne P&L ; opp/fiche réco
   });
 });
 
+describe("mergeCommandes — année de PO dérivée du N° FP quand la colonne Excel est vide/aberrante", () => {
+  // Le N° FP porte structurellement le millésime (FP/AAAA/N). Une ligne P&L sans année (ou 1900,
+  // 20226…) remontait en « commande sans année » au Centre de correction alors que le FP la donne.
+  it("yearPo absent → année du FP ; yearPo aberrant → année du FP ; yearPo plausible conservé", () => {
+    const cmd = mergeCommandes([
+      { fp: "FP/2025/11468", client: "A", cas: 100 },              // pas d'année Excel
+      { fp: "FP/2024/7", client: "B", cas: 100, yearPo: 1900 },    // aberrante
+      { fp: "FP/2023/9", client: "C", cas: 100, yearPo: 2026 },    // plausible ≠ FP → Excel fait foi
+    ], [], [], []);
+    const byFp = Object.fromEntries(cmd.map((c) => [c.fp, c.yearPo]));
+    expect(byFp["FP/2025/11468"]).toBe(2025);
+    expect(byFp["FP/2024/7"]).toBe(2024);
+    expect(byFp["FP/2023/9"]).toBe(2026);
+  });
+  it("ni année Excel ni millésime plausible dans le FP → 0 (reste signalé en anomalie)", () => {
+    // fpKey normalise mais ne borne pas l'année ; yearOfFp la borne (plausibleYear) → 0.
+    const cmd = mergeCommandes([{ fp: "FP/2099/1", client: "D", cas: 100 }], [], [], []);
+    expect(cmd[0].yearPo).toBe(0);
+  });
+});
+
 describe("mergeCommandes — casPnl conservé (contrôle de cohérence amont ADR-030+)", () => {
   // casPnl = CAS d'ORIGINE de la ligne P&L, gardé même quand une opp gagnée / fiche écrase `cas`. Sert au
   // prédicat « écart de valorisation » (alerts/dataQuality). Sans lui, la valeur P&L écrasée serait perdue.
