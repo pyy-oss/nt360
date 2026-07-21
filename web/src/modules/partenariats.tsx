@@ -24,6 +24,7 @@ import {
   PARTNERSHIP_STATUS_LABEL, partnershipTone, CERT_STATUS_LABEL, certStatusTone,
   ALERT_BUCKET_LABEL, alertBucketTone, ASSIGNMENT_STATUS_LABEL, assignmentTone,
   relanceBucketLabel, relanceBucketTone, VALIDATION_STATUS_LABEL, validationTone, BP_AXIS_LABEL, label,
+  DEALREG_STATUS_LABEL, dealregTone, MDF_STATUS_LABEL, mdfTone, REBATE_STATUS_LABEL, rebateTone,
 } from "../lib/parLabels";
 import type { Props } from "./_shared";
 // Types de la QBR (import type : effacé à la compilation — pptxgenjs reste chargé à la demande).
@@ -48,6 +49,15 @@ type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId
 type PipelineSummary = { partners?: { partnerId: string; name: string; openXof: number; openWeightedXof: number; openCount: number; wonXof: number; wonCount: number }[]; totalOpenXof?: number; totalWonXof?: number; exerciseYear?: number } | null;
 type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
 type ConsultantLite = { id: string; name: string; bu?: string };
+// Avantages programme (PAR-L3) — miroirs des collections par_dealregs / par_mdf / par_rebates.
+type DealReg = { id: string; partnerId: string; client: string; designation?: string; refConstructeur?: string; fp?: string; amountXof?: number; remisePct?: number; statut: string; dateSoumission?: string; dateExpiration?: string; note?: string };
+type Mdf = { id: string; partnerId: string; label: string; amountXof: number; usedXof?: number; statut: string; dateExpiration?: string; note?: string };
+type Rebate = { id: string; partnerId: string; periode: string; assietteXof?: number; tauxPct?: number; attenduXof?: number; recuXof?: number; statut: string; dateEcheance?: string; note?: string };
+type BenefitsSummary = {
+  dealregs?: { partners?: { partnerId: string; name?: string; total: number; soumis: number; approuves: number; rejetes: number; expires: number; approvedXof: number; activeRegs: number; openOppCount: number }[]; total?: number; activeRegs?: number; approvedXof?: number; expiring?: { id: string; partnerId: string; client: string; dateExpiration: string; daysLeft: number }[]; expiringTotal?: number };
+  mdf?: { partners?: { partnerId: string; name?: string; allocatedXof: number; usedXof: number; remainingXof: number; funds: number }[]; allocatedXof?: number; usedXof?: number; remainingXof?: number; expiring?: { id: string; partnerId: string; label: string; remainingXof: number; dateExpiration: string; daysLeft: number; bucket: string }[]; expiringTotal?: number };
+} | null;
+type RebatesSummary = { partners?: { partnerId: string; name?: string; attenduXof: number; recuXof: number; ecartXof: number; count: number }[]; attenduXof?: number; recuXof?: number; ecartXof?: number; overdue?: { id: string; partnerId: string; periode: string; attenduXof: number; dateEcheance: string; daysLate: number }[]; overdueTotal?: number } | null;
 
 const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
   <label className="flex flex-col gap-1"><span className="text-[11px] text-muted">{label}</span>{children}</label>
@@ -70,7 +80,7 @@ export const Partenariats: FC<Props> = () => {
   // ADR-P07). Sans ce droit on NE S'ABONNE PAS à summaries/par_ca (sinon permission-denied par les rules)
   // et le KPI + la carte CA sont masqués — comme MB/%MB ailleurs (useCanSeeMargin).
   const canSeeCa = useCanSeeMargin();
-  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "engineers" | "config" | "ia">("dash");
+  const [tab, setTab] = useState<"dash" | "certifs" | "assigns" | "engineers" | "benefits" | "config" | "ia">("dash");
   // Édition d'un partenaire depuis une vue read-only (Plan d'affaires / Conformité) : on bascule sur
   // Paramétrage et on demande l'ouverture du formulaire pour ce partnerId (consommé par ConfigTab).
   const [editPartnerId, setEditPartnerId] = useState<string | null>(null);
@@ -111,6 +121,7 @@ export const Partenariats: FC<Props> = () => {
           { value: "certifs", label: "Certifications", count: certifs?.length },
           { value: "assigns", label: "Assignations", count: assigns?.length },
           { value: "engineers", label: "Ingénieurs" },
+          { value: "benefits", label: "Avantages" },
           { value: "config", label: "Paramétrage" },
           { value: "ia", label: "IA & QBR" },
         ]}
@@ -131,6 +142,7 @@ export const Partenariats: FC<Props> = () => {
         {tab === "certifs" && <CertifsTab certifs={certifs || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
         {tab === "assigns" && <AssignsTab assigns={assigns || []} partners={partners || []} partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} />}
         {tab === "engineers" && <EngineersTab certifs={certifs || []} assigns={assigns || []} partnerName={partnerName} />}
+        {tab === "benefits" && <BenefitsTab partnerName={partnerName} partnerOpts={partnerOpts} canWrite={canWrite} canSeeCa={canSeeCa} />}
         {tab === "config" && <ConfigTab partners={partners || []} certifs={certifs || []} assigns={assigns || []} partnerOpts={partnerOpts} mapDoc={mapDoc} ca={ca} canWrite={canWrite} openEditId={editPartnerId} onConsumedEdit={() => setEditPartnerId(null)} />}
         {tab === "ia" && <IaTab partnerOpts={partnerOpts} />}
       </>}
@@ -171,6 +183,260 @@ const EngineersTab: FC<{ certifs: Certif[]; assigns: Assign[]; partnerName: Reco
         empty="Aucune certification ni assignation enregistrée."
       />
     </Card>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────── Avantages programme (PAR-L3)
+// MDF (fonds marketing), deal registrations et rebates. Les REBATES sont une donnée de MARGE (remise
+// arrière) : abonnement UNIQUEMENT avec le droit `rentabilite` (canSeeCa), comme summaries/par_ca — sans
+// le droit, la carte est masquée (aucun abonnement → aucun permission-denied).
+const DEALREG_MANUAL_STATUSES = ["soumis", "approuve", "rejete"] as const; // « expire » est DÉRIVÉ (sweep) — jamais posé à la main
+
+const DealRegStatusCell: FC<{ r: DealReg }> = ({ r }) => {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const change = async (statut: string) => {
+    if (statut === r.statut || busy) return;
+    setBusy(true);
+    try { await callFn("setParDealRegStatus", { id: r.id, statut }); toast("Statut mis à jour", "ok"); }
+    catch (e: any) { const d = String(e?.message || e?.code || "").replace(/^functions\//, ""); toast(d ? `Changement refusé — ${d}` : "Changement refusé", "err"); }
+    finally { setBusy(false); }
+  };
+  return <div className="w-36"><Select value={DEALREG_MANUAL_STATUSES.includes(r.statut as typeof DEALREG_MANUAL_STATUSES[number]) ? r.statut : ""} onChange={change} options={DEALREG_MANUAL_STATUSES.map((s) => ({ value: s, label: label(DEALREG_STATUS_LABEL, s) }))} ariaLabel="Statut de la deal registration" placeholder={label(DEALREG_STATUS_LABEL, r.statut)} disabled={busy} /></div>;
+};
+
+const BenefitsTab: FC<{ partnerName: Record<string, string>; partnerOpts: { value: string; label: string }[]; canWrite: boolean; canSeeCa: boolean }> = ({ partnerName, partnerOpts, canWrite, canSeeCa }) => {
+  const { rows: dealregs, error: drError, truncated: drTrunc } = useCollectionData<DealReg>("par_dealregs");
+  const { rows: mdfs, error: mdfError, truncated: mdfTrunc } = useCollectionData<Mdf>("par_mdf");
+  const { rows: rebates, error: rbError, truncated: rbTrunc } = useCollectionData<Rebate>(canSeeCa ? "par_rebates" : null);
+  const { data: benefits } = useDocData<BenefitsSummary>("summaries/par_benefits");
+  const { data: rbSummary } = useDocData<RebatesSummary>(canSeeCa ? "summaries/par_ca_rebates" : null);
+  const [editReg, setEditReg] = useState<DealReg | null | undefined>(undefined);
+  const [editMdf, setEditMdf] = useState<Mdf | null | undefined>(undefined);
+  const [editRebate, setEditRebate] = useState<Rebate | null | undefined>(undefined);
+  const pName = (id: string) => partnerName[id] || id;
+  const loadError = drError || mdfError || rbError;
+  const dr = benefits?.dealregs; const mdfSum = benefits?.mdf;
+  return (
+    <div className="space-y-4">
+      {loadError && <ErrorState error={loadError} />}
+      <TruncationNote show={drTrunc || mdfTrunc || rbTrunc} cap={DEFAULT_SUB_CAP} />
+
+      {/* Synthèse (summaries/par_benefits + par_ca_rebates — mêmes nombres que le recompute) */}
+      <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
+        <Card title="Deal regs actives"><div className="font-display text-2xl tabnum">{(dr?.activeRegs ?? 0).toLocaleString("fr-FR")}</div><div className="text-[11px] text-faint">{money(dr?.approvedXof || 0)} protégés (approuvées)</div></Card>
+        <Card title="MDF disponible"><div className="font-display text-2xl tabnum">{fmt(mdfSum?.remainingXof || 0)}</div><div className="text-[11px] text-faint">sur {fmt(mdfSum?.allocatedXof || 0)} accordés</div></Card>
+        <Card title="MDF à consommer ≤ 90 j"><div className="font-display text-2xl tabnum">{(mdfSum?.expiringTotal ?? 0).toLocaleString("fr-FR")}</div><div className="text-[11px] text-faint">fonds dont le budget expire</div></Card>
+        {canSeeCa
+          ? <Card title="Rebates — écart"><div className="font-display text-2xl tabnum">{fmt(rbSummary?.ecartXof || 0)}</div><div className="text-[11px] text-faint">{fmt(rbSummary?.recuXof || 0)} reçus / {fmt(rbSummary?.attenduXof || 0)} attendus</div></Card>
+          : <Card title="Rebates"><div className="text-[12px] text-faint py-2">Réservé au droit « rentabilité » (remise arrière = donnée de marge).</div></Card>}
+      </div>
+
+      {/* Fenêtres d'action (issues du recompute — mêmes prédicats que les statuts dérivés) */}
+      {((dr?.expiring || []).length > 0 || (mdfSum?.expiring || []).length > 0 || (canSeeCa && (rbSummary?.overdue || []).length > 0)) && (
+        <Card title="À traiter (fenêtres qui se ferment)">
+          <div className="flex flex-col gap-1.5 text-[12.5px]">
+            {(dr?.expiring || []).map((e) => (
+              <div key={`dr-${e.id}`} className="flex flex-wrap items-center gap-2"><Badge tone={e.daysLeft <= 0 ? "clay" : "gold"}>{e.daysLeft <= 0 ? "échue" : `J-${e.daysLeft}`}</Badge><span className="text-ink">Deal reg {e.client}</span><span className="text-faint">{pName(e.partnerId)} · expire le {frDate(e.dateExpiration)} — à prolonger auprès du constructeur</span></div>
+            ))}
+            {(mdfSum?.expiring || []).map((e) => (
+              <div key={`mdf-${e.id}`} className="flex flex-wrap items-center gap-2"><Badge tone={alertBucketTone(e.bucket)}>{label(ALERT_BUCKET_LABEL, e.bucket)}</Badge><span className="text-ink">MDF « {e.label} »</span><span className="text-faint">{pName(e.partnerId)} · {money(e.remainingXof)} non consommés, expire le {frDate(e.dateExpiration)}</span></div>
+            ))}
+            {canSeeCa && (rbSummary?.overdue || []).map((e) => (
+              <div key={`rb-${e.id}`} className="flex flex-wrap items-center gap-2"><Badge tone="clay">{e.daysLate} j de retard</Badge><span className="text-ink">Rebate {e.periode}</span><span className="text-faint">{pName(e.partnerId)} · {money(e.attenduXof)} attendus, échéance {frDate(e.dateEcheance)} — à réclamer</span></div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Deal registrations — protection de remise sur les affaires enregistrées auprès du constructeur */}
+      <Card title={`Deal registrations · ${dealregs.length}`} actions={canWrite && <button className="btn" onClick={() => setEditReg(null)}><Plus size={14} /> Ajouter</button>}>
+        <Tip>Enregistrer une affaire auprès du constructeur <b>protège la remise</b> face aux autres partenaires. La colonne « Couverture » (synthèse) compare les opportunités ouvertes <b>taguées constructeur</b> (Pipeline) aux enregistrements actifs — une affaire sourcée non enregistrée est une remise à risque. Le statut « Expirée » est <b>calculé</b> de la date d'expiration.</Tip>
+        <Table
+          columns={[
+            colText("Constructeur", (r) => pName(r.partnerId), (r) => pName(r.partnerId)),
+            colText("Client", (r) => r.client, (r) => r.client),
+            colText("Affaire", (r) => r.designation || "—", (r) => r.designation || ""),
+            colText("Réf. constructeur", (r) => r.refConstructeur || "—", (r) => r.refConstructeur || ""),
+            colText("FP", (r) => r.fp || "—", (r) => r.fp || ""),
+            colNum("Montant", (r) => (r.amountXof ? money(r.amountXof) : "—"), (r) => r.amountXof || 0),
+            colNum("Remise", (r) => (r.remisePct != null ? pct(r.remisePct / 100) : "—"), (r) => r.remisePct || 0),
+            colText("Expire", (r) => (r.dateExpiration ? frDate(r.dateExpiration) : "—"), (r) => r.dateExpiration || ""),
+            canWrite
+              ? colText("Statut", (r) => (r.statut === "expire" ? <Badge tone={dealregTone(r.statut)}>{label(DEALREG_STATUS_LABEL, r.statut)}</Badge> : <DealRegStatusCell r={r} />), (r) => r.statut)
+              : colText("Statut", (r) => <Badge tone={dealregTone(r.statut)}>{label(DEALREG_STATUS_LABEL, r.statut)}</Badge>, (r) => r.statut),
+            ...(canWrite ? [colText("", (r: DealReg) => (
+              <span className="inline-flex items-center gap-2">
+                <button className="btn-ghost text-[11px]" onClick={() => setEditReg(r)}>Éditer</button>
+                <DangerBtn label="Suppr." confirm={`Supprimer la deal registration « ${r.client}${r.designation ? ` — ${r.designation}` : ""} » ?`} fn={() => callFn("deleteParDealReg", { id: r.id })} okMsg="Deal registration supprimée" />
+              </span>
+            ))] : []),
+          ]}
+          rows={dealregs} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.client, (r) => pName(r.partnerId), (r) => r.refConstructeur || "", (r) => r.fp || ""]}
+          empty="Aucune affaire enregistrée auprès d'un constructeur."
+        />
+        {(dr?.partners || []).some((p) => p.openOppCount > 0) && (
+          <div className="mt-2">
+            <Eyebrow>Couverture du pipeline sourcé</Eyebrow>
+            <Table columns={[
+              colText("Constructeur", (p) => p.name || pName(p.partnerId), (p) => p.name || p.partnerId),
+              colNum("Opps ouvertes taguées", (p) => String(p.openOppCount), (p) => p.openOppCount),
+              colNum("Regs actives", (p) => String(p.activeRegs), (p) => p.activeRegs),
+              colNum("Couverture", (p) => (p.openOppCount > 0 ? pct(Math.min(p.activeRegs / p.openOppCount, 1)) : "—"), (p) => (p.openOppCount > 0 ? p.activeRegs / p.openOppCount : 0)),
+            ]} rows={(dr?.partners || []).filter((p) => p.openOppCount > 0 || p.activeRegs > 0)} rowKey={(p) => p.partnerId} />
+          </div>
+        )}
+      </Card>
+
+      {/* MDF — fonds marketing accordés, à consommer avant expiration */}
+      <Card title={`Fonds marketing (MDF) · ${mdfs.length}`} actions={canWrite && <button className="btn" onClick={() => setEditMdf(null)}><Plus size={14} /> Ajouter</button>}>
+        <Tip>Budgets marketing accordés par le constructeur, <b>à consommer avant expiration</b> (un budget expiré est perdu). Le statut « Expiré » est <b>calculé</b> de la date d'expiration ; le restant = accordé − consommé.</Tip>
+        <Table
+          columns={[
+            colText("Constructeur", (m) => pName(m.partnerId), (m) => pName(m.partnerId)),
+            colText("Fonds", (m) => m.label, (m) => m.label),
+            colNum("Accordé", (m) => money(m.amountXof), (m) => m.amountXof || 0),
+            colNum("Consommé", (m) => money(m.usedXof || 0), (m) => m.usedXof || 0),
+            colNum("Restant", (m) => (m.statut === "accorde" ? money(Math.max(0, (m.amountXof || 0) - (m.usedXof || 0))) : "—"), (m) => (m.statut === "accorde" ? Math.max(0, (m.amountXof || 0) - (m.usedXof || 0)) : 0)),
+            colText("Expire", (m) => (m.dateExpiration ? frDate(m.dateExpiration) : "—"), (m) => m.dateExpiration || ""),
+            colText("Statut", (m) => <Badge tone={mdfTone(m.statut)}>{label(MDF_STATUS_LABEL, m.statut)}</Badge>, (m) => m.statut),
+            ...(canWrite ? [colText("", (m: Mdf) => (
+              <span className="inline-flex items-center gap-2">
+                <button className="btn-ghost text-[11px]" onClick={() => setEditMdf(m)}>Éditer</button>
+                <DangerBtn label="Suppr." confirm={`Supprimer le fonds « ${m.label} » (${pName(m.partnerId)}) ?`} fn={() => callFn("deleteParMdf", { id: m.id })} okMsg="Fonds supprimé" />
+              </span>
+            ))] : []),
+          ]}
+          rows={mdfs} rowKey={(m) => m.id} pageSize={12} searchKeys={[(m) => m.label, (m) => pName(m.partnerId)]}
+          empty="Aucun fonds marketing enregistré."
+        />
+      </Card>
+
+      {/* Rebates — remise arrière (donnée de MARGE : droit rentabilite, comme le CA constructeur) */}
+      {canSeeCa && (
+        <Card title={`Rebates (remises arrière) · ${rebates.length}`} actions={canWrite && <button className="btn" onClick={() => setEditRebate(null)}><Plus size={14} /> Ajouter</button>}>
+          <Tip>Remises <b>arrière</b> dues par le constructeur sur le CA réalisé — une <b>marge</b> qui se perd si personne ne la réclame (accès « rentabilité », comme le CA constructeur). L'attendu se saisit, ou se <b>dérive</b> assiette × taux.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => pName(r.partnerId), (r) => pName(r.partnerId)),
+              colText("Période", (r) => r.periode, (r) => r.periode),
+              colNum("Assiette", (r) => (r.assietteXof ? money(r.assietteXof) : "—"), (r) => r.assietteXof || 0),
+              colNum("Taux", (r) => (r.tauxPct != null ? pct(r.tauxPct / 100) : "—"), (r) => r.tauxPct || 0),
+              colNum("Attendu", (r) => money(r.attenduXof || 0), (r) => r.attenduXof || 0),
+              colNum("Reçu", (r) => money(r.recuXof || 0), (r) => r.recuXof || 0),
+              colNum("Écart", (r) => money((r.attenduXof || 0) - (r.recuXof || 0)), (r) => (r.attenduXof || 0) - (r.recuXof || 0)),
+              colText("Échéance", (r) => (r.dateEcheance ? frDate(r.dateEcheance) : "—"), (r) => r.dateEcheance || ""),
+              colText("Statut", (r) => <Badge tone={rebateTone(r.statut)}>{label(REBATE_STATUS_LABEL, r.statut)}</Badge>, (r) => r.statut),
+              ...(canWrite ? [colText("", (r: Rebate) => (
+                <span className="inline-flex items-center gap-2">
+                  <button className="btn-ghost text-[11px]" onClick={() => setEditRebate(r)}>Éditer</button>
+                  <DangerBtn label="Suppr." confirm={`Supprimer le rebate « ${r.periode} » (${pName(r.partnerId)}) ?`} fn={() => callFn("deleteParRebate", { id: r.id })} okMsg="Rebate supprimé" />
+                </span>
+              ))] : []),
+            ]}
+            rows={rebates} rowKey={(r) => r.id} pageSize={12} searchKeys={[(r) => r.periode, (r) => pName(r.partnerId)]}
+            empty="Aucun rebate suivi."
+          />
+        </Card>
+      )}
+
+      {editReg !== undefined && <DealRegForm partnerOpts={partnerOpts} edit={editReg} onClose={() => setEditReg(undefined)} />}
+      {editMdf !== undefined && <MdfForm partnerOpts={partnerOpts} edit={editMdf} onClose={() => setEditMdf(undefined)} />}
+      {editRebate !== undefined && <RebateForm partnerOpts={partnerOpts} edit={editRebate} onClose={() => setEditRebate(undefined)} />}
+    </div>
+  );
+};
+
+const NumInput: FC<{ value: string; onChange: (v: string) => void; aria: string; placeholder?: string }> = ({ value, onChange, aria, placeholder }) => (
+  <input className="field" type="number" inputMode="decimal" aria-label={aria} placeholder={placeholder || "0"} value={value} onChange={(e) => onChange(e.target.value)} />
+);
+const numOrU = (s: string) => (s.trim() === "" ? undefined : Number(s));
+
+const DealRegForm: FC<{ partnerOpts: { value: string; label: string }[]; edit?: DealReg | null; onClose: () => void }> = ({ partnerOpts, edit, onClose }) => {
+  const [partnerId, setPartnerId] = useState(edit?.partnerId || "");
+  const [client, setClient] = useState(edit?.client || "");
+  const [designation, setDesignation] = useState(edit?.designation || "");
+  const [refC, setRefC] = useState(edit?.refConstructeur || "");
+  const [fp, setFp] = useState(edit?.fp || "");
+  const [amount, setAmount] = useState(edit?.amountXof != null ? String(edit.amountXof) : "");
+  const [remise, setRemise] = useState(edit?.remisePct != null ? String(edit.remisePct) : "");
+  const [dateSoumission, setDateSoumission] = useState(edit?.dateSoumission || "");
+  const [dateExpiration, setDateExpiration] = useState(edit?.dateExpiration || "");
+  const submit = async () => {
+    await callFn("upsertParDealReg", { id: edit?.id, partnerId, client, designation: designation || undefined, refConstructeur: refC || undefined, fp: fp || undefined, amountXof: numOrU(amount), remisePct: numOrU(remise), statut: edit?.statut || "soumis", dateSoumission: dateSoumission || undefined, dateExpiration: dateExpiration || undefined });
+    onClose();
+  };
+  return (
+    <Modal open title={edit ? "Modifier la deal registration" : "Enregistrer une affaire (deal registration)"} size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Deal registration enregistrée" errMsg="Enregistrement refusé" />}>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Constructeur"><Select value={partnerId} onChange={setPartnerId} options={partnerOpts} placeholder="Choisir…" /></Field>
+        <Field label="Client"><input className="field" aria-label="Client" value={client} onChange={(e) => setClient(e.target.value)} /></Field>
+        <Field label="Affaire (désignation)"><input className="field" aria-label="Désignation de l'affaire" value={designation} onChange={(e) => setDesignation(e.target.value)} /></Field>
+        <Field label="Réf. d'enregistrement constructeur"><input className="field" aria-label="Référence constructeur" value={refC} onChange={(e) => setRefC(e.target.value)} /></Field>
+        <Field label="N° FP (optionnel)"><input className="field" aria-label="Numéro FP" placeholder="FP/2026/…" value={fp} onChange={(e) => setFp(e.target.value)} /></Field>
+        <Field label="Montant (XOF)"><NumInput value={amount} onChange={setAmount} aria="Montant de l'affaire (XOF)" /></Field>
+        <Field label="Remise protégée (%)"><NumInput value={remise} onChange={setRemise} aria="Remise protégée (%)" /></Field>
+        <Field label="Soumise le"><DateField value={dateSoumission} onChange={setDateSoumission} /></Field>
+        <Field label="Expire le"><DateField value={dateExpiration} onChange={setDateExpiration} /></Field>
+      </div>
+      <Tip>Le statut se pilote depuis le tableau (Soumise → Approuvée / Rejetée) ; « Expirée » est calculée de la date d'expiration.</Tip>
+    </Modal>
+  );
+};
+
+const MdfForm: FC<{ partnerOpts: { value: string; label: string }[]; edit?: Mdf | null; onClose: () => void }> = ({ partnerOpts, edit, onClose }) => {
+  const [partnerId, setPartnerId] = useState(edit?.partnerId || "");
+  const [lbl, setLbl] = useState(edit?.label || "");
+  const [amount, setAmount] = useState(edit?.amountXof != null ? String(edit.amountXof) : "");
+  const [used, setUsed] = useState(edit?.usedXof != null ? String(edit.usedXof) : "");
+  const [statut, setStatut] = useState(edit?.statut || "accorde");
+  const [dateExpiration, setDateExpiration] = useState(edit?.dateExpiration || "");
+  const submit = async () => {
+    await callFn("upsertParMdf", { id: edit?.id, partnerId, label: lbl, amountXof: numOrU(amount), usedXof: numOrU(used), statut, dateExpiration: dateExpiration || undefined });
+    onClose();
+  };
+  return (
+    <Modal open title={edit ? "Modifier le fonds marketing" : "Ajouter un fonds marketing (MDF)"} size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Fonds enregistré" errMsg="Enregistrement refusé" />}>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Constructeur"><Select value={partnerId} onChange={setPartnerId} options={partnerOpts} placeholder="Choisir…" /></Field>
+        <Field label="Libellé"><input className="field" aria-label="Libellé du fonds" placeholder="ex. Campagne Q1" value={lbl} onChange={(e) => setLbl(e.target.value)} /></Field>
+        <Field label="Montant accordé (XOF)"><NumInput value={amount} onChange={setAmount} aria="Montant accordé (XOF)" /></Field>
+        <Field label="Montant consommé (XOF)"><NumInput value={used} onChange={setUsed} aria="Montant consommé (XOF)" /></Field>
+        <Field label="Statut"><Select value={statut} onChange={setStatut} options={["accorde", "consomme", "rembourse"].map((s) => ({ value: s, label: label(MDF_STATUS_LABEL, s) }))} ariaLabel="Statut du fonds" /></Field>
+        <Field label="Expire le"><DateField value={dateExpiration} onChange={setDateExpiration} /></Field>
+      </div>
+      <Tip>« Expiré » est calculé de la date d'expiration (budget non consommé = perdu) — il ne se saisit pas.</Tip>
+    </Modal>
+  );
+};
+
+const RebateForm: FC<{ partnerOpts: { value: string; label: string }[]; edit?: Rebate | null; onClose: () => void }> = ({ partnerOpts, edit, onClose }) => {
+  const [partnerId, setPartnerId] = useState(edit?.partnerId || "");
+  const [periode, setPeriode] = useState(edit?.periode || "");
+  const [assiette, setAssiette] = useState(edit?.assietteXof != null ? String(edit.assietteXof) : "");
+  const [taux, setTaux] = useState(edit?.tauxPct != null ? String(edit.tauxPct) : "");
+  const [attendu, setAttendu] = useState(edit?.attenduXof != null ? String(edit.attenduXof) : "");
+  const [recu, setRecu] = useState(edit?.recuXof != null ? String(edit.recuXof) : "");
+  const [statut, setStatut] = useState(edit?.statut || "attendu");
+  const [dateEcheance, setDateEcheance] = useState(edit?.dateEcheance || "");
+  const submit = async () => {
+    await callFn("upsertParRebate", { id: edit?.id, partnerId, periode, assietteXof: numOrU(assiette), tauxPct: numOrU(taux), attenduXof: numOrU(attendu), recuXof: numOrU(recu), statut, dateEcheance: dateEcheance || undefined });
+    onClose();
+  };
+  return (
+    <Modal open title={edit ? "Modifier le rebate" : "Ajouter un rebate (remise arrière)"} size="form" onClose={onClose} actions={<Busy label="Enregistrer" fn={submit} okMsg="Rebate enregistré" errMsg="Enregistrement refusé" />}>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Constructeur"><Select value={partnerId} onChange={setPartnerId} options={partnerOpts} placeholder="Choisir…" /></Field>
+        <Field label="Période"><input className="field" aria-label="Période du rebate" placeholder="ex. 2026-T1" value={periode} onChange={(e) => setPeriode(e.target.value)} /></Field>
+        <Field label="Assiette CA (XOF)"><NumInput value={assiette} onChange={setAssiette} aria="Assiette CA (XOF)" /></Field>
+        <Field label="Taux (%)"><NumInput value={taux} onChange={setTaux} aria="Taux de rebate (%)" /></Field>
+        <Field label="Attendu (XOF — sinon dérivé assiette × taux)"><NumInput value={attendu} onChange={setAttendu} aria="Montant attendu (XOF)" /></Field>
+        <Field label="Reçu (XOF)"><NumInput value={recu} onChange={setRecu} aria="Montant reçu (XOF)" /></Field>
+        <Field label="Statut"><Select value={statut} onChange={setStatut} options={["attendu", "reclame", "recu", "abandonne"].map((s) => ({ value: s, label: label(REBATE_STATUS_LABEL, s) }))} ariaLabel="Statut du rebate" /></Field>
+        <Field label="Échéance"><DateField value={dateEcheance} onChange={setDateEcheance} /></Field>
+      </div>
+      <Tip>Laissez « Attendu » vide pour le dériver de l'assiette × taux. Les montants sont réservés au droit « rentabilité » (jamais dans le journal d'audit).</Tip>
+    </Modal>
   );
 };
 

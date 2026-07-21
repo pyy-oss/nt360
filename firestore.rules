@@ -282,6 +282,12 @@ service cloud.firestore {
     // Assignations de certification (échéances + relances) : donnée non confidentielle → lecture directe
     // gatée drapeau+droit `partenariats`. Écriture callable-only.
     match /par_assignments/{id}    { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
+    // Avantages programme (PAR-L3). Deal registrations (montants d'OPPS — précédent ADR-059) et fonds
+    // marketing (budget, pas une marge) → lecture directe drapeau+droit. Écriture callable-only.
+    match /par_dealregs/{id}       { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
+    match /par_mdf/{id}            { allow read: if parEnabled() && canRead('partenariats'); allow write: if false; }
+    // Rebates = remise ARRIÈRE constructeur (donnée de MARGE) : SECOND verrou `rentabilite`, comme par_ca.
+    match /par_rebates/{id}        { allow read: if parEnabled() && canRead('partenariats') && canRead('rentabilite'); allow write: if false; }
 
     // Config : la matrice de droits est éditée UNIQUEMENT via le callable setPermissions (schéma
     // validé + auditLog) — jamais en écriture directe (une matrice malformée casserait level() pour

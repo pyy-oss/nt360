@@ -987,6 +987,33 @@ async function recomputeCore(db, only) {
       const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts }, renouvellementsPartenariat: { items: partnerWatch } });
       w.push({ path: "summaries/par_news", data: { asOf, ...news, ...stamp } });
 
+      // AVANTAGES PROGRAMME (PAR-L3) : deal registrations + MDF + rebates. Statuts sensibles au TEMPS
+      // re-dérivés à chaque recompute (sweep, même patron que les certifs) et RÉÉCRITS quand le temps
+      // les a changés — les lecteurs directs voient le statut à date. Deux summaries : par_benefits
+      // (non confidentiel — droit partenariats) et par_ca_rebates (marge arrière → préfixe par_ca ⇒
+      // verrou `rentabilite` par les rules, comme par_ca).
+      const { deriveDealRegStatus, deriveMdfStatus, benefitsSummary, rebatesSummary } = require("../domain/parBenefits");
+      const [parDealregs, parMdfs, parRebates] = await Promise.all([
+        readAll(db, "par_dealregs", true), readAll(db, "par_mdf", true), readAll(db, "par_rebates", true),
+      ]);
+      for (const d of parDealregs) {
+        const derived = deriveDealRegStatus(d, asOf);
+        if (derived !== d.statut && d.id) w.push({ path: `par_dealregs/${d.id}`, data: { statut: derived } });
+        d.statut = derived;
+      }
+      for (const m of parMdfs) {
+        const derived = deriveMdfStatus(m, asOf);
+        if (derived !== m.statut && m.id) w.push({ path: `par_mdf/${m.id}`, data: { statut: derived } });
+        m.statut = derived;
+      }
+      const benefits = benefitsSummary({ dealregs: parDealregs, mdfs: parMdfs, opps, todayIso: asOf });
+      const withNames = (arr) => (arr || []).map((e) => ({ ...e, name: nameById[e.partnerId] || e.partnerId }));
+      w.push({ path: "summaries/par_benefits", data: { asOf,
+        dealregs: { ...benefits.dealregs, partners: withNames(benefits.dealregs.partners) },
+        mdf: { ...benefits.mdf, partners: withNames(benefits.mdf.partners) }, ...stamp } });
+      const rebates = rebatesSummary({ rebates: parRebates, todayIso: asOf });
+      w.push({ path: "summaries/par_ca_rebates", data: { asOf, ...rebates, partners: withNames(rebates.partners), ...stamp } });
+
       // Historisation quotidienne de la couverture des quotas (tendance, Lot P3) — patron qualityHistory :
       // un point par jour (clé = asOf), idempotent (remplace le point du jour), fenêtre glissante 90 j.
       const { parQuotaHistoryPoint } = require("../domain/parQuota");

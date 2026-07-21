@@ -3,6 +3,30 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-062 — Avantages programme partenaires (PAR-L3) : deal registrations, MDF, rebates
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« MDF/rebates/deal registration (partenariats) » — 3e effort L reporté par ADR-058)
+
+### Contexte
+Les programmes constructeurs offrent trois leviers financiers non pilotés par l'ERP : l'enregistrement d'affaires (protection de remise), les fonds marketing (budget à consommer avant expiration — perdu sinon) et les remises arrière (marge due sur le CA réalisé — perdue si personne ne la réclame).
+
+### Décisions
+- **Trois collections** aux profils existants (écriture callable-only, drapeau + droit `partenariats`, partenaire du référentiel OBLIGATOIRE) : `par_dealregs` (montants d'OPPS → lecture au droit `partenariats`, précédent ADR-059), `par_mdf` (budget marketing, pas une marge → idem), `par_rebates` (remise arrière = donnée de MARGE → **second verrou `rentabilite`**, comme par_ca ; montants JAMAIS dans l'auditLog — règle ADR-061).
+- **Domaine PUR `parBenefits`** : validations (statuts en slug FR, montants entiers XOF, dates plausibleYear, FP canonicalisé fpKey), statuts d'expiration **DÉRIVÉS au recompute** (sweep, comme les certifs — réécrits quand le temps les change, jamais saisis), synthèses.
+- **Deux summaries** : `summaries/par_benefits` (deal regs + MDF : compteurs, montants, expirations J-90/60/30 du budget non consommé, **couverture du pipeline sourcé** = opps ouvertes taguées `parPartnerId` vs regs actives — « enregistre-t-on nos affaires ? ») et `summaries/par_ca_rebates` (attendu/reçu/écart par constructeur + échus non reçus — préfixe par_ca ⇒ verrou `rentabilite` par les rules).
+- **7 callables** (`upsertParDealReg`, `setParDealRegStatus`, `deleteParDealReg`, `upsertParMdf`, `deleteParMdf`, `upsertParRebate`, `deleteParRebate`) — recompute synchrone best-effort, test de câblage fabrique→exports à 21, deployed-functions.txt à 199.
+- **Onglet front « Avantages »** : synthèse, carte « À traiter (fenêtres qui se ferment) » (regs ≤ 30 j, MDF expirant, rebates échus), trois tables + formulaires ; la carte Rebates n'est montée (aucun abonnement) qu'avec le droit `rentabilite`.
+- Tests : domaine (8), câblage (21), règles émulateur (dealreg/MDF lisibles au droit partenariats seul ; rebates + summary refusés sans `rentabilite`).
+
+### Conséquences
+- Additif strict, invisible drapeau éteint (rules parEnabled) ; le CA/quotas existants sont inchangés.
+- Le statut « expiré » n'apparaît qu'au premier recompute suivant l'échéance (sweep) — comme les certifs.
+
+### Ce qu'on saura dans six mois
+Si la « couverture du pipeline sourcé » reste basse, vérifier d'abord le TAUX DE TAG `parPartnerId` des opps (réserve ADR-059) avant de conclure qu'on n'enregistre pas nos affaires.
+
 ## ADR-061 — Rentabilité RB2 : reliquats ADR-060 soldés (masque fiche étanche, auditLog sans montants, tendance/byPm marge, purge summaries, honnêteté front)
 
 - **Date :** 2026-07-21

@@ -1688,6 +1688,14 @@ exports.generateParQbr = _partenariats.generateParQbr;
 exports.suggestParPartnerMap = _partenariats.suggestParPartnerMap;
 exports.importParCertifications = _partenariats.importParCertifications;
 exports.importParCertificationsFile = _partenariats.importParCertificationsFile;
+// Avantages programme (PAR-L3) : deal registrations, fonds marketing (MDF), rebates.
+exports.upsertParDealReg = _partenariats.upsertParDealReg;
+exports.setParDealRegStatus = _partenariats.setParDealRegStatus;
+exports.deleteParDealReg = _partenariats.deleteParDealReg;
+exports.upsertParMdf = _partenariats.upsertParMdf;
+exports.deleteParMdf = _partenariats.deleteParMdf;
+exports.upsertParRebate = _partenariats.upsertParRebate;
+exports.deleteParRebate = _partenariats.deleteParRebate;
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique

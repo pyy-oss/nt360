@@ -25,6 +25,10 @@ const EXPECTED = [
   "pushParAssignmentToClickup",
   "generateParActionPlan", "generateParQbr", "suggestParPartnerMap",
   "importParCertifications", "importParCertificationsFile",
+  // Avantages programme (PAR-L3)
+  "upsertParDealReg", "setParDealRegStatus", "deleteParDealReg",
+  "upsertParMdf", "deleteParMdf",
+  "upsertParRebate", "deleteParRebate",
 ];
 
 describe("partenariats — câblage fabrique → exports", () => {
