@@ -417,6 +417,12 @@ describe("Module Partenariats & Certifications — drapeau + cloisonnement CA (r
     await setDoc(doc(db, "summaries/par_quotas"), { partners: [] });
     await setDoc(doc(db, "summaries/par_news"), { bulletins: [] });
     await setDoc(doc(db, "summaries/par_quotasHistory"), { days: [] });
+    // Avantages programme (PAR-L3) : deal reg / MDF non confidentiels ; rebate = marge arrière.
+    await setDoc(doc(db, "par_dealregs/dr1"), { partnerId: "dell", client: "ACME", statut: "soumis" });
+    await setDoc(doc(db, "par_mdf/m1"), { partnerId: "dell", label: "Q1", amountXof: 1 });
+    await setDoc(doc(db, "par_rebates/r1"), { partnerId: "dell", periode: "2026-T1", attenduXof: 1 });
+    await setDoc(doc(db, "summaries/par_benefits"), { dealregs: {}, mdf: {} });
+    await setDoc(doc(db, "summaries/par_ca_rebates"), { attenduXof: 1 });
   });
   // Accorde au rôle `commercial` le droit `partenariats` (absent de la matrice → none par défaut) avec un
   // niveau `rentabilite` PARAMÉTRABLE : prouve que le CA exige le SECOND verrou, pas seulement partenariats.
@@ -443,5 +449,17 @@ describe("Module Partenariats & Certifications — drapeau + cloisonnement CA (r
     await grantPartenariats("read");
     await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_ca")));
     await assertSucceeds(getDoc(doc(as("direction"), "summaries/par_ca"))); // direction = write partout
+  });
+  it("avantages programme (PAR-L3) : deal reg / MDF au droit partenariats ; rebates = second verrou rentabilite", async () => {
+    await enablePar();
+    await grantPartenariats("none");
+    await assertSucceeds(getDoc(doc(as("commercial"), "par_dealregs/dr1")));          // montants d'opps (ADR-059)
+    await assertSucceeds(getDoc(doc(as("commercial"), "par_mdf/m1")));                // budget marketing, pas une marge
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_benefits")));    // synthèse non confidentielle
+    await assertFails(getDoc(doc(as("commercial"), "par_rebates/r1")));               // marge arrière → refusé
+    await assertFails(getDoc(doc(as("commercial"), "summaries/par_ca_rebates")));     // préfixe par_ca → refusé
+    await grantPartenariats("read");
+    await assertSucceeds(getDoc(doc(as("commercial"), "par_rebates/r1")));
+    await assertSucceeds(getDoc(doc(as("commercial"), "summaries/par_ca_rebates")));
   });
 });

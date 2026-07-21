@@ -197,3 +197,10 @@ supplierNames
 setCostModel
 upsertObjective
 upsertOpportunity
+upsertParDealReg
+setParDealRegStatus
+deleteParDealReg
+upsertParMdf
+deleteParMdf
+upsertParRebate
+deleteParRebate

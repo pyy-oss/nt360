@@ -628,7 +628,144 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, ...report, skippedDetail: plan.skipped.slice(0, 40) };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, suggestParPartnerMap, importParCertifications, importParCertificationsFile };
+  // ── AVANTAGES PROGRAMME (PAR-L3) : deal registrations, fonds marketing (MDF), rebates ─────────────
+  // Mêmes profils que les certifs/assignations : écriture callable-only (requireWrite partenariats +
+  // drapeau), partenaire du référentiel OBLIGATOIRE (jamais d'avantage orphelin), recompute synchrone
+  // best-effort. Les REBATES (remise arrière = donnée de MARGE) ne mettent JAMAIS leurs montants dans
+  // l'auditLog (lisible au droit habilitations ⊉ rentabilite — même règle qu'ADR-061).
+  const assertParPartnerExists = async (partnerId) => {
+    if (!(await db.doc(`par_partners/${partnerId}`).get()).exists) throw new HttpsError("failed-precondition", "partenaire inconnu (référentiel)");
+  };
+  const benefitId = (v) => { const s = String(v || "").trim().slice(0, 200); return s || null; };
+
+  // Crée (id auto) ou met à jour (id fourni) un enregistrement d'affaire auprès du constructeur.
+  const upsertParDealReg = onCallG("upsertParDealReg", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const { validateDealReg } = require("../domain/parBenefits");
+    const v = validateDealReg(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    await assertParPartnerExists(v.value.partnerId);
+    const id = benefitId(req.data && req.data.id);
+    const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
+    let outId = id;
+    if (id) {
+      const ref = db.doc(`par_dealregs/${id}`);
+      if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "deal registration inconnue");
+      await ref.set(doc, { merge: true });
+    } else {
+      const ref = await db.collection("par_dealregs").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      outId = ref.id;
+    }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "update_par_dealreg" : "create_par_dealreg", module: "partenariats", entity: "par_dealreg", entityId: outId, detail: { partnerId: v.value.partnerId, client: v.value.client, statut: v.value.statut, fp: v.value.fp || null }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("upsertParDealReg");
+    return { ok: true, id: outId };
+  });
+
+  // Change le statut d'une deal registration (soumis → approuvé / rejeté…). Même patron que les assignations.
+  const setParDealRegStatus = onCallG("setParDealRegStatus", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const { DEALREG_STATUSES } = require("../domain/parBenefits");
+    const id = benefitId(req.data && req.data.id);
+    const statut = String(req.data && req.data.statut || "").trim();
+    if (!id) throw new HttpsError("invalid-argument", "id de deal registration invalide");
+    if (!DEALREG_STATUSES.includes(statut)) throw new HttpsError("invalid-argument", "statut de deal registration invalide");
+    const ref = db.doc(`par_dealregs/${id}`);
+    if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "deal registration inconnue");
+    await ref.set({ statut, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_par_dealreg_status", module: "partenariats", entity: "par_dealreg", entityId: id, detail: { statut }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("setParDealRegStatus");
+    return { ok: true, id, statut };
+  });
+
+  // Supprime une deal registration. Idempotent.
+  const deleteParDealReg = onCallG("deleteParDealReg", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = benefitId(req.data && req.data.id);
+    if (!id) throw new HttpsError("invalid-argument", "id de deal registration invalide");
+    await db.doc(`par_dealregs/${id}`).delete().catch(() => {});
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_dealreg", module: "partenariats", entity: "par_dealreg", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("deleteParDealReg");
+    return { ok: true, id };
+  });
+
+  // Crée (id auto) ou met à jour (id fourni) un fonds marketing (MDF) accordé par un constructeur.
+  const upsertParMdf = onCallG("upsertParMdf", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const { validateMdf } = require("../domain/parBenefits");
+    const v = validateMdf(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    await assertParPartnerExists(v.value.partnerId);
+    const id = benefitId(req.data && req.data.id);
+    const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
+    let outId = id;
+    if (id) {
+      const ref = db.doc(`par_mdf/${id}`);
+      if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "fonds marketing inconnu");
+      await ref.set(doc, { merge: true });
+    } else {
+      const ref = await db.collection("par_mdf").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      outId = ref.id;
+    }
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "update_par_mdf" : "create_par_mdf", module: "partenariats", entity: "par_mdf", entityId: outId, detail: { partnerId: v.value.partnerId, label: v.value.label, statut: v.value.statut }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("upsertParMdf");
+    return { ok: true, id: outId };
+  });
+
+  // Supprime un fonds marketing. Idempotent.
+  const deleteParMdf = onCallG("deleteParMdf", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = benefitId(req.data && req.data.id);
+    if (!id) throw new HttpsError("invalid-argument", "id de fonds marketing invalide");
+    await db.doc(`par_mdf/${id}`).delete().catch(() => {});
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_mdf", module: "partenariats", entity: "par_mdf", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("deleteParMdf");
+    return { ok: true, id };
+  });
+
+  // Crée (id auto) ou met à jour (id fourni) un rebate (remise arrière). Les montants sont CONFIDENTIELS :
+  // stockés dans par_rebates (lecture rules = drapeau + partenariats + rentabilite) et JAMAIS journalisés.
+  const upsertParRebate = onCallG("upsertParRebate", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const { validateRebate } = require("../domain/parBenefits");
+    const v = validateRebate(req.data);
+    if (!v.ok) throw new HttpsError("invalid-argument", v.error);
+    await assertParPartnerExists(v.value.partnerId);
+    const id = benefitId(req.data && req.data.id);
+    const doc = { ...v.value, updatedAt: FieldValue.serverTimestamp() };
+    let outId = id;
+    if (id) {
+      const ref = db.doc(`par_rebates/${id}`);
+      if (!(await ref.get()).exists) throw new HttpsError("failed-precondition", "rebate inconnu");
+      await ref.set(doc, { merge: true });
+    } else {
+      const ref = await db.collection("par_rebates").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      outId = ref.id;
+    }
+    // Pas de montant dans l'auditLog (marge arrière — même règle que patch_fiche/astreinte, ADR-061).
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: id ? "update_par_rebate" : "create_par_rebate", module: "partenariats", entity: "par_rebate", entityId: outId, detail: { partnerId: v.value.partnerId, periode: v.value.periode, statut: v.value.statut }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("upsertParRebate");
+    return { ok: true, id: outId };
+  });
+
+  // Supprime un rebate. Idempotent.
+  const deleteParRebate = onCallG("deleteParRebate", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    const id = benefitId(req.data && req.data.id);
+    if (!id) throw new HttpsError("invalid-argument", "id de rebate invalide");
+    await db.doc(`par_rebates/${id}`).delete().catch(() => {});
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_par_rebate", module: "partenariats", entity: "par_rebate", entityId: id, detail: {}, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("deleteParRebate");
+    return { ok: true, id };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, suggestParPartnerMap, importParCertifications, importParCertificationsFile, upsertParDealReg, setParDealRegStatus, deleteParDealReg, upsertParMdf, deleteParMdf, upsertParRebate, deleteParRebate };
 }
 
 module.exports = { createPartenariats };

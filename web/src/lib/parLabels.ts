@@ -58,4 +58,24 @@ export const BP_AXIS_LABEL: Record<string, string> = {
   pipeline: "Pipeline", booking: "Booking", cert: "Certifications", growth: "Croissance",
 };
 
+// Avantages programme (PAR-L3) — miroir des statuts de functions/domain/parBenefits.js.
+export const DEALREG_STATUS_LABEL: Record<string, string> = {
+  soumis: "Soumise", approuve: "Approuvée", rejete: "Rejetée", expire: "Expirée",
+};
+export function dealregTone(s?: string): Tone {
+  switch (s) { case "approuve": return "emerald"; case "soumis": return "gold"; case "rejete": return "clay"; case "expire": return "plum"; default: return "neutral"; }
+}
+export const MDF_STATUS_LABEL: Record<string, string> = {
+  accorde: "Accordé", consomme: "Consommé", rembourse: "Remboursé", expire: "Expiré",
+};
+export function mdfTone(s?: string): Tone {
+  switch (s) { case "accorde": return "emerald"; case "consomme": return "steel"; case "rembourse": return "plum"; case "expire": return "clay"; default: return "neutral"; }
+}
+export const REBATE_STATUS_LABEL: Record<string, string> = {
+  attendu: "Attendu", reclame: "Réclamé", recu: "Reçu", abandonne: "Abandonné",
+};
+export function rebateTone(s?: string): Tone {
+  switch (s) { case "recu": return "emerald"; case "reclame": return "gold"; case "attendu": return "steel"; case "abandonne": return "neutral"; default: return "neutral"; }
+}
+
 export const label = (map: Record<string, string>, v?: string): string => (v ? map[v] || v : "—");

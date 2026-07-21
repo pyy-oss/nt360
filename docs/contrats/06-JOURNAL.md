@@ -2036,3 +2036,45 @@ consommaient le plafond CAS avant les factures datées → clé de tri « 9999-9
 
 **Vérifs.** Functions 1326/1326, web 301/301, tsc/eslint, no-undef (162), deploy-targets (192), indexes,
 bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — PAR-L3 : avantages programme (deal registrations, MDF, rebates) — ADR-062
+
+**Fait.** Dernier effort L reporté par ADR-058 : 3 collections aux profils par_ existants (callable-only,
+drapeau + droit, partenaire du référentiel obligatoire) — par_dealregs / par_mdf (droit partenariats),
+par_rebates (marge arrière → second verrou rentabilite, montants jamais journalisés) ; domaine PUR
+parBenefits (validations XOF entier / plausibleYear / fpKey, statuts d'expiration DÉRIVÉS au sweep du
+recompute et réécrits) ; summaries/par_benefits (compteurs, expirations J-90/60/30 du MDF non consommé,
+couverture du pipeline sourcé = opps taguées vs regs actives) + summaries/par_ca_rebates (attendu/reçu/
+écart, échus non reçus) ; 7 callables + câblage (21) + deployed-functions (199) ; onglet front
+« Avantages » (synthèse, fenêtres qui se ferment, 3 tables + formulaires, rebates gatés canSeeCa).
+
+**Appris.** Le classement confidentiel se décide PAR NATURE de la donnée, pas par module : dans le même
+onglet, le deal reg (montant d'opp) se lit au droit partenariats quand le rebate (marge arrière) exige le
+second verrou — le préfixe par_ca des summaries fait le gating sans nouvelle règle.
+
+**Vérifs.** Functions 1334/1334 (dont parBenefits 8 + câblage 21), rules émulateur 74/74, web 301/301,
+tsc/eslint, no-undef (163), deploy-targets (199), indexes, bundle 120,9 ≤ 122 Ko.
+
+**En parallèle (prod).** PR #555 fusionnée (squash 8d20265), Firebase Deploy success 12:49, smoke prod
+success. « échec import » rapporté à 13:02 : 503 + CORS sur importDelta = fenêtre du déploiement glissant
+(l'appel n'a pas atteint le code) — à rejouer ; si 503 persiste, lire les logs de la fonction.
+
+---
+
+## 2026-07-21 — HOTFIX : memoryMiB ignoré par firebase-functions v2 → import 503 (ADR-063)
+
+**Fait.** Cause racine de l'« échec import » ENFIN trouvée : `memoryMiB` n'est pas une option v2 (c'est
+`memory`, en "2GiB") — le SDK l'ignorait en silence, toutes les fonctions tournaient à 256 Mio, et
+importDelta (2 Gio voulus) mourait en OOM (503 sans CORS) avant d'atteindre le code. Traduction centrale
+lib/fnopts.withMemory + builders enveloppés sous leur nom (les ~175 sites inchangés), fail-fast sur valeur
+inconnue, filet test __endpoint.availableMemoryMb === 2048.
+
+**Appris.** Deux leçons : (1) un 503 sans en-têtes CORS = l'infrastructure a tué l'appel — chercher côté
+conteneur (mémoire, démarrage), pas côté code ; (2) un SDK qui IGNORE une option inconnue sans erreur rend
+le bug invisible pendant des mois — le filet doit vérifier l'état RÉSOLU (__endpoint), pas la déclaration.
+Le diagnostic précédent (« fichier non reconnu », ADR-060) supposait que l'appel aboutissait — faux : il
+n'a jamais abouti, d'où le carnet vide.
+
+**Vérifs.** Functions 1338/1338 (fnopts 4), no-undef (164), deploy-targets (199).
