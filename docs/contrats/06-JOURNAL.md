@@ -2152,3 +2152,19 @@ odooWebhookStatus l'expose (epoch ms) ; (3) Admin → Intégration affiche « De
 
 **Vérifs.** Functions 1342/1342, web 301/301, tsc/eslint 0, no-undef (164), deploy-targets (199),
 bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Tableau de bord Contrats : lecture & analyse (KPI contextualisés, barres, échéances chiffrées)
+
+**Fait.** Demande « améliorer design et affichage… et améliorer la lecture et l'analyse des data »
+(capture du Tableau de bord Contrats). Uniquement des primitives ERP existantes, aucune couleur en dur :
+(1) KPI contextualisés — part du parc (%), ARR avec équivalent MRR/mois, tickets « sur N », risque en %
+des actifs ; (2) répartitions statuts/priorités en BARRES (HBars) avec les couleurs de sens des badges
+(TONE_COLOR → tokens) et le % de chaque part — les proportions se comparent d'un regard ; (3) échéances
+proches CHIFFRÉES : Σ ARR à renouveler en tête, ARR par contrat en ligne (`MntEcheanceProche.arr`,
+même annualise() que le KPI — testé), badge 3 niveaux (≤15 j / ≤60 j / au-delà), renvoi vers
+Renouvellements ; (4) « Par BU (ARR) » du revenu récurrent en HBars (les autres ventilations restent
+en table, plus riches en colonnes).
+
+**Vérifs.** Web 301/301 (mntDashboard étendu : arr par échéance), tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
