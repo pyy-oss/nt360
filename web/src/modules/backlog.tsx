@@ -35,7 +35,7 @@ export const Backlog: FC<Props> = () => {
   const { active: filterActive } = useFilters(); // bandeau d'honnêteté : ces KPI sont GLOBAUX (audit backlog H2)
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
-  if (!data) return <EmptyState />;
+  if (!data) return <EmptyState label="Aucun backlog calculé — importez le P&L (Admin → Import) ou lancez « Recalculer »." />;
   const total = data.total || 0;
   const derive = data.totalDerive || 0;
   const excel = data.totalExcel ?? (total - derive);
@@ -73,14 +73,14 @@ export const Backlog: FC<Props> = () => {
           <Table columns={[
             // Essentiels + action EN LIGNE ; BU / Source / Année (secondaires) repliés via det().
             colText("FP", (t) => <FpLink fp={t.fp} />, (t) => t.fp),
-            colText("Client", (t) => t.client),
-            colText("Affaire", (t) => t.affaire || "—"),
-            det(colText("BU", (t) => t.bu)),
-            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—")),
+            colText("Client", (t) => t.client, (t) => t.client || ""),
+            colText("Affaire", (t) => t.affaire || "—", (t) => t.affaire || ""),
+            det(colText("BU", (t) => t.bu, (t) => t.bu || "")),
+            det(colText("Source", (t) => SRC_LABEL[t.source || ""] || t.source || "—", (t) => t.source || "")),
             det(colNum("Année", (t) => plausibleYear(t.yearPo) || "—")), // borné (jamais un millésime aberrant brut)
-            colNum("CAS", (t) => money(t.cas)),
-            colNum("Facturé", (t) => money(t.facture)),
-            colNum("RAF dérivé", (t) => money(t.raf)),
+            colNum("CAS", (t) => money(t.cas), (t) => t.cas || 0),
+            colNum("Facturé", (t) => money(t.facture), (t) => t.facture || 0),
+            colNum("RAF dérivé", (t) => money(t.raf), (t) => t.raf || 0),
             ...(canImport ? [colText("", (t) => <RafValidator row={t} />)] : []),
           ]} rows={deriveRows} colsKey="backlog-derive" />
           {(data.countDerive ?? 0) > deriveRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {deriveRows.length} premières commandes (sur {data.countDerive}) — triées par RAF dérivé décroissant.</div>}
@@ -121,9 +121,12 @@ export const Backlog: FC<Props> = () => {
 // par statut + RAF échéancé par mois de date prév. de fin. N'apparaît qu'une fois la synchro inverse
 // ClickUp peuplée (bouton « Synchroniser depuis ClickUp » ou tirage quotidien).
 function ClickupDelaysCard() {
-  const { data } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
+  // `error` consommé (audit backlog M4) : une panne/refus rendait la carte simplement ABSENTE,
+  // indiscernable de « pas de données ClickUp ».
+  const { data, error } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
   const byPm = data?.byPm || [], byStatus = data?.byStatus || [], rafByMonth = data?.rafByMonth || [];
   const overdueRows = data?.overdue || [];
+  if (error) return <Card title="Délais & échéances ClickUp"><ErrorState error={error} /></Card>;
   if (!data || (!byPm.length && !byStatus.length && !rafByMonth.length)) return null;
   return (
     <Card title="Délais & échéances ClickUp">
@@ -137,11 +140,11 @@ function ClickupDelaysCard() {
         <div className="mt-3">
           <Eyebrow>Affaires en retard de livraison</Eyebrow>
           <Table columns={[
-            colText("FP", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => <FpLink fp={r.fp} />, (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.fp || ""),
-            colText("Client", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.client || "—"),
-            colText("Statut CU", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.status || "—"),
-            colText("Livraison contractuelle", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => frDate(r.dateContractuelle) || "—", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.dateContractuelle || ""),
-            colNum("RAF", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => money(r.raf)),
+            colText("FP", (r: OverdueRow) => <FpLink fp={r.fp} />, (r: OverdueRow) => r.fp || ""),
+            colText("Client", (r: OverdueRow) => r.client || "—"),
+            colText("Statut CU", (r: OverdueRow) => r.status || "—"),
+            colText("Livraison contractuelle", (r: OverdueRow) => frDate(r.dateContractuelle) || "—", (r: OverdueRow) => r.dateContractuelle || ""),
+            colNum("RAF", (r: OverdueRow) => money(r.raf)),
           ]} rows={overdueRows} />
           {(data.overdueTotal || 0) > overdueRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {overdueRows.length} premières affaires (sur {data.overdueTotal}) — triées par date contractuelle.</div>}
         </div>
@@ -151,10 +154,10 @@ function ClickupDelaysCard() {
           <div>
             <Eyebrow>Par Project Manager</Eyebrow>
             <Table columns={[
-              colText("PM", (r: ClickupPmDelay) => r.pm),
-              colNum("Actifs", (r: ClickupPmDelay) => r.active),
-              colNum("En retard", (r: ClickupPmDelay) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
-              colNum("Retard moy.", (r: ClickupPmDelay) => (r.overdue ? `${r.avgDaysLate} j` : "—")),
+              colText("PM", (r: ClickupPmDelay) => r.pm, (r: ClickupPmDelay) => r.pm || ""),
+              colNum("Actifs", (r: ClickupPmDelay) => r.active, (r: ClickupPmDelay) => r.active || 0),
+              colNum("En retard", (r: ClickupPmDelay) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0), (r: ClickupPmDelay) => r.overdue || 0),
+              colNum("Retard moy.", (r: ClickupPmDelay) => (r.overdue ? `${r.avgDaysLate} j` : "—"), (r: ClickupPmDelay) => r.avgDaysLate || 0),
             ]} rows={byPm} />
           </div>
         )}
@@ -162,9 +165,9 @@ function ClickupDelaysCard() {
           <div>
             <Eyebrow>RAF à facturer par mois (prév. ClickUp)</Eyebrow>
             <Table columns={[
-              colText("Mois", (r: ClickupMonthRaf) => r.month),
-              colNum("Projets", (r: ClickupMonthRaf) => r.count),
-              colNum("RAF", (r: ClickupMonthRaf) => money(r.raf)),
+              colText("Mois", (r: ClickupMonthRaf) => r.month, (r: ClickupMonthRaf) => r.month || ""),
+              colNum("Projets", (r: ClickupMonthRaf) => r.count, (r: ClickupMonthRaf) => r.count || 0),
+              colNum("RAF", (r: ClickupMonthRaf) => money(r.raf), (r: ClickupMonthRaf) => r.raf || 0),
             ]} rows={rafByMonth} />
           </div>
         )}
@@ -173,9 +176,9 @@ function ClickupDelaysCard() {
         <div className="mt-3">
           <Eyebrow>Par statut projet</Eyebrow>
           <Table columns={[
-            colText("Statut", (r: ClickupStatusDist) => r.status),
-            colNum("Projets", (r: ClickupStatusDist) => r.count),
-            colNum("En retard", (r: ClickupStatusDist) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0)),
+            colText("Statut", (r: ClickupStatusDist) => r.status, (r: ClickupStatusDist) => r.status || ""),
+            colNum("Projets", (r: ClickupStatusDist) => r.count, (r: ClickupStatusDist) => r.count || 0),
+            colNum("En retard", (r: ClickupStatusDist) => (r.overdue ? <span className="text-clay">{r.overdue}</span> : 0), (r: ClickupStatusDist) => r.overdue || 0),
           ]} rows={byStatus} />
         </div>
       )}
@@ -185,6 +188,7 @@ function ClickupDelaysCard() {
 }
 
 type OpenOrder = Order & { projetable: number };
+type OverdueRow = NonNullable<ClickupDelaysSummary["overdue"]>[number];
 
 // Report de CA sur N+1 & JALONS de facturation par projet (direction / PMO). Deux niveaux :
 //  • report simple : montant du RAF facturé en N+1 (fallback quand pas de jalons) ;
@@ -325,13 +329,19 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
         <button className="btn-ghost !px-2 !py-1 text-xs" onClick={onClose}>Fermer</button>
       </div>
       <div className="flex flex-col gap-2">
-        {rows.map((r, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
-            <DateField className="!py-1 text-xs w-36" value={r.date} onChange={(v) => set(i, { date: v })} ariaLabel="Date du jalon" placeholder="date jalon" />
-            <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label="Montant du jalon" />
-            <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label="Supprimer le jalon">×</button>
+        {rows.map((r, i) => {
+          // Ligne INVALIDE (date hors format/bornes ou montant ≤ 0) : exclue du Σ par `clean` — la marquer
+          // (audit backlog B12) sinon l'utilisateur voit « écart Σ ≠ RAF » sans comprendre pourquoi.
+          const invalid = (r.date !== "" || r.amount !== 0) && !(/^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number(r.amount) > 0);
+          return (
+          <div key={i} className={cx("flex flex-wrap items-center gap-2", invalid && "text-clay")} title={invalid ? "Ligne incomplète ou invalide — exclue du Σ jalons" : undefined}>
+            <DateField className="!py-1 text-xs w-36" value={r.date} onChange={(v) => set(i, { date: v })} ariaLabel={`Date du jalon ${i + 1}`} placeholder="date jalon" />
+            <input className="field !py-1 text-xs w-40 text-right" inputMode="numeric" placeholder="Montant" value={r.amount || ""} onChange={(e) => set(i, { amount: Number(String(e.target.value).replace(/\s/g, "").replace(",", ".")) || 0 })} aria-label={`Montant du jalon ${i + 1}`} />
+            <button className="btn-ghost !px-2 !py-1 text-xs text-clay" onClick={() => del(i)} aria-label={`Supprimer le jalon ${i + 1}`}>×</button>
+            {invalid && <span className="text-[11px]">exclue du Σ</span>}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="flex items-center gap-3 mt-2 flex-wrap text-[12px]">
         {rows.length < 15 && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={add}>+ Jalon</button>}
@@ -1154,8 +1164,9 @@ const pnlBadge = (s?: string | null) => {
 // Bandeau des commandes ANNULÉES (statut « Annulée » persistant, hors agrégats) : listées à part
 // avec rétablissement. La liste principale ne les contient plus (le recompute les écarte).
 function CancelledOrders() {
-  const { data: cxl } = useDocData<CancellationsDoc>("config/cancelOrders");
+  const { data: cxl, error } = useDocData<CancellationsDoc>("config/cancelOrders");
   const items = cxl?.items || [];
+  if (error) return <Card title="Commandes annulées"><ErrorState error={error} /></Card>;
   if (!items.length) return null;
   return (
     <Card title={`Commandes annulées · ${items.length}`}>
@@ -1176,9 +1187,10 @@ function CancelledOrders() {
 // Charge par Project Manager : agrégat serveur (summaries/pms) des commandes affectées — nombre,
 // CAS, RAF (backlog). Cliquer une ligne applique le filtre PM transverse (isole les listes sur ce PM).
 function PmWorkload() {
-  const { data } = useDocData<PmsSummary>("summaries/pms");
+  const { data, error } = useDocData<PmsSummary>("summaries/pms");
   const { f, set } = useFilters();
   const rows = data?.rows || [];
+  if (error) return <Card title="Charge par Project Manager"><ErrorState error={error} /></Card>;
   if (!rows.length) return null;
   const pick = (pm: string) => set({ pm: f.pm === pm ? "" : pm });
   return (

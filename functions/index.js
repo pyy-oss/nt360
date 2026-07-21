@@ -610,7 +610,7 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
   await db.doc(`billingMilestones/${safeId(fp)}`).set({ fp, milestones, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "billing_milestones", module: "backlog",
-    entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0) }, ts: FieldValue.serverTimestamp(),
+    entity: "milestones", entityId: fp, detail: { count: milestones.length, total: milestones.reduce((s, m) => s + m.amount, 0), firstDate: milestones[0] ? milestones[0].date : null, lastDate: milestones.length ? milestones[milestones.length - 1].date : null }, ts: FieldValue.serverTimestamp(),
   });
   // 'atterrissage' (report N+1 + tendance de facturation) ET 'news' : sinon l'Actualité (retard de
   // facturation vs jalons, trajectoire) ne se rafraîchissait pas après une édition de jalons.
@@ -2932,7 +2932,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
     throw new HttpsError("invalid-argument", "rien à modifier (année, CAS, RAF, client/AM/BU ou nouveau FP requis)");
   }
   await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "patch_order", module: "overview", entity: "order", entityId: safeId(fp),
+    uid: req.auth.uid, action: "patch_order", module: "import", entity: "order", entityId: safeId(fp), // module RBAC réel de la mutation (audit backlog B1 — « overview » faussait le filtrage du journal)
     detail: { fp, newFp: newFp || null, yearPo: patch.yearPo ?? null, cas: patch.cas ?? null, raf: patch.raf ?? null, client: patch.client ?? null, am: patch.am ?? null }, ts: FieldValue.serverTimestamp(),
   });
   await refreshNowBestEffort("patchOrder");
@@ -2990,7 +2990,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   };
   await ref.set(order, { merge: true });
   await db.collection("auditLog").add({
-    uid: req.auth.uid, action: "create_order", module: "overview", entity: "order", entityId: id,
+    uid: req.auth.uid, action: "create_order", module: "import", entity: "order", entityId: id,
     detail: { fp, cas, source: "manuel" }, ts: FieldValue.serverTimestamp(),
   });
   // Recompute BEST-EFFORT (« n'échoue jamais l'action appelante ») : la commande EST créée (intention de
