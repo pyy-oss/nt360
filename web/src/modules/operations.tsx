@@ -34,10 +34,10 @@ const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number)
 };
 export const PnlProjet: FC<Props> = () => {
   const canMargin = useCanSeeMargin();
-  const { rows: allRows } = useCollectionData<ProjectSheet>("projectSheets");
+  const { rows: allRows, loading: shLoading, truncated: shTrunc } = useCollectionData<ProjectSheet>("projectSheets");
   // Marge des fiches isolée (accès Rentabilité) : lue seulement si le rôle a le droit, fusionnée par FP.
   const { rows: mrows } = useCollectionData<ProjectSheet>(canMargin ? "projectSheetsMargin" : null);
-  const { rows: bc } = useCollectionData<BcLine>("bcLines");
+  const { rows: bc, truncated: bcTrunc } = useCollectionData<BcLine>("bcLines");
   const { match } = useFilters();
   const canImport = useCanImport();
   const canEditFiche = useCan("rentabilite") === "write"; // saisie du prix de vente = donnée de marge
@@ -59,6 +59,9 @@ export const PnlProjet: FC<Props> = () => {
     for (const b of bc) { const k = b.fp || ""; if (!k) continue; (m.get(k) || m.set(k, []).get(k)!).push(b); }
     return m;
   }, [bc]);
+  // Garde de chargement AVANT le vide : sans elle, « Aucune fiche affaire » flashait au premier snapshot
+  // (audit 40 axes, axe 37 — contre-exemple correct : la liste Factures).
+  if (shLoading && !allRows.length) return <CardSkeleton />;
   if (!allRows.length) return <EmptyState label="Aucune fiche affaire. Importez des fiches affaire (par FP)." action={canImport ? <ImportButton label="Importer des fiches affaire" /> : undefined} />;
   // Panneau déplié : actions (mise à jour / suppression, si droit) puis ventilation des coûts de
   // l'affaire par type de dépense et par fournisseur (lignes BC de même N° FP).
@@ -97,6 +100,7 @@ export const PnlProjet: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <FilterNote dims="client" />
+      <TruncationNote show={shTrunc || bcTrunc} cap={DEFAULT_SUB_CAP} />
       {canMargin && (
         <div className={grid4}>
           <Kpi label="Prix de revient" value={fmt(revient)} tone="steel" />
@@ -165,7 +169,7 @@ export const Fournisseurs: FC<Props> = () => {
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
-  const badge: Record<string, string> = { saturation: "clay", tension: "gold", ok: "emerald", non_suivi: "neutral" };
+  const badge: Record<string, string> = { saturation: "clay", tension: "gold", ok: "emerald", non_suivi: "neutral", indetermine: "gold" };
   const cols = [
     colText("Fournisseur", (s: SupplierRow) => s.name, (s: SupplierRow) => s.name), colNum("Expo.", (s: SupplierRow) => money(s.expo), (s: SupplierRow) => s.expo),
     // SOA : le SOLDE (facturé) est distinct de l'ENGAGEMENT (BC non facturés + prévisionnel).
@@ -197,7 +201,7 @@ export const Fournisseurs: FC<Props> = () => {
 // d'ÉCRITURE 'fournisseurs' (indépendamment du drapeau « Vérité du coût ») : on doit pouvoir amorcer les
 // pièces AVANT de basculer le solde SOA dessus. Le solde ne les consomme qu'à drapeau allumé (back gated).
 function SupplierInvoiceCard({ canWrite }: { canWrite: boolean }) {
-  const { rows } = useCollectionData<SupplierInvoice>("supplierInvoices");
+  const { rows, truncated: siTrunc } = useCollectionData<SupplierInvoice>("supplierInvoices");
   const { data: soa } = useDocData<{ enabled?: boolean }>("config/soaFeature");
   const supplierOpts = useSupplierOptions();
   const on = soa?.enabled === true;
@@ -230,6 +234,7 @@ function SupplierInvoiceCard({ canWrite }: { canWrite: boolean }) {
           }} />
         </div>
       )}
+      <TruncationNote show={siTrunc} cap={DEFAULT_SUB_CAP} />
       <Table columns={cols} rows={rows} colsKey="supplierInvoices" searchKeys={[(i: SupplierInvoice) => i.supplier || "", (i: SupplierInvoice) => i.fp || "", (i: SupplierInvoice) => i.bcNumber || ""]} rowKey={(i: SupplierInvoice) => i.id || ""} bulk={[]} />
       <Tip><b>Pièces comptables réelles</b> (facture fournisseur) — saisies indépendamment du drapeau ; le montant est <b>entier</b> (le franc CFA n'a pas de subdivision). {on
         ? <>La « <b>Vérité du coût</b> » est <b className="text-emerald">active</b> : le solde du compte fournisseur dérive de ces factures.</>
@@ -335,7 +340,7 @@ const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
 // par le comptage plein-tableau (mémo) ET la colonne « Retard » par ligne, sans recréer de Date.
 const isBcLate = (r: BcLine, today: string) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
 export const BC: FC<Props> = () => {
-  const { rows: allRows, truncated } = useCollectionData<BcLine>("bcLines");
+  const { rows: allRows, loading: bcLoading, truncated } = useCollectionData<BcLine>("bcLines");
   // Exécution BC = BC RÉELLEMENT ÉMIS via l'IMPORT BC (Logistics / PDF). Les lignes issues des
   // fiches affaire (source « fiche ») sont des achats PLANIFIÉS au niveau projet — elles restent
   // visibles en P&L Projet / FP 360°, JAMAIS dans le suivi d'exécution (même si elles portent un
@@ -372,6 +377,9 @@ export const BC: FC<Props> = () => {
     const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
     return { byStatus: bs, solde: bs["solde"] || 0, lateCount: lateRows.length, filtered: filt };
   }, [rows, flt, today]);
+  // Garde de chargement : sans elle, les 5 compteurs de statut et les KPI rendaient 0 au premier
+  // rendu (flash 0, audit 40 axes, axe 37). Après tous les hooks (règle des hooks inconditionnels).
+  if (bcLoading && !allRows.length) return <CardSkeleton />;
   return (
     <div className="flex flex-col gap-4">
       <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />

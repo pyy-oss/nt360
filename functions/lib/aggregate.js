@@ -113,7 +113,10 @@ async function recomputeCore(db, only) {
   // 'partenariats' inclus : le CA partenaire (summaries/par_ca) est DÉRIVÉ des bcLines (ADR-P02). Sans ça,
   // un recompute scopé only=['partenariats'] chargerait bcLines=[] et écraserait par_ca à vide.
   const needBc = need(["suppliers", "cashflow", "alerts", "dataQuality", "facturation", "relances", "news", "overview", "partenariats"]);
-  const needCredit = need(["suppliers", "alerts", "news"]);
+  // + 'cashflow'/'facturation' : les DÉCAISSEMENTS (summaries/cashflow, gate facturation|cashflow) consomment
+  // désormais supplierInvoices quand le drapeau ADR-P21 est actif — un recompute partiel only=['cashflow']
+  // les reconstruirait sinon avec supplierInvoices=[] → payable cash effacé (même piège que needBc, P0-D).
+  const needCredit = need(["suppliers", "alerts", "news", "cashflow", "facturation"]);
   // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
   // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces
   // agrégats avec objectives=[] → alertes d'écart réelles effacées + faux « objectif absent ». Même
@@ -210,9 +213,23 @@ async function recomputeCore(db, only) {
   // PRIORITÉ SOURCE : un BC importé depuis ClickUp (source 'clickup') n'est qu'un AMORÇAGE ; dès que le
   // même N° BC existe via l'import Logistics/PDF/fiche (données comptables curées), on ÉCARTE la ligne
   // ClickUp → jamais de double compte d'exposition/décaissement, quel que soit l'ordre d'arrivée.
-  const nonCuBcKeys = new Set();
-  for (const b of bcLines) { if (b && b.source !== "clickup" && b.bcNumber) nonCuBcKeys.add(bcKey(b.bcNumber, safeId)); }
-  for (let i = bcLines.length - 1; i >= 0; i--) { const b = bcLines[i]; if (b && b.source === "clickup" && b.bcNumber && nonCuBcKeys.has(bcKey(b.bcNumber, safeId))) bcLines.splice(i, 1); }
+  // Double clé d'éviction : la clé de stockage (safeId, casse-insensible) NE PLIE ni tirets ni zéros de
+  // tête → « BC-001 » (ClickUp) vs « BC 001 » (Excel) passaient entre les mailles = double engagement SOA.
+  // bcCompareKey (lib/ids) assimile tirets/points aux espaces puis canonise (« BC-2026-001 » ≡ « BC/2026/1 »).
+  const { bcCompareKey } = require("./ids");
+  const nonCuBcKeys = new Set(), nonCuBcCmp = new Set();
+  for (const b of bcLines) {
+    if (b && b.source !== "clickup" && b.bcNumber) {
+      nonCuBcKeys.add(bcKey(b.bcNumber, safeId));
+      const c = bcCompareKey(b.bcNumber); if (c) nonCuBcCmp.add(c);
+    }
+  }
+  for (let i = bcLines.length - 1; i >= 0; i--) {
+    const b = bcLines[i];
+    if (!b || b.source !== "clickup" || !b.bcNumber) continue;
+    const c = bcCompareKey(b.bcNumber);
+    if (nonCuBcKeys.has(bcKey(b.bcNumber, safeId)) || (c && nonCuBcCmp.has(c))) bcLines.splice(i, 1);
+  }
   for (const b of bcLines) {
     const raw = String(b.bcNumber || "").trim();
     const k = raw ? bcKey(raw, safeId) : ""; // clé casse-insensible (cohérente avec push/pull BC)
@@ -234,20 +251,10 @@ async function recomputeCore(db, only) {
   // docs LIVE de MÊME FP coexistent → double-compte du pondéré/funnel/conversion. On ne garde que le PLUS
   // RÉCENT (updatedAt) par FP, toutes sources live confondues. (Les opps live sans FP ne sont pas dédupliquées
   // — pas de clé.) MIROIR EXACT dans web/src/modules/overviewCalc.ts.
-  const isLiveSource = (o) => o && (o.source === "salesData" || o.source === "odoo");
-  const _ts = (o) => { const u = o.updatedAt; return u && typeof u.toMillis === "function" ? u.toMillis() : (Number(u) || 0); };
-  const bestLiveByFp = new Map();
-  for (const o of oppsRaw) {
-    if (!isLiveSource(o)) continue;
-    const k = fpKey(o.fp); if (!k) continue;
-    const prev = bestLiveByFp.get(k);
-    if (!prev || _ts(o) >= _ts(prev)) bestLiveByFp.set(k, o);
-  }
-  const oppsDedup = oppsRaw.filter((o) => {
-    if (!isLiveSource(o)) return true;
-    const k = fpKey(o.fp); if (!k) return true;
-    return bestLiveByFp.get(k) === o; // ne garde que le représentant le plus récent du FP (toutes sources live)
-  });
+  // SOURCE UNIQUE de la dédup (domain/liveOpps, partagée avec correctionQueue — sinon les buckets du
+  // Centre de correction divergeaient du cockpit dès qu'Odoo était actif).
+  const { dedupeLiveOpps, maskSaisieCovered } = require("../domain/liveOpps");
+  const { oppsDedup, liveFps } = dedupeLiveOpps(oppsRaw);
   // Opportunités FANTÔMES (cf. audit intégral I2) : une opp 'salesData' RETIRÉE de la feuille LIVE
   // (sans clôture 7/9) est marquée `stale:true` NON-DESTRUCTIVEMENT à l'import (lib/apply.js). On
   // l'EXCLUT ici des agrégats pipeline actifs (pondéré, funnel, conversion, commandes) — elle reste en
@@ -264,8 +271,7 @@ async function recomputeCore(db, only) {
   // liveFps calculé sur oppsDedup (AVANT exclusion stale/aged), sinon un FP live devenu fantôme (stale) ou
   // périmé (aged) cesserait de masquer son jumeau 'saisie' → l'opp manuelle RESSUSCITERAIT au pipeline
   // (cf. vérification). La suppression inter-source doit rester stable quel que soit l'état.
-  const liveFps = new Set(oppsDedup.filter((o) => isLiveSource(o) && fpKey(o.fp)).map((o) => fpKey(o.fp)));
-  const opps = oppsActive.filter((o) => !(o.source === "saisie" && fpKey(o.fp) && liveFps.has(fpKey(o.fp))));
+  const opps = maskSaisieCovered(oppsActive, liveFps);
 
   // COMMANDES = source de vérité fusionnée (fiche affaire > opp gagnée > P&L). Sert de base à
   // « Commandes », « Rentabilité », realiseCas, byEntity, backlog, exposition fournisseurs.
@@ -401,7 +407,9 @@ async function recomputeCore(db, only) {
   // FUTUR (plus de biais pessimiste). Le backlog reste INDICATIF, hors du net (jamais mêlé à l'AR).
   if (want("facturation") || want("cashflow")) {
     const cf = cashflow(invoices, orders, asOf);
-    const dec = decaissements(bcLines, asOf);
+    // Drapeau ADR-P21 propagé (même sémantique que le solde SOA) : sans lui, drapeau actif, le SOA disait
+    // « factures réelles » quand le payable cash lisait encore le statut BC « facturé » — deux vérités du dû.
+    const dec = decaissements(bcLines, asOf, { soaFromInvoices, supplierInvoices });
     const decBy = Object.fromEntries(dec.months.map((m) => [m.month, m.out]));
     let cumNet = 0;
     const monthsNet = cf.months.map((m) => {
@@ -440,7 +448,15 @@ async function recomputeCore(db, only) {
   const attObjectifs = { fy: currentFy, objectif, ecart, probaAtteinte, objectifCaf, ecartCaf, probaAtteinteCaf,
     next: { objectif: nObj, ecart: nEcart, objectifCaf: nObjCaf, ecartCaf: nEcartCaf } }; // cibles (objectifs)
   if (want("atterrissage")) {
-    w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...stamp } });
+    // PURGE des champs isolés (audit 40 axes, axe 16) : l'isolation RBAC a DÉPLACÉ objectif/écart/marge vers
+    // atterrissageObjectifs_/atterrissageMargin_, mais les écritures étant merge:true, les valeurs persistées
+    // AVANT l'isolation restaient figées dans le doc public (l'export CODIR les lisait → chiffres périmés,
+    // et les cibles historiques restaient lisibles au niveau « overview » — contraire à l'intention RBAC).
+    // FieldValue.delete() les retire ; `next` étant une map fusionnée récursivement, ses clés isolées sont
+    // purgées une à une.
+    const del = FieldValue.delete();
+    const attPurge = { objectif: del, ecart: del, probaAtteinte: del, objectifCaf: del, ecartCaf: del, probaAtteinteCaf: del, reporteMarge: del };
+    w.push({ path: `summaries/atterrissage_${currentFy}`, data: { ...attPublic, ...attPurge, next: { ...(attPublic.next || {}), objectif: del, ecart: del, objectifCaf: del, ecartCaf: del }, ...stamp } });
     w.push({ path: `summaries/atterrissageObjectifs_${currentFy}`, data: { ...attObjectifs, ...stamp } });
     w.push({ path: `summaries/atterrissageMargin_${currentFy}`, data: { fy: currentFy, reporteMarge, ...stamp } });
   }
@@ -542,7 +558,10 @@ async function recomputeCore(db, only) {
   // Analytique délais/échéances ClickUp (par PM, par statut, RAF échéancé) → summaries/clickupDelays.
   if (want("commandes") || want("overview") || want("dataQuality")) {
     const delays = clickupDelays(orders, clickupSyncMap, orderPmMap, safeId, asOf);
-    w.push({ path: "summaries/clickupDelays", data: { ...delays, ...stamp } });
+    // LISTE des affaires en retard (fp/client/statut/date/RAF, tri par date) : l'alerte « retard de
+    // livraison » renvoyait vers le cockpit Backlog qui n'avait QUE des agrégats par PM/statut — « N
+    // affaires en retard » sans pouvoir les lister (audit 40 axes, axe 24). Bornée 100 (payload).
+    w.push({ path: "summaries/clickupDelays", data: { ...delays, overdue: cuSignals.overdue.slice(0, 100), ...stamp } });
   }
   if (want("alerts") || want("dataQuality")) {
     w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
@@ -703,7 +722,10 @@ async function recomputeCore(db, only) {
       // overview_* ne garde que la chaîne non-additive et les taux non sensibles.
       const ov = overview(ord, inv, oppP, { backlog: bf.total, backlogCount: bf.count, tiers });
       const { mb: ovMb, ratios: ovR, ...ovRest } = ov;
-      w.push({ path: `summaries/overview_${period}`, data: { period, ...ovRest, ratios: { tauxFacturation: ovR.tauxFacturation, tauxConversionVente: ovR.tauxConversionVente }, ...stamp } });
+      // tauxEncaissement N'EST PAS une donnée marge (encaisse/facture sont déjà dans ce doc public) : son
+      // omission historique laissait le KPI « Taux d'encaissement » à « — » en vue GLOBALE alors que la vue
+      // FILTRÉE (overviewCalc) l'affichait — violation « même métrique = même nombre » (audit 40 axes, axe 1).
+      w.push({ path: `summaries/overview_${period}`, data: { period, ...ovRest, ratios: { tauxFacturation: ovR.tauxFacturation, tauxConversionVente: ovR.tauxConversionVente, tauxEncaissement: ovR.tauxEncaissement }, ...stamp } });
       w.push({ path: `summaries/overviewMargin_${period}`, data: { period, mb: ovMb, pmb: ovR.pmb, ...stamp } });
     }
     // `ord` (commandes de la période) → exclusion « déjà au carnet » IDENTIQUE à overview_${period} (parité Certitudes/Commit).

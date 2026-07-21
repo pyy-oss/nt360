@@ -4,7 +4,7 @@ import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Eyebrow, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
@@ -16,7 +16,7 @@ import { useClientKey } from "../lib/clientName";
 import { frDate } from "../lib/format";
 import { marginWaterfall } from "../lib/waterfall";
 import { MARGIN } from "../lib/thresholds";
-import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
+import type { FacturationSummary, RentabiliteSummary, ReceivablesSummary, Objective, Invoice, CancellationsDoc } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -28,7 +28,7 @@ const SCOPES = [
 const EMPTY_OBJ = { fiscalYear: "", scope: "global", scopeValue: "all", label: "", targetCas: "", targetInvoiced: "", targetMargin: "", targetMarginPct: "" };
 
 export const Objectifs: FC<Props> = () => {
-  const { rows } = useCollectionData<Objective>("objectives");
+  const { rows, loading: objLoading } = useCollectionData<Objective>("objectives");
   const canWrite = useCan("objectifs") === "write";
   const toast = useToast();
   const [f, setF] = useState({ ...EMPTY_OBJ });
@@ -88,7 +88,7 @@ export const Objectifs: FC<Props> = () => {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Objectifs annuels par univers / dimension">
-        <Table columns={cols} rows={rows} empty="Aucun objectif défini." searchKeys={[(x: Objective) => String(x.fiscalYear || ""), (x: Objective) => x.scope || "", (x: Objective) => x.scopeValue || ""]} rowKey={(x: Objective) => objectiveId({ fiscalYear: x.fiscalYear || 0, scope: x.scope, scopeValue: x.scopeValue })} bulk={[]} />
+        <Table columns={cols} rows={rows} empty={objLoading ? "Chargement…" : "Aucun objectif défini."} searchKeys={[(x: Objective) => String(x.fiscalYear || ""), (x: Objective) => x.scope || "", (x: Objective) => x.scopeValue || ""]} rowKey={(x: Objective) => objectiveId({ fiscalYear: x.fiscalYear || 0, scope: x.scope, scopeValue: x.scopeValue })} bulk={[]} />
         <Tip>Cette page sert uniquement à <b>définir les objectifs</b> (global, par BU, par client, par commercial). Le <b>R/O (Réalisé / Objectif)</b> se suit désormais sur la vue de chaque périmètre : global → Vue d'ensemble · BU → Domaines · client → Clients · commercial → AM 360°.</Tip>
       </Card>
       {canWrite && (
@@ -124,20 +124,63 @@ export const Objectifs: FC<Props> = () => {
 };
 
 
+// Créances & DSO (summaries/receivables — gaté « facturation » par les règles) : ce doc était calculé
+// à chaque recompute mais AFFICHÉ NULLE PART (audit 40 axes, axe 3) — le pilotage du recouvrement
+// reposait sur la seule liste Relances. Balance âgée + DSO + top créances, avoirs nettés par client.
+function ReceivablesCard() {
+  const { data } = useDocData<ReceivablesSummary>("summaries/receivables");
+  if (!data || !((data.totalAR || 0) > 0 || (data.openCount || 0) > 0)) return null;
+  const b = data.buckets || {};
+  const buckets = [
+    { label: "Non échu", v: b.notDue || 0 }, { label: "0-30 j", v: b.b0_30 || 0 },
+    { label: "31-60 j", v: b.b31_60 || 0 }, { label: "61-90 j", v: b.b61_90 || 0 },
+    { label: "> 90 j", v: b.b90p || 0 },
+  ];
+  return (
+    <Card title="Créances & DSO">
+      <div className={grid4}>
+        <Kpi label="Encours client (AR)" value={fmt(data.totalAR)} tone="steel" sub={`${data.openCount || 0} factures ouvertes (net d'avoirs)`} />
+        <Kpi label="Échu" value={fmt(data.overdue)} tone={(data.overdue || 0) > 0 ? "clay" : "emerald"} sub={`${data.overdueCount || 0} factures en retard`} />
+        <Kpi label="DSO" value={`${data.dso ?? "—"} j`} tone="gold" sub="délai moyen de règlement (borné)" />
+      </div>
+      <div className="mt-3">
+        <Eyebrow>Balance âgée</Eyebrow>
+        <Table columns={[
+          colText("Tranche", (r: { label: string; v: number }) => r.label),
+          colNum("Montant", (r: { label: string; v: number }) => money(r.v), (r: { label: string; v: number }) => r.v),
+        ]} rows={buckets} />
+      </div>
+      {(data.topAR || []).length > 0 && (
+        <div className="mt-3">
+          <Eyebrow>Top créances par client</Eyebrow>
+          <HBars rows={topArr(data.topAR).slice(0, 10)} colorFn={() => T.clay} />
+        </div>
+      )}
+      <Tip>Encours = factures non payées (avoirs nettés par client). Le plan d'action détaillé (créances échues par responsable) est dans <b>Relances</b>.</Tip>
+    </Card>
+  );
+}
+
 // 4 — Facturation
 export const Facturation: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<FacturationSummary>(`summaries/facturation_${period}`);
+  const { active } = useFilters();
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   return (
     <div className="flex flex-col gap-4">
+      {/* Même honnêteté que Rentabilité : cette vue lit un agrégat pré-calculé GLOBAL — sans ce bandeau,
+          un utilisateur filtré lisait un « Facturé » global sous filtre actif, divergent du CAF filtré
+          de la Vue d'ensemble voisine, sans explication (audit 40 axes, axe 6). */}
+      {active && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client) ne s'applique pas ici (agrégat pré-calculé). Le CAF filtré est lisible dans la Vue d'ensemble.</div>}
       <div className={grid4}><Kpi label="Facturé (période)" value={fmt(data.total)} tone="emerald" sub={`${data.count} factures`} /></div>
       <Card title="Tendance mensuelle"><AreaTrend data={monthsAsc(data.monthly)} color={T.emerald} name="Facturé" /></Card>
       <div className={cols2}>
         <Card title="Mix BU"><DonutBU data={toDonut(data.byBu)} /></Card>
         <Card title="Top clients"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.emerald} /></Card>
       </div>
+      <ReceivablesCard />
     </div>
   );
 };
@@ -289,7 +332,7 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
 // (jours CRA imputés aux affaires via les affectations, keystone). Callable à la demande, gouverné
 // « rentabilite » : sans le droit, l'appel est refusé → la carte ne s'affiche pas (dégradation silencieuse).
 // Défini ICI (module lazy) plutôt que dans writes.ts pour ne pas alourdir le chunk d'entrée (budget 120 KB).
-type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
+type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; coutAstreintes: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
 async function deliveryMarginByAffaire() {
   const res = await httpsCallable(functions, "deliveryMarginByAffaire", { timeout: 120_000 })({});
   return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
@@ -297,19 +340,27 @@ async function deliveryMarginByAffaire() {
 function DeliveryMarginCard() {
   const [rows, setRows] = useState<DeliveryMarginRow[] | null>(null);
   const [unassigned, setUnassigned] = useState(0);
-  const [state, setState] = useState<"loading" | "ok" | "denied">("loading");
+  const [missingCjm, setMissingCjm] = useState<string[]>([]);
+  // « denied » (droit rentabilite absent → carte masquée) ≠ « error » (panne réseau/serveur → signalée) :
+  // l'ancien catch unique faisait disparaître la carte sur une simple panne, sans signal (audit axe 37).
+  const [state, setState] = useState<"loading" | "ok" | "denied" | "error">("loading");
   useEffect(() => {
     let live = true;
     deliveryMarginByAffaire()
-      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setState("ok"); })
-      .catch(() => { if (live) setState("denied"); });
+      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setState("ok"); })
+      .catch((e: unknown) => { if (live) setState((e as { code?: string })?.code === "functions/permission-denied" ? "denied" : "error"); });
     return () => { live = false; };
   }, []);
   if (state === "denied") return null;
+  if (state === "error") return <Card title="Marge de livraison par affaire (après main-d'œuvre)"><ErrorState error={new Error("Le calcul n'a pas pu être chargé — réessayez (panne réseau ou serveur).")} /></Card>;
+  const hasAst = (rows || []).some((a) => (a.coutAstreintes || 0) > 0);
   return (
     <Card title="Marge de livraison par affaire (après main-d'œuvre)">
       {state === "loading" ? <EmptyState label="Calcul de la main-d'œuvre imputée…" /> : (
         <>
+          {/* CJM manquants = marge SOUS-COSTÉE (coût 0 sur ces consultants) — même ⚠ que le module contrats.
+              Le signal revenait du serveur mais n'était jamais affiché (audit axe 14). */}
+          {missingCjm.length > 0 && <div className="text-[11px] text-clay mb-2">⚠ Marge sous-costée : {missingCjm.length} consultant(s) sans CJM (coût compté 0) — {missingCjm.slice(0, 5).join(", ")}{missingCjm.length > 5 ? "…" : ""}. Renseignez le CJM dans Consultants.</div>}
           <Table columns={[
             colText("FP", (a: DeliveryMarginRow) => <FpLink fp={a.fp} />, (a: DeliveryMarginRow) => a.fp),
             colText("Client", (a: DeliveryMarginRow) => a.client || "—", (a: DeliveryMarginRow) => a.client || ""),
@@ -317,10 +368,14 @@ function DeliveryMarginCard() {
             colNum("Marge carnet", (a: DeliveryMarginRow) => money(a.margeCarnet || 0), (a: DeliveryMarginRow) => a.margeCarnet || 0),
             colNum("Jours-h.", (a: DeliveryMarginRow) => String(a.joursLabor), (a: DeliveryMarginRow) => a.joursLabor),
             colNum("Coût M-O", (a: DeliveryMarginRow) => money(a.coutLabor || 0), (a: DeliveryMarginRow) => a.coutLabor || 0),
+            // Astreintes : colonne visible dès qu'une ligne en porte — sinon la décomposition affichée ne
+            // « bouclait » pas (marge carnet − M-O ≠ marge livraison) sans explication (audit axe 14).
+            ...(hasAst ? [colNum("Astreintes", (a: DeliveryMarginRow) => money(a.coutAstreintes || 0), (a: DeliveryMarginRow) => a.coutAstreintes || 0)] : []),
             colNum("Marge livraison", (a: DeliveryMarginRow) => <span className={cx("tabnum", (a.margeLivraison || 0) < 0 ? "text-clay" : "text-emerald")}>{money(a.margeLivraison || 0)}</span>, (a: DeliveryMarginRow) => a.margeLivraison || 0),
             colNum("%", (a: DeliveryMarginRow) => (a.margeLivraisonPct == null ? "—" : pct(a.margeLivraisonPct)), (a: DeliveryMarginRow) => a.margeLivraisonPct || 0),
           ]} rows={(rows || []).slice(0, 30)} colsKey="delivery-margin" empty="Aucune affaire avec de la main-d'œuvre imputée (renseigner les affectations avec un N° FP)." />
-          <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
+          {(rows || []).length > 30 && <div className="text-[11px] text-faint mt-1">Les 30 marges les plus basses (sur {(rows || []).length} affaires).</div>}
+          <Tip><b>Marge de livraison</b> = marge du carnet <b>diminuée de la main-d'œuvre réellement consommée</b> sur l'affaire (jours CRA imputés via les affectations rattachées à un N° FP × coût journalier{hasAst ? ", et des astreintes validées" : ""}). Révèle les affaires dont le travail mange la marge « papier ». Les <b>plus basses d'abord</b>.{unassigned > 0 ? ` ${Math.round(unassigned)} j facturés ne sont rattachés à aucune affaire (affectation sans N° FP).` : ""} La main-d'œuvre est <b>retranchée</b> : si un P&L importé l'incluait déjà, la marge affichée est un plancher.</Tip>
         </>
       )}
     </Card>

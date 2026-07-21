@@ -229,7 +229,9 @@ const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "a
 // (carnet Commandes, backlog, rentabilité, clients, domaines, fournisseurs, cash indicatif) — sinon le
 // carnet resterait périmé et CONTREDIRAIT l'en-tête (overview/atterrissage/AM, eux recalculés sur les
 // nouveaux orders) jusqu'au recompute nocturne. On ne paie ce surcoût QUE quand une opp gagnée est en jeu.
-const OPP_RECOMPUTE_WON = [...OPP_RECOMPUTE, "commandes", "backlog", "rentabilite", "clients", "domaines", "suppliers", "cashflow"];
+// + "recognition" : une opp GAGNÉE réconcilie le CAS des orders → les taux FAE/PCA de summaries/recognition
+// en dérivent (gate want("recognition")) ; sans ce scope ils restaient périmés jusqu'au recompute nocturne.
+const OPP_RECOMPUTE_WON = [...OPP_RECOMPUTE, "commandes", "backlog", "rentabilite", "clients", "domaines", "suppliers", "cashflow", "recognition"];
 
 // Portée d'une mutation d'opp : élargie DÈS QUE l'étape « Gagné » (6) est impliquée AVANT ou APRÈS la
 // mutation (passage à gagné, sortie de gagné, ou édition/suppression d'une opp déjà gagnée) — tous les
@@ -1411,13 +1413,16 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     allOpps = allOpps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
-  // MÊME dédup inter-source que le recompute (aggregate.js) : une opp « saisie » dont le FP est déjà
-  // couvert par une opp importée « salesData » est écartée (la version importée fait foi) → l'assiette des
-  // buckets opp du Centre de correction colle AU COCKPIT/SCORE (plus de sur-comptage opps_doublons /
-  // opps_gagnees_sans_pnl / opps_sans_dprev côté correction). Calculé sur allOpps AVANT le split stale/aged.
-  const { fpKey: fpKeyCorr } = require("./lib/ids");
-  const salesFps = new Set(allOpps.filter((o) => o.source === "salesData" && fpKeyCorr(o.fp)).map((o) => fpKeyCorr(o.fp)));
-  allOpps = allOpps.filter((o) => !(o.source === "saisie" && fpKeyCorr(o.fp) && salesFps.has(fpKeyCorr(o.fp))));
+  // MÊME dédup que le recompute — via la SOURCE UNIQUE domain/liveOpps (audit 40 axes, axe 27) : dédup
+  // INTRA-live (salesData+odoo, le plus récent par FP) PUIS masquage des « saisie » couvertes par un FP
+  // live. L'ancienne ré-implémentation locale ignorait Odoo et ne dédupliquait pas les live entre elles →
+  // buckets opp du Centre de correction SUR-COMPTÉS vs cockpit Qualité dès qu'Odoo était actif.
+  const { fpKey: fpKeyCorr } = require("./lib/ids"); // aussi utilisé plus bas (recommandations par FP)
+  {
+    const { dedupeLiveOpps, maskSaisieCovered } = require("./domain/liveOpps");
+    const { oppsDedup, liveFps } = dedupeLiveOpps(allOpps);
+    allOpps = maskSaisieCovered(oppsDedup, liveFps);
+  }
   const thr = thrDoc.data() || {};
   // MÊME préparation des opportunités que le recompute (aggregate.js) → les compteurs du Centre de
   // correction collent au score/aux bulletins : fantômes (stale) et périmées (aged) sont sortis de
@@ -3225,7 +3230,9 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : un BC ajouté alimente immédiatement les décaissements
   // prévisionnels (domain/cashflow) ; sans lui la prévision cash restait périmée jusqu'au recompute complet.
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  // + "partenariats" : summaries/par_ca (CA constructeur, ADR-P02) DÉRIVE des bcLines — sans ce scope le
+  // CA partenaire restait périmé jusqu'au recompute nocturne (audit 40 axes, axe 29).
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
@@ -4107,7 +4114,7 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   // « alerts » AJOUTÉ (cf. audit P1-6) : importBcFromClickup CRÉE de vraies bcLines (statut/ETA) → les
   // alertes BC (bc_en_attente / bc_en_retard) et les relances BC (bloc co-déclenché par alerts) doivent
   // se rafraîchir immédiatement, sinon elles restaient périmées jusqu'au prochain recompute couvrant.
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts"]); }
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts", "partenariats"]); }
   catch (e) { logger.warn("import BC: recompute partiel échoué", { msg: e && e.message }); }
   const res = { created, skippedKnown, skippedIncomplete, scanned: tasks.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_import", module: "bc", entity: "bcLines", entityId: "import", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
@@ -4154,7 +4161,7 @@ async function runBcPull() {
   if (truncated || listErrors) logger.warn("BC pull: couverture partielle", { truncated, listErrors, pulled, total: keys.length });
   await db.doc("config/clickupBcSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // « dataQuality » (clé canonique, l'ancienne « qualite » était inerte) + « news » (bulletin BC en retard).
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
   catch (e) { logger.warn("BC pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length };
 }
@@ -4237,7 +4244,7 @@ async function applyClickupTaskEvent(token, taskId, event) {
       const task = await clickup.getTask(token, taskId);
       await db.doc("config/clickupBcSync").set({ map: { [plan.key]: { ...bc.readBcSync(task), taskId } } }, { merge: true });
     }
-    try { await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+    try { await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
     catch (e) { logger.warn("webhook: recompute BC échoué", { msg: e && e.message }); }
     return plan;
   }
@@ -4624,7 +4631,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : passer un BC en « facturé » en fait un décaissement
   // (SOA) → la prévision cash doit se rafraîchir tout de suite, pas au prochain recompute complet.
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true };
 });
 
@@ -4667,7 +4674,7 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
     uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,
     detail: { fp: patch.fp ?? null, amountXof: patch.amountXof ?? null, supplier: patch.supplier ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true };
 });
 
@@ -4870,11 +4877,16 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   const canMargin = canRead(matrix, role, "rentabilite");
   const canBacklog = canRead(matrix, role, "backlog");
   const canPipeline = canRead(matrix, role, "pipeline");
+  const canObjectifs = canRead(matrix, role, "objectifs");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};
   const fiscal = await get("config/fiscal");
   const ov = await get(`summaries/overview_${period}`);
   const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`); // atterrissage.* → module overview
+  // Objectif/Écart : lus depuis le doc ISOLÉ atterrissageObjectifs_ (gaté « objectifs ») — le doc public ne
+  // les porte plus depuis l'isolation RBAC ; les lire là où ils étaient laissait des chiffres FIGÉS (résidu
+  // merge:true d'avant l'isolation) ou vides dans le livrable CODIR (audit 40 axes, axe 16).
+  const attObj = canObjectifs ? await get(`summaries/atterrissageObjectifs_${fiscal.currentFy || ""}`) : {};
   const bl = canBacklog ? await get("summaries/backlog_fy") : {};
   const pl = canPipeline ? await get("summaries/pipeline") : {};
   const ovm = canMargin ? await get(`summaries/overviewMargin_${period}`) : {};
@@ -4887,12 +4899,16 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   ws.addRow(["Indicateur", "Valeur"]);
   [
     ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
+    // Encaissé + taux : la chaîne exportée s'arrêtait au Facturé alors que l'écran affiche 5 maillons.
+    ["Encaissé", ov.encaisse],
     ...(canBacklog ? [["Backlog (RAF)", bl.total]] : []),
     ...(canMargin ? [["Marge brute", ovm.mb]] : []),
     ["Taux facturation", ov.ratios?.tauxFacturation],
+    // Repli dérivé pour un summary d'avant la persistance du ratio (encaisse/facture sont publics).
+    ["Taux encaissement", ov.ratios?.tauxEncaissement ?? ((ov.facture || 0) > 0 ? (ov.encaisse || 0) / ov.facture : 0)],
     ...(canPipeline ? [["Pipeline actif pondéré", pl.tot?.weighted]] : []),
     ["Atterrissage projeté", att.projete],
-    ["Objectif CAS", att.objectif], ["Écart", att.ecart],
+    ...(canObjectifs ? [["Objectif CAS", attObj.objectif], ["Écart", attObj.ecart]] : []),
   ].forEach((r) => ws.addRow(r));
 
   const buf = await wb.xlsx.writeBuffer();

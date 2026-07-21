@@ -28,6 +28,13 @@ const bcKey = (v) => {
   return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
 };
 
+/** Clé de COMPARAISON inter-graphies d'un N° BC (anti double-compte SOA) : les tirets/points/underscores
+ *  sont d'abord assimilés à des espaces pour que la forme structurée soit reconnue (« BC-2026-001 » ≡
+ *  « BC/2026/1 »), puis la clé bcKey est réduite aux alphanumériques. Ainsi « BC-001 » ≡ « BC 001 » ≡
+ *  « BC001 », et « BC/2026/001 » ≡ « BC 2026 1 ». Sert à l'ÉVICTION des amorçages ClickUp au recompute —
+ *  la clé de stockage safeId, elle, ne plie ni tirets ni zéros de tête. "" si vide. */
+const bcCompareKey = (v) => bcKey(String(v == null ? "" : v).replace(/[-._]/g, " ")).replace(/[^A-Z0-9]/g, "");
+
 /** Parse un nombre tolérant : gère milliers (espaces, ".", ","), décimale "." ou ",",
  *  symboles/lettres, et négatifs comptables "(1 000)" ou "1000-". Renvoie 0 si non numérique. */
 const num = (v) => {
@@ -101,4 +108,4 @@ const buildFpAliasResolver = (map) => {
   };
 };
 
-module.exports = { fpKey, bcKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear, buildFpAliasResolver };
+module.exports = { fpKey, bcKey, bcCompareKey, num, cleanBu, NOISE, noAcc, cleanName, cleanPerson, plausibleYear, buildFpAliasResolver };

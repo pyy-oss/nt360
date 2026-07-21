@@ -2,13 +2,14 @@
 import { useState, useMemo, useEffect, type FC, type ReactNode } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanImport, useCanSeeMargin, useCan } from "../lib/rbac";
-import { T, fmt, pct } from "../design/tokens";
+import { T, fmt, fmtFull, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Busy, DangerBtn, Modal, Tip, EmptyState, ErrorState, CardSkeleton, ListView, Segmented, Eyebrow, colText, colNum, det, money, cx, useToast, type BulkAction } from "../design/components";
 import { Bars, DonutBU, GroupedBars, MultiLine } from "../design/charts";
 import { DateField, Select } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, useBusinessUnits, useAmOptions, useClientOptions, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
+import { frDate } from "../lib/format";
 import { useFilters } from "../lib/filters";
 import { fpKey, plausibleYear } from "../lib/ids";
 import { useNav } from "../lib/nav";
@@ -100,6 +101,7 @@ export const Backlog: FC<Props> = () => {
 function ClickupDelaysCard() {
   const { data } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
   const byPm = data?.byPm || [], byStatus = data?.byStatus || [], rafByMonth = data?.rafByMonth || [];
+  const overdueRows = data?.overdue || [];
   if (!data || (!byPm.length && !byStatus.length && !rafByMonth.length)) return null;
   return (
     <Card title="Délais & échéances ClickUp">
@@ -107,6 +109,21 @@ function ClickupDelaysCard() {
         <Kpi label="Projets en retard de livraison" value={String(data.overdueTotal || 0)} tone={(data.overdueTotal || 0) > 0 ? "clay" : "emerald"} sub="date contractuelle dépassée, non livrés" />
         <Kpi label="Retard moyen" value={`${data.avgDaysLate || 0} j`} tone="steel" sub="sur les projets en retard" />
       </div>
+      {/* LISTE des affaires en retard — cible du drill-through de l'alerte « retard de livraison » : avant,
+          seuls les agrégats par PM/statut existaient (« N affaires » impossibles à lister, audit axe 24). */}
+      {overdueRows.length > 0 && (
+        <div className="mt-3">
+          <Eyebrow>Affaires en retard de livraison</Eyebrow>
+          <Table columns={[
+            colText("FP", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => <FpLink fp={r.fp} />, (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.fp || ""),
+            colText("Client", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.client || "—"),
+            colText("Statut CU", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.status || "—"),
+            colText("Livraison contractuelle", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => frDate(r.dateContractuelle) || "—", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.dateContractuelle || ""),
+            colNum("RAF", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => money(r.raf)),
+          ]} rows={overdueRows} />
+          {(data.overdueTotal || 0) > overdueRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {overdueRows.length} premières affaires (sur {data.overdueTotal}) — triées par date contractuelle.</div>}
+        </div>
+      )}
       <div className={cols2}>
         {byPm.length > 0 && (
           <div>
@@ -258,7 +275,7 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
   const set = (i: number, patch: Partial<BillingMilestone>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const add = () => setRows((rs) => (rs.length < 15 ? [...rs, { date: "", amount: 0 }] : rs));
   const del = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
-  // Pré-remplissage par défaut : RAF projetable réparti uniformément sur 3 jalons jusqu'au 31/12
+  // Pré-remplissage par défaut : échéancier defaultMilestones (courbe pondérée croissante, ou jalon unique)
   // (aligné sur le repli serveur). L'utilisateur peut ensuite ajuster dates/montants avant d'enregistrer.
   const fill = () => { const today = new Date().toISOString().slice(0, 10); const d = defaultMilestones(raf, today, fy || Number(today.slice(0, 4))); if (d.length) setRows(d); };
   const clean = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number(r.amount) > 0).map((r) => ({ date: r.date, amount: Math.round(Number(r.amount)) }));
@@ -283,7 +300,7 @@ function MilestoneEditor({ fp, raf, initial, fy, onClose }: { fp: string; raf: n
       </div>
       <div className="flex items-center gap-3 mt-2 flex-wrap text-[12px]">
         {rows.length < 15 && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={add}>+ Jalon</button>}
-        <button className="btn-ghost !px-2 !py-1 text-xs" onClick={fill} title="Répartir uniformément le RAF projetable sur 3 jalons jusqu'au 31/12 (ajustable)">Répartir par défaut</button>
+        <button className="btn-ghost !px-2 !py-1 text-xs" onClick={fill} title="Proposer un échéancier par défaut (courbe pondérée croissante jusqu'au 31/12, ou jalon unique à la date de clôture ClickUp — ajustable)">Répartir par défaut</button>
         <span className={matches ? "text-emerald" : "text-clay"}>Σ jalons {fmt(total)} / RAF {fmt(raf)}{matches ? " ✓" : ` · écart ${fmt(total - raf)}`}</span>
         <span className="text-steel">dont reporté N+1 : {fmt(reported)}</span>
         {matches
@@ -836,8 +853,10 @@ function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite
     setBusy(true);
     try {
       const r = await syncOrderAmount(row.fp, direction, row.cas);
-      toast(direction === "toOpp" ? `Opportunité alignée sur ${money(r.cas || 0)} — recalcul lancé`
-        : direction === "toOrder" ? `Commande surchargée à ${money(r.cas || 0)} depuis l'opp — recalcul lancé`
+      // fmtFull (chaîne) et PAS money() (JSX) : interpolé dans un template literal, money() affichait
+      // « aligné sur [object Object] » (audit 40 axes, axe 37).
+      toast(direction === "toOpp" ? `Opportunité alignée sur ${fmtFull(r.cas || 0)} FCFA — recalcul lancé`
+        : direction === "toOrder" ? `Commande surchargée à ${fmtFull(r.cas || 0)} FCFA depuis l'opp — recalcul lancé`
         : "Surcharge retirée — recalcul lancé", "ok");
       setOpen(false);
     } catch (e: any) {
@@ -857,7 +876,7 @@ function AmountSyncBtn({ row, canPipelineWrite }: { row: Order; canPipelineWrite
   const canToOpp = !!peek?.oppFound && !ambiguous && !hasLines && canPipelineWrite; // écrit l'opp (refusé si opp chiffrée par lignes ou sans droit pipeline)
   const canToOrder = !!peek?.oppFound && !ambiguous && (oppAmt ?? 0) > 0; // surcharge la commande depuis l'opp
   const valueBox = (label: string, val: ReactNode, hint?: string, tone = "") => (
-    <div className="flex-1 rounded-lg border border-line bg-white/[0.03] px-3 py-2">
+    <div className="flex-1 rounded-lg border border-line bg-panel2 px-3 py-2">
       <div className="text-[11px] text-faint uppercase tracking-wide">{label}</div>
       <div className={cx("font-display tabnum text-base leading-tight", tone)}>{val}</div>
       {hint && <div className="mt-0.5 text-[10px] text-faint">{hint}</div>}
@@ -961,12 +980,12 @@ function ClickupBtn({ row }: { row: Order }) {
       <Modal open={open} onClose={() => setOpen(false)} size="form"
         title={<>Tâche ClickUp — <span className="text-gold">{row.fp}</span></>}
         actions={<button className="btn-ghost" onClick={() => setOpen(false)}>Fermer</button>}>
-        <div className="text-[12px] text-muted mb-3 rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2">
+        <div className="text-[12px] text-muted mb-3 rounded-lg bg-panel2 border border-line px-3 py-2">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span><b className="text-ink">{row.client || "—"}</b> · {row.affaire || "sans désignation"}</span>
             <span>BU {row.bu || "—"}</span><span>AM {row.am || "—"}</span>
             <span>CA Signé {money(row.cas)}</span><span>CA Facturé {money(row.facture)}</span>
-            <span>PM {row.pm || <i className="text-amber-400">non affecté</i>}</span>
+            <span>PM {row.pm || <i className="text-gold">non affecté</i>}</span>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -988,7 +1007,7 @@ function ClickupBtn({ row }: { row: Order }) {
         <Fld label="Commentaire"><textarea className="field !py-1.5 mt-3" rows={2} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} placeholder="note libre (optionnel)" /></Fld>
         <div className="flex gap-2 mt-4 items-center flex-wrap">
           <button type="button" className="btn-gold" disabled={busy} onClick={submit}>{busy ? "…" : "Créer / mettre à jour la tâche"}</button>
-          {!row.pm && <span className="text-[12px] text-amber-400">PM non affecté — la tâche ne sera pas assignée.</span>}
+          {!row.pm && <span className="text-[12px] text-gold">PM non affecté — la tâche ne sera pas assignée.</span>}
         </div>
       </Modal>
     </>

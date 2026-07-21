@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-057 — Remédiation audit 40 axes facturation/revenu/exécution (R1→R4, cible « même métrique = même nombre » partout)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« on corrige tout, cible 10 sur 10 » après l'audit 40 axes user-facing + technique)
+
+### Contexte
+Audit 5 lots × 8 axes (verdict 8,2/10). Défauts concentrés sur UNE famille : *un consommateur secondaire qui n'a pas suivi la dernière évolution de l'autorité principale* (summary non écrit, vue jamais branchée, scope de recompute oublié, miroir front incomplet).
+
+### Décisions (16 correctifs, 4 lots)
+- **R1 — chiffres faux.** `tauxEncaissement` persisté dans `overview_*` (le KPI affichait « — » global vs chiffré filtré) ; export CODIR lit `atterrissageObjectifs_` (gate « objectifs ») + purge `FieldValue.delete()` des champs figés par merge:true (y compris map `next`) + ajoute Encaissé ; **dédup live extraite en source unique `domain/liveOpps`** (intra-live salesData+odoo + masquage saisie) partagée recompute ⇄ correctionQueue ; **éviction BC ClickUp doublée d'une clé de comparaison canonique `bcCompareKey`** (lib/ids — tirets/points assimilés aux espaces puis bcKey réduit aux alphanumériques : « BC-001 » ≡ « BC 001 », « BC-2026-001 » ≡ « BC/2026/1 »).
+- **R2 — chiffres périmés/invisibles.** Écritures bcLines → scope `partenariats` (par_ca dérive des bcLines, ADR-P02) ; `OPP_RECOMPUTE_WON` → scope `recognition` ; liste `overdue` (affaires en retard de livraison) persistée dans `clickupDelays` (bornée 100) + affichée à la cible du drill-through ; carte **Créances & DSO** branchée sur `summaries/receivables` (calculé mais jamais affiché) ; bandeau « filtre non appliqué » sur la vue Facturation.
+- **R3 — honnêteté & parité.** Miroir front de la marge Facturé = `marginRate` EXACT (CAS=0 → marginPct normalisé, sans plafond) + 4 cas de parité au filet (encaissé, stale/aged, millésime aberrant, repli CAS=0) ; Marge de livraison : ⚠ CJM manquants + colonne Astreintes (décomposition bouclée) + erreur ≠ refus ; **drapeau `soaFromInvoices` propagé aux décaissements cash** (payable = factures fournisseur réelles, BC « facturé » supersedé — une seule vérité du dû) + `needCredit` étendu à cashflow/facturation (piège P0-D).
+- **R4 — finitions.** Toast [object Object] ; gardes loading (PnlProjet, BC, Objectifs) ; Relances en frDate ; état SOA `indetermine` = « À fiabiliser » gold ; troncatures signalées (overview filtré, PnlProjet, factures fournisseur) ; tokens `--hair`/`border-hair` DÉFINIS (fantômes utilisés par 10 modules) ; couleurs en dur → tokens ; libellé jalons corrigé.
+
+### Conséquences
+- Additif strict : aucun champ existant réécrit hors purge volontaire des champs isolés de l'atterrissage public (résidu RBAC).
+- Le repli marge Facturé filtré peut désormais CHANGER un chiffre affiché (il colle enfin au serveur).
+- Suites : functions 1291/1291, web 297/297, no-undef/deploy-targets/indexes/bundle (120,8 Ko ≤ 122) OK.
+
+### Ce qu'on saura dans six mois
+Si un nouvel écart « même métrique, deux nombres » apparaît, chercher d'abord un consommateur secondaire orphelin d'une évolution d'autorité — c'est le patron des 16 défauts corrigés ici.
+
 ## ADR-056 — Le MB de l'opportunité alimente la marge de la commande (dernier rang, après MB TOTAL P&L et fiche)
 
 - **Date :** 2026-07-20

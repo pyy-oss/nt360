@@ -160,4 +160,50 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
     const yr = computeFilteredOverview([] as any, [] as any, dormOpps as any, "2026", mkMatch({ bu: "ICT" }), undefined, null, undefined, 2026, true);
     expect(yr.certitudes).toBe(1000);
   });
+
+  // ---- Cas de parité ajoutés (audit 40 axes) : les trous du filet qui protège l'invariant n°1. ----
+
+  it("ENCAISSÉ (miroir chaine.js) : Σ factures payées de la période + taux d'encaissement", () => {
+    const inv = [
+      { fp: "FP/2026/1", bu: "ICT", client: "ACME", amountHt: 600, date: "2026-03-01", paid: true },
+      { fp: "FP/2026/1", bu: "ICT", client: "ACME", amountHt: 400, date: "2026-04-01" }, // non payée
+    ];
+    const r = computeFilteredOverview(orders as any, inv as any, [] as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.facture).toBe(1000);
+    expect(r.encaisse).toBe(600);
+    expect(r.ratios.tauxEncaissement).toBeCloseTo(0.6, 6);
+  });
+
+  it("marge Facturé : repli marginRate sur commande CAS=0 à marginPct POURCENTAGE (miroir factureLines)", () => {
+    // Serveur (reporting.js:53-57 + 76-81) : CAS=0 → taux = marginPct normalisé (30 ⇒ 0,30), marge SANS
+    // plafond. L'ancien miroir front contribuait 0 → divergence filtrée/globale (audit axes 9/16).
+    const ord = [{ fp: "FP/2026/9", bu: "ICT", am: "X", client: "ACME", cas: 0, raf: 0, mb: 0, marginPct: 30, yearPo: 2026 }];
+    const inv = [{ fp: "FP/2026/9", bu: "ICT", client: "ACME", amountHt: 100, date: "2026-02-01" }];
+    const r = computeFilteredOverview(ord as any, inv as any, [] as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.factureMb).toBeCloseTo(30, 6); // 100 × 30 % — PAS 100 × 30 = 3000, ni 0
+    // Et un RATIO historique (0-1) passe tel quel :
+    const ord2 = [{ fp: "FP/2026/9", bu: "ICT", am: "X", client: "ACME", cas: 0, raf: 0, mb: 0, marginPct: 0.3, yearPo: 2026 }];
+    expect(computeFilteredOverview(ord2 as any, inv as any, [] as any, "2026", mkMatch({ bu: "ICT" })).factureMb).toBeCloseTo(30, 6);
+  });
+
+  it("opps fantômes (stale) et périmées par âge : exclues du pondéré (miroir aggregate.js)", () => {
+    const oppsStale = [
+      { bu: "ICT", am: "X", client: "ACME", amount: 500, stage: 3, probability: 0.95, closingDate: "2026-06-01", source: "salesData", fp: "FP/2026/1", stale: true },
+      // périmée : âge ≥ 366 j (dateCreation ancienne) ET IdC ≤ 90 %
+      { bu: "ICT", am: "X", client: "ACME", amount: 700, stage: 3, probability: 0.5, closingDate: "2026-06-01", source: "salesData", fp: "FP/2026/2", dateCreation: "2020-01-01" },
+      { bu: "ICT", am: "X", client: "ACME", amount: 300, stage: 3, probability: 0.95, closingDate: "2026-06-01" }, // active
+    ];
+    const r = computeFilteredOverview([] as any, [] as any, oppsStale as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(r.certitudes).toBe(300); // ni la fantôme ni la périmée ne comptent
+  });
+
+  it("millésime aberrant (yearPo 20226/1900) : hors cohorte d'année (plausibleYear — miroir serveur)", () => {
+    const ord = [
+      { fp: "FP/2026/1", bu: "ICT", am: "X", client: "ACME", cas: 1000, raf: 0, mb: 0, yearPo: 2026 },
+      { fp: "FP/2026/2", bu: "ICT", am: "X", client: "ACME", cas: 500, raf: 0, mb: 0, yearPo: 20226 }, // coquille
+      { fp: "FP/2026/3", bu: "ICT", am: "X", client: "ACME", cas: 800, raf: 0, mb: 0, yearPo: 1900 },  // sentinelle
+    ];
+    const y = computeFilteredOverview(ord as any, [] as any, [] as any, "2026", mkMatch({ bu: "ICT" }));
+    expect(y.commandes).toBe(1000); // seuls les millésimes plausibles entrent dans la cohorte
+  });
 });
