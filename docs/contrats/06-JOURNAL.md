@@ -2168,3 +2168,23 @@ Renouvellements ; (4) « Par BU (ARR) » du revenu récurrent en HBars (les autr
 en table, plus riches en colonnes).
 
 **Vérifs.** Web 301/301 (mntDashboard étendu : arr par échéance), tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Design « tout » (D1+D2+D3) : entêtes cockpit partagées, tendance MRR visible, enjeux Σ
+
+**Fait.** Suite du lot design, périmètre resserré après état des lieux (Partenariats a déjà son HeroBand,
+Relances est déjà chiffré) : (1) `Spark` + `ScoreRing` MUTUALISÉS dans `_viz.tsx` (hors chunk d'entrée —
+un premier passage par `_shared` faisait monter l'entrée à 121,8 Ko ; `_viz` n'est importé que par des
+modules lazy → 120,9 Ko conservés) ; le Centre de correction consomme désormais les versions partagées ;
+(2) Contrats/Pilotage : anneau « Santé du parc » (actifs sans signal de risque, seuils 90/70) devant les
+KPI + SPARKLINE MRR (30 points du snapshot quotidien) à côté du delta — la tendance se voit ;
+(3) cockpit ClickUp : la case « Couverture » devient un ANNEAU (un chiffre, un endroit — la tuile
+redondante disparaît, grille resserrée) ; (4) Avantages partenaires : « À traiter (fenêtres qui se
+ferment) » porte le compte et l'ENJEU Σ en tête (MDF non consommés à expirer · rebates attendus en
+retard) — on sait ce qu'on laisse sur la table avant de dérouler.
+
+**Appris.** `_shared` est dans le chunk d'entrée : toute primitive qu'on y ajoute se paie sur le budget
+122 Ko. Les primitives d'entêtes cockpit vivent donc dans un module séparé importé par les seuls lazy.
+
+**Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.

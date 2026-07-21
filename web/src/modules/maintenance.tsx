@@ -37,6 +37,7 @@ import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSu
 import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, FilterNote, HBars, useCommandesRows } from "./_shared";
+import { Spark, ScoreRing } from "./_viz";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
@@ -489,6 +490,14 @@ export const Maintenance: FC<Props> = () => {
     const prev = days.length > 30 ? days[days.length - 31] : days[0];
     return { deltaMrr: last.mrr - prev.mrr, fromDate: prev.date, points: days.length };
   }, [mrrSnap]);
+  // Sparkline MRR (≤ 30 derniers points du snapshot quotidien, normalisés [0,1]) : la tendance se VOIT
+  // (pente, cassures), pas seulement en delta chiffré. Même assiette que mrrTrend.
+  const mrrSpark = useMemo(() => {
+    const vals = (mrrSnap?.days || []).filter((d) => d && typeof d.mrr === "number").slice(-30).map((d) => d.mrr as number);
+    if (vals.length < 2) return [] as number[];
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return vals.map((v) => (max > min ? (v - min) / (max - min) : 0.5));
+  }, [mrrSnap]);
   // NB : pas de colonne MRR par groupe — l'ARR (entier) somme juste, mais round(ARR/12) par ligne dériverait
   // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
@@ -769,8 +778,23 @@ export const Maintenance: FC<Props> = () => {
       {tab === "pilotage" && gate && (contrats.length > 0 || tickets.length > 0) && (
         <Card title="Tableau de bord">
           {/* KPI CONTEXTUALISÉS : chaque chiffre porte sa clé de lecture (part du parc, MRR équivalent,
-              enjeu FCFA des échéances, part du parc actif à risque) — on lit ET on situe d'un regard. */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              enjeu FCFA des échéances, part du parc actif à risque) — on lit ET on situe d'un regard.
+              ANNEAU « santé du parc » (ScoreRing partagé, même vocabulaire que Qualité & correction) :
+              part des contrats actifs SANS signal de risque — l'état global en un coup d'œil. */}
+          <div className="flex flex-wrap items-center gap-4">
+            {dash.contratsActifs > 0 && (() => {
+              const sain = Math.max(0, dash.contratsActifs - atRiskCount) / dash.contratsActifs;
+              return (
+                <div className="flex items-center gap-3 shrink-0">
+                  <ScoreRing value={sain} color={sain >= 0.9 ? T.emerald : sain >= 0.7 ? T.gold : T.clay} />
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-faint">Santé du parc</div>
+                    <div className="text-[11px] text-muted">{Math.max(0, dash.contratsActifs - atRiskCount)} actif(s)<br />sans signal de risque</div>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 grow min-w-0">
             <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald"
               sub={dash.contratsTotal > 0 ? `${pct(dash.contratsActifs / dash.contratsTotal)} du parc` : undefined} />
             <Kpi label="Revenu récurrent annuel (ARR)" value={fmt(dash.arrActifs)} tone="ink" sub={`FCFA · ≈ ${fmt(Math.round(dash.arrActifs / 12))}/mois (MRR)`} />
@@ -778,6 +802,7 @@ export const Maintenance: FC<Props> = () => {
               sub={dash.ticketsOuverts > 0 ? `sur ${dash.ticketsTotal} ticket(s)` : "aucun en attente"} />
             <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"}
               sub={dash.contratsActifs > 0 ? `${pct(atRiskCount / dash.contratsActifs)} des actifs` : undefined} />
+            </div>
           </div>
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-4">
             {/* Répartitions en BARRES (HBars, primitive ERP) : les proportions se comparent d'un regard —
@@ -832,12 +857,20 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub={`revenu mensuel · ${recurring.contratsActifs} contrat(s) actif(s)`} />
             <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
           </div>
-          {mrrTrend && mrrTrend.deltaMrr !== 0 && (
-            <div className="mt-2 text-[12px]">
-              <span className="text-muted">Tendance MRR depuis {frDate(mrrTrend.fromDate)} : </span>
-              <span className={cx("font-medium", mrrTrend.deltaMrr > 0 ? "text-emerald" : "text-clay")}>
-                {mrrTrend.deltaMrr > 0 ? "+" : "−"}{fmt(Math.abs(mrrTrend.deltaMrr))}/mois
-              </span>
+          {/* Tendance MRR : la COURBE (sparkline partagée) en plus du delta chiffré — pente et cassures visibles. */}
+          {(mrrSpark.length >= 2 || (mrrTrend && mrrTrend.deltaMrr !== 0)) && (
+            <div className="mt-2 flex items-center gap-3 flex-wrap text-[12px]">
+              {mrrSpark.length >= 2 && <Spark points={mrrSpark} />}
+              {mrrTrend && (
+                <span>
+                  <span className="text-muted">Tendance MRR depuis {frDate(mrrTrend.fromDate)} : </span>
+                  {mrrTrend.deltaMrr === 0 ? <span className="text-faint font-medium">stable</span> : (
+                    <span className={cx("font-medium", mrrTrend.deltaMrr > 0 ? "text-emerald" : "text-clay")}>
+                      {mrrTrend.deltaMrr > 0 ? "+" : "−"}{fmt(Math.abs(mrrTrend.deltaMrr))}/mois
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
           )}
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
