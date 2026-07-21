@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-058 — Remédiation audit 34 axes partenariats (PAR-P1→P4 : chiffres justes, fraîcheur, câblage, valeur channel)
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« tout » après audit channel manager / responsable partenariats, verdict 7,4/10)
+
+### Contexte
+Audit 4 auditeurs × 34 axes du module partenariats (par_). 9 HAUTE consolidés, trois familles : chiffres du CA constructeur inexacts (achats planifiés `source:"fiche"` comptés, alias fournisseurs ignorés, `fiscalStartMonth` saisi mais inappliqué), fraîcheur (recompute DIFFÉRÉ inerte en prod → summaries figés jusqu'au recompute nocturne, statut certif persisté jamais réécrit, suppressions sans garde ni cascade), câblage (`suggestParPartnerMap` défini mais absent du return de la fabrique → export `undefined` invisible de check-deploy-targets, timeouts client 70 s sur des callables serveur 300 s).
+
+### Décisions (4 lots)
+- **P1 — chiffres justes.** `revenueByPartner` exclut `source:"fiche"` (parité SOA/cash/relances — fin du double-compte achat planifié + BC réel) ; résolveur d'alias fournisseurs injecté (`resolveSupplier`, MÊME autorité que le SOA, ADR-046 ; rétro-compat clé brute) ; **exercice FISCAL constructeur enfin appliqué** : `exerciseStartIso` + décision d'appartenance PAR ALLOCATION (fenêtre datée via `dateIn`, approximation millésime sinon ; civil inchangé sans `fiscalStartMonth` et pour les non-mappés) ; `unmappedCount` (vrai compte) + `declaredRawXof` exposés.
+- **P2 — fraîcheur & cycle de vie.** Les 8 mutations par_ passent au recompute SYNCHRONE best-effort (`refreshParBestEffort` — la mutation écrite ne devient jamais une erreur de recompute) ; `setParFeature(on)` → recompute scopé (module utilisable dès l'allumage) ; `deleteParPartner` : garde d'intégrité serveur (refus si certifs/assignations rattachées — le front l'annonçait sans que le serveur le tienne) + purge du mapping (`purgePartnerFromMap`, pur) ; staffing : renommage consultant → resynchronisation des dénormalisations par_, suppression → cascade (gatée drapeau) ; statut certif PERSISTÉ réécrit au recompute quand le dérivé diffère.
+- **P3 — câblage & robustesse.** `suggestParPartnerMap` au return + **test de câblage fabrique→exports** (la garde regex ne voit pas un export `undefined`) ; timeouts client 300 s alignés serveur (IA, imports, recompute) ; gardes loading/error + TruncationNote sur les 3 collections ; hero « — » quand résumé non chargé ; tri des tables ; seuils `ratioColor` unifiés ; types au lieu d'any.
+- **P4 — valeur channel.** `partnerRenewalWatch` (renewalDate du programme, J-90/60/30, pas de J-7) → par_alerts + 2 bulletins parNews ; badge « ≠ calculé » (statut déclaré vs niveau `tierProgress`) ; carte comparatif inter-constructeurs (jointure front, zéro re-dérivation) ; colonnes dont BC / dont déclaré / écart par constructeur.
+
+### Conséquences
+- Additif strict ; comportement byte-identique quand `fiscalStartByPartner` est vide (tests historiques verts).
+- Les mutations par_ coûtent désormais un recompute synchrone (~s) — assumé : la fraîcheur du cockpit prime, l'import massif gardait déjà ce patron.
+- Reportés en sessions dédiées (efforts L) : avantages programme (MDF/rebates/deal registration), pipeline sourcé partenaire, import certifs par fichier.
+
+### Ce qu'on saura dans six mois
+Si un callable « existe dans le code mais pas en prod », vérifier le RETURN de la fabrique avant le déploiement : la garde par nom ne détecte pas un export `undefined` — c'est le test de câblage qui le tient désormais.
+
 ## ADR-057 — Remédiation audit 40 axes facturation/revenu/exécution (R1→R4, cible « même métrique = même nombre » partout)
 
 - **Date :** 2026-07-21
