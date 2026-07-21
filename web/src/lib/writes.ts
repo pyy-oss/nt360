@@ -401,7 +401,7 @@ export async function setDcAlias(from: string, to: string) {
  *  EN MASSE pour l'historique antérieur au webhook Odoo (le DC est généré depuis le FP côté Odoo).
  *  `apply: false` = aperçu (dry-run) ; en cas de conflit, le rapprochement DÉJÀ posé prime (signalé). */
 export type DcMapImportResult = {
-  ok: boolean; dryRun?: boolean; added?: number; aliasCount?: number; backfilled?: number;
+  ok: boolean; dryRun?: boolean; added?: number; aliasCount?: number; backfilled?: number; backfillTruncated?: boolean;
   toAdd: number; unchanged: number; conflicts: number; skipped: number; truncated: boolean;
   conflictsDetail: { dc: string; existing: string; incoming: string }[];
   skippedDetail: { reason: string; detail: string }[];

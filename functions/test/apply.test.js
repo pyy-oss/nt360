@@ -160,32 +160,67 @@ describe("applyWrites — chemin DELTA/partiel : ne mass-stalise JAMAIS les oppo
 });
 
 describe("resolveBcDc / backfillBcFpFromDc — rattachement DC → N° FP persistant (ADR-067)", () => {
-  // fakeDb minimal avec doc().get() : l'overlay config/dcAliases seul suffit à resolveBcDc.
-  const aliasDb = (seed) => ({
-    doc: (path) => ({ async get() { return { data: () => seed[path] }; } }),
-  });
+  // fakeDb : overlay config/dcAliases + docs bcLines (relus par resolveBcDc APRÈS applyWrites),
+  // batch.set(merge) fusionné au commit.
+  const dcDb = (aliasMap, docs) => {
+    const store = new Map(Object.entries(docs || {})); // path complet → data
+    return {
+      store,
+      doc: (path) => ({
+        path,
+        async get() {
+          if (path === "config/dcAliases") return { data: () => ({ map: aliasMap }) };
+          return { data: () => store.get(path) };
+        },
+      }),
+      batch: () => {
+        const ops = [];
+        return {
+          set(ref, data) { ops.push([ref.path, data]); },
+          async commit() { for (const [p, data] of ops) store.set(p, { ...(store.get(p) || {}), ...data }); },
+        };
+      },
+    };
+  };
 
-  it("resolveBcDc : une écriture bcLines SANS fp à DC connu arrive rattachée (fp canonisé) ; un fp existant PRIME", async () => {
-    const db = aliasDb({ "config/dcAliases": { map: { DC1: "FP/2026/0007" } } });
+  it("resolveBcDc : pose le fp résolu sur les DOCS, JAMAIS dans les écritures (garde anti-orphelins, gardien B1)", async () => {
     const writes = [
-      { path: "bcLines/a", data: { dc: "DC1" } },                  // sans fp → résolu (fpKey canonise)
-      { path: "bcLines/b", data: { dc: "DC1", fp: "FP/2026/9" } }, // fp existant → intouché (primauté)
+      { path: "bcLines/a", data: { dc: "DC1" } },                  // sans fp, DC connu → doc rattaché (fpKey canonise)
+      { path: "bcLines/b", data: { dc: "DC1", fp: "FP/2026/9" } }, // fp déjà dans l'écriture → hors cible
       { path: "bcLines/c", data: { dc: "DCX" } },                  // DC inconnu de l'overlay → intouché
       { path: "orders/o1", data: { dc: "DC1" } },                  // hors bcLines → hors périmètre
     ];
+    const db = dcDb({ DC1: "FP/2026/0007" }, { "bcLines/a": { dc: "DC1" }, "bcLines/c": { dc: "DCX" } });
     expect(await resolveBcDc(db, writes)).toBe(1);
-    expect(writes[0].data.fp).toBe("FP/2026/7");
-    expect(writes[1].data.fp).toBe("FP/2026/9");
-    expect(writes[2].data.fp).toBeUndefined();
-    expect(writes[3].data.fp).toBeUndefined();
+    expect(writes[0].data.fp).toBeUndefined(); // l'écriture reste VIERGE — sinon elle entrerait dans keepBySrcFp
+    expect(db.store.get("bcLines/a").fp).toBe("FP/2026/7");
+    expect(db.store.get("bcLines/c").fp).toBeUndefined();
+  });
+
+  it("resolveBcDc : ne touche pas un doc dont le fp a été posé entre-temps (relecture avant écriture)", async () => {
+    const db = dcDb({ DC1: "FP/2026/7" }, { "bcLines/a": { dc: "DC1", fp: "FP/2026/55" } });
+    expect(await resolveBcDc(db, [{ path: "bcLines/a", data: { dc: "DC1" } }])).toBe(0);
+    expect(db.store.get("bcLines/a").fp).toBe("FP/2026/55");
   });
 
   it("resolveBcDc : overlay vide ou illisible → aucun effet (best-effort, jamais bloquant)", async () => {
     const writes = [{ path: "bcLines/a", data: { dc: "DC1" } }];
-    expect(await resolveBcDc(aliasDb({ "config/dcAliases": { map: {} } }), writes)).toBe(0);
+    expect(await resolveBcDc(dcDb({}, {}), writes)).toBe(0);
     const broken = { doc: () => ({ async get() { throw new Error("indisponible"); } }) };
     expect(await resolveBcDc(broken, writes)).toBe(0);
     expect(writes[0].data.fp).toBeUndefined();
+  });
+
+  it("B1 (non-régression sweep) : un delta d'UNE ligne logistics SANS fp ne balaie pas les BC de l'affaire", async () => {
+    // Le parseur n'écrit plus `fp: null` (champ absent) et la résolution DC est POST-apply : la ligne
+    // ne « représente » aucune affaire pour la garde anti-orphelins — les autres BC restent intacts.
+    const db = fakeDb({
+      "bcLines/bc_x": { fp: "FP/2026/5", source: "logistics", amount: 100 },
+      "bcLines/bc_y": { fp: "FP/2026/5", source: "logistics", amount: 200 },
+    });
+    await applyWrites(db, [w("bc_new", { dc: "DC00123", source: "logistics", amount: 50 })]);
+    expect(db.store.has("bcLines/bc_x")).toBe(true);
+    expect(db.store.has("bcLines/bc_y")).toBe(true);
   });
 
   // fakeDb pour le backfill : store id → data, select/limit projetés, batch.update fusionné au commit.
@@ -216,7 +251,7 @@ describe("resolveBcDc / backfillBcFpFromDc — rattachement DC → N° FP persis
       c: { dc: "DCX" },                   // DC hors overlay → intouché
       d: { fp: "", dc: "DC2" },           // fp vide = absent → backfillé
     });
-    expect(await backfillBcFpFromDc(db, map)).toBe(2);
+    expect(await backfillBcFpFromDc(db, map)).toEqual({ backfilled: 2, truncated: false });
     expect(db.store.get("a").fp).toBe("FP/2026/12");
     expect(db.store.get("b").fp).toBe("FP/2026/99");
     expect(db.store.get("c").fp).toBeUndefined();
@@ -224,7 +259,7 @@ describe("resolveBcDc / backfillBcFpFromDc — rattachement DC → N° FP persis
   });
 
   it("backfillBcFpFromDc : overlay vide → aucun scan, 0", async () => {
-    expect(await backfillBcFpFromDc(null, {})).toBe(0);
-    expect(await backfillBcFpFromDc(null, undefined)).toBe(0);
+    expect(await backfillBcFpFromDc(null, {})).toEqual({ backfilled: 0, truncated: false });
+    expect(await backfillBcFpFromDc(null, undefined)).toEqual({ backfilled: 0, truncated: false });
   });
 });

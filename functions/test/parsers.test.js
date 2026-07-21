@@ -334,6 +334,9 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     ])).rows;
     expect(out.find((r) => r.bcNumber === "BC/2026/1").dc).toBe("DC00123");
     expect("dc" in out.find((r) => r.bcNumber === "BC/2026/2")).toBe(false);
+    // Colonne FP absente → fp NON écrit (ni null) : le merge au ré-import PRÉSERVE un fp posé par
+    // backfill DC / correction, et la ligne n'entre pas dans la garde anti-orphelins (gardien B1/B3).
+    expect("fp" in out.find((r) => r.bcNumber === "BC/2026/1")).toBe(false);
   });
   it("deux lignes d'un même BC de MONTANTS différents ne se confondent plus (index d'occurrence)", () => {
     const rows2 = [

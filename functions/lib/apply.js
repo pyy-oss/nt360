@@ -60,11 +60,13 @@ async function resolveLogisticsFx(db, writes) {
   return converted;
 }
 
-// RATTACHEMENT DC → N° FP À L'IMPORT (audit BC/DC × rentabilité) : les écritures bcLines SANS FP mais
-// portant un DC connu de l'overlay config/dcAliases arrivent DÉJÀ rattachées — même règle que le webhook
-// Odoo à l'ingestion (resolveBcFp : un fp existant prime toujours). Sans cela, le doc resterait sans fp
-// et les vues front (FP 360°, Exécution BC), qui lisent le champ brut, ne le verraient pas sous son
-// affaire avant un backfill. Best-effort (jamais bloquant) ; sans overlay, aucun effet.
+// RATTACHEMENT DC → N° FP À L'IMPORT (audit BC/DC × rentabilité) : les lignes BC SANS FP mais portant
+// un DC connu de l'overlay config/dcAliases sont rattachées à leur affaire — même règle que le webhook
+// Odoo (resolveBcFp : un fp existant prime toujours). S'appelle APRÈS applyWrites et pose le fp sur les
+// DOCS, JAMAIS dans les écritures : injecté avant, le fp résolu entrait dans la garde anti-orphelins
+// (keepBySrcFp) et un fichier delta d'UNE ligne à DC connu balayait les autres BC logistics de la même
+// affaire (audit gardien B1). Les docs sont RELUS avant écriture (jamais d'écrasement d'un fp posé par
+// backfill ou correction manuelle). Best-effort (jamais bloquant) ; sans overlay, aucun effet.
 async function resolveBcDc(db, writes) {
   const targets = (writes || []).filter((w) =>
     typeof w.path === "string" && w.path.startsWith("bcLines/") && w.data && !w.data.fp && w.data.dc);
@@ -74,12 +76,26 @@ async function resolveBcDc(db, writes) {
   catch (_) { return 0; }
   if (!Object.keys(map).length) return 0;
   const { resolveBcFp } = require("../domain/odooSync");
-  let resolved = 0;
+  const resolved = [];
   for (const w of targets) {
     const fp = resolveBcFp(w.data, map);
-    if (fp) { w.data.fp = fp; resolved++; }
+    if (fp) resolved.push({ path: w.path, fp });
   }
-  return resolved;
+  if (!resolved.length) return 0;
+  try {
+    // Relecture des docs (tout juste écrits par applyWrites) : ne toucher QUE ceux encore sans fp.
+    const snaps = await Promise.all(resolved.map((r) => db.doc(r.path).get().catch(() => null)));
+    const updates = resolved.filter((r, i) => {
+      const v = snaps[i] && (typeof snaps[i].data === "function" ? snaps[i].data() : null) || {};
+      return v.fp == null || v.fp === "";
+    });
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = db.batch();
+      updates.slice(i, i + 400).forEach((r) => batch.set(db.doc(r.path), { fp: r.fp }, { merge: true }));
+      await batch.commit();
+    }
+    return updates.length;
+  } catch (_) { return 0; } // best-effort : les données sont déjà écrites, le recompute rattache en mémoire
 }
 
 // BACKFILL PERSISTANT DC → N° FP sur les DOCS bcLines existants (audit BC/DC × rentabilité). La
@@ -88,11 +104,14 @@ async function resolveBcDc(db, writes) {
 // rapprochement manuel) restait invisible sous son affaire en FP 360° / Exécution BC — « Qualité dit
 // rattaché, l'écran ne le liste pas ». On matérialise donc fp sur les docs SANS fp dont le DC résout,
 // JAMAIS d'écrasement d'un fp existant (même primauté que resolveBcFp). Scan borné, batchs de 400.
+// `truncated` remonté quand le scan atteint la borne (troncature JAMAIS silencieuse, cf. R1) :
+// au-delà, des docs peuvent rester sans fp — relancer le backfill (ré-appliquer le seed) les rattrape.
 const MAX_BACKFILL_SCAN = 20000;
 async function backfillBcFpFromDc(db, dcAliasMap) {
-  if (!dcAliasMap || !Object.keys(dcAliasMap).length) return 0;
+  if (!dcAliasMap || !Object.keys(dcAliasMap).length) return { backfilled: 0, truncated: false };
   const { resolveBcFp } = require("../domain/odooSync");
   const snap = await db.collection("bcLines").select("fp", "dc").limit(MAX_BACKFILL_SCAN).get();
+  const truncated = snap.docs.length >= MAX_BACKFILL_SCAN;
   const targets = [];
   for (const d of snap.docs) {
     const v = d.data() || {};
@@ -106,7 +125,7 @@ async function backfillBcFpFromDc(db, dcAliasMap) {
     targets.slice(i, i + 400).forEach((t) => batch.update(t.ref, { fp: t.fp }));
     await batch.commit();
   }
-  return targets.length;
+  return { backfilled: targets.length, truncated };
 }
 
 const SWEEP_SOURCES = new Set(["fiche", "logistics"]);

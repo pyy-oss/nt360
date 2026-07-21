@@ -2252,3 +2252,29 @@ brut verront-elles la même chose ? Sinon, backfill persistant.
 
 **Vérifs.** Functions 1353/1353 (alertsBcEngage 2, bcCostByFp 3, logistics DC 1), web 301/301, tsc/eslint 0,
 no-undef (165), deploy-targets (200/200), bundle 121,1 ≤ 122 Ko. Miroir front `engage` = assiette exacte de bcCostByFp.
+
+---
+
+## 2026-07-21 — Audit adverse post-fusion ADR-067 : 3 écarts conformiste + 3 bloquants gardien, tous levés
+
+**Fait.** Conformiste (NON CONFORME → corrigé) : backfill setDcAlias en batchs de 400 (un batch unique
+plafonnait à 500 écritures Firestore), resolveBcDc/backfillBcFpFromDc testés dans apply.test.js (mock
+maison, modèle resolveLogisticsFx), vérifs du journal chiffrées. Gardien (ROUGE → corrigé) :
+(B1) le fp résolu par DC entrait dans la garde anti-orphelins d'applyWrites — un fichier delta d'UNE
+ligne logistics à DC connu balayait les autres BC de l'affaire → resolveBcDc devient POST-applyWrites
+et pose le fp sur les DOCS, jamais dans les écritures (test de non-régression du sweep) ;
+(B2) le Kpi « Engagé » front comptait les doublons d'amorçage ClickUp que le recompute évince →
+éviction miroir par bcCompareKey (miroir ajouté à web/src/lib/ids.ts, testé) + Number() sur les
+montants ; (B3) le parseur Logistics écrivait fp: null → écrasait au ré-import un fp backfillé/corrigé
+→ champ fp ABSENT quand la colonne est vide (comme dc/amountXof), et resolveBcDc branché sur la
+ré-ingestion (reingest). Douteux levés : borne du backfill signalée (backfillTruncated, toast + audit).
+
+**Assumé (à l'arbitrage de la direction si contesté).** Les BC « Annulé » comptent dans l'engagé : le
+parseur les mappe déjà en a_emettre et le SOA les compte déjà en engagement — même règle partout (la
+règle de l'ERP prime) ; les extraire créerait une deuxième vérité. Idem la limite fpAliases du FP 360°
+(requête sur le fp brut) : pré-existante et commune aux Factures/Opportunités du même écran, documentée
+dans le code.
+
+**Appris.** Toute donnée dérivée injectée dans les ÉCRITURES avant applyWrites entre dans la garde
+anti-orphelins — les enrichissements de rattachement se posent sur les docs APRÈS l'apply. Et un
+parseur ne doit jamais écrire null là où « absent » préserve une correction au merge.
