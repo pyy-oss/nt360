@@ -229,7 +229,9 @@ const OPP_RECOMPUTE = ["pipeline", "ams", "atterrissage", "overview", "news", "a
 // (carnet Commandes, backlog, rentabilité, clients, domaines, fournisseurs, cash indicatif) — sinon le
 // carnet resterait périmé et CONTREDIRAIT l'en-tête (overview/atterrissage/AM, eux recalculés sur les
 // nouveaux orders) jusqu'au recompute nocturne. On ne paie ce surcoût QUE quand une opp gagnée est en jeu.
-const OPP_RECOMPUTE_WON = [...OPP_RECOMPUTE, "commandes", "backlog", "rentabilite", "clients", "domaines", "suppliers", "cashflow"];
+// + "recognition" : une opp GAGNÉE réconcilie le CAS des orders → les taux FAE/PCA de summaries/recognition
+// en dérivent (gate want("recognition")) ; sans ce scope ils restaient périmés jusqu'au recompute nocturne.
+const OPP_RECOMPUTE_WON = [...OPP_RECOMPUTE, "commandes", "backlog", "rentabilite", "clients", "domaines", "suppliers", "cashflow", "recognition"];
 
 // Portée d'une mutation d'opp : élargie DÈS QUE l'étape « Gagné » (6) est impliquée AVANT ou APRÈS la
 // mutation (passage à gagné, sortie de gagné, ou édition/suppression d'une opp déjà gagnée) — tous les
@@ -3228,7 +3230,9 @@ exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : un BC ajouté alimente immédiatement les décaissements
   // prévisionnels (domain/cashflow) ; sans lui la prévision cash restait périmée jusqu'au recompute complet.
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  // + "partenariats" : summaries/par_ca (CA constructeur, ADR-P02) DÉRIVE des bcLines — sans ce scope le
+  // CA partenaire restait périmé jusqu'au recompute nocturne (audit 40 axes, axe 29).
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true, id, pdfStored: !!pdfKey };
 });
 
@@ -4110,7 +4114,7 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   // « alerts » AJOUTÉ (cf. audit P1-6) : importBcFromClickup CRÉE de vraies bcLines (statut/ETA) → les
   // alertes BC (bc_en_attente / bc_en_retard) et les relances BC (bloc co-déclenché par alerts) doivent
   // se rafraîchir immédiatement, sinon elles restaient périmées jusqu'au prochain recompute couvrant.
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts"]); }
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts", "partenariats"]); }
   catch (e) { logger.warn("import BC: recompute partiel échoué", { msg: e && e.message }); }
   const res = { created, skippedKnown, skippedIncomplete, scanned: tasks.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_import", module: "bc", entity: "bcLines", entityId: "import", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
@@ -4157,7 +4161,7 @@ async function runBcPull() {
   if (truncated || listErrors) logger.warn("BC pull: couverture partielle", { truncated, listErrors, pulled, total: keys.length });
   await db.doc("config/clickupBcSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // « dataQuality » (clé canonique, l'ancienne « qualite » était inerte) + « news » (bulletin BC en retard).
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
   catch (e) { logger.warn("BC pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length };
 }
@@ -4240,7 +4244,7 @@ async function applyClickupTaskEvent(token, taskId, event) {
       const task = await clickup.getTask(token, taskId);
       await db.doc("config/clickupBcSync").set({ map: { [plan.key]: { ...bc.readBcSync(task), taskId } } }, { merge: true });
     }
-    try { await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news"]); }
+    try { await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
     catch (e) { logger.warn("webhook: recompute BC échoué", { msg: e && e.message }); }
     return plan;
   }
@@ -4627,7 +4631,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
   });
   // 'cashflow' inclus (cf. audit cycle de vie) : passer un BC en « facturé » en fait un décaissement
   // (SOA) → la prévision cash doit se rafraîchir tout de suite, pas au prochain recompute complet.
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true };
 });
 
@@ -4670,7 +4674,7 @@ exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 1
     uid: req.auth.uid, action: "bc_patch", module: "bc", entity: "bcLine", entityId: id,
     detail: { fp: patch.fp ?? null, amountXof: patch.amountXof ?? null, supplier: patch.supplier ?? null }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(["suppliers", "alerts", "cashflow"]);
+  await requestRecompute(["suppliers", "alerts", "cashflow", "partenariats"]);
   return { ok: true };
 });
 

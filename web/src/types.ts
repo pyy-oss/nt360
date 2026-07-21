@@ -140,7 +140,9 @@ export interface PmsSummary { count?: number; rows?: PmRow[] }
 export type ClickupPmDelay = { pm: string; active: number; overdue: number; avgDaysLate: number };
 export type ClickupStatusDist = { status: string; count: number; overdue: number };
 export type ClickupMonthRaf = { month: string; raf: number; count: number };
-export interface ClickupDelaysSummary { overdueTotal?: number; avgDaysLate?: number; byPm?: ClickupPmDelay[]; byStatus?: ClickupStatusDist[]; rafByMonth?: ClickupMonthRaf[] }
+// `overdue` = LISTE des affaires en retard (bornée 100, triée par date) — cible du drill-through de
+// l'alerte « retard de livraison » (avant : agrégats seuls, « N affaires » sans pouvoir les lister).
+export interface ClickupDelaysSummary { overdueTotal?: number; avgDaysLate?: number; byPm?: ClickupPmDelay[]; byStatus?: ClickupStatusDist[]; rafByMonth?: ClickupMonthRaf[]; overdue?: { fp?: string; client?: string; status?: string; dateContractuelle?: string; raf?: number }[] }
 // Suivi BC ⇄ ClickUp (summaries/clickupBc) : couverture + retards d'avancement achat.
 export interface ClickupBcSummary {
   totalBc?: number; linkedCount?: number; overdueCount?: number;

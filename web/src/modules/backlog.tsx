@@ -9,6 +9,7 @@ import { DateField, Select } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Props, grid4, cols2, objToArr, toDonut, buBadge, ImportButton, FilterNote, AtterrissageGauge, useCommandesRows, useProjectManagers, useBusinessUnits, useAmOptions, useClientOptions, FpLink } from "./_shared";
 import { DERIVE_SUSPECT_PCT, FIAB } from "../lib/thresholds";
+import { frDate } from "../lib/format";
 import { useFilters } from "../lib/filters";
 import { fpKey, plausibleYear } from "../lib/ids";
 import { useNav } from "../lib/nav";
@@ -100,6 +101,7 @@ export const Backlog: FC<Props> = () => {
 function ClickupDelaysCard() {
   const { data } = useDocData<ClickupDelaysSummary>("summaries/clickupDelays");
   const byPm = data?.byPm || [], byStatus = data?.byStatus || [], rafByMonth = data?.rafByMonth || [];
+  const overdueRows = data?.overdue || [];
   if (!data || (!byPm.length && !byStatus.length && !rafByMonth.length)) return null;
   return (
     <Card title="Délais & échéances ClickUp">
@@ -107,6 +109,21 @@ function ClickupDelaysCard() {
         <Kpi label="Projets en retard de livraison" value={String(data.overdueTotal || 0)} tone={(data.overdueTotal || 0) > 0 ? "clay" : "emerald"} sub="date contractuelle dépassée, non livrés" />
         <Kpi label="Retard moyen" value={`${data.avgDaysLate || 0} j`} tone="steel" sub="sur les projets en retard" />
       </div>
+      {/* LISTE des affaires en retard — cible du drill-through de l'alerte « retard de livraison » : avant,
+          seuls les agrégats par PM/statut existaient (« N affaires » impossibles à lister, audit axe 24). */}
+      {overdueRows.length > 0 && (
+        <div className="mt-3">
+          <Eyebrow>Affaires en retard de livraison</Eyebrow>
+          <Table columns={[
+            colText("FP", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => <FpLink fp={r.fp} />, (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.fp || ""),
+            colText("Client", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.client || "—"),
+            colText("Statut CU", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.status || "—"),
+            colText("Livraison contractuelle", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => frDate(r.dateContractuelle) || "—", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => r.dateContractuelle || ""),
+            colNum("RAF", (r: NonNullable<ClickupDelaysSummary["overdue"]>[number]) => money(r.raf)),
+          ]} rows={overdueRows} />
+          {(data.overdueTotal || 0) > overdueRows.length && <div className="text-[11px] text-faint mt-1">Liste bornée aux {overdueRows.length} premières affaires (sur {data.overdueTotal}) — triées par date contractuelle.</div>}
+        </div>
+      )}
       <div className={cols2}>
         {byPm.length > 0 && (
           <div>

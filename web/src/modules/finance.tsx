@@ -4,7 +4,7 @@ import { useDocData, useCollectionData, DEFAULT_SUB_CAP } from "../lib/hooks";
 import { useCan, useCanImport } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Eyebrow, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
 import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
@@ -16,7 +16,7 @@ import { useClientKey } from "../lib/clientName";
 import { frDate } from "../lib/format";
 import { marginWaterfall } from "../lib/waterfall";
 import { MARGIN } from "../lib/thresholds";
-import type { FacturationSummary, RentabiliteSummary, Objective, Invoice, CancellationsDoc } from "../types";
+import type { FacturationSummary, RentabiliteSummary, ReceivablesSummary, Objective, Invoice, CancellationsDoc } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -124,20 +124,63 @@ export const Objectifs: FC<Props> = () => {
 };
 
 
+// Créances & DSO (summaries/receivables — gaté « facturation » par les règles) : ce doc était calculé
+// à chaque recompute mais AFFICHÉ NULLE PART (audit 40 axes, axe 3) — le pilotage du recouvrement
+// reposait sur la seule liste Relances. Balance âgée + DSO + top créances, avoirs nettés par client.
+function ReceivablesCard() {
+  const { data } = useDocData<ReceivablesSummary>("summaries/receivables");
+  if (!data || !((data.totalAR || 0) > 0 || (data.openCount || 0) > 0)) return null;
+  const b = data.buckets || {};
+  const buckets = [
+    { label: "Non échu", v: b.notDue || 0 }, { label: "0-30 j", v: b.b0_30 || 0 },
+    { label: "31-60 j", v: b.b31_60 || 0 }, { label: "61-90 j", v: b.b61_90 || 0 },
+    { label: "> 90 j", v: b.b90p || 0 },
+  ];
+  return (
+    <Card title="Créances & DSO">
+      <div className={grid4}>
+        <Kpi label="Encours client (AR)" value={fmt(data.totalAR)} tone="steel" sub={`${data.openCount || 0} factures ouvertes (net d'avoirs)`} />
+        <Kpi label="Échu" value={fmt(data.overdue)} tone={(data.overdue || 0) > 0 ? "clay" : "emerald"} sub={`${data.overdueCount || 0} factures en retard`} />
+        <Kpi label="DSO" value={`${data.dso ?? "—"} j`} tone="gold" sub="délai moyen de règlement (borné)" />
+      </div>
+      <div className="mt-3">
+        <Eyebrow>Balance âgée</Eyebrow>
+        <Table columns={[
+          colText("Tranche", (r: { label: string; v: number }) => r.label),
+          colNum("Montant", (r: { label: string; v: number }) => money(r.v), (r: { label: string; v: number }) => r.v),
+        ]} rows={buckets} />
+      </div>
+      {(data.topAR || []).length > 0 && (
+        <div className="mt-3">
+          <Eyebrow>Top créances par client</Eyebrow>
+          <HBars rows={topArr(data.topAR).slice(0, 10)} colorFn={() => T.clay} />
+        </div>
+      )}
+      <Tip>Encours = factures non payées (avoirs nettés par client). Le plan d'action détaillé (créances échues par responsable) est dans <b>Relances</b>.</Tip>
+    </Card>
+  );
+}
+
 // 4 — Facturation
 export const Facturation: FC<Props> = ({ period }) => {
   const { data, loading, error } = useDocData<FacturationSummary>(`summaries/facturation_${period}`);
+  const { active } = useFilters();
   if (error) return <ErrorState error={error} />;
   if (loading && !data) return <CardSkeleton />;
   if (!data) return <EmptyState />;
   return (
     <div className="flex flex-col gap-4">
+      {/* Même honnêteté que Rentabilité : cette vue lit un agrégat pré-calculé GLOBAL — sans ce bandeau,
+          un utilisateur filtré lisait un « Facturé » global sous filtre actif, divergent du CAF filtré
+          de la Vue d'ensemble voisine, sans explication (audit 40 axes, axe 6). */}
+      {active && <div className="text-[11px] text-gold">Vue globale — le filtre transverse (BU / AM / client) ne s'applique pas ici (agrégat pré-calculé). Le CAF filtré est lisible dans la Vue d'ensemble.</div>}
       <div className={grid4}><Kpi label="Facturé (période)" value={fmt(data.total)} tone="emerald" sub={`${data.count} factures`} /></div>
       <Card title="Tendance mensuelle"><AreaTrend data={monthsAsc(data.monthly)} color={T.emerald} name="Facturé" /></Card>
       <div className={cols2}>
         <Card title="Mix BU"><DonutBU data={toDonut(data.byBu)} /></Card>
         <Card title="Top clients"><HBars rows={topArr(data.topClients).slice(0, 10)} colorFn={() => T.emerald} /></Card>
       </div>
+      <ReceivablesCard />
     </div>
   );
 };

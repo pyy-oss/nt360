@@ -553,7 +553,10 @@ async function recomputeCore(db, only) {
   // Analytique délais/échéances ClickUp (par PM, par statut, RAF échéancé) → summaries/clickupDelays.
   if (want("commandes") || want("overview") || want("dataQuality")) {
     const delays = clickupDelays(orders, clickupSyncMap, orderPmMap, safeId, asOf);
-    w.push({ path: "summaries/clickupDelays", data: { ...delays, ...stamp } });
+    // LISTE des affaires en retard (fp/client/statut/date/RAF, tri par date) : l'alerte « retard de
+    // livraison » renvoyait vers le cockpit Backlog qui n'avait QUE des agrégats par PM/statut — « N
+    // affaires en retard » sans pouvoir les lister (audit 40 axes, axe 24). Bornée 100 (payload).
+    w.push({ path: "summaries/clickupDelays", data: { ...delays, overdue: cuSignals.overdue.slice(0, 100), ...stamp } });
   }
   if (want("alerts") || want("dataQuality")) {
     w.push({ path: "summaries/dataQuality", data: { ...dqSummary, ...stamp } });
