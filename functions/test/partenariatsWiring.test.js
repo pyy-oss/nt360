@@ -24,7 +24,7 @@ const EXPECTED = [
   "upsertParAssignment", "setParAssignmentStatus", "deleteParAssignment",
   "pushParAssignmentToClickup",
   "generateParActionPlan", "generateParQbr", "suggestParPartnerMap",
-  "importParCertifications",
+  "importParCertifications", "importParCertificationsFile",
 ];
 
 describe("partenariats — câblage fabrique → exports", () => {

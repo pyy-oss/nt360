@@ -3,7 +3,7 @@
 // écritures callable et les formats de l'ERP (FCFA entier via money, date JJ/MM/AAAA via frDate). Le CA
 // est DÉRIVÉ des BC fournisseurs (summaries/par_ca) — aucune saisie. Aucune valeur en dur (tons/libellés
 // via lib/parLabels). Composant LAZY → callables inline (hors chunk d'entrée).
-import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import { Plus, Sparkles } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
@@ -884,6 +884,36 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
     } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
     finally { setImpBusy(false); }
   };
+  // Import par FICHIER utilisateur (.xlsx/.csv, PAR-L2) : colonnes Ingénieur / Constructeur /
+  // Certification (+ Statut, Date d'obtention, Échéance). MÊME protocole en deux temps que l'import de
+  // référence : dry-run → confirmation (créations de consultants annoncées) → écriture. Le serveur ne crée
+  // NI partenaire NI entrée de catalogue — les lignes non résolues sont écartées et rapportées.
+  const [fileBusy, setFileBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const runFileImport = async (file: File) => {
+    if (fileBusy) return; setFileBusy(true);
+    try {
+      const fileB64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => { const sv = String(r.result || ""); resolve(sv.slice(sv.indexOf(",") + 1)); };
+        r.onerror = () => reject(r.error || new Error("lecture du fichier impossible"));
+        r.readAsDataURL(file);
+      });
+      const prev = await callFn<{ wouldCreateCount?: number; wouldCreateConsultants?: string[]; certsPlanned?: number; assignsPlanned?: number; skipped?: number; skippedDetail?: { reason: string; detail: string }[] }>("importParCertificationsFile", { fileB64, filename: file.name, dryRun: true }, 300_000);
+      const ok = await askImport(
+        <div className="space-y-1 text-[13px]">
+          <div><b>{prev?.certsPlanned || 0}</b> certification(s) et <b>{prev?.assignsPlanned || 0}</b> assignation(s) seront écrites{prev?.skipped ? <> · <b>{prev.skipped}</b> ligne(s) écartée(s)</> : null}.</div>
+          {!!(prev?.wouldCreateCount) && <div>Créera <b>{prev.wouldCreateCount}</b> consultant(s) absent(s) de l'annuaire ESN, en statut <b>actif</b> (comptés dans TACE/occupation) : <span className="text-muted">{(prev.wouldCreateConsultants || []).slice(0, 12).join(", ")}{(prev.wouldCreateCount || 0) > 12 ? " …" : ""}</span></div>}
+          {!!(prev?.skippedDetail || []).length && <div className="text-faint">Écartées (ex.) : {(prev!.skippedDetail!).slice(0, 3).map((x) => `${x.reason} — ${x.detail}`).join(" ; ")}</div>}
+        </div>,
+        { title: `Importer « ${file.name} »`, confirmLabel: "Importer", tone: "gold" },
+      );
+      if (!ok) { toast("Import annulé", "info"); return; }
+      const r = await callFn<{ certsWritten?: number; assignsWritten?: number; createdConsultants?: number; skipped?: number }>("importParCertificationsFile", { fileB64, filename: file.name }, 300_000);
+      toast(`${r?.certsWritten || 0} certifs + ${r?.assignsWritten || 0} assignations · ${r?.createdConsultants || 0} consultant(s) créé(s)${r?.skipped ? ` · ${r.skipped} écartée(s)` : ""}`, "ok");
+    } catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "import refusé"}`, "err"); }
+    finally { setFileBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
   // undefined = formulaire fermé ; null = nouveau partenaire ; Partner = édition d'un existant.
   const [edit, setEdit] = useState<Partner | null | undefined>(undefined);
   // Édition demandée depuis une vue read-only (Plan d'affaires / Conformité) : ouvre le formulaire pour ce
@@ -1054,6 +1084,13 @@ const ConfigTab: FC<{ partners: Partner[]; certifs: Certif[]; assigns: Assign[];
             + assignations, et renvoie un rapport. Réservé au référentiel PEUPLÉ (les partenaires doivent exister). */}
         {canWrite && !!partners.length && (
           <button className="btn-ghost text-[12px]" disabled={impBusy} onClick={runCertImport}>{impBusy ? "Import…" : "Importer les certifications de référence"}</button>
+        )}
+        {/* Import par FICHIER utilisateur (PAR-L2) : classeur arbitraire du steward — dry-run puis confirmation. */}
+        {canWrite && !!partners.length && (
+          <>
+            <input ref={fileRef} type="file" accept=".xlsx,.csv" className="hidden" aria-label="Fichier de certifications à importer" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runFileImport(f); }} />
+            <button className="btn-ghost text-[12px]" disabled={fileBusy} onClick={() => fileRef.current?.click()} title="Classeur .xlsx/.csv — colonnes : Ingénieur, Constructeur, Certification (+ Statut, Date d'obtention, Échéance)">{fileBusy ? "Import…" : "Importer un fichier de certifs…"}</button>
+          </>
         )}
         {canWrite && <button className="btn" onClick={() => setEdit(null)}><Plus size={14} /> Nouveau partenaire</button>}
       </div>}>

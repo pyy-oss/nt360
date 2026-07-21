@@ -515,7 +515,120 @@ function createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite,
     return { ok: true, ...report, notes: plan.notes, skippedDetail: plan.skipped.slice(0, 40) };
   });
 
-  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, suggestParPartnerMap, importParCertifications };
+  // Import des certifications par FICHIER (.xlsx/.csv) déposé par le steward (PAR-L2). Contrairement à
+  // l'amorçage direction (dataset transcrit dans le code), le classeur est ARBITRAIRE : le plan
+  // (domain/parCertFile, pur) résout chaque ligne contre le référentiel par_partners et l'annuaire ESN —
+  // l'import de fichier ne crée NI partenaire NI entrée de catalogue (référentiel piloté par la direction).
+  // DEUX temps (dryRun → confirmation), mêmes règles de propriété que l'import direction : source
+  // « par_cert_import » (ré-import rafraîchit), éditions MANUELLES préservées, création de consultants
+  // nommés manquants sous droit `pipeline` (plafond 300), discipline plausibleYear sur toute date.
+  const importParCertificationsFile = onCallG("importParCertificationsFile", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+    await requireWrite(req, "partenariats");
+    await assertParEnabled();
+    if (rateLimit && !(await rateLimit(req.auth.uid, "parCertImport", 3, 300_000))) throw new HttpsError("resource-exhausted", "Import déjà lancé récemment — patientez quelques minutes.");
+    const b64 = req.data && req.data.fileB64;
+    if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+    if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)"); // même plafond qu'importDelta
+    const { readWorkbook, sheetToJson } = require("../lib/xlsxRead");
+    let aoa;
+    try { const wb = await readWorkbook(Buffer.from(b64, "base64")); aoa = sheetToJson(wb.Sheets[wb.SheetNames[0]], { header: 1 }); }
+    catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + ((e && e.message) || e)); }
+
+    const { planCertFileImport } = require("../domain/parCertFile");
+    const { validateConsultant } = require("../domain/consultant");
+    const { normName } = require("../domain/parCertSeed");
+    const { plausibleYear } = require("../lib/ids");
+    const today = new Date().toISOString().slice(0, 10);
+    const [consSnap, partSnap, certSnap, assignSnap] = await Promise.all([
+      db.collection("consultants").select("name").limit(5000).get(),
+      db.collection("par_partners").get(), // catalogue ENTIER requis (résolution code/libellé de certif)
+      db.collection("par_certifications").select("source").limit(5000).get(),
+      db.collection("par_assignments").select("source").limit(5000).get(),
+    ]);
+    const consultants = consSnap.docs.map((d) => ({ id: d.id, name: (d.data() || {}).name || "" }));
+    const partners = partSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    if (!partners.length) throw new HttpsError("failed-precondition", "aucun partenaire au référentiel — initialisez le référentiel d'abord");
+    const plan = planCertFileImport(aoa, { consultants, partners });
+    if (plan.error) throw new HttpsError("failed-precondition", plan.error);
+    if (!plan.certs.length && !plan.assigns.length) throw new HttpsError("failed-precondition", `aucune ligne exploitable — ${plan.skipped.length} écartée(s)${plan.skipped[0] ? ` (ex. ${plan.skipped[0].reason})` : ""}`);
+
+    // PRÉ-VISUALISATION (même contrat qu'importParCertifications) : QUI serait créé dans l'annuaire ESN
+    // partagé + volumes + lignes écartées — le front demande confirmation avant l'écriture réelle.
+    if (req.data && req.data.dryRun === true) {
+      return { ok: true, dryRun: true,
+        wouldCreateConsultants: plan.needConsultants.map((n) => n.name).slice(0, 300),
+        wouldCreateCount: plan.needConsultants.length,
+        certsPlanned: plan.certs.length, assignsPlanned: plan.assigns.length,
+        skipped: plan.skipped.length, skippedDetail: plan.skipped.slice(0, 40), parsedRows: plan.parsedRows };
+    }
+
+    // Propriété des docs existants : un doc édité À LA MAIN (source ≠ par_cert_import) n'est pas écrasé.
+    const certOwner = new Map(certSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const assignOwner = new Map(assignSnap.docs.map((d) => [d.id, (d.data() || {}).source || ""]));
+    const isManual = (map, id) => map.has(id) && map.get(id) !== "par_cert_import";
+
+    // Consultants nommés manquants — garde RBAC anti-escalade + plafond défensif (comme l'import direction).
+    if (plan.needConsultants.length) {
+      await requireWrite(req, "pipeline");
+      if (plan.needConsultants.length > 300) throw new HttpsError("failed-precondition", `import anormal : ${plan.needConsultants.length} consultants à créer (> 300) — refusé`);
+    }
+    const idxByNorm = new Map();
+    for (const c of consultants) { const n = normName(c.name); if (n && !idxByNorm.has(n)) idxByNorm.set(n, c.id); }
+    const createdConsultants = [];
+    for (const nc of plan.needConsultants) {
+      const v = validateConsultant({ name: nc.name });
+      if (!v.ok) { plan.skipped.push({ reason: "consultant invalide", detail: nc.name }); continue; }
+      const ref = await db.collection("consultants").add({ ...v.value, source: "par_cert_import", createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() });
+      idxByNorm.set(nc.norm, ref.id);
+      createdConsultants.push({ id: ref.id, name: nc.name });
+    }
+    const nameById = new Map([...consultants.map((c) => [c.id, c.name]), ...createdConsultants.map((c) => [c.id, c.name])]);
+    const partnerDocs = new Map(partners.map((p) => [p.id, p]));
+    const catEntry = (pid, catalogId) => ((partnerDocs.get(pid) || {}).certificationCatalog || []).find((e) => e.id === catalogId) || null;
+
+    // Certifs détenues (statut/expiration DÉRIVÉS du catalogue — jamais pris du fichier).
+    let certsWritten = 0;
+    for (const c of plan.certs) {
+      const consultantId = idxByNorm.get(c.norm), entry = catEntry(c.partnerId, c.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "certif non écrite (consultant/catalogue non résolu)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      if (!plausibleYear(String(c.obtainedDate).slice(0, 4))) { plan.skipped.push({ reason: "date d'obtention implausible", detail: `${c.name} / ${c.obtainedDate}` }); continue; }
+      const expiryDate = computeExpiry(c.obtainedDate, entry.validityMonths);
+      const status = computeCertStatus(expiryDate, today);
+      const id = `${slug(consultantId) || consultantId}_${c.catalogId}`;
+      if (isManual(certOwner, id)) { plan.skipped.push({ reason: "certif préservée (édition manuelle non écrasée)", detail: `${c.name} / ${c.catalogId}` }); continue; }
+      const isNew = !certOwner.has(id);
+      await db.doc(`par_certifications/${id}`).set({
+        consultantId, partnerId: c.partnerId, certificationCatalogId: c.catalogId, obtainedDate: c.obtainedDate, expiryDate, status, inTraining: false,
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), competencyId: entry.competencyId, certCode: entry.code || "", certName: entry.name || "", certLevel: entry.level || "",
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
+      }, { merge: true });
+      certsWritten++;
+    }
+
+    // Assignations à obtenir (date cible = échéance du fichier, plausibleYear).
+    let assignsWritten = 0;
+    for (const a of plan.assigns) {
+      const consultantId = idxByNorm.get(a.norm), entry = catEntry(a.partnerId, a.catalogId);
+      if (!consultantId || !entry) { plan.skipped.push({ reason: "assignation non écrite (consultant/catalogue non résolu)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      if (!plausibleYear(String(a.targetDate).slice(0, 4))) { plan.skipped.push({ reason: "date cible implausible", detail: `${a.name} / ${a.targetDate}` }); continue; }
+      const id = `${slug(consultantId) || consultantId}_${a.catalogId}`;
+      if (isManual(assignOwner, id)) { plan.skipped.push({ reason: "assignation préservée (édition manuelle non écrasée)", detail: `${a.name} / ${a.catalogId}` }); continue; }
+      const isNew = !assignOwner.has(id);
+      await db.doc(`par_assignments/${id}`).set({
+        consultantId, partnerId: a.partnerId, certificationCatalogId: a.catalogId, targetDate: a.targetDate, status: "planifie", reminderOffsets: [],
+        consultantName: String(nameById.get(consultantId) || "").slice(0, 120), cert: entry.code || entry.name || a.catalogId, competencyId: entry.competencyId,
+        source: "par_cert_import", updatedAt: FieldValue.serverTimestamp(), ...(isNew ? { createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() } : {}),
+      }, { merge: true });
+      assignsWritten++;
+    }
+
+    const report = { createdConsultants: createdConsultants.length, certsWritten, assignsWritten, skipped: plan.skipped.length };
+    await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_par_certifications_file", module: "partenariats", entity: "par_certification", entityId: "batch", detail: { ...report, filename: String(req.data && req.data.filename || "").slice(0, 120) }, ts: FieldValue.serverTimestamp() });
+    await refreshParBestEffort("importParCertificationsFile"); // quotas/relances à jour dès le retour
+    return { ok: true, ...report, skippedDetail: plan.skipped.slice(0, 40) };
+  });
+
+  return { upsertParPartner, deleteParPartner, upsertParCertification, deleteParCertification, setParPartnerMap, upsertParAssignment, setParAssignmentStatus, deleteParAssignment, pushParAssignmentToClickup, generateParActionPlan, generateParQbr, suggestParPartnerMap, importParCertifications, importParCertificationsFile };
 }
 
 module.exports = { createPartenariats };
