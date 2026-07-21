@@ -1124,7 +1124,21 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   try { parsed = await parseBuffer(buf, filename); }
   catch (e) { throw new HttpsError(e.code || "invalid-argument", e.message || "fichier illisible"); }
   const { kinds, writes, files, rowsIn, rowsOk, rowsSkipped } = parsed;
-  if (!kinds.length) throw new HttpsError("failed-precondition", "aucune source reconnue dans le fichier");
+  // Refus ACTIONNABLE (constat terrain : « l'import Commandes refuse toujours ») : nommer ce que le fichier
+  // porte RÉELLEMENT (onglets + premiers en-têtes, joints par parseBuffer) et les signatures ATTENDUES.
+  // Cas fréquent : un EXPORT de l'écran Commandes (colonnes FP/Client/CAS/RAF d'affichage) rejoué en
+  // entrée — ce n'est PAS la source P&L (« Opp ID » + « CAS » + « RAF Total ») ; les exports de l'app ne
+  // sont pas des sources d'import.
+  if (!kinds.length) {
+    const seen = (files || [])
+      .flatMap((f) => (f.sheets || []).map((s) => `« ${s.sheet} » (${(s.headers || []).join(" · ") || "sans en-têtes"})`))
+      .slice(0, 4).join(" ; ");
+    throw new HttpsError("failed-precondition",
+      `aucune source reconnue dans le fichier${seen ? ` — onglets vus : ${seen}` : ""}. Sources attendues : `
+      + "P&L (en-têtes « Opp ID », « CAS », « RAF Total »), LIVE pipeline (« IdC » ou « Statut » + « D Prev »), "
+      + "Facturation DF (« Numéro » + « Montant HT »), PO List BC (« N° BC » + « Fournisseur »), ou une Fiche d'affaire. "
+      + "NB : un fichier EXPORTÉ depuis un écran de l'application n'est pas ré-importable — repartez du classeur source.");
+  }
 
   // LIVE écarté du canal delta (cf. stripLiveOpps) : les opportunités ne sont écrites QUE par la synchro
   // Sales_DATA (staling des fantômes) → un ré-import delta ne peut plus créer de doublon de pipeline.
