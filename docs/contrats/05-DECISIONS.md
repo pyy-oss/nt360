@@ -3,6 +3,30 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-064 — Centre de correction exploitable : année de PO dérivée du N° FP à l'autorité, contexte identifiant et actions de ligne (modales), outils de rapprochement intégrés
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« ce ne sont pas des commandes… sans année de PO » / « inexploitable » / « enrichir en action (annuler, modifier, etc) » / « à intégrer au centre de correction » / « ajouter action unitaire, prévoir traitement en masse »)
+
+### Contexte
+Après le premier import réel du carnet, le Centre de correction s'est révélé peu exploitable : lignes réduites à « client seul » (16 opps gagnées sans FP indiscernables), année de PO pré-remplie « 2026 » en dur (fausse pour FP/**2025**/11468 — le FP porte pourtant son millésime), aucune action au-delà de la valeur unique (annuler une fausse commande, requalifier une opp = navigation vers un autre écran), et les outils de rapprochement (Dossier client, réconciliations FP/DC, doublons) dispersés en cartes séparées.
+
+### Décisions
+- **Autorité (mergeCommandes, step 1 P&L)** : `yearPo = plausibleYear(colonne Excel) || yearOfFp(fp)` — l'année du N° FP (FP/AAAA/N, bornée plausibleYear) comble une colonne absente/aberrante (1900, 20226) ; la valeur Excel plausible prime. Tous les consommateurs (summaries, Centre de correction via la même fusion) restent alignés — pas de miroir front à toucher (le carnet vient du serveur). Tests dédiés.
+- **Contexte identifiant par ligne** (cleanup.tsx) : affaire, montant `money()`, étape (opps), AM, date `frDate`, provenance (P&L / opp gagnée / fiche / Odoo / LIVE / saisie) — champs déjà transportés par `correctionQueue`, simplement affichés.
+- **Actions de ligne par entité** (`ent` dans la carte FIX, droits du module de la donnée) : commandes → **modale « Corriger la commande »** (année pré-remplie de l'année du FP, client, AM, désignation, CAS ligne P&L, RAF — seuls les champs modifiés partent dans `patchOrder`), **« annuler »** (`setCancellation` overlay rétablissable, confirmation) ; opportunités → **modale « Requalifier »** (étape 1-9 + motif de perte si 7, montant, D Prev, N° FP → `patchOpportunity`) ; factures → « annuler » ; partout → « ouvrir » l'écran source pré-filtré. `clickup_cloture_avec_raf` : **« Solder le RAF » en un clic** (`patchOrder raf: 0`) ; `bc_fp_inconnu` : éditeur N° FP (comme `bc_sans_fp`).
+- **Point unique** : Dossier client, Réconciliation N° FP, Rapprochement DC et Doublons (direction) deviennent des **sections repliables DANS le Centre de correction** (composants conservés, wrapper Card → CorrSection) — plus de cartes séparées sur la page.
+- **Cockpit ClickUp** : action **unitaire** « Créer/Lier la tâche » par ligne de l'échantillon « commandes non liées » + raccourci **en masse** « ⚡ tout créer (N) » (réutilise le push en masse existant, confirmation) ; `pushOrderToClickup` **complète la commande depuis `orders/{fp}`** quand l'appelant ne connaît que le FP (payload prioritaire, additif).
+
+### Conséquences
+- Le bucket « commandes sans année » ne garde plus que les FP dont NI l'Excel NI le N° FP ne donnent un millésime plausible (vraies anomalies).
+- Une annulation depuis le Centre est un overlay (non destructif, survit aux ré-imports) — rétablissable depuis l'écran Commandes/Factures.
+- L'échantillon du diagnostic ClickUp ne se rafraîchit qu'au prochain « Diagnostic qualité » (message à l'appui du bouton).
+
+### Ce qu'on saura dans six mois
+Si des « commandes sans année » persistent, ce sont des FP sans millésime lisible : corriger le N° FP à la source, pas l'année.
+
 ## ADR-063 — HOTFIX « échec import » : l'option maison `memoryMiB` était ignorée par firebase-functions v2 — toutes les fonctions tournaient à 256 Mio
 
 - **Date :** 2026-07-21

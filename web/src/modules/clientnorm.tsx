@@ -1,8 +1,8 @@
-// ATELIER DE NORMALISATION CLIENTS — un seul écran pour piloter la normalisation des noms de clients :
+// ATELIER DE NORMALISATION CLIENTS — un seul écran, trois blocs, zéro redondance :
 //  1) INVENTAIRE : tous les noms bruts (commandes + factures + opps) groupés par CIBLE CANONIQUE
-//     (règles déterministes + alias config/clientAliases), avec comptes → on voit les graphies qui se
-//     rejoignent déjà et celles isolées ;
-//  2) QUASI-DOUBLONS : suggestions floues (typos, mot en plus) à fusionner d'un clic ;
+//     (règles déterministes + alias config/clientAliases), avec comptes ;
+//  2) FUSIONS PROPOSÉES : détection floue (typos, mot en plus) ET analyse IA dans UNE SEULE liste
+//     dédupliquée par graphie source — une proposition disparaît dès qu'un alias la couvre ;
 //  3) ALIAS (direction) : la table d'alias éditable, enregistrée via setClientAliases (recompute derrière).
 // Lecture gouvernée « import » ; l'édition d'alias reste réservée à la direction (setClientAliases).
 import { useState, useEffect, useCallback, useMemo, type FC } from "react";
@@ -11,10 +11,12 @@ import { fmt } from "../design/tokens";
 import { useDocData } from "../lib/hooks";
 import { useCan } from "../lib/rbac";
 import { grid4, type Props } from "./_shared";
-import { fuzzyDuplicateClients, setClientAliases, aiSuggestClientMerges, type FuzzyPair, type ClientMergeResult, type ClientMergeSuggestion } from "../lib/writes";
+import { fuzzyDuplicateClients, setClientAliases, aiSuggestClientMerges, type FuzzyPair, type ClientMergeResult } from "../lib/writes";
 import { clientNames, type ClientNamesResult, type ClientNameGroup } from "../lib/clientNormWrites";
 
 type ClientAliasConfig = { pairs?: { from: string; to: string }[] };
+// Proposition de fusion UNIFIÉE (flou + IA) : une entrée par graphie SOURCE, quelle que soit sa provenance.
+type MergeProposal = { from: string; to: string; confidence: number; source: "flou" | "ia"; reason?: string; corrected?: boolean };
 
 export const ClientNorm: FC<Props> = () => {
   const canEdit = useCan("habilitations") === "write"; // seule la direction pose des alias (setClientAliases)
@@ -23,6 +25,8 @@ export const ClientNorm: FC<Props> = () => {
   const [loading, setLoading] = useState(true);
   const { data: aliasCfg } = useDocData<ClientAliasConfig>(canEdit ? "config/clientAliases" : null);
   const [draft, setDraft] = useState<{ from: string; to: string }[] | null>(null);
+  const [aiSug, setAiSug] = useState<ClientMergeResult | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,45 +37,56 @@ export const ClientNorm: FC<Props> = () => {
   }, []);
   useEffect(() => { load().catch(() => {}); }, [load]);
 
-  // Comptes par nom brut (pour choisir la cible d'une fusion floue = la graphie la plus fréquente).
+  // Comptes par nom brut (cible d'une fusion floue = la graphie la plus fréquente).
   const countByName = useMemo(() => {
     const m = new Map<string, number>();
     for (const g of inv?.groups || []) for (const v of g.variants) m.set(v.name, v.count);
     return m;
   }, [inv]);
 
-  const aliases = draft ?? (aliasCfg?.pairs || []);
+  // Mémoïsé : `aliases` nourrit le useMemo des propositions (dédup) — une référence stable évite de
+  // recalculer la liste à chaque rendu quand ni le brouillon ni la config n'ont bougé.
+  const aliases = useMemo(() => draft ?? (aliasCfg?.pairs || []), [draft, aliasCfg]);
   const setPair = (idx: number, k: "from" | "to", v: string) => setDraft(aliases.map((r, j) => (j === idx ? { ...r, [k]: v } : r)));
-  const addPair = (p: { from: string; to: string }) => setDraft([...(aliases.filter((r) => r.from.trim() !== p.from)), p]);
   const delPair = (idx: number) => setDraft(aliases.filter((_, j) => j !== idx));
   const save = async () => { await setClientAliases(aliases.filter((r) => r.from.trim() && r.to.trim())); setDraft(null); };
-  // Fusion depuis une suggestion floue : la graphie la plus fréquente devient la cible.
-  const mergeFuzzy = (p: FuzzyPair) => {
-    const [to, from] = (countByName.get(p.a) || 0) >= (countByName.get(p.b) || 0) ? [p.a, p.b] : [p.b, p.a];
-    addPair({ from, to });
-  };
 
-  // --- Normalisation IA : Claude juge quelles graphies désignent la même entité (au-delà du fuzzy) ---
-  // Inventaire des graphies distinctes (avec fréquence) envoyé à l'IA, borné au plafond serveur.
+  // --- FUSIONS PROPOSÉES : flou + IA fusionnés en UNE liste, dédupliquée par graphie source. ---
+  // Une graphie DÉJÀ couverte par un alias (posé ou en brouillon) est MASQUÉE : plus de proposition
+  // qui traîne après avoir été traitée. À sources égales, l'IA prime (elle porte une justification).
+  const proposals = useMemo(() => {
+    const covered = new Set(aliases.map((r) => r.from.trim()).filter(Boolean));
+    const m = new Map<string, MergeProposal>();
+    for (const p of fuzzy) {
+      const [to, from] = (countByName.get(p.a) || 0) >= (countByName.get(p.b) || 0) ? [p.a, p.b] : [p.b, p.a];
+      if (!from || from === to || covered.has(from)) continue;
+      m.set(from, { from, to, confidence: p.score, source: "flou" });
+    }
+    for (const s of aiSug?.suggestions || []) {
+      if (!s.from || s.from === s.to || covered.has(s.from)) continue;
+      m.set(s.from, { from: s.from, to: s.to, confidence: s.confidence, source: "ia", reason: s.reason, corrected: !s.existingTarget });
+    }
+    return [...m.values()].sort((a, b) => b.confidence - a.confidence);
+  }, [fuzzy, aiSug, aliases, countByName]);
+
+  // Inventaire des graphies distinctes (avec fréquence) envoyé à l'IA, borné au plafond serveur —
+  // la troncature est SIGNALÉE (jamais silencieuse).
   const aiNames = useMemo(() => [...countByName.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 400), [countByName]);
-  // Borne d'envoi (400 graphies les plus fréquentes) : on le SIGNALE (pas de troncature silencieuse) si dépassée.
   const aiCapped = countByName.size > aiNames.length;
-  const [aiSug, setAiSug] = useState<ClientMergeResult | null>(null);
-  const [aiSel, setAiSel] = useState<Set<string>>(new Set());
   const runAi = async () => {
     const r = await aiSuggestClientMerges(aiNames);
-    // Auto-sélection des fusions ≥ 90 % (« automatique à 90 % ») ; les autres restent en revue.
-    setAiSel(new Set(r.suggestions.filter((s) => s.confidence >= 0.9).map((s) => s.from)));
+    // Auto-sélection des fusions IA ≥ 90 % (« automatique à 90 % ») ; le reste demande un arbitrage.
+    setSel((p) => new Set([...p, ...r.suggestions.filter((s) => s.confidence >= 0.9).map((s) => s.from)]));
     setAiSug(r);
   };
-  const toggleAi = (from: string) => setAiSel((p) => { const n = new Set(p); n.has(from) ? n.delete(from) : n.add(from); return n; });
-  // Ajoute les fusions cochées à la table d'alias (brouillon) — l'humain enregistre ensuite (setClientAliases).
-  const applyAiSelected = () => {
-    const picked = (aiSug?.suggestions || []).filter((s) => aiSel.has(s.from));
+  const toggle = (from: string) => setSel((p) => { const n = new Set(p); n.has(from) ? n.delete(from) : n.add(from); return n; });
+  // Pose les fusions cochées comme alias (brouillon) — l'humain enregistre ensuite (setClientAliases).
+  // Les propositions couvertes disparaissent de la liste par construction (dédup vs `aliases`).
+  const picked = proposals.filter((p) => sel.has(p.from));
+  const applySelected = () => {
     if (!picked.length) return;
-    const base = aliases.filter((r) => !picked.some((p) => p.from === r.from));
-    setDraft([...base, ...picked.map((p) => ({ from: p.from, to: p.to }))]);
-    setAiSel(new Set());
+    setDraft([...aliases.filter((r) => !picked.some((p) => p.from === r.from.trim())), ...picked.map((p) => ({ from: p.from, to: p.to }))]);
+    setSel(new Set());
   };
   const confTone = (c: number): "emerald" | "gold" | "clay" => (c >= 0.9 ? "emerald" : c >= 0.7 ? "gold" : "clay");
 
@@ -94,47 +109,31 @@ export const ClientNorm: FC<Props> = () => {
         )}
       </Card>
 
-      {/* Suggestions de quasi-doublons (fusion en un clic — réservée à la direction) */}
-      {fuzzy.length > 0 && (
-        <Card title={`Quasi-doublons détectés · ${fmt(fuzzy.length)}`}>
-          <Table colsKey="clientnorm-fuzzy" columns={[
-            colText("Graphie A", (p: FuzzyPair) => p.a, (p: FuzzyPair) => p.a),
-            colText("Graphie B", (p: FuzzyPair) => p.b, (p: FuzzyPair) => p.b),
-            colNum("Proximité", (p: FuzzyPair) => `${Math.round(p.score * 100)}%`, (p: FuzzyPair) => p.score),
-            ...(canEdit ? [colText("", (p: FuzzyPair) => (
-              <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => mergeFuzzy(p)} title="Créer un alias (la graphie la plus fréquente devient la cible)">Fusionner</button>
-            ))] : []),
-          ]} rows={fuzzy} />
-          <Tip>Rapprochements <b>flous</b> (typos, mot en plus) que la normalisation exacte n'a pas fusionnés. « Fusionner » ajoute un <b>alias</b> ci-dessous (à enregistrer) — la graphie la plus fréquente devient la cible.</Tip>
-        </Card>
-      )}
-
-      {/* Normalisation IA — l'IA propose des fusions, l'humain les ajoute à la liste puis enregistre */}
-      {canEdit && aiNames.length > 0 && (
-        <Card title={aiSug ? `Normalisation IA · ${aiSug.suggestions.length} fusion(s) proposée(s)` : "Normalisation IA"}
+      {/* FUSIONS PROPOSÉES — détection floue + IA dans une seule liste (une entrée par graphie source). */}
+      {(proposals.length > 0 || (canEdit && aiNames.length > 0)) && (
+        <Card title={proposals.length ? `Fusions proposées · ${fmt(proposals.length)}` : "Fusions proposées"}
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              {aiSug && aiSel.size > 0 && <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={applyAiSelected}>Ajouter {aiSel.size} à la liste</button>}
-              <Busy variant="gold" label={aiSug ? "Réanalyser" : "Doper à l'IA"} okMsg="Analyse IA prête" errMsg="Analyse IA indisponible" fn={runAi} />
+              {canEdit && picked.length > 0 && <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={applySelected}>Ajouter {picked.length} à la liste</button>}
+              {canEdit && aiNames.length > 0 && <Busy variant="gold" label={aiSug ? "Réanalyser (IA)" : "Doper à l'IA"} okMsg="Analyse IA prête" errMsg="Analyse IA indisponible" fn={runAi} />}
             </div>}>
-          {!aiSug ? (
-            <Tip>L'<b>IA</b> juge quelles graphies désignent la <b>même entité</b> — abréviations (« SGCI »), mots manquants, formes juridiques, singulier/pluriel — <b>au-delà</b> des quasi-doublons flous, et évite les faux rapprochements (« ORANGE » ≠ « ORANGE BANK »). Les fusions <b>≥ 90 %</b> sont pré-cochées ; « Ajouter à la liste » les pose comme alias (à <b>enregistrer</b> ensuite). Rien n'est appliqué automatiquement.{aiCapped ? ` L'analyse porte sur les ${aiNames.length} graphies les plus fréquentes (sur ${fmt(countByName.size)}).` : ""}</Tip>
-          ) : aiSug.suggestions.length === 0 ? (
-            <Tip>L'IA n'a proposé aucune fusion sur cet inventaire.{aiSug.truncated ? ` (Analyse bornée aux ${aiSug.analyzed} graphies les plus fréquentes.)` : ""}</Tip>
+          {proposals.length === 0 ? (
+            <Tip>Aucune fusion en attente{aiSug ? " — la détection floue et l'IA n'ont rien trouvé de plus" : ""}. « <b>Doper à l'IA</b> » juge quelles graphies désignent la <b>même entité</b> (abréviations, mots manquants, formes juridiques) au-delà des quasi-doublons flous, en évitant les faux rapprochements (« ORANGE » ≠ « ORANGE BANK »).</Tip>
           ) : (
             <>
-              <Table colsKey="clientnorm-ai" columns={[
-                raw(colText("", (s: ClientMergeSuggestion) => (
-                  <input type="checkbox" className="accent-gold" checked={aiSel.has(s.from)} onChange={() => toggleAi(s.from)} aria-label={`Sélectionner ${s.from}`} />
-                ))),
-                colText("Graphie", (s: ClientMergeSuggestion) => s.from, (s: ClientMergeSuggestion) => s.from),
-                colText("→ Cible canonique", (s: ClientMergeSuggestion) => (
-                  <span>{s.to} {!s.existingTarget && <span className="text-[10px] text-gold" title="Graphie corrigée par l'IA (absente de l'inventaire)">· corrigée</span>}</span>
-                ), (s: ClientMergeSuggestion) => s.to),
-                colNum("Confiance", (s: ClientMergeSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: ClientMergeSuggestion) => s.confidence),
-                colText("Analyse", (s: ClientMergeSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>),
-              ]} rows={aiSug.suggestions} />
-              <Tip>« <b>Ajouter à la liste</b> » pose les fusions cochées comme alias dans la table ci-dessous — cliquez ensuite <b>Enregistrer</b> pour lancer le recalcul. La mention <span className="text-gold">corrigée</span> = graphie proposée par l'IA absente de l'inventaire (à valider).{aiSug.truncated ? ` Analyse bornée aux ${aiSug.analyzed} graphies les plus fréquentes.` : ""}</Tip>
+              <Table colsKey="clientnorm-merge" columns={[
+                ...(canEdit ? [raw(colText("", (p: MergeProposal) => (
+                  <input type="checkbox" className="accent-gold" checked={sel.has(p.from)} onChange={() => toggle(p.from)} aria-label={`Sélectionner ${p.from}`} />
+                )))] : []),
+                colText("Graphie", (p: MergeProposal) => p.from, (p: MergeProposal) => p.from),
+                colText("→ Cible canonique", (p: MergeProposal) => (
+                  <span>{p.to} {p.corrected && <span className="text-[10px] text-gold" title="Graphie corrigée par l'IA (absente de l'inventaire)">· corrigée</span>}</span>
+                ), (p: MergeProposal) => p.to),
+                colNum("Confiance", (p: MergeProposal) => <Badge tone={confTone(p.confidence)}>{Math.round(p.confidence * 100)} %</Badge>, (p: MergeProposal) => p.confidence),
+                colText("Source", (p: MergeProposal) => <Badge tone={p.source === "ia" ? "gold" : "steel"}>{p.source === "ia" ? "IA" : "flou"}</Badge>, (p: MergeProposal) => p.source),
+                colText("Analyse", (p: MergeProposal) => <span className="text-[12px] text-muted">{p.reason || "—"}</span>),
+              ]} rows={proposals} />
+              <Tip><b>flou</b> = quasi-doublon détecté par proximité (typos, mot en plus) — la graphie la plus fréquente devient la cible ; <b>IA</b> = même entité jugée au-delà du flou (abréviations, formes juridiques), fusions ≥ 90 % pré-cochées. Cochez puis « <b>Ajouter à la liste</b> » : les fusions deviennent des alias ci-dessous, à <b>enregistrer</b> pour lancer le recalcul — rien n'est appliqué automatiquement. Une proposition disparaît dès qu'un alias la couvre.{aiCapped ? ` Analyse IA bornée aux ${aiNames.length} graphies les plus fréquentes (sur ${fmt(countByName.size)}).` : ""}</Tip>
             </>
           )}
         </Card>
@@ -144,7 +143,7 @@ export const ClientNorm: FC<Props> = () => {
       {canEdit && (
         <Card title="Alias de normalisation" actions={
           <div className="flex gap-2">
-            <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => addPair({ from: "", to: "" })}>+ Alias</button>
+            <button type="button" className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setDraft([...aliases, { from: "", to: "" }])}>+ Alias</button>
             <Busy label="Enregistrer" okMsg="Alias enregistrés (recalcul lancé)" fn={save} />
           </div>}>
           <div className="flex flex-col gap-1.5">
@@ -177,7 +176,7 @@ export const ClientNorm: FC<Props> = () => {
               </span>
             ))),
           ]} rows={inv.groups} />
-          <Tip>Chaque ligne = un client <b>canonique</b> et les graphies brutes qui s'y regroupent (déjà) — les variantes <span className="text-gold">dorées</span> sont fusionnées par un alias. Les lignes à plusieurs graphies confirment la normalisation ; utilisez les <b>quasi-doublons</b> ci-dessus pour rapprocher les clients qui devraient l'être et ne le sont pas.</Tip>
+          <Tip>Chaque ligne = un client <b>canonique</b> et les graphies brutes qui s'y regroupent (déjà) — les variantes <span className="text-gold">dorées</span> sont fusionnées par un alias. Les lignes à plusieurs graphies confirment la normalisation ; utilisez les <b>fusions proposées</b> ci-dessus pour rapprocher les clients qui devraient l'être et ne le sont pas.</Tip>
         </Card>
       )}
     </div>

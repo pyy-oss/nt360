@@ -3500,7 +3500,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const order = req.data?.order || {};
+  let order = req.data?.order || {};
   const extra = req.data?.extra || {};
   if (!fpKey(order.fp)) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const teamId = cfg.teamId || CLICKUP_TEAM;
@@ -3525,6 +3525,13 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   try {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const fp = fpKey(order.fp), id = safeId(fp);
+  // Push « par N° FP seul » (action unitaire du cockpit ClickUp) : complète la commande depuis la
+  // ligne P&L stockée — la tâche porte CAS/affaire/AM même quand l'appelant ne connaît que le FP.
+  // Le payload de l'appelant PRIME champ à champ (la liste Commandes envoie déjà la ligne complète).
+  {
+    const stored = (await db.doc(`orders/${id}`).get()).data();
+    if (stored) order = { ...stored, ...Object.fromEntries(Object.entries(order).filter(([, v]) => v != null && v !== "")) };
+  }
   // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
   // formulaire), on l'ADOPTE (mise à jour) au lieu de créer un doublon.
   if (!links[id]) {

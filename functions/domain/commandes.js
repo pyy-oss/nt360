@@ -49,7 +49,13 @@ function mergeCommandes(orders, opps, sheets, invoices) {
   // casPnl = CAS d'ORIGINE de la ligne P&L, CONSERVÉ même si une opp gagnée / fiche écrase ensuite `cas`
   // (étapes 2/3). Sert au contrôle de cohérence AMONT « écart de valorisation » (alerts/dataQuality) : sans
   // lui, la valeur P&L écrasée est perdue et l'écart opp↔P&L devient indétectable. Additif, ne change aucun calcul.
-  for (const o of orders || []) { const k = fpKey(o.fp); if (k) merge(k, { ...o, fp: k, affaire: o.designation || "", casPnl: num(o.cas), pnlSource: "manuel" }); }
+  // Année de PO : la colonne Excel fait foi quand elle est PLAUSIBLE ; sinon (vide, 1900, 20226…)
+  // on la dérive du N° FP lui-même (FP/AAAA/N — millésime structurel de l'affaire). Sans ce repli,
+  // la ligne remonte en « commande sans année » au Centre de correction alors que le FP porte l'année.
+  for (const o of orders || []) {
+    const k = fpKey(o.fp);
+    if (k) merge(k, { ...o, fp: k, affaire: o.designation || "", casPnl: num(o.cas), pnlSource: "manuel", yearPo: plausibleYear(o.yearPo) || yearOfFp(k) });
+  }
   const pnlFps = new Set(byFp.keys()); // FP présents au P&L = seuls candidats « commande »
 
   // 2. Opportunités GAGNÉES (stage 6) : RÉCONCILIENT une ligne P&L existante (corrigent le CAS),

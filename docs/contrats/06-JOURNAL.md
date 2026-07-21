@@ -2078,3 +2078,41 @@ Le diagnostic précédent (« fichier non reconnu », ADR-060) supposait que l'a
 n'a jamais abouti, d'où le carnet vide.
 
 **Vérifs.** Functions 1338/1338 (fnopts 4), no-undef (164), deploy-targets (199).
+
+---
+
+## 2026-07-21 — CC : Centre de correction exploitable (contexte + actions + année FP + rapprochements intégrés) — ADR-064
+
+**Fait.** Lot déclenché par le premier carnet réel en prod : (1) autorité — mergeCommandes step 1 dérive
+`yearPo` de l'année du N° FP (bornée plausibleYear) quand la colonne Excel est vide/aberrante (plus de
+« 2026 » en dur pour FP/2025/…) ; (2) chaque ligne du Centre porte son contexte identifiant (affaire,
+montant, étape, AM, date, provenance) ; (3) actions de ligne par entité : modale « Corriger la commande »
+(champs pré-remplis, seuls les modifiés partent), modale « Requalifier l'opportunité » (étape + motif de
+perte), « annuler » commande/facture (overlay setCancellation, confirmation), « Solder le RAF » en un clic
+(ClickUp clôturé), éditeur FP sur bc_fp_inconnu, « ouvrir » l'écran source partout ; (4) Dossier client,
+réconciliations FP/DC et Doublons intégrés en sections repliables DANS le Centre (point unique) ;
+(5) cockpit ClickUp : « Créer/Lier la tâche » unitaire par ligne non liée + « ⚡ tout créer » en masse,
+pushOrderToClickup complété serveur depuis orders/{fp}.
+
+**Appris.** Les champs de contexte étaient DÉJÀ transportés par correctionQueue (selects complets) — le
+front les jetait à l'affichage. L'assiette des vues qualité passe partout par mergeCommandes : corriger
+l'année à l'autorité aligne d'un coup summaries, alertes et Centre, sans miroir front à toucher.
+
+**Vérifs.** Functions 1340/1340 (commandes 32 dont 2 nouveaux), web 301/301, tsc/eslint OK, no-undef
+(164), deploy-targets (199), indexes, bundle 120,9 ≤ 122 Ko.
+
+**Suivant.** PR à fusionner sur « go » ; après déploiement, relancer « Analyser » au Centre : le bucket
+« sans année » doit tomber aux seuls FP sans millésime lisible.
+
+---
+
+## 2026-07-21 — Normalisation clients : zéro redondance (fusion flou + IA en une liste)
+
+**Fait.** Les deux cartes de propositions (« Quasi-doublons » flous, « Normalisation IA ») faisaient le
+même métier avec deux modèles d'interaction (bouton « Fusionner » par ligne vs cases + « Ajouter à la
+liste »). Fusionnées en UNE carte « Fusions proposées » : liste unifiée dédupliquée par graphie SOURCE
+(l'IA prime — elle porte une justification), badge de provenance (flou/IA), un seul mécanisme de
+sélection, pré-cochage IA ≥ 90 % conservé. Une proposition DISPARAÎT dès qu'un alias (posé ou brouillon)
+la couvre — plus de suggestion qui traîne après traitement. `aliases` mémoïsé (react-hooks).
+
+**Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
