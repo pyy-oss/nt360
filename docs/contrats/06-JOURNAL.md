@@ -2116,3 +2116,39 @@ sélection, pré-cochage IA ≥ 90 % conservé. Une proposition DISPARAÎT dès 
 la couvre — plus de suggestion qui traîne après traitement. `aliases` mémoïsé (react-hooks).
 
 **Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Normalisation fournisseurs dopée à l'IA (ADR-065)
+
+**Fait.** « Doper à l'IA » l'atelier fournisseurs SANS recréer de pipeline : `aiSuggestClientMerges`
+généralisé par un `entity` (« fournisseur ») — prompt achats (EXN = EXCLUSIVE NETWORKS, contre-exemples
+SAMSUNG ≠ SAMSUNG MEDISON), droit `fournisseurs` (module de la donnée), dédup/no-op par `cleanName`
+(ADR-P20) au lieu de `canonicalKey`. Front : carte « Fusions proposées (IA) » identique au modèle
+clients (pré-cochage ≥ 90 %, ajout au brouillon d'alias, enregistrement humain, proposition masquée dès
+qu'un alias la couvre). Zéro nouvelle fonction déployée (199 inchangé). Lève le « sans IA » d'ADR-046.
+
+**Appris.** La barrière défensive (normalizeClientMergeSuggestions) était déjà paramétrable en pensée —
+seul le no-op « déjà fusionné par les règles » dépendait du référentiel : c'est la clé canonique qu'il
+fallait injecter (keyFn), pas dupliquer le module.
+
+**Vérifs.** Functions 1342/1342 (aiClientNorm 9 dont 2 fournisseurs), web 301/301, tsc/eslint 0,
+no-undef (164), deploy-targets (199), bundle 120,9 ≤ 122 Ko.
+
+**En parallèle (prod).** PR #557 fusionnée (squash 3c2adec) sur « go » — déploiement main en cours à
+la fusion (à confirmer au prochain point).
+
+---
+
+## 2026-07-21 — Récupération BC Odoo : option PUSH confirmée (renvoi unitaire §4ter + état de réception)
+
+**Fait.** Demande « récupérer via webhook entrant odoo (unitaire ou masse) » depuis le rapprochement
+DC → N° FP. Arbitrage utilisateur (AskUserQuestion) : RESTER EN PUSH (pas de client sortant Odoo — l'option
+A d'ADR-051/274 tient). Livré : (1) doc ODOO_WEBHOOK.md §4ter — Server Action « renvoyer les BC
+sélectionnés » (unitaire par DC ou sélection de la vue liste), en plus du backfill §4bis ; (2) odooWebhook
+persiste `lastReceived` (horodatage, objet, écrits/échecs — best-effort, jamais bloquant) et
+odooWebhookStatus l'expose (epoch ms) ; (3) Admin → Intégration affiche « Dernier envoi reçu » ;
+(4) le Tip du rapprochement DC explique comment déclencher le renvoi et où vérifier son arrivée.
+
+**Vérifs.** Functions 1342/1342, web 301/301, tsc/eslint 0, no-undef (164), deploy-targets (199),
+bundle 120,9 ≤ 122 Ko.

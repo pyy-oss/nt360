@@ -333,10 +333,12 @@ export async function setOdooWebhook(cfg: { secret?: string; enabled?: boolean }
   const res = await httpsCallable(functions, "setOdooWebhook")(cfg);
   return res.data as { ok: boolean; enabled: boolean; hasSecret: boolean };
 }
-/** État de l'intégration Odoo (jamais le secret) : `hasSecret` (secret posé) + `enabled` (interrupteur). */
+/** État de l'intégration Odoo (jamais le secret) : `hasSecret` (secret posé) + `enabled` (interrupteur)
+ *  + `lastReceived` = dernier envoi Odoo reçu (epoch ms, objet, écrits/échecs) — vérifie qu'un renvoi
+ *  unitaire/backfill déclenché côté Odoo est bien arrivé. */
 export async function odooWebhookStatus() {
   const res = await httpsCallable(functions, "odooWebhookStatus")();
-  return res.data as { enabled: boolean; hasSecret: boolean };
+  return res.data as { enabled: boolean; hasSecret: boolean; lastReceived?: { at: number | null; object: string; written: number; failed: number } | null };
 }
 
 /** Exporte TOUTES les opportunités dans le modèle round-trip (.xlsx) : renvoie le fichier encodé en
@@ -890,8 +892,9 @@ export async function fuzzyDuplicateClients(threshold?: number) {
 // les propositions s'ajoutent à la table d'alias que la direction enregistre (setClientAliases).
 export type ClientMergeSuggestion = { from: string; to: string; confidence: number; reason: string; existingTarget: boolean };
 export type ClientMergeResult = { ok: boolean; suggestions: ClientMergeSuggestion[]; model: string; truncated: boolean; analyzed: number; total: number };
-export async function aiSuggestClientMerges(names: { name: string; count: number }[]): Promise<ClientMergeResult> {
-  const res = await httpsCallable(functions, "aiSuggestClientMerges", { timeout: 300_000 })({ names });
+/** `entity` : "client" (défaut) ou "fournisseur" (atelier fournisseurs — droit `fournisseurs` côté serveur). */
+export async function aiSuggestClientMerges(names: { name: string; count: number }[], entity?: "client" | "fournisseur"): Promise<ClientMergeResult> {
+  const res = await httpsCallable(functions, "aiSuggestClientMerges", { timeout: 300_000 })({ names, entity });
   return res.data as ClientMergeResult;
 }
 

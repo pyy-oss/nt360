@@ -69,3 +69,27 @@ describe("aiClientNorm — normalisation défensive des fusions IA", () => {
     expect(user).toContain("ORANGE");
   });
 });
+
+describe("aiClientNorm — variante FOURNISSEURS (entity, ADR-065)", () => {
+  const { cleanName } = require("../lib/ids");
+
+  it("le prompt fournisseur parle du bon référentiel ; le prompt client reste inchangé par défaut", () => {
+    const f = buildClientNormPrompt([{ name: "EXN", count: 45 }], "fournisseur");
+    expect(f.system).toContain("fournisseurs");
+    expect(f.system).toContain("EXCLUSIVE NETWORKS"); // exemple d'abréviation du métier achats
+    const c = buildClientNormPrompt([{ name: "SGCI", count: 1 }]);
+    expect(c.system).toContain("clients");
+    expect(c.system).not.toContain("EXCLUSIVE NETWORKS");
+  });
+
+  it("dédup fournisseur par cleanName : « à un espace/casse près » = no-op écarté, vraie fusion conservée", () => {
+    const names = [{ name: "exclusive  networks", count: 4 }, { name: "EXCLUSIVE NETWORKS", count: 68 }, { name: "EXN", count: 45 }];
+    const parsed = { merges: [
+      { from: "exclusive  networks", to: "EXCLUSIVE NETWORKS", confidence: 0.99 }, // même cleanName → no-op
+      { from: "EXN", to: "EXCLUSIVE NETWORKS", confidence: 0.95, reason: "abréviation" }, // vraie fusion
+    ] };
+    const out = normalizeClientMergeSuggestions(parsed, names, cleanName);
+    expect(out.map((s) => s.from)).toEqual(["EXN"]);
+    expect(out[0].existingTarget).toBe(true);
+  });
+});

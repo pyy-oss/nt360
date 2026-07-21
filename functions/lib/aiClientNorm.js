@@ -8,15 +8,16 @@ const { parseJson } = require("./anthropic");
 const DEFAULT_MODEL = "claude-opus-4-8";
 
 /**
- * Demande à Claude des fusions de graphies pour un inventaire de noms clients.
+ * Demande à Claude des fusions de graphies pour un inventaire de noms clients OU fournisseurs.
  * @param {string} apiKey  clé Anthropic (Secret Manager)
  * @param {{name:string, count?:number}[]} names inventaire des graphies brutes
- * @param {{model?:string}} [opts]
+ * @param {{model?:string, entity?:"client"|"fournisseur"}} [opts] entité du référentiel (prompt + clé de dédup)
  * @returns {Promise<{suggestions:object[], model:string, usage:object|null}>}
  */
 async function aiSuggestClientMerges(apiKey, names, opts = {}) {
   const model = opts.model || DEFAULT_MODEL;
-  const { system, user } = buildClientNormPrompt(names || []);
+  const entity = opts.entity === "fournisseur" ? "fournisseur" : "client";
+  const { system, user } = buildClientNormPrompt(names || [], entity);
 
   const Anthropic = require("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
@@ -39,7 +40,9 @@ async function aiSuggestClientMerges(apiKey, names, opts = {}) {
   }
 
   const text = (res.content || []).filter((c) => c && c.type === "text").map((c) => c.text).join("");
-  const suggestions = normalizeClientMergeSuggestions(parseJson(text), names || []);
+  // Clé de dédup/no-op propre au référentiel : canonicalKey (clients) vs cleanName (fournisseurs, ADR-P20).
+  const keyFn = entity === "fournisseur" ? require("./ids").cleanName : undefined;
+  const suggestions = normalizeClientMergeSuggestions(parseJson(text), names || [], keyFn);
   return { suggestions, model, usage: res.usage || null };
 }
 

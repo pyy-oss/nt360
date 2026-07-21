@@ -353,6 +353,24 @@ for model, obj, mapper, domain in PLAN:
 > `ir.config_parameter` (`nt360.last_backfill`) mis à jour en fin de run. Le renvoi restant idempotent, un
 > chevauchement de fenêtre est sans danger.
 
+## 4ter. Renvoi UNITAIRE d'un BC (par DC ou sélection)
+
+Cas d'usage : nt360 vient de poser un **rapprochement DC → N° FP** (Centre de correction) et l'on veut que
+le BC concerné soit rattaché **tout de suite**, sans attendre la prochaine mise à jour Odoo ni relancer le
+backfill complet. Même principe que §4bis (c'est **Odoo qui pousse** — aucun client sortant côté nt360),
+mais borné à un enregistrement (ou à la sélection courante). Idempotent → rejouable sans doublon.
+
+```python
+# Server Action « nt360 — renvoyer les BC sélectionnés » : à exécuter sur purchase.order.
+# Depuis la vue liste Odoo : cochez le(s) BC → Action → « nt360 — renvoyer les BC sélectionnés ».
+recs = records or env["purchase.order"].sudo().search([("name", "=", "DC00123")])  # repli : un DC précis
+_nt360_send(env, "bc", [map_bc(r) for r in recs])
+```
+
+> Fonctionne pour n'importe quel objet du contrat (remplacez modèle + mapper : `map_lead`/`map_order`/
+> `map_invoice`). Côté nt360, l'écran **Admin → Intégration** affiche le **dernier envoi reçu** (horodatage,
+> objet, écrits/échecs) — le moyen de vérifier que le renvoi est bien arrivé.
+
 ## 5. Tester l'endpoint AVANT de brancher Odoo (curl signé)
 
 ```bash

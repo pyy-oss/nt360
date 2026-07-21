@@ -3,6 +3,26 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-065 — Normalisation fournisseurs dopée à l'IA : réutilisation du pipeline clients (entity), lève la variante « sans IA » de l'ADR-046
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté (remplace le choix « sans IA » de l'ADR-046 pour l'atelier fournisseurs)
+- **Décideur :** Direction (« doper à l'IA », capture de l'atelier Normalisation fournisseurs)
+
+### Contexte
+L'atelier fournisseurs était volontairement minimal (ADR-046 : cleanName + alias manuels, sans IA). Avec les données réelles (227 graphies, 1 seul regroupement), les abréviations métier (« EXN » = « EXCLUSIVE NETWORKS ») ne se rapprochent qu'à la main.
+
+### Décisions
+- **Réutilisation, pas recréation** : le callable `aiSuggestClientMerges` accepte un `entity` (« client » par défaut, « fournisseur ») — prompt adapté au référentiel achats (distributeurs/constructeurs, contre-exemples propres : « SAMSUNG » ≠ « SAMSUNG MEDISON »), **droit gouverné par le module de la donnée** (`fournisseurs` au lieu d'`import`), et **clé de dédup/no-op propre au référentiel** : `cleanName` (ADR-P20) au lieu de `canonicalKey` — un « à un espace/casse près » est un no-op écarté. Aucune nouvelle fonction déployée (199 inchangé).
+- **Front (suppliernorm.tsx)** : carte « Fusions proposées (IA) » calquée sur celle des clients (pré-cochage ≥ 90 %, « Ajouter à la liste » → alias en brouillon, l'humain **enregistre** ; une proposition disparaît dès qu'un alias la couvre). La clé canonique reste STRICTEMENT `cleanName` — l'IA ne produit que des alias, jamais une nouvelle sémantique (le SOA est inchangé tant qu'on n'enregistre pas).
+
+### Conséquences
+- Même gouvernance que les clients (« l'IA propose, l'humain valide », rate-limit, logOps avec entity).
+- L'en-tête « variante minimale sans IA » d'ADR-046 ne vaut plus pour ce point précis ; le reste (pas de règles juridiques/pays sur la clé) demeure.
+
+### Ce qu'on saura dans six mois
+Si les fusions IA fournisseurs génèrent des faux positifs, resserrer les contre-exemples du prompt AVANT d'envisager un seuil différent des clients (parité d'usage d'abord).
+
 ## ADR-064 — Centre de correction exploitable : année de PO dérivée du N° FP à l'autorité, contexte identifiant et actions de ligne (modales), outils de rapprochement intégrés
 
 - **Date :** 2026-07-21

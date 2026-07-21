@@ -1609,7 +1609,10 @@ exports.aiSuggestClientMerges = onCallG(
   "aiSuggestClientMerges",
   { secrets: [ANTHROPIC_API_KEY], memoryMiB: 512, timeoutSeconds: 300 },
   async (req) => {
-    await requireWrite(req, "import");
+    // Entité du référentiel : "client" (historique) ou "fournisseur" (atelier fournisseurs « dopé à
+    // l'IA ») — même pipeline, prompt/clé de dédup adaptés, droit gouverné par le module de la donnée.
+    const entity = req.data?.entity === "fournisseur" ? "fournisseur" : "client";
+    await requireWrite(req, entity === "fournisseur" ? "fournisseurs" : "import");
     if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
     const apiKey = ANTHROPIC_API_KEY.value();
     if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
@@ -1626,13 +1629,13 @@ exports.aiSuggestClientMerges = onCallG(
     const { aiSuggestClientMerges: runAi } = require("./lib/aiClientNorm");
     let out;
     try {
-      out = await runAi(apiKey, names);
+      out = await runAi(apiKey, names, { entity });
     } catch (e) {
       if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de traiter ce lot.");
-      logger.error("aiSuggestClientMerges a échoué", { message: e && e.message });
+      logger.error("aiSuggestClientMerges a échoué", { entity, message: e && e.message });
       throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de suggestions (réessayez).");
     }
-    await logOps({ kind: "ai", action: "suggestClientMerges", status: "ok", uid: req.auth.uid, detail: { names: names.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
+    await logOps({ kind: "ai", action: "suggestClientMerges", status: "ok", uid: req.auth.uid, detail: { entity, names: names.length, suggestions: out.suggestions.length, model: out.model, usage: out.usage } });
     return { ok: true, suggestions: out.suggestions, model: out.model, truncated, analyzed: names.length, total: rawNames.length };
   },
 );
@@ -4531,6 +4534,12 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
       await Promise.all(batch.slice(i, i + CONC).map((rec) => processOne(rec)));
     }
     if (wrote) await requestRecompute(null); // recompute différé/coalescé (un seul pour tout le lot)
+    // État de réception (best-effort) : horodatage/volume du DERNIER envoi Odoo, affiché en Admin →
+    // Intégration — seul moyen côté app de VÉRIFIER qu'un renvoi (unitaire §4ter / backfill §4bis),
+    // déclenché côté Odoo, est bien arrivé. Ne doit jamais faire échouer la réponse au webhook.
+    try {
+      await db.doc("config/odooWebhook").set({ lastReceived: { at: FieldValue.serverTimestamp(), object, written: results.length, failed: errors.length } }, { merge: true });
+    } catch (e) { logger.warn("odooWebhook : lastReceived non persisté", { msg: e && e.message }); }
     res.status(200).json({ ok: true, object, written: results.length, failed: errors.length, truncated, results, errors });
   } catch (e) {
     logger.error("odooWebhook : traitement échoué", { object, msg: e && e.message, stack: e && e.stack });
@@ -4560,7 +4569,10 @@ exports.setOdooWebhook = onCallG("setOdooWebhook", { memoryMiB: 256, timeoutSeco
 exports.odooWebhookStatus = onCallG("odooWebhookStatus", { memoryMiB: 256, timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const cur = (await db.doc("config/odooWebhook").get()).data() || {};
-  return { enabled: cur.enabled !== false, hasSecret: !!cur.secret };
+  // Dernier envoi reçu (posé par odooWebhook) — epoch ms pour une sérialisation propre côté callable.
+  const lr = cur.lastReceived || null;
+  const lastReceived = lr ? { at: lr.at && typeof lr.at.toMillis === "function" ? lr.at.toMillis() : null, object: lr.object || "", written: Number(lr.written) || 0, failed: Number(lr.failed) || 0 } : null;
+  return { enabled: cur.enabled !== false, hasSecret: !!cur.secret, lastReceived };
 });
 
 // setupClickupWebhook : enregistre (ou met à jour) LE webhook workspace pointant vers clickupWebhook.
