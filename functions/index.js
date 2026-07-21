@@ -1411,13 +1411,16 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     allOpps = allOpps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }
-  // MÊME dédup inter-source que le recompute (aggregate.js) : une opp « saisie » dont le FP est déjà
-  // couvert par une opp importée « salesData » est écartée (la version importée fait foi) → l'assiette des
-  // buckets opp du Centre de correction colle AU COCKPIT/SCORE (plus de sur-comptage opps_doublons /
-  // opps_gagnees_sans_pnl / opps_sans_dprev côté correction). Calculé sur allOpps AVANT le split stale/aged.
-  const { fpKey: fpKeyCorr } = require("./lib/ids");
-  const salesFps = new Set(allOpps.filter((o) => o.source === "salesData" && fpKeyCorr(o.fp)).map((o) => fpKeyCorr(o.fp)));
-  allOpps = allOpps.filter((o) => !(o.source === "saisie" && fpKeyCorr(o.fp) && salesFps.has(fpKeyCorr(o.fp))));
+  // MÊME dédup que le recompute — via la SOURCE UNIQUE domain/liveOpps (audit 40 axes, axe 27) : dédup
+  // INTRA-live (salesData+odoo, le plus récent par FP) PUIS masquage des « saisie » couvertes par un FP
+  // live. L'ancienne ré-implémentation locale ignorait Odoo et ne dédupliquait pas les live entre elles →
+  // buckets opp du Centre de correction SUR-COMPTÉS vs cockpit Qualité dès qu'Odoo était actif.
+  const { fpKey: fpKeyCorr } = require("./lib/ids"); // aussi utilisé plus bas (recommandations par FP)
+  {
+    const { dedupeLiveOpps, maskSaisieCovered } = require("./domain/liveOpps");
+    const { oppsDedup, liveFps } = dedupeLiveOpps(allOpps);
+    allOpps = maskSaisieCovered(oppsDedup, liveFps);
+  }
   const thr = thrDoc.data() || {};
   // MÊME préparation des opportunités que le recompute (aggregate.js) → les compteurs du Centre de
   // correction collent au score/aux bulletins : fantômes (stale) et périmées (aged) sont sortis de
@@ -4870,11 +4873,16 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   const canMargin = canRead(matrix, role, "rentabilite");
   const canBacklog = canRead(matrix, role, "backlog");
   const canPipeline = canRead(matrix, role, "pipeline");
+  const canObjectifs = canRead(matrix, role, "objectifs");
   const period = req.data?.period || "all";
   const get = async (p) => (await db.doc(p).get()).data() || {};
   const fiscal = await get("config/fiscal");
   const ov = await get(`summaries/overview_${period}`);
   const att = await get(`summaries/atterrissage_${fiscal.currentFy || ""}`); // atterrissage.* → module overview
+  // Objectif/Écart : lus depuis le doc ISOLÉ atterrissageObjectifs_ (gaté « objectifs ») — le doc public ne
+  // les porte plus depuis l'isolation RBAC ; les lire là où ils étaient laissait des chiffres FIGÉS (résidu
+  // merge:true d'avant l'isolation) ou vides dans le livrable CODIR (audit 40 axes, axe 16).
+  const attObj = canObjectifs ? await get(`summaries/atterrissageObjectifs_${fiscal.currentFy || ""}`) : {};
   const bl = canBacklog ? await get("summaries/backlog_fy") : {};
   const pl = canPipeline ? await get("summaries/pipeline") : {};
   const ovm = canMargin ? await get(`summaries/overviewMargin_${period}`) : {};
@@ -4887,12 +4895,16 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   ws.addRow(["Indicateur", "Valeur"]);
   [
     ["Certitudes", ov.certitudes], ["Commandes (CAS)", ov.commandes], ["Facturé", ov.facture],
+    // Encaissé + taux : la chaîne exportée s'arrêtait au Facturé alors que l'écran affiche 5 maillons.
+    ["Encaissé", ov.encaisse],
     ...(canBacklog ? [["Backlog (RAF)", bl.total]] : []),
     ...(canMargin ? [["Marge brute", ovm.mb]] : []),
     ["Taux facturation", ov.ratios?.tauxFacturation],
+    // Repli dérivé pour un summary d'avant la persistance du ratio (encaisse/facture sont publics).
+    ["Taux encaissement", ov.ratios?.tauxEncaissement ?? ((ov.facture || 0) > 0 ? (ov.encaisse || 0) / ov.facture : 0)],
     ...(canPipeline ? [["Pipeline actif pondéré", pl.tot?.weighted]] : []),
     ["Atterrissage projeté", att.projete],
-    ["Objectif CAS", att.objectif], ["Écart", att.ecart],
+    ...(canObjectifs ? [["Objectif CAS", attObj.objectif], ["Écart", attObj.ecart]] : []),
   ].forEach((r) => ws.addRow(r));
 
   const buf = await wb.xlsx.writeBuffer();
