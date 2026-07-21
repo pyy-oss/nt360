@@ -60,6 +60,55 @@ async function resolveLogisticsFx(db, writes) {
   return converted;
 }
 
+// RATTACHEMENT DC → N° FP À L'IMPORT (audit BC/DC × rentabilité) : les écritures bcLines SANS FP mais
+// portant un DC connu de l'overlay config/dcAliases arrivent DÉJÀ rattachées — même règle que le webhook
+// Odoo à l'ingestion (resolveBcFp : un fp existant prime toujours). Sans cela, le doc resterait sans fp
+// et les vues front (FP 360°, Exécution BC), qui lisent le champ brut, ne le verraient pas sous son
+// affaire avant un backfill. Best-effort (jamais bloquant) ; sans overlay, aucun effet.
+async function resolveBcDc(db, writes) {
+  const targets = (writes || []).filter((w) =>
+    typeof w.path === "string" && w.path.startsWith("bcLines/") && w.data && !w.data.fp && w.data.dc);
+  if (!targets.length) return 0;
+  let map = {};
+  try { map = ((await db.doc("config/dcAliases").get()).data() || {}).map || {}; }
+  catch (_) { return 0; }
+  if (!Object.keys(map).length) return 0;
+  const { resolveBcFp } = require("../domain/odooSync");
+  let resolved = 0;
+  for (const w of targets) {
+    const fp = resolveBcFp(w.data, map);
+    if (fp) { w.data.fp = fp; resolved++; }
+  }
+  return resolved;
+}
+
+// BACKFILL PERSISTANT DC → N° FP sur les DOCS bcLines existants (audit BC/DC × rentabilité). La
+// résolution en mémoire du recompute rattache les AGRÉGATS (SOA, cash, relances, par_ca), mais les
+// vues front lisent le champ `fp` BRUT des docs : un BC rattaché via un alias posé APRÈS coup (seed,
+// rapprochement manuel) restait invisible sous son affaire en FP 360° / Exécution BC — « Qualité dit
+// rattaché, l'écran ne le liste pas ». On matérialise donc fp sur les docs SANS fp dont le DC résout,
+// JAMAIS d'écrasement d'un fp existant (même primauté que resolveBcFp). Scan borné, batchs de 400.
+const MAX_BACKFILL_SCAN = 20000;
+async function backfillBcFpFromDc(db, dcAliasMap) {
+  if (!dcAliasMap || !Object.keys(dcAliasMap).length) return 0;
+  const { resolveBcFp } = require("../domain/odooSync");
+  const snap = await db.collection("bcLines").select("fp", "dc").limit(MAX_BACKFILL_SCAN).get();
+  const targets = [];
+  for (const d of snap.docs) {
+    const v = d.data() || {};
+    if ((v.fp == null || v.fp === "") && v.dc) {
+      const fp = resolveBcFp(v, dcAliasMap);
+      if (fp) targets.push({ ref: d.ref, fp });
+    }
+  }
+  for (let i = 0; i < targets.length; i += 400) {
+    const batch = db.batch();
+    targets.slice(i, i + 400).forEach((t) => batch.update(t.ref, { fp: t.fp }));
+    await batch.commit();
+  }
+  return targets.length;
+}
+
 const SWEEP_SOURCES = new Set(["fiche", "logistics"]);
 async function applyWrites(db, writes) {
   const byPath = new Map();
@@ -105,4 +154,4 @@ async function applyWrites(db, writes) {
   // vérification). Le marquage vit dans lib/sync.js (applySalesSync), seul chemin snapshot LIVE complet.
 }
 
-module.exports = { applyWrites, stripLiveOpps, resolveLogisticsFx };
+module.exports = { applyWrites, stripLiveOpps, resolveLogisticsFx, resolveBcDc, backfillBcFpFromDc };

@@ -22,7 +22,7 @@ const { readWorkbook, aoaToXlsxBase64 } = require("./lib/xlsxRead");
 const { getApp } = require("firebase-admin/app");
 const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
 const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
-const { applyWrites, stripLiveOpps, resolveLogisticsFx } = require("./lib/apply");
+const { applyWrites, stripLiveOpps, resolveLogisticsFx, resolveBcDc, backfillBcFpFromDc } = require("./lib/apply");
 const { parseBuffer, reingestBucket } = require("./lib/reingest");
 const { defineSecret } = require("firebase-functions/params");
 // Token API ClickUp (Secret Manager) — utilisé seulement par les fonctions d'intégration ClickUp.
@@ -86,7 +86,11 @@ async function ingestHandler(event) {
     // correction manuelle (cf. resolveLogisticsFx) — la conversion USD/GBP se fait à l'ingestion.
     const fxConverted = await resolveLogisticsFx(db, deltaWrites);
     if (fxConverted) report.fxConverted = fxConverted;
-    logger.info("ingest", { name, kinds, liveSkipped, fxConverted, ...report });
+    // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — même règle que le
+    // webhook Odoo à l'ingestion : le doc arrive déjà rattaché (cf. resolveBcDc).
+    const dcResolved = await resolveBcDc(db, deltaWrites);
+    if (dcResolved) report.dcResolved = dcResolved;
+    logger.info("ingest", { name, kinds, liveSkipped, fxConverted, dcResolved, ...report });
 
     await applyWrites(db, deltaWrites); // upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
@@ -1194,9 +1198,11 @@ exports.importDelta = onCallG("importDelta", { memoryMiB: 2048, timeoutSeconds: 
   // Taux paramétrés (config/fxRates) appliqués aux lignes logistics « à saisir » sans écraser de correction
   // manuelle (cf. resolveLogisticsFx) — conversion USD/GBP à l'import.
   const fxConverted = await resolveLogisticsFx(db, deltaWrites);
+  // Rattachement DC → N° FP des lignes BC sans FP (overlay config/dcAliases) — cf. resolveBcDc.
+  const dcResolved = await resolveBcDc(db, deltaWrites);
   await applyWrites(db, deltaWrites); // dédup par chemin + upsert + nettoyage des orphelins de fiche (voir applyWrites)
 
-  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}), ...(fxConverted ? { fxConverted } : {}) };
+  const report = { kinds, files, rowsIn, rowsOk, rowsSkipped, ...(liveSkipped ? { liveSkipped } : {}), ...(fxConverted ? { fxConverted } : {}), ...(dcResolved ? { dcResolved } : {}) };
   await db.collection("imports").add({
     uid: req.auth.uid, kinds, filename, objectKey: null, mode: "delta",
     rowsIn, rowsOk, rowsSkipped, report, ts: FieldValue.serverTimestamp(),
@@ -1328,12 +1334,25 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
   }
   // merge:FALSE (audit intégrité, cf. setFpAlias) : sinon la clé retirée survivrait au merge récursif du champ map.
   await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  // RATTACHEMENT PERSISTANT (audit BC/DC × rentabilité) : matérialise le fp sur les docs bcLines de CE
+  // DC encore sans fp — les vues front (FP 360°, Exécution BC) lisent le champ brut ; sans écriture, le
+  // BC resterait invisible sous son affaire malgré le rattachement des agrégats. Jamais d'écrasement
+  // d'un fp existant ; la SUPPRESSION d'un alias ne retire rien (non destructif). Best-effort.
+  let backfilled = 0;
+  if (to) {
+    try {
+      const snap = await db.collection("bcLines").where("dc", "==", from).limit(1000).get();
+      const batch = db.batch();
+      for (const d of snap.docs) { const v = d.data() || {}; if (v.fp == null || v.fp === "") { batch.update(d.ref, { fp: to }); backfilled++; } }
+      if (backfilled) await batch.commit();
+    } catch (e) { logger.warn("setDcAlias : backfill bcLines en échec (non bloquant)", { from, msg: e && e.message }); }
+  }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "set_dc_alias", module: "import", entity: "dcAlias", entityId: from,
-    detail: { from, to: to || null }, ts: FieldValue.serverTimestamp(),
+    detail: { from, to: to || null, backfilled }, ts: FieldValue.serverTimestamp(),
   });
   await refreshNowBestEffort("setDcAlias");
-  return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
+  return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length, backfilled };
 });
 
 // --- SEED de la table FP–DC (import de fichier .xlsx/.csv) : dans Odoo, le DC est GÉNÉRÉ depuis le FP
@@ -1373,13 +1392,19 @@ exports.importDcAliases = onCallG("importDcAliases", { memoryMiB: 512, timeoutSe
   for (const p of plan.toAdd) map[p.dc] = p.fp;
   // merge:FALSE (audit intégrité, cf. setDcAlias) : le doc reflète EXACTEMENT la map calculée.
   await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  // RATTACHEMENT PERSISTANT (audit BC/DC × rentabilité) : matérialise le fp sur les docs bcLines encore
+  // sans fp dont le DC résout désormais — sans quoi FP 360° / Exécution BC (champ brut) ne montreraient
+  // pas les BC que les agrégats rattachent. Jamais d'écrasement d'un fp existant. Best-effort.
+  let backfilled = 0;
+  try { backfilled = await backfillBcFpFromDc(db, map); }
+  catch (e) { logger.warn("importDcAliases : backfill bcLines en échec (non bloquant)", { msg: e && e.message }); }
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "import_dc_aliases", module: "import", entity: "dcAlias", entityId: "batch",
-    detail: { added: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length, skipped: plan.skipped.length, filename: String(req.data && req.data.filename || "").slice(0, 120) },
+    detail: { added: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length, skipped: plan.skipped.length, backfilled, filename: String(req.data && req.data.filename || "").slice(0, 120) },
     ts: FieldValue.serverTimestamp(),
   });
   await refreshNowBestEffort("importDcAliases"); // les BC historiques à DC connu se rattachent au recalcul
-  return { ok: true, added: plan.toAdd.length, aliasCount: Object.keys(map).length, ...summary };
+  return { ok: true, added: plan.toAdd.length, aliasCount: Object.keys(map).length, backfilled, ...summary };
 });
 
 // --- DOSSIER CLIENT (rapprochement) : regroupe Opportunités / Commandes P&L / Factures par CLIENT

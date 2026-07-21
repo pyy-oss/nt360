@@ -327,6 +327,14 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     expect(r.status).toBe("livre");
     expect(r.source).toBe("logistics");
   });
+  it("capte le DC (colonne « DC ») ADDITIVEMENT — clé de rattachement de secours via config/dcAliases", () => {
+    const out = parseLogistics(wbFromRows("PO List", [
+      { "PO N°": "BC/2026/1", Fournisseur: "ACME", "Montant XOF": 500, DC: "DC00123" },
+      { "PO N°": "BC/2026/2", Fournisseur: "ACME", "Montant XOF": 700 }, // sans DC → champ NON écrit (merge préservé)
+    ])).rows;
+    expect(out.find((r) => r.bcNumber === "BC/2026/1").dc).toBe("DC00123");
+    expect("dc" in out.find((r) => r.bcNumber === "BC/2026/2")).toBe(false);
+  });
   it("deux lignes d'un même BC de MONTANTS différents ne se confondent plus (index d'occurrence)", () => {
     const rows2 = [
       { "Opp ID": "FP/2024/9", "PO N°": "BC/9", Fournisseur: "ACME", Description: "Switch", "Montant XOF": 100 },

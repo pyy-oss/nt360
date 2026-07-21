@@ -394,14 +394,14 @@ export async function setFpAlias(from: string, to: string) {
  *  supprime le rapprochement. Droit « import ». onCall : recalcule. */
 export async function setDcAlias(from: string, to: string) {
   const res = await httpsCallable(functions, "setDcAlias", { timeout: 300_000 })({ from, to });
-  return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number };
+  return res.data as { ok: boolean; from: string; to: string | null; aliasCount: number; backfilled?: number };
 }
 
 /** SEED de la table FP–DC (fichier .xlsx/.csv à deux colonnes, ordre libre) : amorce config/dcAliases
  *  EN MASSE pour l'historique antérieur au webhook Odoo (le DC est généré depuis le FP côté Odoo).
  *  `apply: false` = aperçu (dry-run) ; en cas de conflit, le rapprochement DÉJÀ posé prime (signalé). */
 export type DcMapImportResult = {
-  ok: boolean; dryRun?: boolean; added?: number; aliasCount?: number;
+  ok: boolean; dryRun?: boolean; added?: number; aliasCount?: number; backfilled?: number;
   toAdd: number; unchanged: number; conflicts: number; skipped: number; truncated: boolean;
   conflictsDetail: { dc: string; existing: string; incoming: string }[];
   skippedDetail: { reason: string; detail: string }[];

@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-067 — BC/DC dans la rentabilité : « engagé (Σ BC) » par affaire + alerte de dépassement, rattachement DC persistant sur les docs, DC capté à l'import BC
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« audit de la prise en compte des DC et des BC liés dans le module rentabilité », puis « go » sur les trois lots recommandés)
+
+### Contexte
+L'audit a montré que la chaîne de coût par affaire connaissait le PLANIFIÉ (fiche/P&L → costTotal) et le RÉEL (factures fournisseur, ADR-P21) mais ignorait le stade intermédiaire ENGAGÉ (Σ des BC émis) : un dépassement d'achat déjà commandé était invisible en rentabilité alors que la donnée existait (bcLines, listées en FP 360° sans être sommées). Par ailleurs, la résolution DC → FP rétroactive (overlay posé APRÈS le BC — cas courant post-seed ADR-066) restait EN MÉMOIRE au recompute : les agrégats rattachaient le BC, mais FP 360° / Exécution BC (qui lisent le champ `fp` brut des docs) ne le montraient pas. Enfin, l'import BC Excel (Logistics) ne captait pas de colonne DC — l'information était perdue à l'import.
+
+### Décisions
+- **`bcCostByFp` (domain/fournisseurs, PUR, testé)** : Σ des BC RÉELS par N° FP canonique, TOUS statuts confondus (un BC payé reste un coût — le statut est du cash), lignes de fiche EXCLUES (achats planifiés, déjà dans costTotal). Source unique de l'« engagé » ; miroir front trivial en FP 360°.
+- **FP 360°** : la réconciliation amont devient planifié / **Engagé (Σ BC)** / réel / écart ; Σ engagé aussi dans l'entête « Lignes BC » (visible sans le drapeau « Vérité du coût », comme les montants de la table) ; **alerte `achat_bc_sup_planifie`** (high, `margin: true` → alertsMargin, droit rentabilite) quand l'engagé dépasse un costTotal CONNU (> 0) — sans référence planifiée, pas de verdict.
+- **Rattachement DC persistant** : le `fp` résolu par l'overlay est désormais ÉCRIT sur les docs bcLines — à l'import (resolveBcDc, delta + trigger, même règle que le webhook), au seed (`importDcAliases` → backfill borné 20 000 docs) et au rapprochement manuel (`setDcAlias` → backfill ciblé par DC). JAMAIS d'écrasement d'un fp existant ; la suppression d'un alias ne retire rien. La résolution en mémoire du recompute est CONSERVÉE (filet pour tout doc non encore backfillé).
+- **Parseur Logistics** : colonne « DC » captée additivement (champ non écrit si absente — le merge au ré-import préserve un dc déjà posé).
+
+### Conséquences
+- « Qualité dit rattaché mais l'écran ne le liste pas » disparaît : après un seed, les BC à DC connu apparaissent sous leur affaire en FP 360° / Exécution BC (compteur `backfilled` audité et affiché).
+- Une dérive d'achat commandée se voit AVANT la facture fournisseur (alerte + KPI), au lieu d'attendre le réel.
+- Colonne DC visible dans les « Lignes BC » du FP 360° (vérification visuelle d'un rattachement sans passer par le Centre de correction).
+
+### Ce qu'on saura dans six mois
+Si l'alerte `achat_bc_sup_planifie` est bruyante, c'est que les fiches ne sont pas re-validées après émission des BC — durcir le processus fiche, pas le seuil.
+
 ## ADR-066 — Seed de la table FP–DC : import de fichier en masse dans config/dcAliases, l'existant prime en cas de conflit
 
 - **Date :** 2026-07-21

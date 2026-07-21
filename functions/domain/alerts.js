@@ -3,6 +3,7 @@
 const { sum } = require("./chaine");
 const { groupSum } = require("./backlog");
 const { fpKey, plausibleYear } = require("../lib/ids");
+const { bcCostByFp } = require("./fournisseurs");
 // Seuils d'alerte PAR DÉFAUT (source unique domain/thresholds ; surchargés par config/alerts).
 const { ALERT_DEFAULTS } = require("./thresholds");
 
@@ -30,6 +31,14 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   // Achats fournisseurs > vente (Σsuppliers > CAS).
   const achatSup = orders.filter((o) => (o.suppliers || []).reduce((s, x) => s + (x.amount || 0), 0) > (o.cas || 0) && o.cas > 0);
   if (achatSup.length) out.push({ type: "achat_sup_vente", severity: "high", margin: true, count: achatSup.length, message: `${achatSup.length} commande(s) où les achats dépassent la vente`, refs: achatSup.slice(0, 10).map((o) => o.fp) });
+
+  // Achats ENGAGÉS (Σ BC réels du FP, tous statuts — bcCostByFp) > coût PLANIFIÉ du carnet (costTotal,
+  // fiche/P&L). Dérive d'achat DÉJÀ COMMANDÉE, invisible de la marge carnet tant que la fiche n'est pas
+  // mise à jour. Seulement quand le planifié est CONNU (costTotal > 0) — sans référence, pas de verdict
+  // (le flag « coût absent » couvre ce cas). Dérivée de la marge (costTotal confidentiel) → alertsMargin.
+  const engByFp = bcCostByFp(bcLines || []);
+  const bcSup = orders.filter((o) => { const k = fpKey(o.fp); const c = Number(o.costTotal) || 0; return k && c > 0 && (engByFp[k] || 0) > c; });
+  if (bcSup.length) out.push({ type: "achat_bc_sup_planifie", severity: "high", margin: true, count: bcSup.length, message: `${bcSup.length} commande(s) où les BC émis dépassent le coût planifié`, refs: bcSup.slice(0, 10).map((o) => o.fp) });
 
   // --- Cohérence financière (identité CAS = Facturé + RAF) ---
   // Σ facturé par FP CANONIQUE (fpKey) : un même FP formaté différemment côté facture/commande
