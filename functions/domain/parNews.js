@@ -6,7 +6,7 @@
 
 // Construit le fil de bulletins partenariats à partir des états dérivés (quotas de couverture, alertes de
 // renouvellement, relances d'assignation) déjà calculés au recompute. Ids fixes = curables par type.
-function parNews({ quotas, renouvellements, relances } = {}) {
+function parNews({ quotas, renouvellements, relances, renouvellementsPartenariat } = {}) {
   const B = [];
   const qp = (quotas && quotas.partners) || (Array.isArray(quotas) ? quotas : []);
   const nonConf = qp.filter((p) => p && p.status === "non_compliant");
@@ -27,6 +27,17 @@ function parNews({ quotas, renouvellements, relances } = {}) {
     title: `${total} certification(s) à renouveler (≤ 90 j)`, detail: "Anticipez les renouvellements pour maintenir la couverture des quotas constructeurs." });
   if (late) B.push({ id: "par_assignations_retard", domain: "partenariats", module: "partenariats", severity: "medium",
     title: `${late} assignation(s) de certification en retard`, detail: "Des parcours de certification ont dépassé leur échéance cible — relancez les managers concernés." });
+
+  // Renouvellement du PARTENARIAT (renewalDate du référentiel, fenêtre J-90/60/30 — partnerRenewalWatch).
+  // Échu = high (le contrat programme n'est plus couvert) ; à venir = medium (anticiper la renégociation).
+  const prItems = (renouvellementsPartenariat && renouvellementsPartenariat.items) || [];
+  const prExp = prItems.filter((p) => p && p.bucket === "expired");
+  const prSoon = prItems.filter((p) => p && p.bucket !== "expired");
+  const prNames = (arr) => arr.slice(0, 4).map((p) => p.name || p.partnerId).join(", ") + (arr.length > 4 ? "…" : "");
+  if (prExp.length) B.push({ id: "par_partenariats_echus", domain: "partenariats", module: "partenariats", severity: "high",
+    title: `${prExp.length} partenariat(s) à échéance dépassée`, detail: `Contrat programme non renouvelé : ${prNames(prExp)}. Statuts, remises et accès constructeur peuvent être suspendus.` });
+  if (prSoon.length) B.push({ id: "par_partenariats_a_renouveler", domain: "partenariats", module: "partenariats", severity: "medium",
+    title: `${prSoon.length} partenariat(s) à renouveler (≤ 90 j)`, detail: `Échéance de programme proche : ${prNames(prSoon)}. Préparez la renégociation (quotas, plan d'affaires, niveau).` });
 
   return { bulletins: B, recommendations: [], counts: { total: B.length, high: B.filter((b) => b.severity === "high").length } };
 }

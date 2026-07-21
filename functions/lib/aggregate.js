@@ -889,7 +889,7 @@ async function recomputeCore(db, only) {
     if (isParEnabled(parCfg)) {
       const { revenueByPartner, blendRevenue } = require("../domain/parRevenue");
       const { coverageAll } = require("../domain/parQuota");
-      const { certRenewalWatch, watchCounts } = require("../domain/parAlert");
+      const { certRenewalWatch, partnerRenewalWatch, watchCounts } = require("../domain/parAlert");
       const { assignmentWatch, watchCounts: assignCounts } = require("../domain/parAssignment");
       const [parPartners, parCertifs, parAssigns] = await Promise.all([
         readAll(db, "par_partners", true), readAll(db, "par_certifications", true), readAll(db, "par_assignments", true),
@@ -952,9 +952,12 @@ async function recomputeCore(db, only) {
       const quotas = coverageAll(parPartners, certsByPartner);
       w.push({ path: "summaries/par_quotas", data: { asOf, partners: quotas, ...stamp } });
 
-      // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0).
+      // Alertes cycle de vie : liste de renouvellement des certifs ≤ 90 j / expirées (J-90/60/30/7/0)
+      // + renouvellement du PARTENARIAT lui-même (renewalDate du référentiel, J-90/60/30 — PAR-P4).
       const watch = certRenewalWatch(parCertifs, asOf);
-      w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length, ...stamp } });
+      const partnerWatch = partnerRenewalWatch(parPartners, asOf);
+      w.push({ path: "summaries/par_alerts", data: { asOf, items: watch.slice(0, 200), counts: watchCounts(watch), total: watch.length,
+        partnerRenewals: partnerWatch.slice(0, 50), partnerRenewalCounts: watchCounts(partnerWatch), partnerRenewalTotal: partnerWatch.length, ...stamp } });
 
       // Relances d'assignation : assignations en retard ou dans une fenêtre de relance (J-30/14/7).
       const relances = assignmentWatch(parAssigns, asOf);
@@ -967,7 +970,7 @@ async function recomputeCore(db, only) {
       // au fil Actualité (comme newsFacturation/…). Contrairement à maintenance, le module CONTRIBUE au fil.
       const { parNews } = require("../domain/parNews");
       const renouv = { counts: watchCounts(watch), total: watch.length };
-      const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts } });
+      const news = parNews({ quotas: { partners: quotas }, renouvellements: renouv, relances: { counts: relanceCounts }, renouvellementsPartenariat: { items: partnerWatch } });
       w.push({ path: "summaries/par_news", data: { asOf, ...news, ...stamp } });
 
       // Historisation quotidienne de la couverture des quotas (tendance, Lot P3) — patron qualityHistory :

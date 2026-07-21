@@ -40,10 +40,10 @@ type BusinessPlan = Partial<Record<"pipelineBp" | "pipelineYtd" | "bookingBp" | 
 type Partner = { id: string; name: string; programName?: string; status?: string; renewalDate?: string; validationStatus?: string; businessPlan?: BusinessPlan; caDeclaredXof?: number; fiscalStartMonth?: number; tiers?: { id: string; name: string; rank: number }[]; competencies?: { id: string; name: string }[]; certificationCatalog?: CatalogEntry[]; requirements?: { tierId: string; certIdOrCompetencyId: string; minCount: number }[] };
 type Certif = { id: string; consultantId: string; consultantName?: string; consultantBu?: string; partnerId: string; certificationCatalogId: string; certName?: string; certCode?: string; status: string; obtainedDate: string; expiryDate?: string };
 type Assign = { id: string; consultantId: string; consultantName?: string; partnerId: string; certificationCatalogId: string; cert?: string; targetDate: string; status: string; clickupTaskId?: string; clickupUrl?: string };
-type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; totalXof?: number; bcXof?: number; declaredXof?: number; exerciseYear?: number; offExerciseXof?: number; offExerciseCount?: number; asOf?: string } | null;
+type CaSummary = { byPartner?: { partnerId: string; name: string; revenueXof: number; bcXof?: number; declaredXof?: number; bcCount: number; source?: "bc" | "declare" }[]; unmapped?: { supplier: string; revenueXof: number; bcCount: number }[]; unmappedCount?: number; declaredRawXof?: number; totalXof?: number; bcXof?: number; declaredXof?: number; exerciseYear?: number; offExerciseXof?: number; offExerciseCount?: number; asOf?: string } | null;
 type CaHistory = { days?: { date: string; totalXof: number; bcXof: number; declaredXof: number }[] } | null;
 type QuotaSummary = { partners?: { partnerId: string; name: string; status: string; coverage: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[]; gaps: { target: string; minCount: number; holders: number }[] }[]; asOf?: string } | null;
-type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number } | null;
+type AlertSummary = { items?: { id: string; consultantName?: string; partnerId: string; certName?: string; expiryDate: string; daysLeft: number; bucket: string }[]; counts?: Record<string, number>; total?: number; partnerRenewals?: { id: string; partnerId: string; name: string; renewalDate: string; daysLeft: number; bucket: string }[]; partnerRenewalTotal?: number } | null;
 type RelanceSummary = { items?: { id: string; consultantName?: string; partnerId: string; cert?: string; targetDate: string; daysLeft: number; bucket: string; effectiveStatus?: string }[]; counts?: { total: number; late: number } } | null;
 type QuotaHistory = { days?: { date: string; conformes: number; aRisque: number; nonConformes: number; total: number; aRenouveler: number; expirees: number }[] } | null;
 type ConsultantLite = { id: string; name: string; bu?: string };
@@ -373,6 +373,35 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
   const tp = (r: { partnerId: string; coverage?: { tierId: string; target: string; minCount: number; holders: number; ok: boolean }[] }) =>
     tierProgress(tiersByPartner.get(r.partnerId), r.coverage);
   const bpCol = (ax: typeof BP_AXES[number]) => colNum(BP_AXIS_LABEL[ax], (r: typeof bpRows[number]) => <MiniBar ratio={r.a[ax]} />, (r: typeof bpRows[number]) => r.a[ax] ?? -1);
+  // Écart statut DÉCLARÉ (fiche partenaire, texte libre : « Silver », « Expert »…) vs niveau CALCULÉ
+  // (tierProgress sur la couverture des quotas) — PAR-P4. Comparaison insensible casse/espaces : un badge
+  // signale la divergence (statut affiché au constructeur non soutenu par les certifs, ou l'inverse).
+  const declaredById = useMemo(() => new Map(partners.map((p) => [p.id, (p.status || "").trim()])), [partners]);
+  const normLvl = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  // Renouvellements du PARTENARIAT (renewalDate, J-90/60/30 — partnerRenewalWatch au recompute).
+  const partnerRenewals = alerts?.partnerRenewals || [];
+  // Comparatif inter-constructeurs (PAR-P4) : jointure FRONT des états déjà calculés (CA, conformité,
+  // niveau tenu, certifs valides, renouvellements) — aucune re-dérivation, uniquement une mise côte à côte
+  // pour arbitrer où investir (quel partenariat rapporte, lequel coûte en conformité).
+  const compareRows = useMemo(() => {
+    const caBy = new Map((ca?.byPartner || []).map((g) => [g.partnerId, g]));
+    const quotaBy = new Map(quotaPartners.map((q) => [q.partnerId, q]));
+    const renewBy = new Map<string, number>();
+    for (const a of alertItems) renewBy.set(a.partnerId, (renewBy.get(a.partnerId) || 0) + 1);
+    const certBy = new Map<string, { ok: number; tot: number }>();
+    for (const c of certifs) { const e = certBy.get(c.partnerId) || { ok: 0, tot: 0 }; e.tot++; if (c.status === "active") e.ok++; certBy.set(c.partnerId, e); }
+    return partners.map((p) => {
+      const q = quotaBy.get(p.id);
+      return {
+        partnerId: p.id, name: p.name,
+        caXof: caBy.get(p.id)?.revenueXof || 0, caSource: caBy.get(p.id)?.source,
+        quotaStatus: q?.status || "non_evalue",
+        achieved: q ? tierProgress(p.tiers, q.coverage).achieved?.name || null : null,
+        certOk: certBy.get(p.id)?.ok || 0, certTot: certBy.get(p.id)?.tot || 0,
+        renouv: renewBy.get(p.id) || 0,
+      };
+    }).sort((a, b) => b.caXof - a.caXof || a.name.localeCompare(b.name));
+  }, [partners, ca, quotaPartners, alertItems, certifs]);
   // Plan de formation (PA+ Lot 3) : transforme les écarts de quota en assignations proposées. PUR (parTraining),
   // aucune re-dérivation de la conformité — on lit la couverture du summary.
   const trainRows = useMemo(() => trainingPlan(quotaPartners, partners, certifs, assigns), [quotaPartners, partners, certifs, assigns]);
@@ -411,7 +440,22 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
       <Card title="CA par constructeur — BC dérivé + déclaratif">
         <Tip>Le chiffre d'affaires par partenaire <b>mélange</b> le <b>dérivé des bons de commande fournisseurs</b> (via la correspondance fournisseur→constructeur, Paramétrage) et le <b>CA réalisé déclaré</b> sur la fiche partenaire (repli = booking YTD du plan d'affaires). Règle : le <b>BC prime</b> dès qu'il existe, le déclaratif comble sinon — jamais additionnés. Montants en FCFA.</Tip>
         <Table
-          columns={[colText("Constructeur", (r) => r.name), colNum("CA (FCFA)", (r) => money(r.revenueXof)), colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>), colNum("BC", (r) => String(r.bcCount))]}
+          columns={[
+            colText("Constructeur", (r) => r.name, (r) => r.name),
+            colNum("CA retenu (FCFA)", (r) => money(r.revenueXof), (r) => r.revenueXof),
+            // Écart BC vs déclaré PAR LIGNE (PAR-P4) : les deux mesures coexistent sur la fiche — les voir
+            // côte à côte révèle un déclaratif surestimé (ou un mapping BC incomplet), au lieu d'un seul
+            // chiffre « retenu » qui masque la divergence.
+            colNum("dont BC", (r) => (r.bcXof || 0) > 0 ? money(r.bcXof!) : <span className="text-faint">—</span>, (r) => r.bcXof || 0),
+            colNum("dont déclaré", (r) => (r.declaredXof || 0) > 0 ? money(r.declaredXof!) : <span className="text-faint">—</span>, (r) => r.declaredXof || 0),
+            colNum("Écart BC−déclaré", (r) => {
+              if (!((r.bcXof || 0) > 0 && (r.declaredXof || 0) > 0)) return <span className="text-faint">—</span>;
+              const d = (r.bcXof || 0) - (r.declaredXof || 0);
+              return <span className="tabnum" style={{ color: d < 0 ? T.clay : T.emerald }}>{d > 0 ? "+" : ""}{money(d)}</span>;
+            }, (r) => ((r.bcXof || 0) > 0 && (r.declaredXof || 0) > 0) ? (r.bcXof || 0) - (r.declaredXof || 0) : 0),
+            colText("Source", (r) => <Badge tone={r.source === "bc" ? "emerald" : "gold"}>{r.source === "bc" ? "BC" : "Déclaré"}</Badge>, (r) => r.source || ""),
+            colNum("BC", (r) => String(r.bcCount), (r) => r.bcCount),
+          ]}
           rows={ca?.byPartner || []} rowKey={(r) => r.partnerId} empty="Aucun CA — ni BC rattaché, ni CA déclaré/booking YTD sur les fiches partenaires."
         />
         {/* Ventilation BC dérivé vs déclaratif (fait voir où le réel a pris le relais du repli). */}
@@ -428,9 +472,9 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
             {money(ca!.offExerciseXof!)} de commandes d'autres millésimes exclues de l'exercice {ca?.exerciseYear || ""} ({ca?.offExerciseCount || 0} BC).
           </div>
         )}
-        {!!(ca?.unmapped || []).length && (
+        {!!(ca?.unmappedCount ?? (ca?.unmapped || []).length) && (
           <div className="mt-2 text-[12px] text-gold">
-            {(ca!.unmapped!).length} fournisseur(s) BC non rattaché(s) à un constructeur (à mapper en Paramétrage) — ex. {(ca!.unmapped!).slice(0, 3).map((u) => u.supplier).join(", ")}.
+            {ca?.unmappedCount ?? (ca!.unmapped!).length} fournisseur(s) BC non rattaché(s) à un constructeur (à mapper en Paramétrage) — ex. {(ca?.unmapped || []).slice(0, 3).map((u) => u.supplier).join(", ")}.
           </div>
         )}
         {/* Tendance du CA (historisé à chaque recalcul) : total + ventilation BC/déclaré. */}
@@ -460,6 +504,17 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
             colText("Constructeur", (r) => r.name),
             colText("Statut", (r) => <Badge tone={partnershipTone(r.status)}>{label(PARTNERSHIP_STATUS_LABEL, r.status)}</Badge>),
             colText("Niveau tenu", (r) => tp(r).achieved?.name || "—"),
+            // Statut DÉCLARÉ vs niveau CALCULÉ (PAR-P4) : badge quand la fiche revendique un niveau que la
+            // couverture des quotas ne soutient pas (ou l'inverse) — signal de mise à jour de fiche ou de
+            // risque à l'audit constructeur. Simple signal, pas une erreur (les libellés peuvent différer).
+            colText("Déclaré", (r: QuotaRow) => {
+              const d = declaredById.get(r.partnerId) || "";
+              if (!d) return <span className="text-faint">—</span>;
+              const a = tp(r).achieved?.name || "";
+              return normLvl(d) === normLvl(a)
+                ? <span>{d}</span>
+                : <span className="inline-flex items-center gap-1.5" title={`Statut déclaré « ${d} » ≠ niveau calculé « ${a || "aucun"} » (couverture des quotas)`}>{d}<Badge tone="gold">≠ calculé</Badge></span>;
+            }, (r: QuotaRow) => declaredById.get(r.partnerId) || ""),
             colText("Prochain niveau", (r) => { const p = tp(r); return p.next ? <span>{p.next.name}{p.gaps.length ? <span className="text-faint"> · {p.gaps.map((g) => `${g.target} ${g.holders}/${g.minCount}`).join(", ")}</span> : null}</span> : <span className="text-emerald">Palier max tenu</span>; }),
             colText("Exigences couvertes", (r: QuotaRow) => { const tot = (r.coverage || []).length; const ok = (r.coverage || []).filter((c) => c.ok).length; return <MiniBar ratio={tot ? ok / tot : null} label={`${ok}/${tot}`} />; }),
             colText("Écarts", (r: QuotaRow) => (r.gaps || []).length ? r.gaps.map((g) => `${g.target} (${g.holders}/${g.minCount})`).join(", ") : "—"),
@@ -468,6 +523,50 @@ const Dashboard: FC<{ ca: CaSummary; caHistory: CaHistory; canSeeCa: boolean; ca
           rows={quotaPartners} rowKey={(r) => r.partnerId} empty="Aucun quota évalué — ajoutez des exigences au référentiel et des certifications."
         />
       </Card>
+
+      {/* Comparatif inter-constructeurs (PAR-P4) : mise côte à côte des états DÉJÀ calculés — quel
+          partenariat rapporte (CA), lequel coûte (conformité, renouvellements). Aucune re-dérivation. */}
+      {compareRows.length >= 2 && (
+        <Card title="Comparatif inter-constructeurs" actions={<ExportBtn name="comparatif-constructeurs" cols={[
+          { header: "Constructeur", render: (r: typeof compareRows[number]) => r.name },
+          ...(canSeeCa ? [{ header: "CA (FCFA)", render: (r: typeof compareRows[number]) => String(r.caXof) }] : []),
+          { header: "Conformité", render: (r: typeof compareRows[number]) => label(PARTNERSHIP_STATUS_LABEL, r.quotaStatus) },
+          { header: "Niveau tenu", render: (r: typeof compareRows[number]) => r.achieved || "" },
+          { header: "Certifs valides", render: (r: typeof compareRows[number]) => `${r.certOk}/${r.certTot}` },
+          { header: "À renouveler ≤ 90 j", render: (r: typeof compareRows[number]) => String(r.renouv) },
+        ]} rows={compareRows} />}>
+          <Tip>Les constructeurs côte à côte : le <b>CA</b> qu'ils génèrent{canSeeCa ? "" : " (masqué sans droit rentabilité)"}, la <b>conformité</b> des quotas, le <b>niveau tenu</b> et la pression de <b>renouvellement</b>. Mêmes chiffres que les cartes ci-dessus — juste alignés pour arbitrer où investir.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              ...(canSeeCa ? [colNum("CA (FCFA)", (r: typeof compareRows[number]) => r.caXof ? <span className="inline-flex items-center gap-1.5">{money(r.caXof)}{r.caSource === "declare" && <Badge tone="gold">Déclaré</Badge>}</span> : <span className="text-faint">—</span>, (r: typeof compareRows[number]) => r.caXof)] : []),
+              colText("Conformité", (r) => <Badge tone={partnershipTone(r.quotaStatus)}>{label(PARTNERSHIP_STATUS_LABEL, r.quotaStatus)}</Badge>, (r) => r.quotaStatus),
+              colText("Niveau tenu", (r) => r.achieved || "—", (r) => r.achieved || ""),
+              colNum("Certifs valides", (r) => r.certTot ? <MiniBar ratio={r.certOk / r.certTot} label={`${r.certOk}/${r.certTot}`} /> : <span className="text-faint">—</span>, (r) => r.certTot ? r.certOk / r.certTot : -1),
+              colNum("À renouveler", (r) => r.renouv ? <span className="text-gold tabnum">{r.renouv}</span> : "0", (r) => r.renouv),
+            ]}
+            rows={compareRows} rowKey={(r) => r.partnerId} empty="Au moins deux partenaires requis."
+          />
+        </Card>
+      )}
+
+      {/* Renouvellement du PARTENARIAT lui-même (PAR-P4) : renewalDate du référentiel, fenêtres J-90/60/30
+          matérialisées au recompute (partnerRenewalWatch) — le contrat programme se renégocie en amont. */}
+      {!!partnerRenewals.length && (
+        <Card title="Renouvellements de partenariats (≤ 90 j)">
+          <Tip>Échéances de <b>contrat programme</b> constructeur à préparer : renégociation du niveau, quotas et plan d'affaires. Dérivé de la date d'échéance saisie sur chaque fiche partenaire.</Tip>
+          <Table
+            columns={[
+              colText("Constructeur", (r) => r.name, (r) => r.name),
+              colText("Échéance", (r) => frDate(r.renewalDate), (r) => r.renewalDate),
+              colNum("Jours restants", (r) => r.daysLeft <= 0 ? <span className="text-clay tabnum">échue</span> : <span className="tabnum">{r.daysLeft}</span>, (r) => r.daysLeft),
+              colText("Urgence", (r) => <Badge tone={alertBucketTone(r.bucket)}>{r.bucket === "expired" ? "Échue" : label(ALERT_BUCKET_LABEL, r.bucket)}</Badge>, (r) => r.bucket),
+              ...(canWrite ? [editCol((r) => r.partnerId)] : []),
+            ]}
+            rows={partnerRenewals} rowKey={(r) => r.id} pageSize={10} empty="Aucun partenariat à échéance sous 90 jours."
+          />
+        </Card>
+      )}
 
       {!!trainRows.length && (
         <Card title="Plan de formation — combler les quotas">
