@@ -14,7 +14,7 @@ Le DC Odoo est GÉNÉRÉ depuis le FP (« Générer DC ») et porte ensuite TOUT
 
 ### Décisions
 - **Callable `importDcAliases`** (droit `import`, rate-limité, fichier .xlsx/.csv ≤ ~22 Mo via xlsxRead) : amorce `config/dcAliases` EN MASSE. Deux temps (dryRun → confirmation), comme PAR-L2.
-- **Plan PUR `domain/dcMapImport.planDcMapImport`** (testé) : détection PAR CONTENU — la cellule que `fpKey` résout est le FP, la première autre non vide est le DC (ordre de colonnes libre, entêtes écartées naturellement) ; dédoublonnage par DC ; borne 5 000 lignes signalée.
+- **Plan PUR `domain/dcMapImport.planDcMapImport`** (testé) : détection PAR CONTENU — la cellule que `fpKey` résout est le FP, la SEULE autre cellule non vide est le DC (ordre de colonnes libre, entêtes écartées naturellement) ; toute ambiguïté est écartée et signalée (deux FP sur la ligne, ou plusieurs cellules non-FP — un export à colonnes surnuméraires ne « devine » jamais le DC, sinon mapping faux en masse) ; dédoublonnage par DC ; borne 5 000 lignes signalée.
 - **Règle de conflit : L'EXISTANT PRIME.** Un rapprochement déjà posé (manuel ou import précédent) n'est JAMAIS écrasé par le fichier — le conflit est signalé à l'aperçu et dans le résultat, l'arbitrage reste humain (modification à la main si le fichier a raison).
 - **Front** : bloc « Seed initial » dans la section Rapprochement DC du Centre de correction (fichier → Aperçu avec badges à ajouter / déjà en place / conflits conservés / écartées + exemples → Appliquer). Doc `ODOO_WEBHOOK.md` : contexte DC + mode d'emploi du seed.
 - Le DC comme **pivot des dépenses** est consigné : si d'autres charges Odoo (décaissements…) remontent un jour, leur clé de rattachement naturelle sera le DC via ce même overlay.

@@ -7,8 +7,9 @@
 //
 // Règles :
 //  - Détection PAR CONTENU, pas par entête : dans chaque ligne, la cellule que fpKey résout est le FP,
-//    la première autre cellule non vide est le DC (ordre des colonnes libre ; les entêtes tombent
-//    naturellement en « écartée »). Deux cellules FP-résolubles = ambigu → écartée.
+//    la seule autre cellule non vide est le DC (ordre des colonnes libre ; les entêtes tombent
+//    naturellement en « écartée »). Deux cellules FP-résolubles OU plusieurs cellules non-FP
+//    (export à colonnes surnuméraires : deviner le DC = mapping faux en masse) = ambigu → écartée.
 //  - Dédoublonnage par DC : première occurrence retenue, doublons écartés (signalés).
 //  - CONFLIT avec un rapprochement DÉJÀ posé (manuel ou import précédent) : L'EXISTANT PRIME — on
 //    n'écrase jamais en silence un arbitrage humain ; le conflit est signalé pour arbitrage.
@@ -45,6 +46,7 @@ function planDcMapImport(aoa, existingMap, fpKeyFn) {
     if (fps.length === 0) { skipped.push({ reason: "aucun N° FP reconnu (entête ?)", detail: detail(cells) }); continue; }
     if (fps.length > 1) { skipped.push({ reason: "plusieurs N° FP sur la ligne (ambigu)", detail: detail(cells) }); continue; }
     if (others.length === 0) { skipped.push({ reason: "DC absent", detail: detail(cells) }); continue; }
+    if (others.length > 1) { skipped.push({ reason: "plusieurs colonnes non-FP (DC ambigu)", detail: detail(cells) }); continue; }
     const fp = fps[0];
     const dc = others[0].slice(0, 120); // DC = chaîne libre (format Odoo, on ne canonise pas — ADR-054)
     if (seen.has(dc)) { skipped.push({ reason: "DC en double dans le fichier (première occurrence retenue)", detail: detail(cells) }); continue; }

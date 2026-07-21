@@ -2207,3 +2207,27 @@ décaissements/charges remontent un jour, leur clé de rattachement naturelle se
 
 **Vérifs.** Functions 1346/1346 (dcMapImport 4), web 301/301, tsc/eslint 0, no-undef (165),
 deploy-targets (200/200), bundle 121,1 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Blindage du delta du jour (audit adverse conformiste + gardien)
+
+**Fait.** Audit adverse des 4 lots du jour (Centre de correction, IA fournisseurs, design Contrats,
+seed FP–DC) par deux agents. Conformiste : CONFORME — un seul écart (libellé DangerBtn « annuler » →
+« Annuler », ×2 dans cleanup.tsx), corrigé. Gardien : suites vertes et périmètre additif tenu, mais
+3 constats DOUTEUX, tous levés : (1) `fiscalYearFromOrders` (currentFy) calculait max(yearPo) sur le
+champ BRUT alors que le carnet dérive désormais le millésime du FP → même règle appliquée
+(`plausibleYear(yearPo) || année du FP`, les deux appelants lisent aussi `fp`) + tests ; (2) le push
+ClickUp unitaire « par FP seul » complétait la tâche depuis `orders/{id}` BRUT (ni fiche, ni override,
+ni alias) → complète désormais depuis la ligne FUSIONNÉE du carnet (même source que le push en masse,
+repli doc brut si hors carnet) ; (3) `planDcMapImport` devinait le DC sur une ligne à 3+ colonnes
+(première cellule non-FP) → toute ligne à plusieurs cellules non-FP est écartée « ambigu » + test.
+
+**Assumé (effet de bord documenté, pas un bug).** Le yearPo dérivé du FP (ADR-064) élargit les
+assiettes des alertes « pré-PO » et « dormantes » : des commandes jusque-là sans millésime y entrent
+au prochain recompute — les compteurs bougeront, de façon COHÉRENTE partout (backend et miroir front
+partagent la fusion).
+
+**Appris.** Quand une règle de dérivation entre dans `mergeCommandes`, chercher AUSSI les agrégats qui
+lisent les collections brutes sans passer par la fusion (currentFy, push unitaire) : c'est là que
+l'invariant « même métrique = même nombre » casse en silence.

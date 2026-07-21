@@ -209,9 +209,10 @@ if (process.env.RECOMPUTE_REGION) {
   );
 }
 
-/** Recalcule config/fiscal.currentFy = max(yearPo) des commandes (§7). */
+/** Recalcule config/fiscal.currentFy = max(yearPo) des commandes (§7). fp lu aussi : le millésime
+ * suit la règle du carnet (plausibleYear(yearPo) sinon année du FP) — cf. lib/ingest. */
 async function updateFiscalYearFromOrders() {
-  const snap = await db.collection("orders").select("yearPo").get();
+  const snap = await db.collection("orders").select("yearPo", "fp").get();
   const currentFy = fiscalYearFromOrders(snap.docs.map((d) => d.data()));
   if (currentFy > 0) await db.doc("config/fiscal").set({ currentFy }, { merge: true });
 }
@@ -3575,11 +3576,14 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const fp = fpKey(order.fp), id = safeId(fp);
   // Push « par N° FP seul » (action unitaire du cockpit ClickUp) : complète la commande depuis la
-  // ligne P&L stockée — la tâche porte CAS/affaire/AM même quand l'appelant ne connaît que le FP.
-  // Le payload de l'appelant PRIME champ à champ (la liste Commandes envoie déjà la ligne complète).
+  // ligne FUSIONNÉE du carnet (même source que le push en masse) — la tâche porte le CAS d'autorité
+  // (fiche > opp gagnée > P&L, overrides/alias compris), PAS le doc orders/ brut qui peut différer.
+  // Repli sur le doc brut si le FP n'est pas (encore) au carnet. Le payload de l'appelant PRIME
+  // champ à champ (la liste Commandes envoie déjà la ligne complète).
   {
-    const stored = (await db.doc(`orders/${id}`).get()).data();
-    if (stored) order = { ...stored, ...Object.fromEntries(Object.entries(order).filter(([, v]) => v != null && v !== "")) };
+    const base = (await loadCommandeRows()).find((r) => r && fpKey(r.fp) === fp)
+      || (await db.doc(`orders/${id}`).get()).data();
+    if (base) order = { ...base, ...Object.fromEntries(Object.entries(order).filter(([, v]) => v != null && v !== "")) };
   }
   // ANTI-DOUBLON : si la commande n'a pas de lien mais qu'une tâche existe déjà (Opp ID = FP, ex-
   // formulaire), on l'ADOPTE (mise à jour) au lieu de créer un doublon.

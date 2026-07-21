@@ -18,12 +18,13 @@ describe("dcMapImport — plan d'import de la table FP–DC (seed config/dcAlias
     expect(plan.skipped[0].reason).toContain("aucun N° FP");
   });
 
-  it("écarte les lignes ambiguës (deux FP), sans DC, et dédoublonne par DC (première occurrence retenue)", () => {
+  it("écarte les lignes ambiguës (deux FP, plusieurs colonnes non-FP), sans DC, et dédoublonne par DC", () => {
     const aoa = [
       ["FP/2026/1", "FP/2026/2"],            // deux FP → ambigu
       ["FP/2026/3", ""],                     // DC absent
       ["FP/2026/4", "DC1"],
       ["FP/2026/5", "DC1"],                  // DC en double → écartée
+      ["Client SA", "FP/2026/6", "DC9"],     // export 3 colonnes : deviner le DC = mapping faux → écartée
     ];
     const plan = planDcMapImport(aoa, {}, fpKey);
     expect(plan.toAdd).toEqual([{ dc: "DC1", fp: "FP/2026/4" }]);
@@ -31,6 +32,7 @@ describe("dcMapImport — plan d'import de la table FP–DC (seed config/dcAlias
       expect.stringContaining("plusieurs N° FP"),
       expect.stringContaining("DC absent"),
       expect.stringContaining("DC en double"),
+      expect.stringContaining("plusieurs colonnes non-FP"),
     ]);
   });
 

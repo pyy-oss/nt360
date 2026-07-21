@@ -3,7 +3,7 @@
 // (PIPELINE_NT_CI_Inventory.xlsx regroupe P&L + LIVE + Facturation DF). Sans dépendance
 // Firebase ⇒ testable (tests de non-régression §18).
 const { sheetToJson } = require("./xlsxRead");
-const { noAcc } = require("./ids");
+const { noAcc, plausibleYear } = require("./ids");
 const { parsePnl } = require("../parsers/pnl");
 const { parseFacturationDf } = require("../parsers/facturationDf");
 const { parseFiche, parseFicheAll, sheetIsFiche } = require("../parsers/ficheAffaire");
@@ -143,9 +143,12 @@ function buildWrites(wb) {
   };
 }
 
-/** Année fiscale courante = max(yearPo) sur les commandes (§7). */
+/** Année fiscale courante = max(yearPo) sur les commandes (§7). MÊME règle de millésime que le
+ * carnet (domain/commandes) : plausibleYear(yearPo) sinon année du N° FP — sinon un yearPo aberrant
+ * (20226) ou absent du P&L décale currentFy par rapport aux vues qui, elles, dérivent du FP. */
+const yearOfFp = (fp) => { const m = String(fp || "").match(/\/(\d{4})\//); return m ? plausibleYear(m[1]) : 0; };
 function fiscalYearFromOrders(orders) {
-  return orders.reduce((mx, o) => Math.max(mx, o.yearPo || 0), 0);
+  return orders.reduce((mx, o) => Math.max(mx, plausibleYear(o.yearPo) || yearOfFp(o.fp)), 0);
 }
 
 module.exports = { detectKind, detectKinds, describeSheets, buildWrites, pathFor, fiscalYearFromOrders, PARSERS };
