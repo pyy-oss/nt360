@@ -3,6 +3,30 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-060 — Remédiation Backlog (B1→B4) + correctifs Rentabilité (RB1) + refus d'import actionnable
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« on corrige tout cible 10/10 partout ; on lance audit rentabilité en parallèle ; import Commandes refuse toujours »)
+
+### Contexte
+Audit Backlog (4 auditeurs, 36 axes — 7,1/10 : PM/PMO 7 · Chiffres 7,5 · Backend 6,5 · Front 7,5) et audit Rentabilité (4 auditeurs — 7,75/10 : Chiffres 8,5 · Utilisateur 7,5 · Backend 7 · Front 8), plus un constat terrain : l'import « Commandes » refuse systématiquement sans dire pourquoi.
+
+### Décisions
+- **Import actionnable.** Le refus « aucune source reconnue » d'importDelta nomme désormais les onglets/en-têtes VUS (describeSheets joint au rapport parseBuffer) et les signatures ATTENDUES par source, avec le rappel qu'un export d'écran n'est pas ré-importable (cause la plus probable du refus répété).
+- **B1 — fraîcheur & vérité serveur.** Les mutations du carnet (Solder/patchOrder, createOrder, jalons, PM, montants, alias FP/DC, rattachement facture, suppressions/annulations, importDelta) passent au recompute SYNCHRONE best-effort (`refreshNowBestEffort` — le différé est inerte en prod : RECOMPUTE_REGION posé côté runtime mais trigger absent du déploiement). Jalons rapprochés par FP CANONIQUE dans aggregate (invariant fpKey) ; miroir « Répartir par défaut » réaligné sur le repli serveur (courbe pondérée + closeMs, tests de parité) ; gardes serveur RAF ≤ CAS, RAF validé à la création, Σ jalons ≤ CAS/RAF.
+- **B2 — honnêteté d'affichage.** frDate sur les dates ClickUp ; bandeau filtre transverse sur le cockpit ; error/truncated propagés (useCommandesRows) — refus de droit ≠ « Aucune commande » ; anti-flash + mémoïsation CarryoverCard ; bornes dites (« 25 sur N ») ; confirmation Solder (0) ; liste ÉNUMÉRABLE des commandes dormantes (dormantTop, même prédicat que l'alerte).
+- **B3 — parité & filet.** RAF clampé dans summaries/pms ; libellés « Backlog (RAF glissant) » (cockpit + CODIR) + note « Σ RAF signé » sur la Cohérence du carnet ; reportedFromMilestones extrait et testé ; test de PARITÉ CROISÉE backlogFy ⇄ overview sur fixture partagée ; millésime borné persisté dans deriveTop.
+- **B4 — finitions.** Tris des tables secondaires, erreurs des cartes consommées, aria jalons indexés, lignes de jalon invalides marquées, auditLog au module RBAC réel (« import »). **Frontière RBAC actée** : les JALONS relèvent de `backlog:write` ; Solder/intégrer/corriger FP passent par patchOrder/createOrder = `import:write` (héritage de la curation P&L — la migration ensureImportPermission maintient pmo en écriture backlog). Assumé en l'état : changer la frontière imposerait une migration de matrice — à réviser si un rôle backlog:write sans import apparaît.
+- **RB1 — Rentabilité (HAUTE/MOYENNE).** reporteMarge via l'AUTORITÉ marginRate (fin de la réimplémentation non normalisée, latente) ; effet ASTREINTE appliqué en synchrone dans decideApproval (le trigger env-gaté absent laissait la charge « en attente » à jamais → marge surestimée) ; tjmBilled retiré de staffingPlan sans droit `rentabilite` (fuite du CA par ressource sous `overview`) ; mutations CRA/CJM → recompute prebilling/maintenance synchrone best-effort ; capped propagé et affiché sur la marge de livraison ; upsertMntTicket/decideApproval 300 s.
+
+### Conséquences
+- Les mutations carnet gagnent la latence d'un recompute (verrou/coalescing) — assumé : la fraîcheur prime, et si le différé est un jour réellement déployé (secret RECOMPUTE_REGION du workflow), ces sites peuvent y revenir.
+- Reliquats Rentabilité notés (non corrigés ici) : badge « marge estimée » à propager à FP 360°/livraison (mbSource déjà dans les rows), fiche masquée à la marge dérivable (lignes+vente exposées), montants confidentiels en clair dans auditLog (habilitations ⊉ rentabilite), formats de % divergents (pct() à généraliser), tendance de marge mensuelle + marge par PM absentes, summaries marge de millésimes disparus jamais purgés, 3e copie du peg dans fiches.tsx.
+
+### Ce qu'on saura dans six mois
+Si un module semble « figé 24 h » après une action : chercher un `requestRecompute` (différé inerte) — le patron `refreshNowBestEffort` est la réponse tant que le trigger n'est pas réellement déployé.
+
 ## ADR-059 — Pipeline sourcé partenaire + import de certifications par fichier (PAR-L1/L2)
 
 - **Date :** 2026-07-21

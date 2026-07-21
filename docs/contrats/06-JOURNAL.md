@@ -1983,3 +1983,31 @@ d'en-têtes reconnues doivent inclure les variantes PLIÉES, pas seulement les l
 
 **Vérifs.** Functions 1319/1319, web 297/297, tsc/eslint OK, deploy-targets (192), no-undef (162),
 bundle 120,8 Ko ≤ 122. MDF/rebates/deal registration : toujours en attente (non demandé).
+
+
+---
+
+## 2026-07-21 (suite 2) — Backlog B1→B4 + Rentabilité RB1 + import actionnable (ADR-060)
+
+**Audits.** Backlog 7,1/10 (4 auditeurs, 36 axes) ; Rentabilité 7,75/10 (4 auditeurs). Constat transverse
+dominant : le recompute DIFFÉRÉ inerte en prod frappait TOUTES les mutations du carnet et de la marge —
+toasts « recalcul lancé » mensongers, summaries figés jusqu'à 05:00, astreintes approuvées jamais comptées.
+
+**Fait (6 commits).** Diagnostic import (refus nomme onglets/en-têtes vus + signatures attendues) ;
+B1 fraîcheur (12 sites carnet en recompute synchrone best-effort, fpKey jalons aggregate, miroir défauts
+réaligné + tests, gardes RAF/Σ serveur) ; B2 honnêteté (frDate, bandeau filtre, error/truncated propagés,
+anti-flash + memo CarryoverCard, bornes dites, confirmation Solder, liste dormantes) ; B3 parité (pms
+clampé, libellés glissant, reportedFromMilestones extrait+testé, parité croisée backlogFy⇄overview) ;
+B4 finitions (tris, erreurs cartes, aria indexés, auditLog module réel, frontière RBAC actée en ADR) ;
+RB1 rentabilité (marginRate autorité pour reporteMarge, effet astreinte synchrone, fuite tjmBilled
+colmatée, scopes CRA/CJM, capped propagé/affiché).
+
+**Appris.** Un « best-effort différé » qui ne s'exécute jamais est pire qu'un synchrone lent : l'UI promet
+un rafraîchissement qui n'arrive pas, et l'utilisateur re-clique (double écriture évitée seulement par
+l'idempotence). Vérifier le DÉPLOIEMENT d'un trigger avant de router des effets métier dessus.
+
+**Reliquats (ADR-060) :** badge « estimée » FP360/livraison, fiche masquée dérivable, auditLog en clair,
+formats %, tendance/byPm marge, purge summaries marge périmés, 3e copie du peg.
+
+**Vérifs.** Functions 1323/1323, web 301/301, tsc/eslint, no-undef (162), deploy-targets (192), indexes,
+bundle ≤ 122 Ko.
