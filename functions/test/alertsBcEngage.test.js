@@ -33,3 +33,22 @@ describe("achat_bc_sup_planifie — BC émis > coût planifié du carnet", () =>
     expect(al.find((x) => x.type === "achat_bc_sup_planifie")).toBeFalsy();
   });
 });
+
+// ADR-068 — BC « annulé » : ni en attente, ni en retard, ni dans l'engagé de l'alerte amont.
+describe("statut annule — hors bc_en_attente / bc_en_retard / achat_bc_sup_planifie (ADR-068)", () => {
+  it("un BC annulé ne compte ni en attente ni en retard (ETA dépassée ignorée)", () => {
+    const bcLines = [
+      { bcNumber: "BC1", amountXof: 1_000, status: "annule", etaContrat: "2026-01-01" },
+      { bcNumber: "BC2", amountXof: 1_000, status: "emis", etaContrat: "2026-01-01" }, // témoin
+    ];
+    const al = alerts([], [], sup, bcLines, 2026, "2026-07-21", [], null);
+    expect(al.find((x) => x.type === "bc_en_attente").count).toBe(1);
+    expect(al.find((x) => x.type === "bc_en_retard").count).toBe(1);
+  });
+  it("un BC annulé ne déclenche pas achat_bc_sup_planifie (plus un achat de l'affaire)", () => {
+    const orders2 = [{ fp: "FP/2026/1", cas: 10_000, costTotal: 5_000 }];
+    const bcLines = [{ fp: "FP/2026/1", amountXof: 9_000, status: "annule" }];
+    const al = alerts(orders2, [], sup, bcLines, 2026, "2026-07-21", [], null);
+    expect(al.find((x) => x.type === "achat_bc_sup_planifie")).toBeFalsy();
+  });
+});

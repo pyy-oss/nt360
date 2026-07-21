@@ -943,7 +943,7 @@ export async function purgeCollections(targets: Array<"orders" | "opportunities"
  *  reste (historique) mais est EXCLU de tous les agrégats (carnet, CAS, backlog, facturation, cash).
  *  Stocké en overlay (config/cancellations) → survit à un ré-import delta. `id` = DOC ID (commande =
  *  fpDocId(fp)). meta = libellé/nom non monétaires pour l'affichage de la liste des annulées. */
-export async function setCancellation(collection: "orders" | "invoices", id: string, cancelled: boolean, meta?: { label?: string; client?: string }) {
+export async function setCancellation(collection: "orders" | "invoices" | "charges", id: string, cancelled: boolean, meta?: { label?: string; client?: string }) {
   const res = await httpsCallable(functions, "setCancellation", { timeout: 300_000 })({ collection, id, cancelled, ...(meta || {}) }); // aligné serveur (300 s)
   return res.data as { ok: boolean; id: string; cancelled: boolean };
 }

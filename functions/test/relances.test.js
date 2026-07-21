@@ -18,6 +18,7 @@ describe("relances — plan de relance daté par responsable", () => {
     { bcNumber: "BC1", supplier: "SUP", fp: "FP/2026/1", amountXof: 700, status: "emis", etaContrat: "2026-06-01" },  // retard
     { bcNumber: "BC2", supplier: "SUP", fp: "FP/2026/2", amountXof: 400, status: "solde", etaContrat: "2026-01-01" }, // soldé → ignoré
     { bcNumber: "BC3", supplier: "SUP2", fp: null, amountXof: 200, status: "emis", etaReel: "2026-08-01" },           // ETA future
+    { bcNumber: "BC4", supplier: "SUP", fp: "FP/2026/1", amountXof: 900, status: "annule", etaContrat: "2026-01-01" }, // annulé (ADR-068) → jamais relancé
   ];
   const MS = {
     "FP/2026/1": [{ date: "2026-03-01", amount: 2000 }, { date: "2026-09-01", amount: 500 }], // échu 2000, facturé 1500 (I1 1000 + I3 500) → gap 500

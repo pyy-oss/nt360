@@ -126,15 +126,17 @@ function alerts(orders, invoices, suppliersSummary, bcLines, fy, asOf, opps, thr
   // (qui les exclut), rendant le compte de l'alerte ≠ du compte de la vue au drill-through.
   const execBc = (bcLines || []).filter((b) => b.source !== "fiche");
   // Statut ABSENT traité comme « a_emettre » (donc non soldé) — MÊME convention que la vue Exécution BC
-  // (operations.tsx : `(r.status || "a_emettre") !== "solde"`). Exiger un statut renseigné sous-comptait
-  // ici les lignes importées sans statut mappé → compte de l'alerte ≠ compte du segment « Non soldés ».
-  const pending = execBc.filter((b) => (b.status || "a_emettre") !== "solde").length;
+  // (operations.tsx : segment « Non soldés »). Exiger un statut renseigné sous-comptait ici les lignes
+  // importées sans statut mappé → compte de l'alerte ≠ compte du segment. « annule » exclu (ADR-068) :
+  // un BC annulé n'est plus en attente de rien.
+  const pending = execBc.filter((b) => !["solde", "annule"].includes(b.status || "a_emettre")).length;
   if (pending) out.push({ type: "bc_en_attente", severity: "low", count: pending, message: `${pending} ligne(s) BC non soldée(s)` });
 
   // BC en retard : ETA (réelle sinon contractuelle) dépassée alors que non encore livré.
   // On EXIGE asOf : sans date réelle, retomber sur la fin d'exercice (fy-12-31) déclarerait en
   // retard quasiment tous les BC ouverts de l'année (faux positifs massifs en début/milieu d'année).
-  const DELIVERED = new Set(["livre", "facture", "solde"]);
+  // « annule » exclu comme les livrés (ADR-068) : un BC annulé ne sera jamais livré, il n'est pas en retard.
+  const DELIVERED = new Set(["livre", "facture", "solde", "annule"]);
   const lateBc = asOf ? execBc.filter((b) => {
     const eta = b.etaReel || b.etaContrat;
     return eta && String(eta).slice(0, 10) < asOf && !DELIVERED.has(b.status);

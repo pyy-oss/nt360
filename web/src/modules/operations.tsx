@@ -13,7 +13,7 @@ import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, C
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { Gauge } from "../design/charts";
-import { setBcStatus, patchBcLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId } from "../lib/writes";
+import { setBcStatus, patchBcLine, callAddBcLine, callParseBcPdf, patchProjectSheet, deleteRecord, pushBcToClickup, fpDocId, setCancellation } from "../lib/writes";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { Props, grid4, cols2, SUP_LABEL, BC_STAGES, bcLabel, HBars, ImportButton, FilterNote, useObjectives, roBadge, useCommandesRows, useSupplierOptions, FpLink } from "./_shared";
@@ -22,6 +22,31 @@ import { MARGIN, QUALITY } from "../lib/thresholds";
 import type { SuppliersSummary, SupplierRow, SupplierInvoice, BcLine, ProjectSheet, EntitySummary, EntityRow, Invoice, Opportunity, DataQualitySummary } from "../types";
 
 // 8 — P&L Projet
+
+// « Supprimer la charge » (ADR-069) : overlay NON destructif (config/cancelCharges) sur une ligne
+// d'achat PLANIFIÉ de fiche — au recompute elle sort de TOUS les agrégats, Y COMPRIS du coût planifié
+// du P&L (costTotal ↓, marge ↑). Dans le MÊME geste, les BC RÉELS non soldés du même fournisseur sur
+// l'affaire passent en « Annulé » (ADR-068). Rétablissable (l'overlay se retire, les docs sont intacts).
+function ChargeDropBtn({ line, dropped, related }: { line: BcLine; dropped: boolean; related: BcLine[] }) {
+  if (!line.id) return null;
+  if (dropped) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Badge tone="steel">Charge supprimée</Badge>
+        <Busy variant="ghost" label="Rétablir" okMsg="Charge rétablie (recalcul lancé)" errMsg="Rétablissement refusé" fn={() => setCancellation("charges", line.id!, false)} />
+      </span>
+    );
+  }
+  const lies = related.filter((b) => b.id && b.source !== "fiche" && !["annule", "solde"].includes(b.status || "a_emettre") && cleanName(b.supplier) === cleanName(line.supplier));
+  return (
+    <DangerBtn label="Supprimer la charge" okMsg="Charge supprimée (recalcul lancé)" errMsg="Suppression refusée"
+      confirm={`Supprimer la charge ${money(line.amountXof)} (${line.supplier || "—"}) de ${line.fp || "l'affaire"} ? Elle sort de tous les agrégats, y compris du coût planifié du P&L${lies.length ? ` ; ${lies.length} BC lié(s) passeront en « Annulé »` : ""}. Rétablissable.`}
+      fn={async () => {
+        await setCancellation("charges", line.id!, true, { label: [line.supplier, line.expenseType].filter(Boolean).join(" · "), client: line.customer || "" });
+        for (const b of lies) await setBcStatus(b.id!, "annule"); // un seul geste : la charge ET son BC (ADR-069)
+      }} />
+  );
+}
 
 const sumBy = (arr: any[], keyFn: (x: any) => string, valFn: (x: any) => number) => {
   const m: Record<string, number> = {};
@@ -37,6 +62,9 @@ export const PnlProjet: FC<Props> = () => {
   const { match } = useFilters();
   const canImport = useCanImport();
   const canEditFiche = useCan("rentabilite") === "write"; // saisie du prix de vente = donnée de marge
+  const canBc = useCan("bc") === "write"; // « Supprimer la charge » : même droit que les statuts BC (ADR-069)
+  const { data: cxlCharges } = useDocData<{ items?: { id: string }[] }>(canBc ? "config/cancelCharges" : null);
+  const droppedCharges = useMemo(() => new Set((cxlCharges?.items || []).map((i) => i.id)), [cxlCharges]);
   const { intent } = useNav();
   // Dérivations plein-tableau (projectSheets + bcLines temps réel) MÉMOÏSÉES — avant tout retour anticipé
   // (hooks inconditionnels) : sinon Map + filter + 3 reduces + index BC rejoués à chaque render (expand/collapse).
@@ -75,6 +103,22 @@ export const PnlProjet: FC<Props> = () => {
             </div>
           </div>
         )}
+        {/* Charges planifiées de la fiche : suppression totale (y compris du coût planifié P&L) par
+            overlay, rétablissable — les BC réels du même fournisseur passent en « Annulé » (ADR-069). */}
+        {canBc && (() => {
+          const planned = lines.filter((b) => b.source === "fiche" && b.id);
+          return planned.length ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs font-semibold text-muted">Charges planifiées (fiche)</div>
+              {planned.map((b) => (
+                <div key={b.id} className="flex flex-wrap items-center gap-3 text-xs">
+                  <span className="text-muted">{b.supplier || "—"} · {b.expenseType || "—"} · <span className="tabnum">{money(b.amountXof)}</span></span>
+                  <ChargeDropBtn line={b} dropped={droppedCharges.has(b.id!)} related={lines} />
+                </div>
+              ))}
+            </div>
+          ) : null;
+        })()}
         {lines.length ? (
           <div className="flex flex-col gap-3">
             <div className="text-[11px] text-faint">{lines.length} ligne{lines.length > 1 ? "s" : ""} BC · coût total {money(total)}</div>
@@ -331,7 +375,7 @@ function BcImport() {
 }
 
 // 10 — Exécution BC
-const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
+const BC_DELIVERED = new Set(["livre", "facture", "solde", "annule"]); // annulé (ADR-068) : jamais « en retard » (miroir alerte bc_en_retard)
 // BC en retard : ETA (réelle sinon contractuelle) dépassée ET non livré. Pur (today injecté) → réutilisé
 // par le comptage plein-tableau (mémo) ET la colonne « Retard » par ligne, sans recréer de Date.
 const isBcLate = (r: BcLine, today: string) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
@@ -352,6 +396,9 @@ export const BC: FC<Props> = () => {
   const { data: cuCfg } = useDocData<{ enabled?: boolean }>("config/clickup");
   const { data: bcLinks } = useDocData<{ map?: Record<string, string> }>(canWrite ? "config/clickupBcLinks" : null);
   const cuOn = canWrite && cuCfg?.enabled !== false;
+  // Charges planifiées supprimées (overlay ADR-069) — sert l'action « Supprimer la charge » par BC.
+  const { data: cxlCharges } = useDocData<{ items?: { id: string }[] }>(canWrite ? "config/cancelCharges" : null);
+  const droppedCharges = useMemo(() => new Set((cxlCharges?.items || []).map((i) => i.id)), [cxlCharges]);
   const { intent } = useNav();
   const [flt, setFlt] = useState<"all" | "open" | "late">(intent?.segment === "late" ? "late" : intent?.segment === "open" ? "open" : "all");
   // Drill-through depuis le Centre d'alertes (« BC en retard / en attente ») → segment pré-sélectionné.
@@ -370,7 +417,8 @@ export const BC: FC<Props> = () => {
     const bs: Record<string, number> = {};
     const lateRows: BcLine[] = [];
     for (const r of rows) { const st = r.status || "a_emettre"; bs[st] = (bs[st] || 0) + 1; if (isBcLate(r, today)) lateRows.push(r); }
-    const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
+    // « Non soldés » exclut aussi les annulés (ADR-068) — miroir de l'alerte bc_en_attente (même compte au drill-through).
+    const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => !["solde", "annule"].includes(r.status || "a_emettre")) : rows;
     return { byStatus: bs, solde: bs["solde"] || 0, lateCount: lateRows.length, filtered: filt };
   }, [rows, flt, today]);
   // Garde de chargement : sans elle, les 5 compteurs de statut et les KPI rendaient 0 au premier
@@ -417,6 +465,20 @@ export const BC: FC<Props> = () => {
               <div className="flex items-center justify-end gap-1.5">
                 {cuOn && <BcClickupBtn bcNumber={r.bcNumber} linked={!!(r.bcNumber && bcLinks?.map?.[fpDocId(r.bcNumber)])} />}
                 {canWrite && <BcFixer id={r.id!} fp={r.fp} amountXof={r.amountXof} supplier={r.supplier} currency={r.currency} amount={r.amount} />}
+                {/* « Supprimer la charge » (ADR-069) : depuis un BC, retire la/les charge(s) planifiée(s)
+                    de fiche du même FP+fournisseur (y compris du coût planifié P&L) ET passe ce BC en
+                    « Annulé » (ADR-068) — un seul geste, non destructif, rétablissable. */}
+                {canWrite && r.id && (() => {
+                  const k = fpKey(r.fp || "");
+                  const charges = k ? allRows.filter((b) => b.source === "fiche" && b.id && !droppedCharges.has(b.id) && fpKey(b.fp || "") === k && cleanName(b.supplier) === cleanName(r.supplier)) : [];
+                  if (!charges.length) return null;
+                  return <DangerBtn label="Supprimer la charge" okMsg="Charge supprimée (recalcul lancé)" errMsg="Suppression refusée"
+                    confirm={`Supprimer la charge planifiée de ${r.fp} (${charges.length} ligne(s) de fiche, ${money(charges.reduce((s, b) => s + (b.amountXof || 0), 0))}) et passer ce BC en « Annulé » ? La charge sort de tous les agrégats, y compris du coût planifié du P&L. Rétablissable.`}
+                    fn={async () => {
+                      for (const c of charges) await setCancellation("charges", c.id!, true, { label: [c.supplier, c.expenseType].filter(Boolean).join(" · "), client: c.customer || "" });
+                      if ((r.status || "a_emettre") !== "annule") await setBcStatus(r.id!, "annule");
+                    }} />;
+                })()}
                 {canWrite && r.id && <DangerBtn label="Suppr." confirm={`Supprimer la ligne BC ${r.bcNumber || r.supplier || r.id} ? Un futur import delta ne la recréera que si la source la contient encore.`} fn={() => deleteRecord("bcLines", r.id!)} />}
               </div>
             ), () => 0)] : []),
@@ -707,6 +769,9 @@ export const Fp360: FC<Props> = () => {
   // On exige donc les DEUX droits (coût confidentiel = rentabilite ; source = fournisseurs) pour l'abonnement
   // ET la carte, cohérent avec la règle — sinon on masque plutôt que d'afficher un zéro trompeur.
   const canFournisseurs = useCan("fournisseurs") !== "none";
+  const canBc = useCan("bc") === "write"; // « Supprimer la charge » (ADR-069) : même droit que les statuts BC
+  const { data: cxlCharges } = useDocData<{ items?: { id: string }[] }>(canBc ? "config/cancelCharges" : null);
+  const droppedCharges = useMemo(() => new Set((cxlCharges?.items || []).map((i) => i.id)), [cxlCharges]);
   const raw = q.trim();
   // RAPPROCHEMENT PAR fpKey (invariant ERP : rapprocher DEUX FP passe TOUJOURS par fpKey, jamais la casse
   // brute — sinon « FP/2026/007 » ≠ « FP/2026/7 »). `key` = forme canonique ; on interroge Firestore sur
@@ -748,7 +813,7 @@ export const Fp360: FC<Props> = () => {
   // double-comptait ce que l'alerte ne voit pas. Limite assumée (comme Factures/Opportunités de cet
   // écran) : un BC saisi sous un FP ALIAS source est compté par l'alerte (canonisation au recompute)
   // mais invisible ici (requête sur le fp brut du doc).
-  const bcReal = bc.filter((b) => b.source !== "fiche");
+  const bcReal = bc.filter((b) => b.source !== "fiche" && b.status !== "annule"); // annulé (ADR-068) : plus un achat de l'affaire — miroir bcCostByFp
   const bcCmpSet = new Set(bcReal.filter((b) => b.source !== "clickup" && b.bcNumber).map((b) => bcCompareKey(b.bcNumber)).filter(Boolean));
   const engage = bcReal
     .filter((b) => b.source !== "clickup" || !b.bcNumber || !bcCmpSet.has(bcCompareKey(b.bcNumber)))
@@ -814,7 +879,10 @@ export const Fp360: FC<Props> = () => {
           {canMargin && <Card title="Fiche projet"><Table columns={[colText("Affaire", (s) => s.affaire), colNum("Revient", (s) => money(s.costTotal)), colNum("Vente", (s) => money(s.saleTotal)), colNum("Marge", (s) => money(s.margin)), colNum("%MB", (s) => pct(s.marginPct))]} rows={sheets} /></Card>}
           {/* Σ engagé dans l'entête : visible SANS le drapeau « Vérité du coût » (les montants BC de la
               table sont déjà lisibles ici) — la carte de réconciliation, elle, reste gatée (costTotal). */}
-          <Card title={`Lignes BC · ${bc.length}${engage > 0 ? ` · Σ engagé ${fmt(engage)}` : ""}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colText("DC", (b) => b.dc || "—"), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => bcLabel(b.status))]} rows={bc} /></Card>
+          <Card title={`Lignes BC · ${bc.length}${engage > 0 ? ` · Σ engagé ${fmt(engage)}` : ""}`}><Table columns={[colText("Fournisseur", (b) => b.supplier), colText("Type", (b) => b.expenseType), colText("DC", (b) => b.dc || "—"), colNum("XOF", (b) => money(b.amountXof)), colText("Statut", (b) => b.source === "fiche" ? <Badge tone="steel">planifié (fiche)</Badge> : bcLabel(b.status)),
+            // « Supprimer la charge » (ADR-069) sur les lignes PLANIFIÉES de fiche uniquement — les BC
+            // réels s'annulent par statut (ADR-068, Exécution BC).
+            ...(canBc ? [colText("", (b) => b.source === "fiche" && b.id ? <ChargeDropBtn line={b} dropped={droppedCharges.has(b.id)} related={bc} /> : null, () => 0)] : [])]} rows={bc} /></Card>
           <Card title={`Opportunités · ${opps.length}`}><Table columns={[colText("Client", (x) => x.client), colText("Affaire", (x) => x.designation || "—"), colText("Commercial", (x) => x.am), colNum("Montant", (x) => money(x.amount)), colText("Étape", (x) => x.stageLabel || x.stage)]} rows={opps} /></Card>
         </>
       ) : <EmptyState label={`Aucun élément rattaché à ${key}.`} />) : (

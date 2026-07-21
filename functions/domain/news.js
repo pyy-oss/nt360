@@ -273,7 +273,7 @@ function buildNews(x) {
     action: "Renégocier la ligne de crédit ou solder les encours des fournisseurs saturés.",
   });
   const today = String(x.asOf || "").slice(0, 10);
-  const delivered = new Set(["livre", "facture", "solde"]);
+  const delivered = new Set(["livre", "facture", "solde", "annule"]); // annulé (ADR-068) : jamais « en retard »
   const lateBc = bcLines.filter((r) => { const eta = r.etaReel || r.etaContrat; return r.source !== "fiche" && eta && String(eta).slice(0, 10) < today && !delivered.has(r.status || "a_emettre"); });
   pushIf(B, lateBc.length > 0, {
     id: "bc_en_retard", domain: "bc", severity: "medium", module: "bc", segment: "late",

@@ -143,7 +143,7 @@ function decaissements(bcLines, asOf, opts = {}) {
       if (!eta || cmpDay(eta) < today) { engagedOut[curMonth] += amt; continue; } // pas d'ETA / ETA passée → imminent
       if (inHorizon.has(mk)) engagedOut[mk] += amt; else engagedBeyond += amt;
     }
-    // status 'solde' (payé) → hors compte.
+    // status 'solde' (payé) et 'annule' (ADR-068 : ni payable ni engagement) → hors compte.
   }
   // PAYABLE = FACTURES FOURNISSEUR RÉELLES (drapeau actif) — miroir du solde SOA (fournisseurs.js) :
   // la pièce comptable fait autorité. Pas de dueDate sur ces pièces → échéance = date de facture

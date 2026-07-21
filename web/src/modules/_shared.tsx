@@ -208,9 +208,11 @@ export const toDonut = (o: Record<string, number> = {}) => objToArr(o).map((x) =
 export const STAGE_SHORT: Record<number, string> = { 1: "Qualif", 2: "Montage", 3: "Transmise", 4: "Négo", 5: "Contrat", 6: "Gagné", 7: "Perdu", 8: "Suspendu", 9: "Annulé" };
 
 // Libellés FR des statuts techniques (jamais de code brut à l'écran).
-export const BC_LABEL: Record<string, string> = { a_emettre: "À émettre", emis: "Émis", livre: "Livré", facture: "Facturé", solde: "Soldé" };
+export const BC_LABEL: Record<string, string> = { a_emettre: "À émettre", emis: "Émis", livre: "Livré", facture: "Facturé", solde: "Soldé", annule: "Annulé" };
 export const SUP_LABEL: Record<string, string> = { saturation: "Saturé", tension: "Tendu", ok: "OK", non_suivi: "Non suivi", indetermine: "À fiabiliser" };
-export const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
+// « annule » HORS CYCLE (ADR-068) : hors engagement/netting SOA, hors cash, hors retard/attente —
+// la charge planifiée reste au P&L en attendant le BC de remplacement.
+export const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde", "annule"];
 export const bcLabel = (s?: string) => BC_LABEL[s || "a_emettre"] || (s || "a_emettre");
 
 const buTone: Record<string, string> = { ICT: "emerald", CLOUD: "steel", FORMATION: "gold", AUTRE: "neutral" };

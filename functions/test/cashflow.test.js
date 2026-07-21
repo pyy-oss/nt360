@@ -148,3 +148,16 @@ describe("decaissements — VÉRITÉ DU COÛT (ADR-P21) : drapeau soaFromInvoice
     expect(d.engagedTotal).toBe(700);
   });
 });
+
+// ADR-068 — BC « annulé » : ni payable ni engagement de trésorerie (hors compte, comme un soldé).
+describe("decaissements — BC annulé hors cash (ADR-068)", () => {
+  const { decaissements } = require("../domain/cashflow");
+  it("annule exclu du payable et de l'engagement ; l'émis témoin reste engagé", () => {
+    const d = decaissements([
+      { amountXof: 700, status: "annule", etaContrat: "2026-08-15" },
+      { amountXof: 300, status: "emis", etaContrat: "2026-08-15" },
+    ], "2026-07-01", { horizon: 6 });
+    expect(d.total).toBe(0);          // aucun payable
+    expect(d.engagedTotal).toBe(300); // seul l'émis engage la trésorerie
+  });
+});

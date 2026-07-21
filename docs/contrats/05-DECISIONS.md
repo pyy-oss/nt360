@@ -3,6 +3,50 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-069 — « Supprimer la charge » : retrait TOTAL d'une charge planifiée (y compris du P&L) par overlay non destructif, BC lié annulé dans le même geste
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« prévoir bouton supprimer la charge pour supprimer totalement y compris du P&L », arbitrages : charge = ligne de coût de la fiche ; un seul geste qui annule aussi le BC lié ; boutons en FP 360°, Exécution BC et P&L Projet)
+
+### Contexte
+L'ADR-068 sort le BC annulé des engagements en laissant la charge planifiée au P&L (BC de remplacement attendu). Quand la charge elle-même disparaît (périmètre réduit, achat abandonné), il faut pouvoir la retirer TOTALEMENT — y compris du coût planifié — sans suppression physique (un ré-import de fiche la recréerait).
+
+### Décisions
+- **Objet porteur : la ligne d'achat planifié de fiche** (bcLines source « fiche »), identifiée par son id de doc (déterministe au ré-import).
+- **Overlay `config/cancelCharges`**, via le callable existant `setCancellation` (genre « charges » ajouté à CANCELLABLE, droit « bc », transaction, audit, recompute) — même patron que cancelOrders/cancelInvoices : non destructif, survit aux ré-imports, RÉTABLISSABLE, aucune fonction déployée nouvelle.
+- **Effet au recompute** (règle PURE `domain/charges.applyChargeDrops`, testée) : la ligne sort de tous les agrégats ET son montant est retiré du coût planifié de l'affaire — `costTotal` ↓, `margin` ↑, `%MB` recalculé sur la vente (plancher 0 ; une fiche sans marge numérique n'est pas inventée).
+- **Un seul geste** : le bouton passe aussi les BC RÉELS non soldés du même FP+fournisseur en « Annulé » (ADR-068) — et depuis l'Exécution BC, le geste inverse (annuler ce BC + supprimer ses charges de fiche) existe aussi.
+- **Trois emplacements** : FP 360° (Lignes BC, lignes planifiées), Exécution BC (action de ligne), P&L Projet (détail d'affaire, liste des charges planifiées). Badge « Charge supprimée » + « Rétablir » partout ; lecture de l'overlay sous droit « bc » (firestore.rules).
+
+### Conséquences
+- Au recompute suivant : marge carnet et rentabilité de l'affaire REMONTENT du montant supprimé ; l'exposition de la fiche disparaît des vues planifiées. Rétablir inverse tout.
+- Une charge supprimée dont la fiche est ré-importée reste supprimée (overlay par id déterministe) ; si la fiche retire la ligne à la source, l'entrée d'overlay devient inerte.
+
+### Ce qu'on saura dans six mois
+Si des charges sont « supprimées » à répétition sur les mêmes affaires, c'est la fiche source qu'il faut mettre à jour dans Odoo — l'overlay est un correctif d'arbitrage, pas un canal de saisie.
+
+## ADR-068 — BC « Annulé » : statut propre hors engagements/cash, la charge planifiée reste au P&L en attendant le BC de remplacement
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« bc annulé sort des engagements mais le montant reste attaché au P&L en attendant le BC de remplacement », puis « go »)
+
+### Contexte
+Le statut « annule » existait DÉJÀ côté ClickUp (`lib/clickupBc.mapBcStatus`) mais n'était jamais généralisé : l'import Logistics mappait « Annulé » sur `a_emettre` et le webhook Odoo le rejetait vers « emis ». Un BC annulé comptait donc à tort dans l'engagement SOA, les décaissements prévisionnels, les alertes « BC non soldés »/« BC en retard », les relances et l'engagé rentabilité (ADR-067).
+
+### Décisions
+- **6ᵉ statut `annule`, hors cycle**, reconnu de bout en bout : parseur Logistics (« annul » → `annule`), webhook Odoo (`annule` accepté dans les statuts d'engagement, mapping `cancel` documenté), `BC_STAGES` (saisie manuelle/masse, back + front), libellé « Annulé ».
+- **Sémantique unique partout** : hors engagement SOA **et hors netting** — l'achat planifié de la commande RETOMBE en prévisionnel (`open`), c'est le « en attendant le BC de remplacement » ; hors décaissements/engagement de trésorerie ; hors alertes `bc_en_attente`/`bc_en_retard` ; hors relances ; hors bulletin « BC en retard » ; hors **engagé** rentabilité (`bcCostByFp` + miroir FP 360°) et donc hors `achat_bc_sup_planifie`.
+- **La charge planifiée n'est PAS touchée** : le coût planifié (fiche/P&L, `costTotal`, `suppliers[]`) est un objet distinct — l'annulation d'un BC ne modifie ni le P&L ni la marge carnet. (Le retrait TOTAL d'une charge — « supprimer y compris du P&L » — fera l'objet d'un lot dédié par overlay non destructif, une fois l'objet porteur tranché.)
+
+### Conséquences
+- Au prochain recompute : engagement SOA et engagement de trésorerie BAISSENT du montant des BC annulés, le prévisionnel (`open`) remonte d'autant — mouvement cohérent sur toutes les vues (mêmes assiettes back/front).
+- Un BC annulé n'apparaît plus jamais « en retard » ni « en attente » ; il reste listé (statut « Annulé ») dans l'Exécution BC et le FP 360°.
+
+### Ce qu'on saura dans six mois
+Si des « Annulé » réapparaissent en engagement, c'est qu'une nouvelle source de statut BC n'est pas passée par `mapBcStatus`/`BC_STAGES` — brancher la source, pas patcher la vue.
+
 ## ADR-067 — BC/DC dans la rentabilité : « engagé (Σ BC) » par affaire + alerte de dépassement, rattachement DC persistant sur les docs, DC capté à l'import BC
 
 - **Date :** 2026-07-21

@@ -308,6 +308,8 @@ service cloud.firestore {
     // « overview », les factures à « facturation » (pas de fuite de libellé facturation ailleurs).
     match /config/cancelOrders   { allow read: if canRead('overview');    allow write: if false; }
     match /config/cancelInvoices { allow read: if canRead('facturation'); allow write: if false; }
+    // Charges planifiées de fiche supprimées (ADR-069) — badge/rétablissement en P&L Projet / FP 360° / Exécution BC.
+    match /config/cancelCharges  { allow read: if canRead('bc');          allow write: if false; }
     // Réconciliation de N° FP (opp→P&L) : une map de N° FP vers N° FP (donnée non sensible, les FP
     // apparaissent déjà dans de nombreuses vues) ; lisible par le carnet (overview), écrite par le
     // callable setFpAlias (Admin SDK, droit « import »).
