@@ -426,7 +426,7 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
     return { ok: true, restored, considered: info.size };
   });
 
-  const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  const upsertMntTicket = onCallG("upsertMntTicket", { memoryMiB: 256, timeoutSeconds: 300 }, async (req) => {
     await requireWrite(req, "maintenance");
     await assertMntEnabled();
     const { validateTicket } = require("../domain/mntTicket");

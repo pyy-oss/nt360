@@ -3,6 +3,7 @@
 // Le backlog est exposé séparément (informatif) mais N'ENTRE PAS dans le projeté CAS (déjà
 // couvert par le CAS réalisé). + comparaison N vs N-1 sur la facturation.
 const { sum } = require("./chaine");
+const { marginRate } = require("./reporting");
 const { projectionWeight, normalizeTiers } = require("./projection");
 const { reportedFromMilestones } = require("./milestones");
 const { fpKey, plausibleYear } = require("../lib/ids");
@@ -102,7 +103,10 @@ function atterrissage(orders, invoices, opps, objectives, fy, asOf, tiers, miles
     backlogProjete += bp - rep;
     reporteCaf += rep;
     // Marge reportée AU PRORATA : taux P&L de la commande × montant reporté (la marge suit le CA).
-    const rate = (o.cas || 0) > 0 ? (o.mb || 0) / o.cas : (o.marginPct || 0);
+    // AUTORITÉ marginRate (audit rentabilité M1) : la réimplémentation locale sautait la normalisation
+    // p>1 ⇒ /100 (piège P2-1) — latente ici (rep=0 quand CAS=0) mais armée au moindre assouplissement
+    // du plafond. Une SEULE dérivation de taux de marge dans le dépôt.
+    const rate = marginRate(o);
     reporteMarge += rate * rep;
   }
   const cafProjete = factureN + backlogProjete + pipelinePondere;

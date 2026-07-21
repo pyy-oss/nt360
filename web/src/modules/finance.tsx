@@ -335,19 +335,20 @@ function MarginWaterfall({ byBu }: { byBu: { bu?: string; mb?: number }[] }) {
 type DeliveryMarginRow = { fp: string; client: string; bu: string; am: string; vente: number; facture: number; margeCarnet: number | null; coutLabor: number | null; coutAstreintes: number | null; joursLabor: number; margeLivraison: number | null; margeLivraisonPct: number | null };
 async function deliveryMarginByAffaire() {
   const res = await httpsCallable(functions, "deliveryMarginByAffaire", { timeout: 120_000 })({});
-  return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[] };
+  return res.data as { ok: boolean; rows: DeliveryMarginRow[]; unassignedDays: number; missingCjm: string[]; capped?: boolean };
 }
 function DeliveryMarginCard() {
   const [rows, setRows] = useState<DeliveryMarginRow[] | null>(null);
   const [unassigned, setUnassigned] = useState(0);
   const [missingCjm, setMissingCjm] = useState<string[]>([]);
+  const [capped, setCapped] = useState(false); // troncature de scan serveur — labor partiellement compté
   // « denied » (droit rentabilite absent → carte masquée) ≠ « error » (panne réseau/serveur → signalée) :
   // l'ancien catch unique faisait disparaître la carte sur une simple panne, sans signal (audit axe 37).
   const [state, setState] = useState<"loading" | "ok" | "denied" | "error">("loading");
   useEffect(() => {
     let live = true;
     deliveryMarginByAffaire()
-      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setState("ok"); })
+      .then((r) => { if (!live) return; setRows(r.rows || []); setUnassigned(r.unassignedDays || 0); setMissingCjm(r.missingCjm || []); setCapped(r.capped === true); setState("ok"); })
       .catch((e: unknown) => { if (live) setState((e as { code?: string })?.code === "functions/permission-denied" ? "denied" : "error"); });
     return () => { live = false; };
   }, []);
@@ -360,6 +361,7 @@ function DeliveryMarginCard() {
         <>
           {/* CJM manquants = marge SOUS-COSTÉE (coût 0 sur ces consultants) — même ⚠ que le module contrats.
               Le signal revenait du serveur mais n'était jamais affiché (audit axe 14). */}
+          {capped && <div className="text-[11px] text-gold mb-2">⚠ Données tronquées au cap de scan serveur — le coût de main-d'œuvre est partiellement compté (marge possiblement surestimée).</div>}
           {missingCjm.length > 0 && <div className="text-[11px] text-clay mb-2">⚠ Marge sous-costée : {missingCjm.length} consultant(s) sans CJM (coût compté 0) — {missingCjm.slice(0, 5).join(", ")}{missingCjm.length > 5 ? "…" : ""}. Renseignez le CJM dans Consultants.</div>}
           <Table columns={[
             colText("FP", (a: DeliveryMarginRow) => <FpLink fp={a.fp} />, (a: DeliveryMarginRow) => a.fp),

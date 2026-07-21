@@ -1771,7 +1771,7 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
 // handlers/timesheets.js (patron R3). CRA mensuel → TACE/occupation réels, tendance, auto-CRA ClickUp,
 // P&L par ressource et pré-facturation. Deps injectées ; exports déclarés ici (déploiement par nom).
 const { createTimesheets } = require("./handlers/timesheets");
-const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM });
+const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow: recomputeSummaries, logOps });
 exports.upsertTimesheet = _timesheets.upsertTimesheet;
 exports.deleteTimesheet = _timesheets.deleteTimesheet;
 exports.timesheetKpis = _timesheets.timesheetKpis;
@@ -2236,7 +2236,7 @@ exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIEN
   return { ok: true, id: ref.id, approverUid };
 });
 
-exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+exports.decideApproval = onCallG("decideApproval", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   // DÉCIDER ≠ ÉDITER une opp : droit LECTURE `pipeline` suffit (le manager approbateur peut n'avoir que
   // la lecture). QUI peut décider reste borné dur ci-dessous (approbateur désigné OU direction) → aucune
   // fuite. Corrige le workflow d'approbation bloqué quand le décideur n'a pas `pipeline:write` (audit).
@@ -2255,6 +2255,27 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 256, timeoutSeco
   if (cur.requestedBy === req.auth.uid && !isDir) throw new HttpsError("permission-denied", "un demandeur ne peut pas approuver sa propre demande");
   await ref.set({ status: decision, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), decisionNote: String(req.data?.note || "").trim().slice(0, 1000) }, { merge: true });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "approval_decide", module: "pipeline", entity: "approval", entityId: id, detail: { decision, entityId: cur.entityId }, ts: FieldValue.serverTimestamp() });
+  // EFFET ASTREINTE APPLIQUÉ EN SYNCHRONE (audit rentabilité H2) : le trigger onMntApprovalDecided est
+  // env-gaté (RECOMPUTE_REGION) et ABSENT du déploiement — sans lui, une astreinte approuvée restait
+  // « en_attente » POUR TOUJOURS : sa charge n'était jamais comptée (mntContratPnl, marge de livraison,
+  // mnt_risque) → marge SURESTIMÉE en silence. Best-effort (la décision est déjà écrite) ; idempotent
+  // (on ne mute que si l'astreinte n'est pas déjà décidée — le trigger, s'il est un jour déployé,
+  // réécrira les mêmes valeurs). L'effet CONTRAT (renouvellement/résiliation) reste porté par le trigger.
+  if (cur.entityType === "astreinte" && cur.entityId) {
+    try {
+      const { isMntEnabled } = require("./domain/mntFeature");
+      if (isMntEnabled((await db.doc("config/mntFeature").get()).data())) {
+        const statut = decision === "approved" ? "validee" : "rejetee";
+        const aRef = db.doc(`mnt_astreintes/${cur.entityId}`);
+        const aSnap = await aRef.get();
+        if (aSnap.exists && !["validee", "rejetee"].includes(String((aSnap.data() || {}).statut))) {
+          await aRef.set({ statut, decidedBy: req.auth.uid, decidedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          await db.collection("auditLog").add({ uid: req.auth.uid, action: "astreinte_decide", module: "maintenance", entity: "astreinte", entityId: cur.entityId, detail: { statut, approvalId: id }, ts: FieldValue.serverTimestamp() });
+          if (statut === "validee") await refreshNowBestEffort("decideApproval", ["maintenance"]); // la charge validée pèse dans la marge
+        }
+      }
+    } catch (e) { logger.error("decideApproval : effet astreinte en échec (décision enregistrée)", { id, message: e && e.message }); }
+  }
   await fireOutbound("approval_decided", { approvalId: id, decision, kind: cur.kind, entityId: cur.entityId, amount: cur.amount ?? null }); // Lot 7b
   return { ok: true, id, status: decision };
 });

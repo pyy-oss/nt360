@@ -9,7 +9,14 @@ const { MAX_SCAN, sliceCapped } = require("../domain/scan");
 const { isMntEnabled } = require("../domain/mntFeature");
 const { excludeMaintenance } = require("../domain/timesheet");
 
-function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM }) {
+function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow, logOps }) {
+  // Recompute SYNCHRONE best-effort (audit rentabilité M3) : summaries/preBilling et mnt_risque dérivent
+  // des CRA/consultants, mais AUCUNE mutation ne demandait le scope « prebilling » — ils restaient figés
+  // jusqu'au recompute nocturne. La donnée est déjà écrite : échec tracé, jamais remonté.
+  const refreshCra = async (action) => {
+    try { if (recomputeNow) await recomputeNow(["prebilling", "maintenance"]); }
+    catch (e) { if (logOps) await logOps({ kind: "recompute", trigger: action, status: "error", error: (e && e.message) || String(e) }); }
+  };
   // Drapeau du module maintenance : lu à la demande. ÉTEINT ⇒ la contribution CRA « mnt » (ADR-013)
   // est écartée des KPI d'activité (TACE/occupation) pour restaurer strictement l'ERP d'avant (1A).
   async function mntEnabled() {
@@ -24,6 +31,7 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     // source « manual » : une saisie manuelle PRIME sur l'auto-CRA ClickUp (qui ne l'écrase plus) — cf. audit F1.
     await db.doc(`timesheets/${id}`).set({ ...v.value, source: "manual", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_timesheet", module: "pipeline", entity: "timesheet", entityId: id, detail: { consultantId: v.value.consultantId, month: v.value.month, billedDays: v.value.billedDays }, ts: FieldValue.serverTimestamp() });
+    await refreshCra("upsertTimesheet");
     return { ok: true, id };
   });
 
@@ -32,6 +40,7 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     const id = assertPlainId(req.data?.id, "id CRA");
     await db.doc(`timesheets/${id}`).delete();
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "delete_timesheet", module: "pipeline", entity: "timesheet", entityId: id, ts: FieldValue.serverTimestamp() });
+    await refreshCra("deleteTimesheet");
     return { ok: true };
   });
 
@@ -120,6 +129,7 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
     }
     if (n) await batch.commit();
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "import_timesheets", module: "pipeline", entity: "timesheet", entityId: "*", detail: { imported, errors: errors.length }, ts: FieldValue.serverTimestamp() });
+    await refreshCra("importTimesheets");
     return { ok: true, imported, errorCount: errors.length, errors: errors.slice(0, 20) };
   });
 
@@ -278,18 +288,22 @@ function createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, r
       readChunks("commandesRows"),        // carnet (vente/facturé par affaire)
       readChunks("commandesRowsMargin"),  // marge isolée (mb/costTotal) — même droit rentabilite
     ]);
-    const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    // `capped` PROPAGÉ (audit rentabilité M3') : scan.js promet « on tronque EN LE SIGNALANT » — jeté ici,
+    // un dépassement du cap sous-comptait le labor (marge SURESTIMÉE) sans aucun signal côté client.
+    const cS = sliceCapped(cSnap.docs), tS = sliceCapped(tSnap.docs), aS = sliceCapped(aSnap.docs);
+    const capped = cS.capped || tS.capped || aS.capped;
+    const consultants = cS.docs.map((d) => ({ id: d.id, ...d.data() }));
     // Labor : contribution « mnt » écartée par imputeLaborByFp (forfait, ADR-005) ; imputée sur TOUS les mois
     // présents dans les CRA (la marge de livraison couvre la VIE ENTIÈRE de l'affaire, pas une fenêtre).
-    const timesheets = sliceCapped(tSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-    const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
+    const timesheets = tS.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const assignments = aS.docs.map((d) => ({ id: d.id, ...d.data() }));
     const months = [...new Set(timesheets.map((t) => t && t.month).filter(Boolean))];
     const labor = imputeLaborByFp(assignments, timesheets, consultants, months);
     // Charge des astreintes VALIDÉES par FP (ADR-035) — retranchée EN PLUS du labor dans la marge de livraison.
     const { astreinteCostByFp } = require("../domain/mntAstreinte");
     const astreinteByFp = astreinteCostByFp(sliceCapped(astSnap.docs).docs.map((d) => d.data()));
     const rows = deliveryMargin(carnetRows, marginRows, labor.byFp, true, astreinteByFp);
-    return { ok: true, rows, unassignedDays: labor.unassignedDays, missingCjm: labor.missingCjm };
+    return { ok: true, rows, unassignedDays: labor.unassignedDays, missingCjm: labor.missingCjm, capped };
   });
 
   return { upsertTimesheet, deleteTimesheet, timesheetKpis, taceHistory, importTimesheets, syncClickupTimesheets, resourcePnl, preBillingFromCra, deliveryMarginByAffaire };

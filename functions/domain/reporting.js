@@ -169,4 +169,4 @@ function byEntity(orders, invoices, keyFn, opps, tiers) {
   return [...all.slice(0, CAP), other];
 }
 
-module.exports = { facturation, rentabilite, byEntity, topN };
+module.exports = { facturation, rentabilite, byEntity, topN, marginRate };

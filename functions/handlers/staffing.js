@@ -64,6 +64,12 @@ function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, req
       const before = (await db.doc(`consultants/${id}`).get()).data() || {};
       await db.doc(`consultants/${id}`).set(doc, { merge: true });
       parChanged = ["name", "bu", "grade", "managerUid"].some((k) => (before[k] ?? null) !== (v.value[k] ?? null));
+      // CJM modifié (audit rentabilité M3) : preBilling / mnt_risque / P&L ressource en dérivent — sans
+      // recompute, le palier de risque marge des contrats reste faux jusqu'au nocturne. Best-effort.
+      if ((before.cjm ?? null) !== (v.value.cjm ?? null)) {
+        try { if (recomputeNow) await recomputeNow(["prebilling", "maintenance"]); }
+        catch (e) { if (logOps) await logOps({ kind: "recompute", trigger: "upsertConsultant.cjm", status: "error", error: (e && e.message) || String(e) }); }
+      }
     }
     else { const ref = await db.collection("consultants").add({ ...doc, createdBy: req.auth.uid, createdAt: FieldValue.serverTimestamp() }); id = ref.id; }
     await db.collection("auditLog").add({ uid: req.auth.uid, action: "upsert_consultant", module: "pipeline", entity: "consultant", entityId: id, detail: { name: v.value.name, status: v.value.status }, ts: FieldValue.serverTimestamp() });
@@ -141,7 +147,15 @@ function createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, req
     // Effectif EN ACTIVITÉ (staffé + intercontrat) : le banc doit apparaître en intercontrat (IC), pas « — ».
     const activeIds = consultants.filter((c) => isWorkforce(c.status)).map((c) => c.id);
     const { byConsultant, flags } = buildLoad(assignments, months, activeIds);
-    return { ok: true, months, consultants: consultants.map((c) => ({ id: c.id, name: c.name || null, status: c.status || "active", bu: c.bu || null })), assignments, byConsultant, flags };
+    // TJM par ressource = donnée `rentabilite` (MÊME verrou que preBilling — audit rentabilité H3) : sous
+    // le seul droit `overview`, un lecteur reconstruisait le CA par ressource depuis `tjmBilled`. Le plan
+    // de charge n'a besoin que des périodes/allocations — le tarif est retiré sans le droit coût.
+    const { canRead } = require("../domain/authz");
+    const role = req.auth.token?.nt360Role;
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    const canRate = role === "direction" || canRead(matrix, role, "rentabilite");
+    const safeAssignments = canRate ? assignments : assignments.map((a) => { const { tjmBilled: _tjm, ...rest } = a; return rest; });
+    return { ok: true, months, consultants: consultants.map((c) => ({ id: c.id, name: c.name || null, status: c.status || "active", bu: c.bu || null })), assignments: safeAssignments, byConsultant, flags };
   });
 
   return { upsertConsultant, deleteConsultant, listConsultants, upsertAssignment, deleteAssignment, staffingPlan };
