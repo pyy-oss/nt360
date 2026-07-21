@@ -86,3 +86,23 @@ describe("suppliers — netting BC ↔ achat commande (anti double-compte)", () 
     expect(c.engagement).toBe(100000); // 30000 (BC) + 70000 (reliquat open)
   });
 });
+
+// ADR-068 — BC « annulé » : hors engagement ET hors netting SOA. L'achat planifié de la commande
+// RETOMBE en prévisionnel (open) « en attendant le BC de remplacement » ; la charge planifiée reste
+// au P&L (costTotal/fiche — objets distincts, non touchés ici).
+describe("suppliers — BC annulé hors engagement et hors netting (ADR-068)", () => {
+  const order = { fp: "FP/2026/1", raf: 100, suppliers: [{ name: "ACME", amount: 100_000 }] };
+  it("BC émis : achat netté (open 0), engagement 100k — référence avant annulation", () => {
+    const r = suppliers([order], [{ bcNumber: "BC1", supplier: "ACME", fp: "FP/2026/1", amountXof: 100_000, status: "emis" }], []);
+    const a = r.bySupplier.find((s) => s.name === "ACME");
+    expect(a.engagement).toBe(100_000); // BC engagé
+    expect(a.open).toBe(0);             // achat couvert par le BC (netting)
+  });
+  it("MÊME BC annulé : plus d'engagement, l'achat retombe en prévisionnel (open)", () => {
+    const r = suppliers([order], [{ bcNumber: "BC1", supplier: "ACME", fp: "FP/2026/1", amountXof: 100_000, status: "annule" }], []);
+    const a = r.bySupplier.find((s) => s.name === "ACME");
+    expect(a.open).toBe(100_000);       // besoin d'achat de nouveau ouvert (BC de remplacement attendu)
+    expect(a.engagement).toBe(100_000); // = open seul (engagementBc 0)
+    expect(a.facture).toBe(0);          // jamais dans le solde
+  });
+});

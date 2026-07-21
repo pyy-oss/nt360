@@ -113,7 +113,7 @@ connus (un `update` partiel ne réécrit pas le reste). Le **statut** ne pose QU
 | `currency` | string | Devise ISO (`XOF` par défaut) ; convertie en XOF via `config/fxRates`. |
 | `amount` | number | Montant en devise. |
 | `amountXof` | number | Contre-valeur XOF **saisie** (prioritaire sur la conversion). |
-| `status` | string | Engagement : `a_emettre`/`emis`/`livre` (autre valeur → `emis`). |
+| `status` | string | Engagement : `a_emettre`/`emis`/`livre`/`annule` (autre valeur → `emis`). `annule` sort le BC des engagements/du cash — la charge planifiée reste au P&L. |
 | `eta` | string | ETA **réelle** `AAAA-MM-JJ` (alias `etaReel`). |
 | `etaContrat` | string | ETA **contractuelle** `AAAA-MM-JJ` (engagement, distincte de l'ETA réelle). |
 | `dateIn` | string | Date d'entrée `AAAA-MM-JJ`. |
@@ -278,8 +278,9 @@ def map_invoice(m):
 
 # purchase.order → bc  (bon de commande fournisseur ; N° BC requis ; statut d'ENGAGEMENT seulement)
 def map_bc(p):
-    # état Odoo → statut d'engagement nt360 (jamais 'facture'/'solde' : le solde reste un acte comptable)
-    status = "livre" if p.state == "done" else ("emis" if p.state == "purchase" else "a_emettre")
+    # état Odoo → statut d'engagement nt360 (jamais 'facture'/'solde' : le solde reste un acte comptable).
+    # 'cancel' → 'annule' : le BC sort des engagements, la charge planifiée reste au P&L (ADR-068).
+    status = "annule" if p.state == "cancel" else ("livre" if p.state == "done" else ("emis" if p.state == "purchase" else "a_emettre"))
     return {
         "odooId": "purchase.order:%s" % p.id,
         "bcNumber": p.name or "",                          # N° BC (requis)

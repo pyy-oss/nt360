@@ -16,16 +16,19 @@ function pickSheet(wb) {
 }
 
 // Statuts logistiques hétérogènes (numérotés « 7-Livraison totale », ou libres « Livrée »,
-// « Placée »…) → 5 étapes du cycle BC. Ordre de test important (du plus avancé au moins avancé).
+// « Placée »…) → 6 étapes du cycle BC. Ordre de test important (du plus avancé au moins avancé).
 function mapBcStatus(raw) {
   const s = noAcc(raw).trim();
   if (!s) return "a_emettre";
+  // « Annulé » = statut PROPRE (ADR-068, aligné sur le canal ClickUp) : hors engagement et hors
+  // netting SOA — le mapper sur a_emettre le comptait à tort en engagement/décaissements.
+  if (/annul/.test(s)) return "annule";
   if (/(solde|cloture|cloturee)/.test(s)) return "solde";
   if (/factur/.test(s)) return "facture";
   if (/(livr|disponible|diponible|recu|receptionn)/.test(s)) return "livre";
-  // « Non commandé » / « Nouveau » / « Annulé » AVANT la règle générique « command… »
+  // « Non commandé » / « Nouveau » AVANT la règle générique « command… »
   // (sinon « non commande » serait capté par « command » → emis à tort).
-  if (/(non\s*command|nouveau|attente|annul|^0)/.test(s)) return "a_emettre";
+  if (/(non\s*command|nouveau|attente|^0)/.test(s)) return "a_emettre";
   if (/(command|placee|placement|expedition|production|provision|douane|dedouan|traitement|eta|bloqu|transit)/.test(s)) return "emis";
   return "a_emettre";
 }

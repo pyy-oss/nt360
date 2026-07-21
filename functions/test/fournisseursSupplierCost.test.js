@@ -62,3 +62,16 @@ describe("bcCostByFp — achats engagés par affaire (fpKey)", () => {
     expect(bcCostByFp(undefined)).toEqual({});
   });
 });
+
+// ADR-068 — un BC ANNULÉ n'est plus un achat de l'affaire : hors engagé (la charge planifiée, elle,
+// reste au P&L via costTotal). Miroir front : FP 360° exclut aussi status "annule".
+describe("bcCostByFp — BC annulé exclu de l'engagé (ADR-068)", () => {
+  const { bcCostByFp } = require("../domain/fournisseurs");
+  it("annule exclu ; les autres statuts (payé compris) restent comptés", () => {
+    const r = bcCostByFp([
+      { fp: "FP/2026/1", amountXof: 8_000, status: "annule" },
+      { fp: "FP/2026/1", amountXof: 5_000, status: "solde" },
+    ]);
+    expect(r).toEqual({ "FP/2026/1": 5_000 });
+  });
+});

@@ -331,7 +331,7 @@ function BcImport() {
 }
 
 // 10 — Exécution BC
-const BC_DELIVERED = new Set(["livre", "facture", "solde"]);
+const BC_DELIVERED = new Set(["livre", "facture", "solde", "annule"]); // annulé (ADR-068) : jamais « en retard » (miroir alerte bc_en_retard)
 // BC en retard : ETA (réelle sinon contractuelle) dépassée ET non livré. Pur (today injecté) → réutilisé
 // par le comptage plein-tableau (mémo) ET la colonne « Retard » par ligne, sans recréer de Date.
 const isBcLate = (r: BcLine, today: string) => { const eta = r.etaReel || r.etaContrat; return !!eta && String(eta).slice(0, 10) < today && !BC_DELIVERED.has(r.status || "a_emettre"); };
@@ -370,7 +370,8 @@ export const BC: FC<Props> = () => {
     const bs: Record<string, number> = {};
     const lateRows: BcLine[] = [];
     for (const r of rows) { const st = r.status || "a_emettre"; bs[st] = (bs[st] || 0) + 1; if (isBcLate(r, today)) lateRows.push(r); }
-    const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => (r.status || "a_emettre") !== "solde") : rows;
+    // « Non soldés » exclut aussi les annulés (ADR-068) — miroir de l'alerte bc_en_attente (même compte au drill-through).
+    const filt = flt === "late" ? lateRows : flt === "open" ? rows.filter((r) => !["solde", "annule"].includes(r.status || "a_emettre")) : rows;
     return { byStatus: bs, solde: bs["solde"] || 0, lateCount: lateRows.length, filtered: filt };
   }, [rows, flt, today]);
   // Garde de chargement : sans elle, les 5 compteurs de statut et les KPI rendaient 0 au premier
@@ -748,7 +749,7 @@ export const Fp360: FC<Props> = () => {
   // double-comptait ce que l'alerte ne voit pas. Limite assumée (comme Factures/Opportunités de cet
   // écran) : un BC saisi sous un FP ALIAS source est compté par l'alerte (canonisation au recompute)
   // mais invisible ici (requête sur le fp brut du doc).
-  const bcReal = bc.filter((b) => b.source !== "fiche");
+  const bcReal = bc.filter((b) => b.source !== "fiche" && b.status !== "annule"); // annulé (ADR-068) : plus un achat de l'affaire — miroir bcCostByFp
   const bcCmpSet = new Set(bcReal.filter((b) => b.source !== "clickup" && b.bcNumber).map((b) => bcCompareKey(b.bcNumber)).filter(Boolean));
   const engage = bcReal
     .filter((b) => b.source !== "clickup" || !b.bcNumber || !bcCmpSet.has(bcCompareKey(b.bcNumber)))

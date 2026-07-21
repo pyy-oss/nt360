@@ -8,7 +8,7 @@ const { fpKey } = require("../lib/ids");
 const DAY = 86400000;
 const daysLate = (asOf, ref) => Math.floor((Date.parse(asOf) - Date.parse(String(ref).slice(0, 10))) / DAY);
 const bucketOf = (late) => (late <= 30 ? "0-30" : late <= 60 ? "31-60" : late <= 90 ? "61-90" : "90+");
-const DELIVERED = new Set(["livre", "facture", "solde"]); // BC réputé exécuté → hors relance
+const DELIVERED = new Set(["livre", "facture", "solde", "annule"]); // BC exécuté OU annulé (ADR-068) → hors relance
 
 // Regroupe des actions par responsable (compte + montant), trié par montant décroissant.
 function byResponsable(items, amountOf) {

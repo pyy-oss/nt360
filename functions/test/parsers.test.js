@@ -351,7 +351,7 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     const out2 = parseLogistics(wbFromRows("PO List", corrected)).rows;
     expect(out2.map((r) => r._id).sort()).toEqual(out.map((r) => r._id).sort());
   });
-  it("mapBcStatus : cycle BC (a_emettre/emis/livre/facture/solde)", () => {
+  it("mapBcStatus : cycle BC (a_emettre/emis/livre/facture/solde) + annule hors cycle", () => {
     expect(mapBcStatus("1- Non commandé")).toBe("a_emettre");
     expect(mapBcStatus("2- Commande placée")).toBe("emis");
     expect(mapBcStatus("6- Dedouanement")).toBe("emis");
@@ -359,6 +359,9 @@ describe("parseLogistics → bcLines (suivi BC fournisseurs)", () => {
     expect(mapBcStatus("2- Facturé")).toBe("facture");
     expect(mapBcStatus("Solde")).toBe("solde");
     expect(mapBcStatus("")).toBe("a_emettre");
+    // ADR-068 : « Annulé » = statut PROPRE (plus a_emettre) — sort des engagements/du cash, aligné ClickUp.
+    expect(mapBcStatus("Annulé")).toBe("annule");
+    expect(mapBcStatus("Commande annulée")).toBe("annule");
   });
 });
 

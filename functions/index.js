@@ -3363,7 +3363,7 @@ exports.patchOpportunity = _opps.patchOpportunity;
 exports.exportOpportunities = _opps.exportOpportunities;
 exports.importOpportunities = _opps.importOpportunities;
 
-const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde"];
+const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde", "annule"];
 
 exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "bc");
@@ -4542,9 +4542,10 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     });
     bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known, dcAliases };
   }
-  // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT (jamais « facture »/« solde » — le solde SOA reste un acte
-  // comptable, MÊME règle que l'import ClickUp `mapBcStatus`). Défaut « emis » (un BC Odoo est une commande émise).
-  const BC_COMMIT_ONLY = ["a_emettre", "emis", "livre"];
+  // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT ou l'ANNULATION (jamais « facture »/« solde » — le solde
+  // SOA reste un acte comptable, MÊME règle que l'import ClickUp `mapBcStatus`). « annule » accepté (ADR-068) :
+  // une annulation Odoo sort le BC de l'engagement. Défaut « emis » (un BC Odoo est une commande émise).
+  const BC_COMMIT_ONLY = ["a_emettre", "emis", "livre", "annule"];
   // Traitement d'UN enregistrement (résolution d'id + upsert + audit). Les ids cibles sont DÉTERMINISTES
   // (safeId(fp)/safeId(numero) pour commande/facture ; odoo_+safeId(odooId||fp) pour une opp non rapprochée),
   // donc deux écritures concurrentes sur le même doc CONVERGENT (upsert idempotent) — parallélisation sûre.

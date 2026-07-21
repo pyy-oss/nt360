@@ -10,10 +10,14 @@
 //   • Disponible = autorisé − solde − engagement.  Exposition = Σ achats prévus par les commandes.
 const { fpKey, cleanName } = require("../lib/ids");
 
-// Statuts BC : a_emettre → emis → livre → facture → solde. « facture » = facturé non payé (dans le
-// solde) ; « solde » = payé (hors compte) ; les 3 premiers = engagé non facturé.
+// Statuts BC : a_emettre → emis → livre → facture → solde (+ « annule », hors cycle). « facture » =
+// facturé non payé (dans le solde) ; « solde » = payé (hors compte) ; les 3 premiers = engagé non
+// facturé ; « annule » = HORS COMPTE ET HORS NETTING (ADR-068) — le BC annulé n'engage plus rien et
+// ne couvre plus l'achat planifié de la commande, qui RETOMBE en prévisionnel (open) en attendant le
+// BC de remplacement. La charge planifiée, elle, reste au P&L (costTotal/fiche, objets distincts).
 const INVOICED = "facture";
 const PAID = "solde";
+const CANCELLED = "annule";
 const COMMITTED = new Set(["a_emettre", "emis", "livre"]);
 
 /**
@@ -49,6 +53,7 @@ function suppliers(orders, bcLines, creditLines, supplierInvoices, opts) {
   for (const b of bcLines) {
     if (b.source === "fiche") continue; // achats PLANIFIÉS de fiche (a_emettre) : pas des BC commandés → hors SOA/engagement (parité)
     if (b.status === PAID) continue; // payé → hors compte et hors engagement
+    if (b.status === CANCELLED) continue; // annulé → hors engagement ET hors netting (l'achat retombe en prévisionnel, ADR-068)
     // Clé fournisseur CANONIQUE (cleanName, autorité unique ERP-wide, ADR-P20) : compacte espaces + trim +
     // MAJUSCULES. Sans compaction, un même fournisseur importé « à un espace près » selon la source (ClickUp/
     // fiche vs Odoo/logistics) se scindait en deux dans le SOA — alors que par_ca les fusionne déjà. Aligné.
@@ -180,15 +185,17 @@ function supplierCostByFp(supplierInvoices) {
   return out;
 }
 
-// ACHATS ENGAGÉS PAR AFFAIRE — Σ des BC RÉELS par N° FP canonique (fpKey), TOUS statuts confondus :
-// un BC payé (soldé) reste un COÛT de l'affaire — le statut est du cash, pas du coût. Les lignes de
-// fiche (source « fiche ») sont EXCLUES : achats PLANIFIÉS, déjà portés par costTotal — les compter
-// ici ferait comparer le planifié à lui-même. Sert la réconciliation amont du FP 360° (planifié /
-// engagé / réel) et l'alerte achat_bc_sup_planifie. PUR (miroir front trivial, testé une fois).
+// ACHATS ENGAGÉS PAR AFFAIRE — Σ des BC RÉELS par N° FP canonique (fpKey), tous statuts SAUF
+// « annule » : un BC payé (soldé) reste un COÛT de l'affaire — le statut est du cash, pas du coût —
+// mais un BC ANNULÉ n'est plus un achat de l'affaire (ADR-068 ; la charge planifiée, elle, reste au
+// P&L en attendant le BC de remplacement). Les lignes de fiche (source « fiche ») sont EXCLUES :
+// achats PLANIFIÉS, déjà portés par costTotal — les compter ici ferait comparer le planifié à
+// lui-même. Sert la réconciliation amont du FP 360° (planifié / engagé / réel) et l'alerte
+// achat_bc_sup_planifie. PUR (miroir front trivial, testé une fois).
 function bcCostByFp(bcLines) {
   const out = {};
   for (const b of Array.isArray(bcLines) ? bcLines : []) {
-    if (!b || b.source === "fiche") continue;
+    if (!b || b.source === "fiche" || b.status === CANCELLED) continue;
     const k = fpKey(b.fp) || "";
     if (!k) continue;
     out[k] = (out[k] || 0) + (Number(b.amountXof) || 0);
