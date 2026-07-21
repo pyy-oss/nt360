@@ -27,7 +27,9 @@ function parseIso(s?: string | null): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-export interface MntEcheanceProche { id: string; fp: string | null; client: string; dateFin: string; jours: number }
+// `arr` = revenu récurrent annualisé du contrat (même annualise() que le KPI ARR) : chiffre l'ENJEU de
+// chaque échéance proche — un renouvellement à 40 M ne se lit pas comme un renouvellement à 400 k.
+export interface MntEcheanceProche { id: string; fp: string | null; client: string; dateFin: string; jours: number; arr: number }
 export interface MntDashboard {
   contratsTotal: number;
   contratsActifs: number;
@@ -110,7 +112,7 @@ export function computeMntDashboard(contrats: ContratLike[], tickets: TicketLike
     if (fin != null && asOf != null) {
       const jours = Math.round((fin - asOf) / DAY);
       if (jours >= 0 && jours <= ECHEANCE_PROCHE_JOURS) {
-        echeancesProches.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", dateFin: c.dateFin as string, jours });
+        echeancesProches.push({ id: c.id || "", fp: c.fp ?? null, client: c.client || "", dateFin: c.dateFin as string, jours, arr: Math.round(annualise(Number(c.montantEngage) || 0, c.echeanceType)) });
       }
     }
   }

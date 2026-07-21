@@ -232,9 +232,17 @@ const BenefitsTab: FC<{ partnerName: Record<string, string>; partnerOpts: { valu
           : <Card title="Rebates"><div className="text-[12px] text-faint py-2">Réservé au droit « rentabilité » (remise arrière = donnée de marge).</div></Card>}
       </div>
 
-      {/* Fenêtres d'action (issues du recompute — mêmes prédicats que les statuts dérivés) */}
-      {((dr?.expiring || []).length > 0 || (mdfSum?.expiring || []).length > 0 || (canSeeCa && (rbSummary?.overdue || []).length > 0)) && (
-        <Card title="À traiter (fenêtres qui se ferment)">
+      {/* Fenêtres d'action (issues du recompute — mêmes prédicats que les statuts dérivés). L'ENJEU Σ
+          s'affiche en tête : MDF non consommés qui expirent + rebates attendus en retard — on sait
+          combien on laisse sur la table avant même de dérouler la liste. */}
+      {((dr?.expiring || []).length > 0 || (mdfSum?.expiring || []).length > 0 || (canSeeCa && (rbSummary?.overdue || []).length > 0)) && (() => {
+        const mdfEnjeu = (mdfSum?.expiring || []).reduce((s, e) => s + (e.remainingXof || 0), 0);
+        const rbEnjeu = canSeeCa ? (rbSummary?.overdue || []).reduce((s, e) => s + (e.attenduXof || 0), 0) : 0;
+        const n = (dr?.expiring || []).length + (mdfSum?.expiring || []).length + (canSeeCa ? (rbSummary?.overdue || []).length : 0);
+        const parts = [mdfEnjeu > 0 ? `${money(mdfEnjeu)} de MDF à consommer` : "", rbEnjeu > 0 ? `${money(rbEnjeu)} de rebates à réclamer` : ""].filter(Boolean);
+        return (
+        <Card title={`À traiter (fenêtres qui se ferment) · ${n}`}
+          actions={parts.length > 0 ? <span className="text-[11px] text-ink tabnum">{parts.join(" · ")}</span> : undefined}>
           <div className="flex flex-col gap-1.5 text-[12.5px]">
             {(dr?.expiring || []).map((e) => (
               <div key={`dr-${e.id}`} className="flex flex-wrap items-center gap-2"><Badge tone={e.daysLeft <= 0 ? "clay" : "gold"}>{e.daysLeft <= 0 ? "échue" : `J-${e.daysLeft}`}</Badge><span className="text-ink">Deal reg {e.client}</span><span className="text-faint">{pName(e.partnerId)} · expire le {frDate(e.dateExpiration)} — à prolonger auprès du constructeur</span></div>
@@ -247,7 +255,8 @@ const BenefitsTab: FC<{ partnerName: Record<string, string>; partnerOpts: { valu
             ))}
           </div>
         </Card>
-      )}
+        );
+      })()}
 
       {/* Deal registrations — protection de remise sur les affaires enregistrées auprès du constructeur */}
       <Card title={`Deal registrations · ${dealregs.length}`} actions={canWrite && <button className="btn" onClick={() => setEditReg(null)}><Plus size={14} /> Ajouter</button>}>

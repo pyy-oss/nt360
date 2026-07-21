@@ -8,6 +8,8 @@ import { Card, Table, Badge, Tip, Busy, Toggle, colText, cx, useToast, useConfir
 import { Select } from "../design/inputs";
 import { trackWrite } from "../lib/activity";
 import { setClickupConfig, syncClickupCaf, syncFromClickup, reconcileClickupLinks, clickupHealth, pushAllOrdersToClickup, pushOrderToClickup, dedupeClickupTasks, dedupeBcTasks, enrichClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, pushAllBcToClickup, setupClickupWebhook, deleteClickupWebhook } from "../lib/writes";
+import { T } from "../design/tokens";
+import { ScoreRing } from "./_viz";
 import type { ClickupHealthSummary } from "../types";
 
 // Intégration ClickUp : activation + liste cible. Le token vit dans Secret Manager (CLICKUP_TOKEN),
@@ -42,8 +44,17 @@ function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHe
   return (
     <div className="mt-3">
       {errBanner}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Metric label="Couverture" value={`${cov}%`} tone={cov >= 90 ? "text-emerald" : cov >= 50 ? "text-gold" : "text-clay"} sub={`${health.linked}/${health.commandesTotal} liées`} />
+      {/* Couverture en ANNEAU (ScoreRing partagé — même vocabulaire que les entêtes cockpit) : la métrique
+          de tête se voit en un coup d'œil ; l'ancienne case « Couverture » disparaît (un chiffre, un endroit). */}
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-3 shrink-0">
+          <ScoreRing value={cov / 100} color={cov >= 90 ? T.emerald : cov >= 50 ? T.gold : T.clay} />
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.14em] text-faint">Couverture</div>
+            <div className="text-[11px] text-muted">{health.linked}/{health.commandesTotal}<br />commandes liées</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 grow min-w-0">
         <Metric label="Commandes non liées" value={health.unlinked || 0} tone={(health.unlinked || 0) > 0 ? "text-gold" : "text-emerald"} sub={`dont ${health.unlinkedMatchable || 0} rattachables`} />
         <Metric label="Synchronisées (statut/dates)" value={health.synced || 0} sub={`sur ${health.linked} liées`} />
         <Metric label="Tâches ClickUp" value={health.tasksTotal || 0} sub={`${health.tasksWithFp || 0} avec N° FP`} />
@@ -58,6 +69,7 @@ function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHe
           const sub = wh?.error ? "vérif échouée" : !wh?.registered ? "aucun webhook" : wh?.present ? (wh?.status ? `état : ${wh.status}` : "présent") : "absent côté ClickUp";
           return <Metric label="Webhook temps réel" value={val} tone={tone} sub={sub} />;
         })()}
+        </div>
       </div>
       {/* Deux sens OPPOSÉS, donc distincts : « non liées » = commandes app sans tâche (à pousser) ;
           « orphelines » = tâches ClickUp sans commande active correspondante. Un total nul de rattachables

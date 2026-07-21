@@ -26,7 +26,7 @@ describe("computeMntDashboard", () => {
   it("repère les échéances proches (0..90 j, ADR-041) des contrats actifs, triées, exclut passées et lointaines", () => {
     const d = computeMntDashboard(
       [
-        { id: "a", client: "X", statut: "actif", dateFin: "2026-08-01" }, // +17 j → proche
+        { id: "a", client: "X", statut: "actif", dateFin: "2026-08-01", echeanceType: "mensuel", montantEngage: 1_000_000 }, // +17 j → proche, ARR 12M
         { id: "b", client: "Y", statut: "actif", dateFin: "2026-07-20" }, // +5 j → proche
         { id: "f", client: "U", statut: "actif", dateFin: "2026-10-01" }, // +78 j → proche (dans la fenêtre 90 j, était HORS à 60 j)
         { id: "c", client: "Z", statut: "actif", dateFin: "2026-07-10" }, // passée → exclue
@@ -38,6 +38,9 @@ describe("computeMntDashboard", () => {
     );
     expect(d.echeancesProches.map((e) => e.id)).toEqual(["b", "a", "f"]); // f (78 j) inclus depuis ADR-041
     expect(d.echeancesProches[0].jours).toBe(5);
+    // `arr` = enjeu annualisé PAR échéance (même annualise() que le KPI ARR) ; montant absent → 0.
+    expect(d.echeancesProches.find((e) => e.id === "a")?.arr).toBe(12_000_000);
+    expect(d.echeancesProches.find((e) => e.id === "b")?.arr).toBe(0);
     expect(ECHEANCE_PROCHE_JOURS).toBe(90);
   });
 

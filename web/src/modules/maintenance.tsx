@@ -12,7 +12,7 @@ import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, Kpi, money, EmptyState, Modal, Segmented, cx, useConfirm, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
-import { fmt, pct } from "../design/tokens";
+import { fmt, pct, T } from "../design/tokens";
 import { frDate, tsMillis } from "../lib/format";
 import { fpKey } from "../lib/ids";
 import { isMntEnabled, type MntFeature } from "../lib/mntFeature";
@@ -36,10 +36,14 @@ import {
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
 import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
-import { FpLink, FilterNote, useCommandesRows } from "./_shared";
+import { FpLink, FilterNote, HBars, useCommandesRows } from "./_shared";
+import { Spark, ScoreRing } from "./_viz";
 import type { Props } from "./_shared";
 
 const BU_OPTS = ["ICT", "CLOUD", "FORMATION", "AUTRE"];
+// Ton sémantique (Badge) → couleur token (barres HBars du tableau de bord) : mêmes couleurs de sens que
+// les badges du module — jamais de couleur en dur.
+const TONE_COLOR: Record<string, string> = { emerald: T.emerald, gold: T.gold, clay: T.clay, steel: T.steel, plum: T.plum, neutral: T.steel };
 const MNT_COMPLIANCE_LABEL: Record<string, string> = { sans_sla: "Sans engagement SLA", sans_echeance: "Sans date de fin", montant_nul: "Montant nul" };
 const opt = (map: Record<string, string>, vals: readonly string[]) => vals.map((v) => ({ value: v, label: map[v] || v }));
 const digits = (s: string) => s.replace(/[^\d]/g, "");
@@ -486,6 +490,14 @@ export const Maintenance: FC<Props> = () => {
     const prev = days.length > 30 ? days[days.length - 31] : days[0];
     return { deltaMrr: last.mrr - prev.mrr, fromDate: prev.date, points: days.length };
   }, [mrrSnap]);
+  // Sparkline MRR (≤ 30 derniers points du snapshot quotidien, normalisés [0,1]) : la tendance se VOIT
+  // (pente, cassures), pas seulement en delta chiffré. Même assiette que mrrTrend.
+  const mrrSpark = useMemo(() => {
+    const vals = (mrrSnap?.days || []).filter((d) => d && typeof d.mrr === "number").slice(-30).map((d) => d.mrr as number);
+    if (vals.length < 2) return [] as number[];
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return vals.map((v) => (max > min ? (v - min) / (max - min) : 0.5));
+  }, [mrrSnap]);
   // NB : pas de colonne MRR par groupe — l'ARR (entier) somme juste, mais round(ARR/12) par ligne dériverait
   // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
@@ -765,42 +777,67 @@ export const Maintenance: FC<Props> = () => {
       ]} />
       {tab === "pilotage" && gate && (contrats.length > 0 || tickets.length > 0) && (
         <Card title="Tableau de bord">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald" />
-            <Kpi label="Revenu récurrent annuel (ARR)" value={fmt(dash.arrActifs)} tone="ink" sub="contrats actifs · annualisé" />
-            <Kpi label="Tickets ouverts" value={String(dash.ticketsOuverts)} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"} />
-            <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"} />
+          {/* KPI CONTEXTUALISÉS : chaque chiffre porte sa clé de lecture (part du parc, MRR équivalent,
+              enjeu FCFA des échéances, part du parc actif à risque) — on lit ET on situe d'un regard.
+              ANNEAU « santé du parc » (ScoreRing partagé, même vocabulaire que Qualité & correction) :
+              part des contrats actifs SANS signal de risque — l'état global en un coup d'œil. */}
+          <div className="flex flex-wrap items-center gap-4">
+            {dash.contratsActifs > 0 && (() => {
+              const sain = Math.max(0, dash.contratsActifs - atRiskCount) / dash.contratsActifs;
+              return (
+                <div className="flex items-center gap-3 shrink-0">
+                  <ScoreRing value={sain} color={sain >= 0.9 ? T.emerald : sain >= 0.7 ? T.gold : T.clay} />
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-faint">Santé du parc</div>
+                    <div className="text-[11px] text-muted">{Math.max(0, dash.contratsActifs - atRiskCount)} actif(s)<br />sans signal de risque</div>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 grow min-w-0">
+            <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald"
+              sub={dash.contratsTotal > 0 ? `${pct(dash.contratsActifs / dash.contratsTotal)} du parc` : undefined} />
+            <Kpi label="Revenu récurrent annuel (ARR)" value={fmt(dash.arrActifs)} tone="ink" sub={`FCFA · ≈ ${fmt(Math.round(dash.arrActifs / 12))}/mois (MRR)`} />
+            <Kpi label="Tickets ouverts" value={String(dash.ticketsOuverts)} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"}
+              sub={dash.ticketsOuverts > 0 ? `sur ${dash.ticketsTotal} ticket(s)` : "aucun en attente"} />
+            <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"}
+              sub={dash.contratsActifs > 0 ? `${pct(atRiskCount / dash.contratsActifs)} des actifs` : undefined} />
+            </div>
           </div>
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-3">
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-4">
+            {/* Répartitions en BARRES (HBars, primitive ERP) : les proportions se comparent d'un regard —
+                une liste de badges donne les comptes mais pas les ordres de grandeur. */}
             <div>
               <div className="text-[11px] text-muted mb-1.5">Contrats par statut</div>
-              <div className="flex flex-wrap gap-1.5">
-                {STATUTS.filter((s) => (dash.parStatut[s] || 0) > 0).map((s) => (
-                  <Badge key={s} tone={statutTone(s)}>{label(STATUT_LABEL, s)} · {dash.parStatut[s]}</Badge>
-                ))}
-                {dash.contratsTotal === 0 && <span className="text-[12px] text-muted">—</span>}
-              </div>
+              {dash.contratsTotal === 0 ? <span className="text-[12px] text-muted">—</span> : (
+                <HBars rows={STATUTS.filter((s) => (dash.parStatut[s] || 0) > 0).map((s) => ({ name: label(STATUT_LABEL, s), v: dash.parStatut[s], sub: pct((dash.parStatut[s] || 0) / dash.contratsTotal), tone: statutTone(s) }))}
+                  colorFn={(r) => TONE_COLOR[(r as { tone?: string }).tone || ""] || T.steel} />
+              )}
             </div>
             <div>
               <div className="text-[11px] text-muted mb-1.5">Tickets ouverts par priorité</div>
-              <div className="flex flex-wrap gap-1.5">
-                {PRIORITES.filter((p) => (dash.parPriorite[p] || 0) > 0).map((p) => (
-                  <Badge key={p} tone={prioriteTone(p)}>{label(PRIORITE_LABEL, p)} · {dash.parPriorite[p]}</Badge>
-                ))}
-                {dash.ticketsOuverts === 0 && <span className="text-[12px] text-muted">Aucun ticket ouvert.</span>}
-              </div>
+              {dash.ticketsOuverts === 0 ? <span className="text-[12px] text-muted">Aucun ticket ouvert.</span> : (
+                <HBars rows={PRIORITES.filter((p) => (dash.parPriorite[p] || 0) > 0).map((p) => ({ name: label(PRIORITE_LABEL, p), v: dash.parPriorite[p], sub: pct((dash.parPriorite[p] || 0) / dash.ticketsOuverts), tone: prioriteTone(p) }))}
+                  colorFn={(r) => TONE_COLOR[(r as { tone?: string }).tone || ""] || T.steel} />
+              )}
             </div>
             <div>
-              <div className="text-[11px] text-muted mb-1.5">Échéances proches (≤ {ECHEANCE_PROCHE_JOURS} j)</div>
+              {/* Échéances CHIFFRÉES : l'enjeu (Σ ARR à renouveler) en tête, le montant par contrat en ligne. */}
+              <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                <span className="text-[11px] text-muted">Échéances proches (≤ {ECHEANCE_PROCHE_JOURS} j)</span>
+                {dash.echeancesProches.length > 0 && (
+                  <span className="text-[11px] text-ink tabnum">{dash.echeancesProches.length} contrat(s) · {money(dash.echeancesProches.reduce((s, e) => s + e.arr, 0))} d'ARR</span>
+                )}
+              </div>
               {dash.echeancesProches.length === 0 ? <span className="text-[12px] text-muted">Aucune échéance imminente.</span> : (
                 <div className="flex flex-col gap-1 text-[12px]">
                   {dash.echeancesProches.slice(0, 5).map((e) => (
                     <div key={e.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate">{e.client || "—"} · <FpLink fp={e.fp || undefined} /></span>
-                      <Badge tone={e.jours <= 15 ? "clay" : "gold"}>{frDate(e.dateFin)} · {e.jours} j</Badge>
+                      <span className="truncate min-w-0">{e.client || "—"} · <FpLink fp={e.fp || undefined} />{e.arr > 0 && <span className="text-muted tabnum"> · {money(e.arr)}</span>}</span>
+                      <Badge tone={e.jours <= 15 ? "clay" : e.jours <= 60 ? "gold" : "steel"}>{frDate(e.dateFin)} · {e.jours} j</Badge>
                     </div>
                   ))}
-                  {dash.echeancesProches.length > 5 && <span className="text-muted">+{dash.echeancesProches.length - 5} autre(s)</span>}
+                  {dash.echeancesProches.length > 5 && <span className="text-muted">+{dash.echeancesProches.length - 5} autre(s) — onglet Contrats → Renouvellements</span>}
                 </div>
               )}
             </div>
@@ -820,18 +857,27 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub={`revenu mensuel · ${recurring.contratsActifs} contrat(s) actif(s)`} />
             <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
           </div>
-          {mrrTrend && mrrTrend.deltaMrr !== 0 && (
-            <div className="mt-2 text-[12px]">
-              <span className="text-muted">Tendance MRR depuis {frDate(mrrTrend.fromDate)} : </span>
-              <span className={cx("font-medium", mrrTrend.deltaMrr > 0 ? "text-emerald" : "text-clay")}>
-                {mrrTrend.deltaMrr > 0 ? "+" : "−"}{fmt(Math.abs(mrrTrend.deltaMrr))}/mois
-              </span>
+          {/* Tendance MRR : la COURBE (sparkline partagée) en plus du delta chiffré — pente et cassures visibles. */}
+          {(mrrSpark.length >= 2 || (mrrTrend && mrrTrend.deltaMrr !== 0)) && (
+            <div className="mt-2 flex items-center gap-3 flex-wrap text-[12px]">
+              {mrrSpark.length >= 2 && <Spark points={mrrSpark} />}
+              {mrrTrend && (
+                <span>
+                  <span className="text-muted">Tendance MRR depuis {frDate(mrrTrend.fromDate)} : </span>
+                  {mrrTrend.deltaMrr === 0 ? <span className="text-faint font-medium">stable</span> : (
+                    <span className={cx("font-medium", mrrTrend.deltaMrr > 0 ? "text-emerald" : "text-clay")}>
+                      {mrrTrend.deltaMrr > 0 ? "+" : "−"}{fmt(Math.abs(mrrTrend.deltaMrr))}/mois
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
           )}
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
             <div>
-              <div className="text-[11px] text-muted mb-1.5">Par BU</div>
-              <Table columns={rrCols("BU")} rows={recurring.byBu} colsKey="mnt_rr_bu" />
+              {/* Ventilation en barres (HBars) : les poids relatifs des BU se lisent d'un regard. */}
+              <div className="text-[11px] text-muted mb-1.5">Par BU (ARR)</div>
+              <HBars rows={recurring.byBu.map((g) => ({ name: g.key || "—", v: g.arr, sub: `${g.contrats} contrat(s)` }))} />
             </div>
             <div>
               <div className="text-[11px] text-muted mb-1.5">Top clients (ARR)</div>

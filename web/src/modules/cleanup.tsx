@@ -31,19 +31,8 @@ const looksCanonicalFp = (fp?: string) => /FP\/?\s*\d{4}(?!\d)\/?\s*\d+/i.test(S
 // pré-remplissage HONNÊTE de « Année de PO » (l'année de l'affaire elle-même, jamais une année en dur).
 const yearOfFp = (fp?: string) => { const m = /\/(\d{4})\//.exec(String(fp || "")); return m ? plausibleYear(m[1]) : 0; };
 import { Props, relTime, STAGE_SHORT } from "./_shared";
+import { Spark, ScoreRing } from "./_viz";
 import type { DataQualitySummary, QualityHistory, AuditLog, BcLine, Opportunity } from "../types";
-
-// Sparkline SVG minimaliste (aucune dépendance chart dans ce chunk admin). points ∈ [0,1].
-function Spark({ points }: { points: number[] }) {
-  if (points.length < 2) return null;
-  const w = 160, h = 32, n = points.length;
-  const d = points.map((v, i) => `${(i / (n - 1)) * w},${h - Math.max(0, Math.min(1, v)) * h}`).join(" ");
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="text-gold" aria-hidden="true">
-      <polyline points={d} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
 
 const ACTION_LABEL: Record<string, string> = {
   delete_records: "Suppression", patch_order: "Commande corrigée", patch_opp: "Opp. corrigée",
@@ -916,20 +905,6 @@ function ClientReconcileSection() {
         <Tip>Vue par <b>client</b> alignant <b>opportunités, commandes P&amp;L et factures</b> sur le même N° FP. Le <b>FP de la facture fait foi</b> (facturation) devant le FP commande, lui-même devant le FP opp. « <b>Clients à rapprocher</b> » liste ceux dont un flux est sous un N° FP divergent ; ouvrez un dossier puis cliquez « <b>Réconcilier</b> » sur une proposition (overlay non destructif, recalcul immédiat). Chaque proposition indique son signal : <b>montant concordant</b>, <b>même affaire</b> (désignation) ou <b>facture partielle</b> (acompte, appariement unique) — toujours à confirmer d'un clic.</Tip>
       </div>
     </CorrSection>
-  );
-}
-
-// Anneau de score compact (conic-gradient) — pour l'entête premium du cockpit Qualité & Correction.
-function ScoreRing({ value, color }: { value: number; color: string }) {
-  const v = Math.max(0, Math.min(1, value));
-  const deg = Math.round(v * 360);
-  return (
-    <div className="relative shrink-0" style={{ width: 68, height: 68 }} aria-hidden>
-      <div className="absolute inset-0 rounded-full" style={{ background: `conic-gradient(${color} ${deg}deg, rgb(var(--hair)) ${deg}deg)` }} />
-      <div className="absolute inset-[6px] rounded-full bg-panel flex items-center justify-center">
-        <span className="font-display tabnum text-lg leading-none" style={{ color }}>{Math.round(v * 100)}</span>
-      </div>
-    </div>
   );
 }
 
