@@ -2103,3 +2103,16 @@ l'année à l'autorité aligne d'un coup summaries, alertes et Centre, sans miro
 
 **Suivant.** PR à fusionner sur « go » ; après déploiement, relancer « Analyser » au Centre : le bucket
 « sans année » doit tomber aux seuls FP sans millésime lisible.
+
+---
+
+## 2026-07-21 — Normalisation clients : zéro redondance (fusion flou + IA en une liste)
+
+**Fait.** Les deux cartes de propositions (« Quasi-doublons » flous, « Normalisation IA ») faisaient le
+même métier avec deux modèles d'interaction (bouton « Fusionner » par ligne vs cases + « Ajouter à la
+liste »). Fusionnées en UNE carte « Fusions proposées » : liste unifiée dédupliquée par graphie SOURCE
+(l'IA prime — elle porte une justification), badge de provenance (flou/IA), un seul mécanisme de
+sélection, pré-cochage IA ≥ 90 % conservé. Une proposition DISPARAÎT dès qu'un alias (posé ou brouillon)
+la couvre — plus de suggestion qui traîne après traitement. `aliases` mémoïsé (react-hooks).
+
+**Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
