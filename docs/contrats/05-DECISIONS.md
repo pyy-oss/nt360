@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-069 — « Supprimer la charge » : retrait TOTAL d'une charge planifiée (y compris du P&L) par overlay non destructif, BC lié annulé dans le même geste
+
+- **Date :** 2026-07-21
+- **Statut :** Accepté
+- **Décideur :** Direction (« prévoir bouton supprimer la charge pour supprimer totalement y compris du P&L », arbitrages : charge = ligne de coût de la fiche ; un seul geste qui annule aussi le BC lié ; boutons en FP 360°, Exécution BC et P&L Projet)
+
+### Contexte
+L'ADR-068 sort le BC annulé des engagements en laissant la charge planifiée au P&L (BC de remplacement attendu). Quand la charge elle-même disparaît (périmètre réduit, achat abandonné), il faut pouvoir la retirer TOTALEMENT — y compris du coût planifié — sans suppression physique (un ré-import de fiche la recréerait).
+
+### Décisions
+- **Objet porteur : la ligne d'achat planifié de fiche** (bcLines source « fiche »), identifiée par son id de doc (déterministe au ré-import).
+- **Overlay `config/cancelCharges`**, via le callable existant `setCancellation` (genre « charges » ajouté à CANCELLABLE, droit « bc », transaction, audit, recompute) — même patron que cancelOrders/cancelInvoices : non destructif, survit aux ré-imports, RÉTABLISSABLE, aucune fonction déployée nouvelle.
+- **Effet au recompute** (règle PURE `domain/charges.applyChargeDrops`, testée) : la ligne sort de tous les agrégats ET son montant est retiré du coût planifié de l'affaire — `costTotal` ↓, `margin` ↑, `%MB` recalculé sur la vente (plancher 0 ; une fiche sans marge numérique n'est pas inventée).
+- **Un seul geste** : le bouton passe aussi les BC RÉELS non soldés du même FP+fournisseur en « Annulé » (ADR-068) — et depuis l'Exécution BC, le geste inverse (annuler ce BC + supprimer ses charges de fiche) existe aussi.
+- **Trois emplacements** : FP 360° (Lignes BC, lignes planifiées), Exécution BC (action de ligne), P&L Projet (détail d'affaire, liste des charges planifiées). Badge « Charge supprimée » + « Rétablir » partout ; lecture de l'overlay sous droit « bc » (firestore.rules).
+
+### Conséquences
+- Au recompute suivant : marge carnet et rentabilité de l'affaire REMONTENT du montant supprimé ; l'exposition de la fiche disparaît des vues planifiées. Rétablir inverse tout.
+- Une charge supprimée dont la fiche est ré-importée reste supprimée (overlay par id déterministe) ; si la fiche retire la ligne à la source, l'entrée d'overlay devient inerte.
+
+### Ce qu'on saura dans six mois
+Si des charges sont « supprimées » à répétition sur les mêmes affaires, c'est la fiche source qu'il faut mettre à jour dans Odoo — l'overlay est un correctif d'arbitrage, pas un canal de saisie.
+
 ## ADR-068 — BC « Annulé » : statut propre hors engagements/cash, la charge planifiée reste au P&L en attendant le BC de remplacement
 
 - **Date :** 2026-07-21

@@ -2300,3 +2300,18 @@ attend l'arbitrage sur l'objet porteur (ligne de fiche vs achats P&L) — lot d�
 **Vérifs.** Functions 1365/1365 (SOA annulé 2, engagé annulé 1, alertes annulé 2, cash annulé 1,
 relances témoin, mapBcStatus), web 303/303, tsc/eslint 0, no-undef (165), deploy-targets (200/200),
 bundle 121,1 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — « Supprimer la charge » : retrait total y compris du P&L, overlay rétablissable (ADR-069)
+
+**Fait.** Arbitrages de la direction posés par questionnaire (objet = ligne de coût de la fiche ; un
+seul geste qui annule aussi le BC lié ; boutons aux trois emplacements). Livré : genre « charges »
+ajouté au callable existant setCancellation (overlay config/cancelCharges, droit bc, aucune fonction
+déployée nouvelle), règle PURE domain/charges.applyChargeDrops au recompute (ligne exclue + costTotal ↓,
+marge ↑, %MB recalculé, plancher 0), boutons « Supprimer la charge »/« Rétablir » en FP 360°,
+Exécution BC (annule aussi le BC, et inversement) et P&L Projet (liste des charges planifiées par
+affaire), règle firestore.rules de lecture de l'overlay.
+
+**Appris.** L'infrastructure d'annulation (CANCELLABLE + overlay + transaction + audit) s'étend à un
+nouvel objet en une ligne de spec — le patron « overlay non destructif » continue de payer.

@@ -126,7 +126,7 @@ async function recomputeCore(db, only) {
     readAll(db, "orders"),
     readAll(db, "invoices", true), // id nécessaire pour l'exclusion des factures annulées (overlay)
     readAll(db, "opportunities"),
-    needBc ? readAll(db, "bcLines") : Promise.resolve([]),
+    needBc ? readAll(db, "bcLines", true) : Promise.resolve([]), // id nécessaire à l'exclusion des charges supprimées (overlay, ADR-069)
     needCredit ? readAll(db, "creditLines", true) : Promise.resolve([]),
     needCredit ? readAll(db, "supplierInvoices") : Promise.resolve([]), // factures fournisseur RÉELLES (ADR-P21) — même gate que creditLines (alimentent suppliers())
     needObj ? readAll(db, "objectives") : Promise.resolve([]),
@@ -187,10 +187,11 @@ async function recomputeCore(db, only) {
   // l'id figure ici sont EXCLUES de tous les agrégats (carnet, CAS, backlog, facturation, cash,
   // rentabilité, qualité). Stocké en overlay config/cancellations (et non sur le doc) → l'exclusion
   // SURVIT à un ré-import delta. Les docs sources restent (historique) ; seul le recompute les écarte.
-  const [cxlO, cxlI] = await Promise.all([db.doc("config/cancelOrders").get(), db.doc("config/cancelInvoices").get()]);
+  const [cxlO, cxlI, cxlC] = await Promise.all([db.doc("config/cancelOrders").get(), db.doc("config/cancelInvoices").get(), db.doc("config/cancelCharges").get()]);
   const itemsOf = (snap) => { const v = (snap.data() || {}).items; return new Set((Array.isArray(v) ? v : []).map((e) => e && e.id).filter(Boolean)); };
   const cancelledOrders = itemsOf(cxlO);
   const cancelledInvoices = itemsOf(cxlI);
+  const cancelledCharges = itemsOf(cxlC); // lignes d'achat planifié de fiche supprimées (ADR-069)
   // AFFECTATION PMO (Project Manager par commande) : overlay config/orderPm { map: { <safeId(fp)>: pm } },
   // stocké hors des docs commandes → SURVIT au recompute et à un ré-import delta (comme l'annulation).
   const orderPmMap = ((await db.doc("config/orderPm").get()).data() || {}).map || {};
@@ -244,6 +245,13 @@ async function recomputeCore(db, only) {
   // Fiches complètes reconstituées pour les calculs serveur (mergeCommandes, dataQuality).
   const smBy = new Map(sheetsMargin.map((m) => [m._id, m]));
   const projectSheets = sheetsBase.map((s) => ({ ...s, ...(smBy.get(s._id) || {}) }));
+
+  // SUPPRESSION DE CHARGE (overlay config/cancelCharges, ADR-069) : une ligne d'achat PLANIFIÉ de
+  // fiche « supprimée » par arbitrage humain est EXCLUE des agrégats ET son montant est RETIRÉ du
+  // coût planifié de l'affaire (costTotal ↓, marge ↑) — retrait TOTAL y compris du P&L. Règle PURE
+  // dans domain/charges (testée) ; mute bcLines/projectSheets en place, AVANT mergeCommandes.
+  const { applyChargeDrops } = require("../domain/charges");
+  applyChargeDrops(bcLines, projectSheets, cancelledCharges);
 
   // Dédup INTER-source LIVE par FP (cf. audit cycle de vie + re-audit #3). Sources LIVE d'une opp = l'import
   // Excel ('salesData') ET le webhook Odoo ('odoo') : ce sont deux flux temps-réel/périodique de MÊME autorité

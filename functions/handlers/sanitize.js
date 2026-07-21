@@ -6,7 +6,10 @@
 // Collections assainissables (suppression) → module RBAC gouvernant.
 const DELETABLE = { orders: "import", invoices: "import", bcLines: "bc", projectSheets: "rentabilite", opportunities: "pipeline" };
 // Objets annulables → overlay config par module (lisible au bon niveau RBAC ; écriture réservée au callable).
-const CANCELLABLE = { orders: { module: "import", doc: "config/cancelOrders" }, invoices: { module: "import", doc: "config/cancelInvoices" } };
+// « charges » (ADR-069) : ligne d'achat PLANIFIÉ de fiche (bcLines source « fiche ») — la suppression
+// retire la charge de TOUS les agrégats Y COMPRIS le coût planifié du P&L (costTotal ↓, marge ↑, cf.
+// aggregate). Droit « bc » (même gouvernance que les statuts BC). Non destructif, rétablissable.
+const CANCELLABLE = { orders: { module: "import", doc: "config/cancelOrders" }, invoices: { module: "import", doc: "config/cancelInvoices" }, charges: { module: "bc", doc: "config/cancelCharges" } };
 
 // Collections assainissables SOUMISES à la visibilité par enregistrement (OWD private). La suppression
 // doit y respecter le périmètre de l'appelant, comme deleteOpportunity — le carnet (orders/invoices/…)
