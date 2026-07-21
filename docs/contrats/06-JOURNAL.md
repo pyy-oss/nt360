@@ -2188,3 +2188,22 @@ retard) — on sait ce qu'on laisse sur la table avant de dérouler.
 122 Ko. Les primitives d'entêtes cockpit vivent donc dans un module séparé importé par les seuls lazy.
 
 **Vérifs.** Web 301/301, tsc/eslint 0, bundle 120,9 ≤ 122 Ko.
+
+---
+
+## 2026-07-21 — Seed FP–DC : import de la table de correspondance (ADR-066)
+
+**Fait.** Contexte métier fourni par la direction : le DC Odoo est GÉNÉRÉ depuis le FP (« Générer DC »)
+et porte ensuite toutes les dépenses du projet (BC, décaissements, astreintes…) ; une table FP–DC peut
+être exportée pour le seed. Livré : callable `importDcAliases` (droit import, dry-run → confirmation,
+fichier xlsx/csv ≤ ~22 Mo via xlsxRead), plan PUR `domain/dcMapImport` (détection PAR CONTENU — la
+cellule fpKey-résoluble est le FP, l'autre est le DC, ordre libre ; dédup par DC ; borne 5 000 signalée),
+règle de conflit L'EXISTANT PRIME (un arbitrage humain n'est jamais écrasé — conflits signalés). Front :
+bloc « Seed initial » dans Rapprochement DC (aperçu à badges + exemples + application). Doc
+ODOO_WEBHOOK.md : contexte DC (pivot des dépenses) + mode d'emploi. 200 fonctions déployées.
+
+**Appris.** Le DC est le pivot de TOUT le coût projet côté Odoo — consigné dans l'ADR : si les
+décaissements/charges remontent un jour, leur clé de rattachement naturelle sera le DC via ce même overlay.
+
+**Vérifs.** Functions 1346/1346 (dcMapImport 4), web 301/301, tsc/eslint 0, no-undef (165),
+deploy-targets (200/200), bundle 121,1 ≤ 122 Ko.

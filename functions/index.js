@@ -1335,6 +1335,52 @@ exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300
   return { ok: true, from, to: to || null, aliasCount: Object.keys(map).length };
 });
 
+// --- SEED de la table FP–DC (import de fichier .xlsx/.csv) : dans Odoo, le DC est GÉNÉRÉ depuis le FP
+// (« Générer DC ») puis porte toutes les dépenses du projet — la correspondance existe à la source.
+// Cet import amorce config/dcAliases EN MASSE pour l'historique antérieur au webhook (au lieu de
+// rapprochements un par un). DEUX temps (dryRun → confirmation), plan PUR (domain/dcMapImport) :
+// détection par contenu (ordre de colonnes libre), l'existant PRIME en cas de conflit (un arbitrage
+// humain n'est jamais écrasé en silence). Droit « import », audité, recompute (rattache les BC connus). ---
+exports.importDcAliases = onCallG("importDcAliases", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
+  await requireWrite(req, "import");
+  if (!(await rateLimit(req.auth.uid, "dcMapImport", 5, 300_000))) throw new HttpsError("resource-exhausted", "Import déjà lancé récemment — patientez quelques minutes.");
+  const b64 = req.data && req.data.fileB64;
+  if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
+  if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)"); // même plafond qu'importDelta
+  const { readWorkbook, sheetToJson } = require("./lib/xlsxRead");
+  let aoa;
+  try { const wb = await readWorkbook(Buffer.from(b64, "base64")); aoa = sheetToJson(wb.Sheets[wb.SheetNames[0]], { header: 1 }); }
+  catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + ((e && e.message) || e)); }
+
+  const { planDcMapImport } = require("./domain/dcMapImport");
+  const { fpKey } = require("./lib/ids");
+  const ref = db.doc("config/dcAliases");
+  const map = { ...(((await ref.get()).data() || {}).map || {}) };
+  const plan = planDcMapImport(aoa, map, fpKey);
+  const summary = {
+    toAdd: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length,
+    skipped: plan.skipped.length, truncated: plan.truncated,
+    conflictsDetail: plan.conflicts.slice(0, 40), skippedDetail: plan.skipped.slice(0, 40),
+    sample: plan.toAdd.slice(0, 10),
+  };
+  if (!plan.toAdd.length && !plan.unchanged && !plan.conflicts.length) {
+    throw new HttpsError("failed-precondition", `aucune ligne exploitable — ${plan.skipped.length} écartée(s)${plan.skipped[0] ? ` (ex. ${plan.skipped[0].reason})` : ""}`);
+  }
+  // PRÉ-VISUALISATION : volumes + conflits (existant conservé) + écartées — le front confirme avant écriture.
+  if (req.data && req.data.dryRun === true) return { ok: true, dryRun: true, ...summary };
+
+  for (const p of plan.toAdd) map[p.dc] = p.fp;
+  // merge:FALSE (audit intégrité, cf. setDcAlias) : le doc reflète EXACTEMENT la map calculée.
+  await ref.set({ map, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+  await db.collection("auditLog").add({
+    uid: req.auth.uid, action: "import_dc_aliases", module: "import", entity: "dcAlias", entityId: "batch",
+    detail: { added: plan.toAdd.length, unchanged: plan.unchanged, conflicts: plan.conflicts.length, skipped: plan.skipped.length, filename: String(req.data && req.data.filename || "").slice(0, 120) },
+    ts: FieldValue.serverTimestamp(),
+  });
+  await refreshNowBestEffort("importDcAliases"); // les BC historiques à DC connu se rattachent au recalcul
+  return { ok: true, added: plan.toAdd.length, aliasCount: Object.keys(map).length, ...summary };
+});
+
 // --- DOSSIER CLIENT (rapprochement) : regroupe Opportunités / Commandes P&L / Factures par CLIENT
 // canonique puis par N° FP (alias appliqués), et propose des rapprochements (FP facture prioritaire).
 // LECTURE SEULE (aucune mutation) — gouverné par le module « import » (data-steward). Sans `client`,

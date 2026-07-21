@@ -371,6 +371,17 @@ _nt360_send(env, "bc", [map_bc(r) for r in recs])
 > `map_invoice`). Côté nt360, l'écran **Admin → Intégration** affiche le **dernier envoi reçu** (horodatage,
 > objet, écrits/échecs) — le moyen de vérifier que le renvoi est bien arrivé.
 
+### Contexte DC & seed initial de la table FP–DC
+
+Dans Odoo, le **DC est généré depuis le FP** (bouton « Générer DC ») puis **toutes les dépenses du projet**
+(BC fournisseurs, décaissements, astreintes…) sont rattachées au DC — la correspondance FP↔DC existe donc
+**à la source** pour le flux courant (le webhook envoie `fp` + `dc`). Pour l'**historique** antérieur au
+branchement : exportez la table de correspondance (deux colonnes FP / DC, ordre libre, .xlsx ou .csv) et
+importez-la dans **Qualité & correction → Centre de correction → Rapprochement DC → « Seed initial »**
+(aperçu dry-run, puis application). Règle de conflit : un rapprochement **déjà posé dans nt360 prime** —
+le fichier ne l'écrase jamais, le conflit est signalé pour arbitrage manuel. Les BC historiques à DC connu
+se rattachent au recalcul qui suit l'import.
+
 ## 5. Tester l'endpoint AVANT de brancher Odoo (curl signé)
 
 ```bash
