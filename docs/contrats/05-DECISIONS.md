@@ -3,6 +3,25 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-076 — B4 Phase 2 : le webhook Odoo entrant alimente la base client de référence (`object: "partner"`)
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« Phase 2 à faire en webhook entrant déjà existant »)
+
+### Contexte
+ADR-075 a créé la base client de référence persistante (`config/clientsRef`), seedée par le recompute depuis la normalisation. Reste la Phase 2 : intégrer les clients créés côté Odoo (y compris sans activité). Décision : le faire dans le **webhook entrant existant** (`odooWebhook`), pas une nouvelle fonction.
+
+### Décision
+- Nouvel objet **`object: "partner"`** dans `odooWebhook`. Chaque enregistrement porte un `name` ; on ajoute sa **clé canonique** (mêmes règles que le recompute : `canonicalKey` + alias `config/clientAliases`) à `config/clientsRef.keys` via **`arrayUnion`** (atomique, additif, jamais de retrait). Collecté sur tout le lot, écrit UNE fois. Idempotent. Trace `auditLog` (`odoo_partner`).
+- Le `count`/tri de `clientsRef` et le **taux de couverture** se rafraîchissent au recompute différé que le webhook déclenche déjà (`if (wrote) requestRecompute`).
+- **Aucune nouvelle fonction déployée** (branche dans un webhook existant), **aucune règle** (écriture admin SDK), **aucun secret** nouveau (réutilise la signature HMAC `config/odooWebhook.secret`). Documenté dans `docs/ODOO_WEBHOOK.md`.
+
+### Conséquences
+- La base client de référence reflète désormais l'univers Odoo complet (clients sans affaire inclus) → le taux de couverture devient une mesure de **pénétration réelle** (actifs / base totale), plus seulement « actifs / clients déjà vus dans les agrégats ». Le montant/CA n'est PAS attendu sur `partner` (l'activité reste portée par commandes/factures/opps) — l'objet ne fait qu'élargir le dénominateur.
+
+---
+
 ## ADR-075 — Base client de référence PERSISTANTE (union additive de la normalisation) + taux de couverture
 
 - **Date :** 2026-07-22
