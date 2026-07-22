@@ -5,7 +5,7 @@
 //    commande) — en une action, plus un raccourci vers le dédoublonnage (doublons).
 // NON destructif par défaut : la purge demande confirmation et n'agit que sur des enregistrements
 // non rattachables. Le delta reste prioritaire (une source ré-important le record le recrée).
-import { useState, type FC, type ReactNode } from "react";
+import { useState, type FC, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { orderBy, limit } from "firebase/firestore";
 import { useDocData, useCollectionData, useReloadOnWrite } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
@@ -527,13 +527,18 @@ const refKeyOf = (it: CorrectionItem) => String(it.id || it.numero || it.fp || i
 // Seuil de confiance pour l'application EN LOT : on n'auto-applique que les propositions très fiables ;
 // en dessous, elles restent visibles pour un arbitrage ligne à ligne. Réglé prudent (l'IA propose).
 const AI_BULK_CONF = 0.85;
+// Bilan d'une analyse IA d'un bloc (propositions actionnables, vérifiées, lot tronqué).
+type BucketAiInfo = { actionable: number; truncated: boolean; verified: boolean; verifiedCount: number };
+// Une proposition est APPLICABLE EN LOT si elle est actionnable ET fiable : vérifiée quand la relecture
+// adverse a tourné, sinon confiance ≥ seuil. Prédicat PARTAGÉ par le lot d'un bloc et l'application globale.
+const aiBulkEligible = (s: AiSuggestion | undefined, verifRan: boolean): boolean =>
+  !!s && s.action !== "review" && (verifRan ? !!s.verified : s.confidence >= AI_BULK_CONF);
 
-function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void> }) {
+// `sugg`/`aiInfo` sont REMONTÉS au CorrectionCenter (clés par type d'anomalie) : une seule commande « Analyser
+// tout à l'IA » alimente tous les blocs, et « Appliquer toutes les vérifiées » agit sur toute la base.
+function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone, sugg, setSugg, aiInfo, setAiInfo }: { bucket: CorrectionBucket; open: boolean; onToggle: () => void; canFix: boolean; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void>; sugg: Record<string, AiSuggestion>; setSugg: Dispatch<SetStateAction<Record<string, AiSuggestion>>>; aiInfo: BucketAiInfo | null; setAiInfo: (v: BucketAiInfo | null) => void }) {
   const cfg = FIX[bucket.type] || { kind: "" };
   const [confirmBulk, setConfirmBulk] = useState(false);
-  // Propositions IA indexées par ref (l'IA propose, l'humain applique via les écritures gouvernées).
-  const [sugg, setSugg] = useState<Record<string, AiSuggestion>>({});
-  const [aiInfo, setAiInfo] = useState<{ actionable: number; truncated: boolean; verified: boolean; verifiedCount: number } | null>(null);
   const toast = useToast();
   // Génération EN MASSE réservée aux factures non rattachées (crée commande + opp gagnée pour TOUTES les
   // orphelines à FP canonique absentes du carnet — les FP inconnus/déjà présents sont ignorés côté serveur).
@@ -551,11 +556,7 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
   // Cibles de l'application en lot « effort minimal » : quand la vérification adverse a tourné, on n'applique
   // QUE les propositions VÉRIFIÉES (fiabilité max) ; sinon, repli sur les propositions à haute confiance (≥ seuil).
   const verifRan = !!aiInfo?.verified;
-  const bulkItems = () => bucket.items.filter((it) => {
-    const s = sugg[refKeyOf(it)];
-    if (!s || s.action === "review") return false;
-    return verifRan ? !!s.verified : s.confidence >= AI_BULK_CONF;
-  });
+  const bulkItems = () => bucket.items.filter((it) => aiBulkEligible(sugg[refKeyOf(it)], verifRan));
   // Applique EN LOT : chacune passe par SON écriture gouvernée (RBAC/audit/recalcul inchangés), séquentiellement,
   // tolérant aux échecs par ligne (une correction refusée n'annule pas les autres).
   const applyBulk = async () => {
@@ -688,9 +689,59 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [scoped, setScoped] = useState(false); // assiette opps CADRÉE par visibilité (OWD privé, non-admin)
+  // Propositions IA REMONTÉES ici, clés par type d'anomalie (chaque bloc reçoit sa tranche). Permet l'analyse
+  // et l'application IA à l'échelle de TOUTE la base (« effort minimal ») en plus du bloc par bloc.
+  const [suggByType, setSuggByType] = useState<Record<string, Record<string, AiSuggestion>>>({});
+  const [aiInfoByType, setAiInfoByType] = useState<Record<string, BucketAiInfo>>({});
+  const [aiRunning, setAiRunning] = useState(false);
+  const toast = useToast();
   const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" };
   const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); setPlan(r.plan || null); setScoped(!!r.scoped); };
   const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
+  // Setter par type, style dispatch (accepte valeur ou updater) — donné à chaque bloc pour piloter SA tranche.
+  const setSuggFor = (type: string): Dispatch<SetStateAction<Record<string, AiSuggestion>>> => (v) =>
+    setSuggByType((all) => ({ ...all, [type]: typeof v === "function" ? (v as (m: Record<string, AiSuggestion>) => Record<string, AiSuggestion>)(all[type] || {}) : v }));
+  const setAiInfoFor = (type: string) => (v: BucketAiInfo | null) =>
+    setAiInfoByType((all) => { const n = { ...all }; if (v) n[type] = v; else delete n[type]; return n; });
+  // Blocs éligibles à l'IA : ceux dont la correction se fait ICI (pas « nav »/« dedupe ») et dans les droits.
+  const aiBuckets = () => (buckets || []).filter((b) => { const k = FIX[b.type]?.kind; return k !== "nav" && k !== "dedupe" && canFixBucket(b); });
+  // ANALYSE IA GLOBALE : lance l'assistant sur CHAQUE bloc éligible (séquentiel — chaque appel est un tour LLM
+  // + vérification adverse), alimente `suggByType`. Une seule commande pour toute la base.
+  const analyzeAll = async () => {
+    setAiRunning(true);
+    let totalActionable = 0, totalVerified = 0, blocks = 0;
+    try {
+      for (const b of aiBuckets()) {
+        const r = await aiSuggestCorrections(b.type, b.items);
+        const map: Record<string, AiSuggestion> = {};
+        for (const s of r.suggestions) map[s.ref] = s;
+        setSuggByType((all) => ({ ...all, [b.type]: map }));
+        setAiInfoByType((all) => ({ ...all, [b.type]: { actionable: r.suggestions.filter((s) => s.action !== "review").length, truncated: r.truncated, verified: !!r.verified, verifiedCount: r.verifiedCount || 0 } }));
+        totalActionable += r.suggestions.filter((s) => s.action !== "review").length;
+        totalVerified += r.verifiedCount || 0;
+        blocks++;
+      }
+      toast(`IA : ${totalActionable} proposition${totalActionable > 1 ? "s" : ""} sur ${blocks} bloc${blocks > 1 ? "s" : ""}${totalVerified ? ` — ${totalVerified} vérifiée${totalVerified > 1 ? "s" : ""}` : ""}. Vérifiez puis appliquez.`, "ok");
+    } catch { toast("Analyse IA globale refusée", "err"); }
+    finally { setAiRunning(false); }
+  };
+  // Toutes les propositions APPLICABLES (fiables/vérifiées) à travers TOUS les blocs — mêmes critères que le
+  // lot d'un bloc (aiBulkEligible). Sert au compteur du bouton global et à l'application.
+  const globalTargets = () => (buckets || []).flatMap((b) => {
+    const map = suggByType[b.type]; if (!map) return [];
+    const verifRan = !!aiInfoByType[b.type]?.verified;
+    return b.items.filter((it) => aiBulkEligible(map[refKeyOf(it)], verifRan)).map((it) => ({ it, s: map[refKeyOf(it)]! }));
+  });
+  // APPLIQUE toute la base : chaque proposition passe par SON écriture gouvernée (RBAC/audit/recalcul inchangés),
+  // séquentiellement, tolérant aux échecs par ligne. Un seul recalcul final (load).
+  const applyAll = async () => {
+    const targets = globalTargets();
+    let ok = 0, fails = 0;
+    for (const { it, s } of targets) { try { await applyAiSuggestion(it, s); ok++; } catch { fails++; } }
+    await load();
+    toast(`${ok} correction${ok > 1 ? "s" : ""} IA appliquée${ok > 1 ? "s" : ""} sur toute la base${fails ? ` — ${fails} refusée${fails > 1 ? "s" : ""} (à traiter à la main)` : ""}`, fails ? "err" : "ok");
+  };
+  const globalCount = globalTargets().length;
   return (
     <Card title="Centre de correction" actions={
       <div className="flex items-center gap-2">
@@ -708,8 +759,22 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
         )}
         {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine.</div>}
         {plan && buckets && buckets.length > 0 && <RemediationPlanCard plan={plan} onGo={(t) => setOpen((o) => ({ ...o, [t]: true }))} />}
+        {/* IA GLOBALE — « effort minimal » : analyser toute la base d'un coup, puis appliquer toutes les
+            propositions fiables/vérifiées en un clic. Chaque écriture reste GOUVERNÉE (mêmes callables, droits,
+            audit, recalcul). L'IA propose, l'humain déclenche. */}
+        {buckets && buckets.length > 0 && aiBuckets().length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap rounded-md border border-gold/25 bg-gold/5 px-3 py-2">
+            <span className="text-[12px] font-medium text-ink">Assistant IA — toute la base</span>
+            <Busy variant="ghost" label={aiRunning ? "Analyse en cours…" : "Analyser tout à l'IA"} okMsg="Analyse IA terminée" errMsg="Analyse IA refusée" fn={analyzeAll} />
+            {globalCount > 0 && (
+              <Busy label={`Appliquer toutes les vérifiées (${globalCount})`} okMsg="Propositions appliquées (recalcul lancé)" errMsg="Application refusée" fn={applyAll} />
+            )}
+            <span className="text-[11px] text-faint grow min-w-[12ch]">Propose une correction justifiée par anomalie sur tous les blocs, puis vérifie par relecture adverse ; l'application n'exécute que les propositions vérifiées (fiables). Dépliez une ligne pour voir chaque proposition.</span>
+          </div>
+        )}
         {buckets && buckets.map((b) => (
-          <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} caps={caps} onDone={load} />
+          <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} caps={caps} onDone={load}
+            sugg={suggByType[b.type] || {}} setSugg={setSuggFor(b.type)} aiInfo={aiInfoByType[b.type] || null} setAiInfo={setAiInfoFor(b.type)} />
         ))}
         {buckets && buckets.length > 0 && <Tip>Chaque correction appelle le service gouverné par le <b>module de la donnée</b> (droits respectés) et relance le recalcul ; l'anomalie se résorbe après « Rafraîchir ». « <b>modifier</b> » / « <b>requalifier</b> » ouvrent la modale de correction ici même ; « <b>annuler</b> » sort l'enregistrement des chiffres (overlay rétablissable) ; « <b>ouvrir</b> » renvoie à l'écran source pré-filtré.</Tip>}
         {/* OUTILS DE RAPPROCHEMENT — intégrés au point unique (plus de cartes séparées sur la page). */}
