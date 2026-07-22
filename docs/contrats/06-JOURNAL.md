@@ -2668,3 +2668,23 @@ rétro-compatibilité des tests et isole l'I/O.
 
 **Vérifs.** Functions 1380/1380 (+2 clickupHealth), no-undef 167, deploy-targets 201, node --check OK. Web
 313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Centre de correction : normalisation clients assistée IA (Lot 4/5)
+
+**Fait.** Dans les outils de rapprochement du point unique (Assainissement), nouveau bloc « Normalisation
+clients (IA) » qui **surface** les mêmes fusions de graphies clients que l'atelier Référentiels →
+« Normalisation clients » : mêmes callables (`aiSuggestClientMerges` juge « même entité » ; `setClientAliases`
+pose l'alias) et **même source unique** `config/clientAliases`. Flux compact « proposer → cocher → appliquer » :
+fusions ≥ 90 % pré-cochées, application ADDITIVE (alias existants conservés hors graphies re-posées), renvoi
+« Atelier complet → » vers l'écran clientnorm. Réservé à la direction (gate `useCan("habilitations")==="write"`,
+comme la table d'alias de l'atelier). Zéro backend nouveau ; primitives réutilisées (`CorrSection`, `Table`,
+`Busy`, `Badge`, `Tip`, `useNav`).
+
+**Appris.** « Ne recrée pas ce qui existe » : l'atelier possède déjà l'IA de fusion + l'inventaire + la table
+éditable. Le Lot 4 n'en **duplique pas la logique** — il en réexpose l'entrée là où le correcteur travaille
+(un nom divergent est souvent la CAUSE d'un dossier client à rapprocher), en écrivant dans la **même** config.
+La source unique reste `config/clientAliases` : les deux écrans y posent des alias à l'identique.
+
+**Vérifs.** Web 313/313, tsc/eslint 0, build OK, bundle 121,4 ≤ 122 Ko. Aucun changement backend, aucune règle.
