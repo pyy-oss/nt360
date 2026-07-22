@@ -1,0 +1,29 @@
+{
+  "hosting": {
+    "site": "neurones-360",
+    "public": "web/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [{ "key": "Cache-Control", "value": "max-age=31536000, immutable" }]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        "source": "/manifest.webmanifest",
+        "headers": [{ "key": "Content-Type", "value": "application/manifest+json" }]
+      }
+    ]
+  },
+  "firestore": {
+    "database": "nt360",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": { "rules": "storage.rules" },
+  "functions": [{ "source": "functions", "codebase": "default", "runtime": "nodejs20" }]
+}

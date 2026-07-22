@@ -1,0 +1,120 @@
+name: Firebase Deploy V2 (neurones-360, manuel)
+
+# DÉPLOIEMENT DU PROJET DÉDIÉ neurones-360 — parallèle, MANUEL (workflow_dispatch), ISOLÉ de la prod.
+# But : amener le nouveau projet « à blanc » (rules + indexes + functions + hosting) SANS toucher au
+# déploiement de production (firebase-deploy.yml continue de servir propulse-business-87f7a). Le cutover
+# (bascule des utilisateurs) se fait plus tard, cf. docs/MIGRATION_PROJET.md.
+#
+# Pré-requis côté GitHub / GCP (à poser AVANT le premier run) :
+#   - Secret  FIREBASE_SERVICE_ACCOUNT_V2 : clé JSON du SA de déploiement de neurones-360.
+#   - (option) Secret APPCHECK_SITE_KEY_V2 : clé reCAPTCHA v3 du domaine neurones-360 (sinon build sans
+#     App Check ; l'enforcement reste OFF de toute façon → callables fonctionnels).
+#   - Secret Manager (neurones-360) : CLICKUP_TOKEN, ANTHROPIC_API_KEY, GRAPH_CLIENT_SECRET. Ce workflow
+#     crée des PLACEHOLDERS inertes s'ils manquent (le déploiement ne bloque pas) ; poser les vraies
+#     valeurs ensuite via `firebase functions:secrets:set X --project neurones-360`.
+on:
+  workflow_dispatch:
+    inputs:
+      imports_bucket:
+        description: "Bucket d'imports/exports du nouveau projet"
+        required: false
+        default: "neurones-360.firebasestorage.app"
+
+concurrency:
+  group: firebase-deploy-v2
+  cancel-in-progress: false
+
+jobs:
+  deploy-v2:
+    runs-on: ubuntu-latest
+    env:
+      NEW_PROJECT: neurones-360
+      NEW_REGION: europe-west1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+
+      # Build du client POUR neurones-360 : config web PUBLIQUE injectée en dur ici (les clés Firebase web
+      # ne sont PAS des secrets — elles vivent déjà dans le bundle). VITE_APPCHECK_SITE_KEY = clé v2 si le
+      # secret existe, vide sinon (App Check non enforce → callables fonctionnels).
+      - name: Build web (config neurones-360)
+        run: pnpm --filter web build
+        env:
+          VITE_APPCHECK_SITE_KEY: ${{ secrets.APPCHECK_SITE_KEY_V2 }}
+          VITE_FIREBASE_API_KEY: "AIzaSyA80fBp3QlqrJMXi5sCruapazuLvj5pju8"
+          VITE_FIREBASE_AUTH_DOMAIN: "neurones-360.firebaseapp.com"
+          VITE_FIREBASE_PROJECT_ID: "neurones-360"
+          VITE_FIREBASE_STORAGE_BUCKET: "neurones-360.firebasestorage.app"
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "165643317476"
+          VITE_FIREBASE_APP_ID: "1:165643317476:web:228e6c75b34e5c8e37fcf1"
+
+      # Env runtime des functions. APPCHECK_ENFORCE=false (obligatoire tant que la clé reCAPTCHA v2 n'est pas
+      # déployée au client). RECOMPUTE_REGION/INGEST_REGION = europe-west1 (co-localisés à la base nommée
+      # nt360, cf. functions/.env.example) → active le recompute différé + les triggers. FIRESTORE_DATABASE
+      # inchangé (nt360).
+      - name: Configurer l'env des functions (neurones-360)
+        run: |
+          {
+            printf 'IMPORTS_BUCKET=%s\n' "${{ github.event.inputs.imports_bucket }}"
+            printf 'BACKUP_BUCKET=%s\n' "${NEW_PROJECT}-backups"
+            printf 'APPCHECK_ENFORCE=false\n'
+            printf 'FIRESTORE_DATABASE=nt360\n'
+            printf 'RECOMPUTE_REGION=%s\n' "$NEW_REGION"
+            printf 'INGEST_REGION=%s\n' "$NEW_REGION"
+          } > functions/.env
+          echo "functions/.env (neurones-360) :"; sed 's/^/  /' functions/.env
+
+      - name: Write service account (V2)
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT_V2" > "$HOME/sa.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT_V2: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_V2 }}
+
+      # Les functions LIENT des secrets (CLICKUP_TOKEN, ANTHROPIC_API_KEY, GRAPH_CLIENT_SECRET) : `firebase
+      # deploy` échoue si un secret n'existe pas dans Secret Manager. On garantit leur existence de façon NON
+      # BLOQUANTE (placeholder inerte si absent) → le déploiement à blanc passe avant même que les vraies
+      # valeurs soient posées. Idempotent : une version ENABLED existante n'est jamais écrasée.
+      - name: Assurer les secrets Secret Manager (neurones-360, non bloquant)
+        run: |
+          gcloud auth activate-service-account --key-file="$HOME/sa.json"
+          for S in CLICKUP_TOKEN ANTHROPIC_API_KEY GRAPH_CLIENT_SECRET; do
+            if ! gcloud secrets describe "$S" --project="$NEW_PROJECT" >/dev/null 2>&1; then
+              echo "$S absent → placeholder inerte."
+              printf 'UNSET' | gcloud secrets create "$S" --data-file=- --replication-policy=automatic --project="$NEW_PROJECT"
+            elif ! gcloud secrets versions list "$S" --project="$NEW_PROJECT" --filter='state:ENABLED' --format='value(name)' | grep -q .; then
+              echo "$S sans version active → placeholder inerte."
+              printf 'UNSET' | gcloud secrets versions add "$S" --data-file=- --project="$NEW_PROJECT"
+            else
+              echo "$S déjà provisionné — inchangé."
+            fi
+          done
+
+      # Déploiement scopé au nouveau projet via --config firebase.v2.json (site hosting neurones-360, base
+      # nt360). « storage » VOLONTAIREMENT hors cibles (mêmes raisons que la prod : le SA n'a pas forcément le
+      # droit sur le bucket par défaut → 403 qui ferait tout échouer). Cibles functions depuis la source unique
+      # deployed-functions.txt + triggers env-gated (RECOMPUTE_REGION est défini). Retry sur erreur transitoire.
+      - name: Deploy V2 (neurones-360, firebase.v2.json)
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
+          if [ -z "$FN_TARGETS" ]; then echo "::error::liste de fonctions vide"; exit 1; fi
+          # RECOMPUTE_REGION est fourni → déployer aussi les triggers env-gated (absents de deployed-functions.txt).
+          FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest,functions:onMntApprovalDecided"
+          attempt=1; max=4
+          while true; do
+            if npx firebase deploy \
+              --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
+              --config firebase.v2.json \
+              --project "$NEW_PROJECT" --non-interactive; then
+              echo "Déploiement V2 OK (tentative $attempt)"; break
+            fi
+            if [ "$attempt" -ge "$max" ]; then echo "::error::firebase deploy V2 a échoué après $max tentatives"; exit 1; fi
+            wait=$((attempt * 30)); echo "::warning::Déploiement V2 échoué (tentative $attempt/$max) — retry dans ${wait}s"
+            sleep "$wait"; attempt=$((attempt + 1))
+          done
+          echo "neurones-360 déployé à blanc. Smoke : https://neurones-360.web.app (base vide tant que les données ne sont pas importées — cf. docs/MIGRATION_PROJET.md Phase 3)."

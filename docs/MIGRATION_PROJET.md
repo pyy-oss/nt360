@@ -45,6 +45,31 @@ bascule ne se produit qu'en posant ces **variables de dépôt** (Settings → Va
 | `RECOMPUTE_REGION` | `europe-west1` |
 | `APPCHECK_SITE_KEY` | clé reCAPTCHA v3 du domaine `neurones-360` |
 
+### Variante retenue : déploiement V2 **parallèle** (workflow manuel) avant cutover
+
+Plutôt que de basculer d'emblée le workflow de prod, on amène `neurones-360` **à blanc** via un workflow
+**dédié et manuel** — la prod (`propulse-business-87f7a`) n'est pas touchée tant que le nouveau projet
+n'est pas validé.
+
+- **Workflow** : `.github/workflows/firebase-deploy-v2.yml` (`workflow_dispatch`). Déploie
+  `hosting + firestore:rules + firestore:indexes + nos functions` sur `neurones-360` via
+  `firebase deploy --config firebase.v2.json`.
+- **Config isolée** : `firebase.v2.json` = copie de `firebase.json` avec `hosting.site: "neurones-360"`
+  (⚠️ `nt360.web.app` est un identifiant **global** déjà pris par l'ancien projet → le nouveau sert sur
+  **`neurones-360.web.app`**). Base Firestore **inchangée** (`nt360`).
+- **Secret** : `FIREBASE_SERVICE_ACCOUNT_V2` (SA de `neurones-360`) — distinct de `FIREBASE_SERVICE_ACCOUNT`
+  (prod), pour que les **deux projets restent déployables** pendant la transition. `APPCHECK_SITE_KEY_V2`
+  optionnel (App Check reste **off** sur V2 jusqu'à enregistrement de la clé reCAPTCHA du nouveau domaine).
+- **Env functions** : posé par le workflow — `APPCHECK_ENFORCE=false`, `FIRESTORE_DATABASE=nt360`,
+  `RECOMPUTE_REGION=INGEST_REGION=europe-west1`, `IMPORTS_BUCKET`/`BACKUP_BUCKET` du nouveau projet.
+- **Secrets Secret Manager** (`CLICKUP_TOKEN`, `ANTHROPIC_API_KEY`, `GRAPH_CLIENT_SECRET`) : le workflow crée
+  des **placeholders inertes** s'ils manquent (déploiement à blanc non bloquant) ; poser les vraies valeurs
+  ensuite via `firebase functions:secrets:set X --project neurones-360`.
+- **Après le déploiement V2** : smoke sur `https://neurones-360.web.app` (base vide), puis migration des
+  données (Phase 3) et couplages externes (Phase 5). Le **cutover** des utilisateurs (Phase 4) reste piloté
+  par variables comme ci-dessus, OU par bascule du site/DNS quand le nouveau projet est validé. `firebase.v2.json`
+  est **supprimé au cutover**, quand `firebase.json` pointera `neurones-360` et deviendra la seule config.
+
 ---
 
 ## Phase 0 — Provisionnement du nouveau projet (console / gcloud)
