@@ -1000,6 +1000,9 @@ function ClickupBtn({ row }: { row: Order }) {
   const [dateFinPrev, setDateFinPrev] = useState(row.dateFinPrev || "");
   const [lieu, setLieu] = useState("");
   const [commentaire, setCommentaire] = useState("");
+  // PM affecté à la tâche, choisi ICI (liste `pm-options` = référentiel Admin ∪ PM déjà affectés, alimentée
+  // depuis ClickUp). Pré-rempli avec le PM de la commande ; l'assignation ClickUp utilise ce nom.
+  const [pm, setPm] = useState(row.pm || "");
   const [busy, setBusy] = useState(false);
 
   const pays = CLICKUP_COUNTRY_LISTS.find((l) => l.id === listId)?.pays;
@@ -1008,8 +1011,12 @@ function ClickupBtn({ row }: { row: Order }) {
     if (busy) return;
     setBusy(true);
     try {
+      // Si le PM choisi diffère de celui de la commande, on le PERSISTE d'abord (setOrderPm — recalcul) pour
+      // que l'affectation « colle » (la ligne + les futures synchros le reflètent), puis on pousse avec ce PM.
+      const pmName = pm.trim();
+      if (pmName !== (row.pm || "") && row.fp) { try { await setOrderPm(row.fp, pmName); } catch { /* affectation non bloquante pour le push */ } }
       const r = await pushOrderToClickup(
-        { fp: row.fp, client: row.client, affaire: row.affaire, bu: row.bu, am: row.am, cas: row.cas, facture: row.facture, pm: row.pm },
+        { fp: row.fp, client: row.client, affaire: row.affaire, bu: row.bu, am: row.am, cas: row.cas, facture: row.facture, pm: pmName || undefined },
         { listId, extra: {
           pays, nature: nature || undefined, domaine: domaine || undefined, secteur: secteur || undefined,
           circuit: circuit || undefined, catRecurrent: catRecurrent || undefined, priority: priority || undefined,
@@ -1057,11 +1064,12 @@ function ClickupBtn({ row }: { row: Order }) {
           <Fld label="Date contractuelle"><DateField value={dateContractuelle} onChange={setDateContractuelle} ariaLabel="Date contractuelle" /></Fld>
           <Fld label="Date prév. de fin"><DateField value={dateFinPrev} onChange={setDateFinPrev} ariaLabel="Date prévisionnelle de fin" /></Fld>
           <Fld label="Lieu"><input className="field !py-1.5" value={lieu} onChange={(e) => setLieu(e.target.value)} placeholder="site / ville (optionnel)" /></Fld>
+          <Fld label="PM (assigné)"><input className="field !py-1.5" list="pm-options" value={pm} onChange={(e) => setPm(e.target.value)} placeholder="Nom du PM (assignation)" /></Fld>
         </div>
         <Fld label="Commentaire"><textarea className="field !py-1.5 mt-3" rows={2} value={commentaire} onChange={(e) => setCommentaire(e.target.value)} placeholder="note libre (optionnel)" /></Fld>
         <div className="flex gap-2 mt-4 items-center flex-wrap">
           <button type="button" className="btn-gold" disabled={busy} onClick={submit}>{busy ? "…" : "Créer / mettre à jour la tâche"}</button>
-          {!row.pm && <span className="text-[12px] text-gold">PM non affecté — la tâche ne sera pas assignée.</span>}
+          {!pm.trim() && <span className="text-[12px] text-gold">PM non affecté — la tâche ne sera pas assignée.</span>}
         </div>
       </Modal>
     </>
