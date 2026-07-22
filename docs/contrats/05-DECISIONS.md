@@ -3,6 +3,33 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-077 — Remédiation d'audit : régime UNIQUE de l'« aged-lost » (exclu partout) + base client de référence à l'abri des courses + parité des actifs
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté (remplace la partie « aged-lost » d'ADR-072 pour le win-rate)
+- **Décideur :** Direction commerciale (« audit de la session des 10 dernières heures » → arbitrage « Exclure partout »)
+
+### Contexte
+L'audit adverse de la session (3 agents) a relevé, dans le travail des dernières heures, trois défauts réels :
+1. **BLOQUANT — course sur `config/clientsRef`.** Le recompute réécrivait `keys` avec le tableau complet (`keys: [...refSet].sort()`), pendant que le webhook Odoo (`object: "partner"`, ADR-076) ajoute des clés par `arrayUnion`. Deux écritures concurrentes → les clés partenaires arrivées entre la lecture et l'écriture du recompute étaient **perdues** (last-write-wins sur le champ entier).
+2. **HAUTE — win-rate incohérent selon la vue.** `isAgedLost` (opp vieille ≥ 366 j, IdC ≤ 90 %, stades 1-5, source salesData) est traité en **perdu** par `isLostOpp` (`domain/oppLifecycle.js`), donc compté au dénominateur du taux de gain du cockpit. Mais `salesVelocity` (callable) ne filtrait que `stale !== true` et `scoreOpportunities` ne prenait que `stage===6||7||isAgedLost` : trois populations différentes → **trois taux de gain différents** pour la même réalité. Viole l'invariant « même métrique = même nombre ».
+3. **MOYENNE — parité des actifs + stade 9 omis.** Le comptage des clients « actifs » se faisait par commande (un client à N commandes comptait N fois) au lieu d'agréger le CAS par client ; et `scoreOpportunities` oubliait le stade **9** (perdu) que `isLostOpp` inclut.
+
+### Décision
+- **Régime unique « aged-lost ».** Arbitrage métier : l'aged-lost est du **bruit de pipeline** (opp jamais close, présumée abandonnée), pas un échec commercial imputable. On l'**exclut partout du calcul du win-rate** — cockpit compris. Concrètement : `salesVelocity` et `scoreOpportunities` filtrent désormais `!isAgedLost(o)` sur leur population, et le taux de gain se calcule via la **paire unique** `isWonOpp` / `isLostOpp` (`won = stage 6` ; `lost = stage 7 ∨ 9`, l'aged étant déjà retiré en amont). Une seule définition, un seul nombre. **Remplace** la partie d'ADR-072 qui rangeait l'aged-lost au dénominateur.
+- **`config/clientsRef` uniquement en `arrayUnion`.** Le recompute n'écrit plus jamais le tableau complet : il fait `keys: FieldValue.arrayUnion(...seen)` (additif, atomique, commutatif avec le webhook). Plus de course. Un `logger.warn` prévient au-delà de 15 000 clés (approche de la limite doc Firestore de 1 MiB) — purge = ADR ultérieur si besoin.
+- **Parité des actifs.** Le CAS est agrégé **par client** (`casByClient`) avant de dériver l'ensemble « actifs » (CAS > 0), pour que `clientCoverage` reçoive une population cohérente avec le reste des agrégats.
+
+### Conséquences
+- Le taux de gain est identique dans le cockpit, `salesVelocity` et `scoreOpportunities` — quelle que soit la vue. Le dénominateur ne contient plus d'opp fantôme.
+- La base client de référence ne perd plus de clés partenaires sous charge concurrente ; les deux producteurs (recompute + webhook) coexistent sans se piétiner.
+- Le taux de couverture repose sur un décompte d'actifs non gonflé par la multiplicité des commandes.
+
+### Ce qu'on saura dans six mois
+Si des directions veulent voir l'aged-lost **quelque part** (hygiène de pipeline), ce sera une métrique séparée et nommée, jamais réinjectée dans le win-rate. Si `clientsRef` approche 1 MiB, le warn déclenche la conception d'une purge (clés inactives depuis N recomputes).
+
+---
+
 ## ADR-076 — B4 Phase 2 : le webhook Odoo entrant alimente la base client de référence (`object: "partner"`)
 
 - **Date :** 2026-07-22
