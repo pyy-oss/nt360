@@ -85,22 +85,30 @@ function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHe
                   = FP) au lieu de dupliquer ; l'échantillon se rafraîchit au prochain diagnostic. */}
               <div className="flex items-center gap-2 mb-1">
                 <div className="text-[11px] text-muted grow">Commandes non liées (échantillon)</div>
-                {onBulkPush && (health.unlinked || 0) > 0 && (
+                {onBulkPush && (health.unlinkedEligible ?? health.unlinked ?? 0) > 0 && (
                   <button type="button" className="text-gold hover:underline text-[11px]" onClick={onBulkPush}
-                    title="Créer les tâches de TOUTES les commandes non liées (les tâches existantes sont adoptées, pas dupliquées)">
-                    ⚡ tout créer ({health.unlinked})
+                    title="Créer les tâches des commandes non liées ÉLIGIBLES (un DC doit être lié au N° FP ; les tâches existantes sont adoptées, pas dupliquées)">
+                    ⚡ tout créer ({health.unlinkedEligible ?? health.unlinked})
                   </button>
                 )}
               </div>
+              {/* Éligibilité ClickUp (ADR-079) : une commande n'est synchronisable que si un DC (Odoo) est
+                  lié à son N° FP. Les non éligibles sont signalées et leur bouton remplacé par un renvoi. */}
+              {(health.unlinkedNoDc || 0) > 0 && (
+                <div className="text-[11px] text-clay mb-1">{health.unlinkedNoDc} non éligible(s) : aucun DC lié au N° FP — générez le DC dans Odoo, ou rapprochez-le (Assainissement → Rapprochement DC → N° FP).</div>
+              )}
               <Table colsKey="clickup-unlinked" columns={[
                 colText("FP", (r: { fp?: string }) => r.fp || "—"),
                 colText("Client", (r: { client?: string }) => r.client || "—"),
+                colText("DC lié", (r: { hasDc?: boolean }) => (r.hasDc === false ? <Badge tone="clay">non</Badge> : <Badge tone="emerald">oui</Badge>)),
                 colText("Tâche existante", (r: { matchable?: boolean }) => (r.matchable ? <Badge tone="gold">à rattacher</Badge> : <span className="text-faint">non</span>)),
-                colText("", (r: { fp?: string; client?: string; matchable?: boolean }) => r.fp ? (
+                colText("", (r: { fp?: string; client?: string; matchable?: boolean; hasDc?: boolean }) => !r.fp ? null : r.hasDc === false ? (
+                  <span className="text-faint text-[11px]" title="Un DC doit être lié au N° FP pour synchroniser (ADR-079)">DC requis</span>
+                ) : (
                   <Busy variant="ghost" label={r.matchable ? "Lier la tâche" : "Créer la tâche"}
                     okMsg="Tâche ClickUp créée/liée — relancez « Diagnostic qualité » pour rafraîchir la liste" errMsg="Push refusé"
                     fn={async () => { await pushOrderToClickup({ fp: r.fp, client: r.client }, { listId }); }} />
-                ) : null),
+                )),
               ]} rows={health.unlinkedSample} />
             </div>
           )}

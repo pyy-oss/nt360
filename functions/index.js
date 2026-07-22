@@ -3675,6 +3675,11 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
   try {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const fp = fpKey(order.fp), id = safeId(fp);
+  // ÉLIGIBILITÉ (ADR-079) : une commande n'est synchronisable que si un DC est lié à son N° FP. Requis par
+  // défaut ; `config/clickup.requireDc === false` désactive la règle sans redéploiement (drapeau réversible).
+  if (cfg.requireDc !== false && !(await loadFpsWithDc()).has(fp)) {
+    throw new HttpsError("failed-precondition", "Commande non éligible à ClickUp : aucun DC (Odoo) lié à ce N° FP. Générez le DC dans Odoo, ou rapprochez-le (Assainissement → Rapprochement DC → N° FP).");
+  }
   // Push « par N° FP seul » (action unitaire du cockpit ClickUp) : complète la commande depuis la
   // ligne FUSIONNÉE du carnet (même source que le push en masse) — la tâche porte le CAS d'autorité
   // (fiche > opp gagnée > P&L, overrides/alias compris), PAS le doc orders/ brut qui peut différer.
@@ -3744,13 +3749,18 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   catch (e) { throw new HttpsError("unavailable", "ClickUp : index anti-doublon indisponible — push en masse annulé pour éviter les doublons. " + ((e && e.message) || "")); }
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();
+  // ÉLIGIBILITÉ DC (ADR-079) : requise par défaut. Une commande sans DC lié à son N° FP n'est pas
+  // synchronisée (comptée `skippedNoDc`). Ensemble chargé UNE fois (push en masse déjà lourd).
+  const requireDc = cfg.requireDc !== false;
+  const dcSet = requireDc ? await loadFpsWithDc() : null;
   const newLinks = {};
   let pending = 0; // liens non encore flushés (résilience : on persiste régulièrement, pas qu'à la fin)
   const flush = async () => { if (pending) { await db.doc("config/clickupLinks").set({ map: newLinks }, { merge: true }); pending = 0; } };
-  let created = 0, updated = 0, adopted = 0, failed = 0, skipped = 0;
+  let created = 0, updated = 0, adopted = 0, failed = 0, skipped = 0, skippedNoDc = 0;
   for (const o of orders) {
     const fp = fpKey(o.fp);
     if (!fp) { skipped++; continue; }
+    if (dcSet && !dcSet.has(fp)) { skippedNoDc++; continue; } // pas de DC lié → non éligible
     const id = safeId(fp);
     const existingTaskId = links[id] || newLinks[id] || fpIndex[fp] || null;
     if (existingTaskId && !force) {
@@ -3767,7 +3777,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
     if (pending >= 25) await flush();
   }
   await flush();
-  const res = { created, updated, adopted, failed, skipped, total: orders.length };
+  const res = { created, updated, adopted, failed, skipped, skippedNoDc, total: orders.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bulk_push", module: "habilitations", entity: "config", entityId: "clickupLinks", detail: { ...res, force, listId }, ts: FieldValue.serverTimestamp() });
   return { ok: true, ...res };
   } finally { await releaseClickupLock(db, FieldValue, "push"); }
@@ -3924,7 +3934,9 @@ async function runClickupHealth(listId) {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const syncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   const orders = await loadCommandeRows();
-  const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId);
+  // Éligibilité DC (ADR-079) : le diagnostic distingue les non-liées CRÉABLES (DC lié) des non éligibles.
+  const dcSet = await loadFpsWithDc();
+  const health = clickupHealth(orders, tasks, links, syncMap, fpKey, safeId, (fp) => dcSet.has(fp));
   health.truncated = !!tasks.truncated; // liens fantômes non fiables si le scan est tronqué (> 5000 tâches)
   // Santé du webhook : le webhook enregistré existe-t-il TOUJOURS côté ClickUp et n'est-il pas « failing » ?
   // Best-effort — un échec ici n'invalide pas le diagnostic. Reflète l'état RÉEL dans config/clickup.webhookActive.
@@ -4007,6 +4019,27 @@ async function loadCommandeRows() {
   const rows = [];
   for (const s of snaps) rows.push(...(((s.data() || {}).rows) || []));
   return rows;
+}
+
+// FPs disposant d'un DC (identifiant du BC côté Odoo) — ÉLIGIBILITÉ ClickUp (ADR-079). Une commande n'est
+// synchronisable vers ClickUp que si un DC est lié à son N° FP (le DC, généré depuis le FP dans Odoo, porte
+// toutes les dépenses du projet). Sources d'un DC couvrant un FP : (1) l'overlay `config/dcAliases` (DC→FP,
+// rapprochement manuel/seed) ; (2) une ligne BC (`bcLines`) portant un `dc`, dont le FP (canonique) résout
+// l'affaire. On renvoie l'ENSEMBLE des FP couverts (canoniques). Utilisé par le push (unitaire + masse) et le
+// diagnostic. NB : lecture bornée des bcLines — opération d'admin, peu fréquente.
+async function loadFpsWithDc() {
+  const { fpKey } = require("./lib/ids");
+  const set = new Set();
+  const dcMap = ((await db.doc("config/dcAliases").get()).data() || {}).map || {};
+  for (const v of Object.values(dcMap)) { const k = fpKey(v); if (k) set.add(k); }
+  const snap = await db.collection("bcLines").get();
+  for (const doc of snap.docs) {
+    const b = doc.data();
+    if (!b || !b.dc) continue;               // seules les lignes portant un DC comptent
+    const k = fpKey(b.fp) || fpKey(dcMap[b.dc]); // fp direct (cas normal Odoo), sinon résolu via l'overlay
+    if (k) set.add(k);
+  }
+  return set;
 }
 
 // CAF courant par clé safeId(fp), lu des commandes matérialisées.

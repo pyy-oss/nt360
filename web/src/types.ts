@@ -160,8 +160,9 @@ export interface ClickupBcSummary {
 // Diagnostic qualité de l'intégration ClickUp (summaries/clickupHealth).
 export interface ClickupHealthSummary {
   commandesTotal?: number; linked?: number; unlinked?: number; unlinkedMatchable?: number; synced?: number;
+  unlinkedNoDc?: number; unlinkedEligible?: number; // éligibilité ClickUp : DC lié au N° FP requis (ADR-079)
   tasksTotal?: number; tasksWithFp?: number; orphanTasks?: number; duplicateTasks?: number; duplicateFps?: number; cafGapCount?: number; cafGapTotal?: number; coverage?: number;
-  unlinkedSample?: { fp?: string; client?: string; matchable?: boolean }[];
+  unlinkedSample?: { fp?: string; client?: string; matchable?: boolean; hasDc?: boolean }[];
   orphanSample?: { id?: string; name?: string; fp?: string | null }[];
   duplicateSample?: { fp?: string; count?: number }[];
   phantomLinks?: number; phantomSample?: { ref?: string; taskId?: string }[]; // liens vers tâche introuvable (dérive)

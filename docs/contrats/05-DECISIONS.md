@@ -3,6 +3,29 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-079 — Éligibilité ClickUp : une commande n'est synchronisable que si un DC (Odoo) est lié à son N° FP
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction (« exiger l'existence d'un DC lié au FP pour la synchro ClickUp — si pas de DC, non éligible »)
+
+### Contexte
+Une commande devient une tâche ClickUp (pilotage projet). Certaines affaires ne sont pas encore provisionnées côté Odoo : elles n'ont pas de **DC** (identifiant du BC généré depuis le FP, portant toutes les dépenses du projet). Créer une tâche ClickUp pour une affaire sans DC crée un projet orphelin de la comptabilité Odoo.
+
+### Décision
+Une commande n'est **éligible** à la synchronisation ClickUp que si un **DC est lié à son N° FP**. Sources d'un DC couvrant un FP : (1) l'overlay `config/dcAliases` (DC→FP, rapprochement/seed) ; (2) une ligne BC (`bcLines`) portant un `dc`, dont le FP canonique résout l'affaire. Un helper `loadFpsWithDc()` renvoie l'ensemble des FP couverts.
+- **Enforcement au push** (autorité) : `pushOrderToClickup` (unitaire) **rejette** un FP sans DC (`failed-precondition`) ; `pushAllOrdersToClickup` (masse) **saute** les non éligibles (`skippedNoDc`).
+- **Diagnostic** : `clickupHealth` (domaine, pur) reçoit un prédicat `hasDc(fp)` et distingue, parmi les non liées, les **créables** (`unlinkedEligible`) des **non éligibles** (`unlinkedNoDc`) ; chaque ligne de l'échantillon porte `hasDc`. Le cockpit remplace « Créer la tâche » par « DC requis » (renvoi vers Assainissement → Rapprochement DC).
+- **Réversible sans redéploiement** : `config/clickup.requireDc === false` désactive la règle (drapeau, défaut = requis) — cohérent avec la philosophie de drapeaux de l'ERP.
+
+### Conséquences
+- Les tâches ClickUp ne sont plus créées que pour des affaires réellement provisionnées dans Odoo (avec DC) → cohérence exécution ↔ comptabilité. Les affaires sans DC sont signalées et guidées vers le rapprochement, pas synchronisées silencieusement.
+
+### Ce qu'on saura dans six mois
+Si trop d'affaires légitimes restent sans DC (retard de provisioning Odoo), on relâchera temporairement via le drapeau, le temps de rattraper les DC.
+
+---
+
 ## ADR-078 — Assistant IA du Centre de correction : actions auto-applicables = DÉCISIONS/classifications, jamais des valeurs inventées
 
 - **Date :** 2026-07-22

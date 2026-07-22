@@ -18,8 +18,10 @@ function taskNumField(task, name) {
  * @param {object} links      config/clickupLinks.map { safeId(fp): taskId }
  * @param {object} syncMap    config/clickupSync.map  { safeId(fp): {...} }
  * @param {(fp)=>string} fpKey  ; safeId(fp)
+ * @param {(canonicalFp)=>boolean} [hasDc]  ÉLIGIBILITÉ ClickUp (ADR-079) : le N° FP a-t-il un DC lié ?
+ *   Défaut `() => true` (rétro-compatible : sans info DC, toutes les commandes restent éligibles).
  */
-function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
+function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId, hasDc = () => true) {
   const L = links || {}, S = syncMap || {};
   const cmdFpSet = new Set();
   // Index tâche par FP (Opp ID) → { id, caf }. On COMPTE aussi les tâches par FP pour rendre VISIBLES les
@@ -61,7 +63,8 @@ function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
       const t = taskByFp[fp];
       if (t) { const gap = Math.round(Number(o.facture || 0)) - Math.round(Number(t.caf || 0)); if (gap !== 0) { cafGapCount++; cafGapTotal += Math.abs(gap); } }
     } else {
-      unlinked.push({ fp: o.fp, client: o.client || "", matchable: !!taskByFp[fp] });
+      // hasDc : éligibilité ClickUp (un DC doit être lié au N° FP). Non éligible → ni créable ici, ni comptée créable.
+      unlinked.push({ fp: o.fp, client: o.client || "", matchable: !!taskByFp[fp], hasDc: !!hasDc(fp) });
     }
     if (S[id]) synced++;
   }
@@ -86,11 +89,16 @@ function clickupHealth(orders, tasks, links, syncMap, fpKey, safeId) {
   }
 
   const unlinkedMatchable = unlinked.filter((u) => u.matchable).length;
+  // Éligibilité ClickUp : parmi les non liées, combien n'ont PAS de DC lié (donc non synchronisables, ADR-079).
+  const unlinkedNoDc = unlinked.filter((u) => !u.hasDc).length;
+  const unlinkedEligible = unlinked.length - unlinkedNoDc;
   return {
     commandesTotal,
     linked,
     unlinked: unlinked.length,
     unlinkedMatchable,          // non liées MAIS une tâche existe (Opp ID) → à rattacher
+    unlinkedNoDc,               // non liées SANS DC lié → non éligibles à la synchro ClickUp (ADR-079)
+    unlinkedEligible,           // non liées AVEC un DC lié → créables
     synced,                     // commandes ayant reçu la synchro inverse (statut/dates)
     tasksTotal: (tasks || []).length,
     tasksWithFp,
