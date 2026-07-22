@@ -78,6 +78,25 @@ const TYPE_SPECS = {
     actions: { patch_bc_line: ["supplier"] },
     hint: "Propose le fournisseur s'il est déductible de la description/du N° BC. Sinon « review ».",
   },
+  opps_fantomes: {
+    actions: { patch_opportunity: ["stage"] },
+    hint: "Opportunité « fantôme » : active dans le pipeline mais sans suite plausible (ni activité, ni jalon crédible). " +
+      "Si le contexte indique clairement un abandon, propose sa REQUALIFICATION en « 7 » (perdue) — ou « 9 » (annulée) " +
+      "si elle n'aurait jamais dû exister. Sinon « review ». Ne propose JAMAIS un autre stage (uniquement 7 ou 9). " +
+      "C'est une décision de classification (sortie de pipeline), pas une valeur inventée.",
+  },
+  opps_agees: {
+    actions: { patch_opportunity: ["stage"] },
+    hint: "Opportunité trop ANCIENNE pour rester crédible (D Prev très dépassée, aucune reprise). Propose sa " +
+      "requalification en « 7 » (perdue) quand l'âge la rend non réaliste ; « review » si un doute subsiste. " +
+      "Uniquement stage 7 ou 9.",
+  },
+  clickup_cloture_avec_raf: {
+    actions: { settle_raf: [] },
+    hint: "Le projet ClickUp est CLÔTURÉ mais la commande garde un RAF (reste à facturer) non nul. L'action attendue " +
+      "est de SOLDER le RAF (le mettre à 0) puisque plus rien ne sera facturé — aucune valeur à inventer (le RAF est " +
+      "forcé à 0). Propose « settle_raf ». « review » uniquement si la clôture ClickUp semble erronée.",
+  },
   opps_doublons: {
     actions: {},
     hint: "JUGE si les enregistrements du lot sont de VRAIS doublons (même affaire ré-importée) ou des affaires " +
@@ -157,6 +176,9 @@ function sanitizeField(name, value) {
   if (NON_APPLICABLE_FIELDS.has(name)) return undefined;         // garde-fou 4 : pas d'invention monétaire/date
   if (name === "fp") { const k = fpKey(value); return k || undefined; } // garde-fou 5 : FP canonique obligatoire
   if (name === "yearPo") { const y = plausibleYear(value); return y || undefined; }
+  // REQUALIFICATION d'opportunité : on n'autorise QUE la sortie de pipeline (7 = perdu, 9 = annulé) — c'est
+  // une DÉCISION (classification), pas une valeur inventée. Tout autre stage proposé par l'IA est rejeté.
+  if (name === "stage") { const n = Math.trunc(Number(value)); return (n === 7 || n === 9) ? n : undefined; }
   if (name === "client") { const c = cleanName(value); return c || undefined; }
   if (name === "bu") { const b = cleanBu(value); return b || undefined; }
   if (name === "am") {

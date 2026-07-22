@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-078 — Assistant IA du Centre de correction : actions auto-applicables = DÉCISIONS/classifications, jamais des valeurs inventées
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« nouvelles actions et fonctions IA pour réduire l'effort de correction »)
+
+### Contexte
+L'assistant IA du Centre de correction (ADR IA correction / `domain/aiCorrection`) applique le principe « l'IA propose, l'humain valide » avec un garde-fou fort : **aucune invention de montant/date/FP** (`NON_APPLICABLE_FIELDS` force « review »). On veut ÉTENDRE les actions auto-applicables pour réduire la saisie manuelle, SANS violer l'interdit absolu « n'invente aucune donnée » (CLAUDE.md).
+
+### Décision
+On distingue une **valeur inventée** (un montant, une date, un FP que le modèle devrait deviner — interdit d'auto-appliquer) d'une **décision de classification** ou d'une **valeur déterministe** (imposée par la nature de l'anomalie — auto-applicable, toujours via clic humain gouverné). Nouvelles actions :
+- **Requalification d'opportunité fantôme/âgée** (`opps_fantomes`, `opps_agees`) → `patch_opportunity` avec **`stage`** borné à **7 (perdu)** ou **9 (annulé)** UNIQUEMENT (sortie de pipeline). `sanitizeField("stage")` rejette tout autre stade. C'est une classification (l'opp est présumée abandonnée), pas une valeur inventée. Cap `pipeline`.
+- **Solder un RAF de commande ClickUp-clôturée** (`clickup_cloture_avec_raf`) → action **`settle_raf`** SANS champ : RAF forcé à **0** (déterministe, plus rien à facturer). Fieldless → ne retombe pas en « review » faute de champ.
+
+Les champs **montant/date/FP restent NON auto-applicables** (garde-fou inchangé) : pour eux, l'IA explique et priorise, l'humain saisit via l'éditeur inline (qui pré-remplit la recommandation déterministe quand elle existe). Chaque application passe par l'écriture GOUVERNÉE (`patchOpportunity`/`patchOrder` — droits/audit/recalcul), et par la vérification adverse avant l'application en lot.
+
+### Conséquences
+- L'effort baisse sur deux familles fréquentes (opps mortes à sortir du pipeline, RAF fantômes à solder) sans jamais auto-écrire une valeur devinée. Le win-rate/pipeline reste juste (requalif = 7/9, cohérent avec ADR-077).
+- La frontière « décision vs valeur inventée » est le critère durable pour toute future action IA auto-applicable.
+
+### Ce qu'on saura dans six mois
+Si des requalifications IA s'avèrent trop agressives (opps rouvertes à tort), on relèvera le seuil de vérification ou on repassera ces types en « review ».
+
+---
+
 ## ADR-077 — Remédiation d'audit : régime UNIQUE de l'« aged-lost » (exclu partout) + base client de référence à l'abri des courses + parité des actifs
 
 - **Date :** 2026-07-22

@@ -179,8 +179,9 @@ const FIX: Record<string, { kind: string; cap?: "import" | "pipeline" | "bc" | "
   opps_sans_montant: { kind: "num-opp-amount", cap: "pipeline", ent: "opp" },
   opps_gagnees_sans_fp: { kind: "fp-opp", cap: "pipeline", ent: "opp" },
   opps_gagnees_sans_pnl: { kind: "reconcile-pnl", cap: "import", ent: "opp" },
-  opps_fantomes: { kind: "nav", module: "opplist", ent: "opp" },
-  opps_agees: { kind: "nav", module: "opplist", ent: "opp" },
+  // cap « pipeline » : l'IA peut proposer une requalification (perdu/annulé) → écriture opp (patchOpportunity).
+  opps_fantomes: { kind: "nav", cap: "pipeline", module: "opplist", ent: "opp" },
+  opps_agees: { kind: "nav", cap: "pipeline", module: "opplist", ent: "opp" },
   // Cohérence AMONT (opportunité ↔ commande) : la modale « modifier » (CAS ligne P&L) / « requalifier »
   // porte désormais la correction ; « ouvrir » reste pour le contexte complet.
   ecart_valorisation: { kind: "nav", module: "orderlist", ent: "order" },
@@ -279,9 +280,19 @@ async function applyAiSuggestion(item: CorrectionItem, s: AiSuggestion): Promise
       if (f.am != null) patch.am = String(f.am);
       return void (await patchOrder(patch));
     }
-    case "patch_opportunity":
-      if (!item.id || !f.fp) throw new Error("proposition incomplète");
-      return void (await patchOpportunity({ id: item.id, fp: String(f.fp) }));
+    case "patch_opportunity": {
+      // fp (rattacher) OU stage (requalifier en perdu/annulé — opp fantôme/âgée). Le serveur borne stage à 7/9.
+      if (!item.id) throw new Error("opportunité sans identifiant");
+      const patch: { id: string; fp?: string; stage?: number } = { id: item.id };
+      if (f.fp != null) patch.fp = String(f.fp);
+      if (f.stage != null) patch.stage = Number(f.stage);
+      if (patch.fp == null && patch.stage == null) throw new Error("proposition incomplète");
+      return void (await patchOpportunity(patch));
+    }
+    case "settle_raf":
+      // Solder le RAF d'une commande ClickUp clôturée : valeur DÉTERMINISTE (0), rien d'inventé.
+      if (!item.fp) throw new Error("commande sans N° FP");
+      return void (await patchOrder({ fp: item.fp, raf: 0 }));
     case "patch_bc_line": {
       if (!item.id) throw new Error("ligne BC sans identifiant");
       const patch: { id: string; fp?: string; supplier?: string } = { id: item.id };
@@ -299,14 +310,16 @@ const AI_ACTION_LABEL: Record<string, string> = {
   set_invoice_fp: "Rattacher au N° FP",
   generate_from_invoice: "Générer commande + opp",
   patch_order: "Corriger la commande",
-  patch_opportunity: "Poser le N° FP",
+  patch_opportunity: "Corriger l'opportunité",
+  settle_raf: "Solder le RAF (→ 0)",
   patch_bc_line: "Corriger la ligne BC",
   review: "À vérifier",
 };
 function aiProposalText(s: AiSuggestion): string {
   const f = s.fields || {};
-  const vals = Object.entries(f).map(([k, v]) => `${k} = ${v}`).join(", ");
-  return AI_ACTION_LABEL[s.action] + (vals ? ` (${vals})` : "");
+  // `stage` est une requalification : on l'affiche en clair (« → 7 Perdu ») plutôt qu'en brut.
+  const parts = Object.entries(f).map(([k, v]) => (k === "stage" ? `→ ${v} ${STAGE_SHORT[Number(v)] || ""}`.trim() : `${k} = ${v}`));
+  return AI_ACTION_LABEL[s.action] + (parts.length ? ` (${parts.join(", ")})` : "");
 }
 
 // Proposition IA rendue COMPACTE dans la colonne « IA » du tableau : confiance + « vérifiée » + boutons
@@ -601,7 +614,7 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone, sugg, s
           <Badge tone={CORR_SEV[bucket.severity]}>{bucket.count}</Badge>
           <span className="text-ink truncate">{bucket.label}</span>
         </button>
-        {canFix && cfg.kind !== "nav" && (
+        {canFix && cfg.kind !== "dedupe" && (
           <Busy variant="ghost" label="IA" okMsg="Propositions IA prêtes" errMsg="Analyse IA refusée" fn={runAi} />
         )}
         {bulkGen && !confirmBulk && (
@@ -704,7 +717,7 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
   const setAiInfoFor = (type: string) => (v: BucketAiInfo | null) =>
     setAiInfoByType((all) => { const n = { ...all }; if (v) n[type] = v; else delete n[type]; return n; });
   // Blocs éligibles à l'IA : ceux dont la correction se fait ICI (pas « nav »/« dedupe ») et dans les droits.
-  const aiBuckets = () => (buckets || []).filter((b) => { const k = FIX[b.type]?.kind; return k !== "nav" && k !== "dedupe" && canFixBucket(b); });
+  const aiBuckets = () => (buckets || []).filter((b) => { const k = FIX[b.type]?.kind; return k !== "dedupe" && canFixBucket(b); });
   // ANALYSE IA GLOBALE : lance l'assistant sur CHAQUE bloc éligible (séquentiel — chaque appel est un tour LLM
   // + vérification adverse), alimente `suggByType`. Une seule commande pour toute la base.
   const analyzeAll = async () => {
