@@ -20,7 +20,7 @@ import {
   deleteRecords, callDedupe, setFpAlias, setDcAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
   setCancellation, fpDocId, importDcAliases, type DcMapImportResult,
-  aiSuggestCorrections, aiSuggestClientMerges, setClientAliases, type ClientMergeResult, type ClientMergeSuggestion,
+  aiSuggestCorrections, aiSuggestClientMerges, setClientAliases, aiRemediationSummary, type ClientMergeResult, type ClientMergeSuggestion, type RemediationSynthesis,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
 } from "../lib/writes";
 import { clientNames } from "../lib/clientNormWrites";
@@ -678,12 +678,22 @@ function exportBucketsCsv(buckets: CorrectionBucket[]) {
 // Plan d'assainissement PRIORISÉ (par impact FCFA) — « par où commencer ». Rend la liste actionnable comme
 // une feuille de route : la catégorie au plus fort impact d'abord. Impact extrapolé signalé (« ~ »).
 function RemediationPlanCard({ plan, onGo }: { plan: RemediationPlan; onGo: (type: string) => void }) {
+  // SYNTHÈSE IA « par où commencer » : narration facultative PAR-DESSUS le plan déterministe (l'ordre FCFA
+  // reste la vérité affichée en dessous). L'IA n'ordonne/explique que les types du plan ; chaque étape
+  // renvoie à son bloc via onGo. Aucune écriture. Labels résolus depuis le plan (jamais un libellé inventé).
+  const [ai, setAi] = useState<RemediationSynthesis | null>(null);
   if (!plan.rows.length) return null;
   const top3 = plan.rows.filter((r) => r.impact > 0).slice(0, 3);
   if (!top3.length) return null;
+  const labelByType = new Map(plan.rows.map((r) => [r.type, r.label]));
+  const aiSteps = (ai?.steps || []).filter((s) => labelByType.has(s.type));
   return (
     <div className="rounded-md border border-gold/30 bg-gold/5 px-3 py-2.5">
-      <div className="text-[12px] font-medium text-ink mb-1.5">🗺️ Plan d'assainissement — par où commencer <span className="text-faint font-normal">(impact FCFA le plus fort d'abord)</span></div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <div className="text-[12px] font-medium text-ink grow">🗺️ Plan d'assainissement — par où commencer <span className="text-faint font-normal">(impact FCFA le plus fort d'abord)</span></div>
+        <Busy variant="ghost" label={ai ? "Ré-analyser (IA)" : "Synthèse IA"} okMsg="Synthèse prête" errMsg="Synthèse IA indisponible"
+          fn={async () => { setAi(await aiRemediationSummary(plan)); }} />
+      </div>
       <ol className="flex flex-col gap-1">
         {top3.map((r, i) => (
           <li key={r.type} className="flex items-center gap-2 text-[12px]">
@@ -694,6 +704,26 @@ function RemediationPlanCard({ plan, onGo }: { plan: RemediationPlan; onGo: (typ
           </li>
         ))}
       </ol>
+      {/* Feuille de route NARRÉE par l'IA (facultative) — complète, ne remplace pas, le classement FCFA ci-dessus. */}
+      {ai && (aiSteps.length || ai.headline) && (
+        <div className="mt-2 border-t border-gold/20 pt-2 flex flex-col gap-1.5">
+          {ai.headline && <div className="text-[12px] text-ink">{ai.headline}</div>}
+          {aiSteps.length > 0 && (
+            <ol className="flex flex-col gap-1">
+              {aiSteps.map((s, i) => (
+                <li key={s.type} className="flex items-start gap-2 text-[12px]">
+                  <span className="text-faint tabnum shrink-0">{i + 1}.</span>
+                  <span className="min-w-0">
+                    <button type="button" className="text-gold hover:underline" onClick={() => onGo(s.type)}>{labelByType.get(s.type)}</button>
+                    <span className="text-muted"> — {s.why}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="text-[10px] text-faint">Synthèse IA au-dessus du plan chiffré (l'IA n'invente aucun chiffre ; l'ordre FCFA reste la référence).</div>
+        </div>
+      )}
     </div>
   );
 }

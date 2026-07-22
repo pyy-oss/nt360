@@ -922,6 +922,16 @@ export async function aiSuggestClientMerges(names: { name: string; count: number
   return res.data as ClientMergeResult;
 }
 
+// SYNTHÈSE IA « par où commencer » : narre le plan d'assainissement DÉTERMINISTE (remediationPlan) en une
+// feuille de route hiérarchisée. Lecture seule (aucune écriture) ; l'IA n'ordonne/explique QUE les types du
+// plan (jamais de chantier ni de chiffre inventé). Chaque étape renvoie à son bloc de correction (via type).
+export type RemediationStep = { type: string; why: string };
+export type RemediationSynthesis = { ok: boolean; headline: string; steps: RemediationStep[]; model: string };
+export async function aiRemediationSummary(plan: RemediationPlan): Promise<RemediationSynthesis> {
+  const res = await httpsCallable(functions, "aiRemediationSummary", { timeout: 120_000 })({ plan });
+  return res.data as RemediationSynthesis;
+}
+
 /** Enregistre la table d'alias de normalisation des noms de clients (direction). Remplace la table
  *  entière ; recalcule tous les agrégats client. */
 export async function setClientAliases(pairs: { from: string; to: string }[]) {
