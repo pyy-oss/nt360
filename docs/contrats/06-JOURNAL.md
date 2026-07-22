@@ -2470,3 +2470,26 @@ n'était pas d'implémenter, mais de RENDRE VISIBLE là où le pilote regarde. N
 (`max(cas−facturé,0)`) — la surfacturation n'est donc PAS captée par un RAF négatif mais par le prédicat dédié.
 
 **Vérifs.** web tsc/eslint 0, tests modules 15/15, bundle 121,3 ≤ 122 Ko. Aucun backend touché.
+
+---
+
+## 2026-07-22 — Cockpit DC/DG : marge attendue du pipe + concentration client (Lot B, ADR-074)
+
+**Fait.** Reprise du Lot B (6 vues DC/DG). Cartographie préalable des agrégats (agent auditeur) : la MOITIÉ
+existait déjà — atterrissage CAS/CAF (overview), pipe par BU (« Pondéré par BU »), CAS par domaine + concentration
+top-5 (operations). Rien recréé. Deux vrais manques bâtis sur le cockpit commercial :
+- **Marge attendue du pipe** : `lib/pipeMargin.pipeExpectedMargin` PUR (testé, 4 cas) — Σ pondéré × mbPrev %,
+  taux moyen pondéré, ventilation BU. mbPrev absent → 0 % (aucune marge inventée). Carte dans la vue analyses.
+- **Concentration du pipe par client** : pondéré par clientKey + part top 5 (risque portefeuille), calculé front
+  sur l'assiette pipeline, miroir du patron lostByCompetitor/winLoss.
+
+**Report MOTIVÉ (documenté, pas contourné).** Couverture base client : AUCUNE collection maître de clients
+(univers dérivé des agrégats) → pas de dénominateur, exige une nouvelle source (ADR + décision). Win-rate
+concurrentiel : `competitor` saisi UNIQUEMENT sur les perdues (étape 7) → won structurellement 0 ; exigerait de
+saisir le concurrent sur les gagnées (changement de modèle). Les deux sont des décisions métier, pas de l'additif.
+
+**Appris.** « Chercher avant de créer » a divisé le Lot B par deux : 3 des 6 vues existaient déjà sous un autre
+écran. Le vrai travail était (a) identifier les 2 manques nets et (b) NOMMER les 2 blocages de modèle de données
+plutôt que d'inventer une base client ou un win-rate concurrentiel faux.
+
+**Vérifs.** web 313/313 (+4 pipeMargin), tsc/eslint 0, bundle 121,3 ≤ 122 Ko. Aucun backend touché.

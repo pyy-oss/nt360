@@ -3,6 +3,27 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-074 — Cockpit DC/DG : marge attendue du pipe + concentration client ; report motivé de la couverture base client et du win-rate concurrentiel
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« on déploie tout » — Lot B des vues DC/DG manquantes)
+
+### Contexte
+L'audit DC/DG demandait 6 vues (réalisé/RAF, concentration client, CAS par domaine, couverture base client, marge du pipe, win-rate concurrentiel). Cartographie préalable des agrégats : **la moitié existe déjà** — atterrissage CAS/CAF (`domain/atterrissage.js`, cartes overview), pipe par BU (`pipeline.byBU`, carte « Pondéré par BU »), CAS par domaine et concentration top-5 (`summaries/domaines_*`, `operations.tsx`). On ne recrée rien de tout cela.
+
+### Décisions
+- **Marge attendue du pipe (NEUF).** Le pondéré porte le CA escompté mais jamais la marge. `web/src/lib/pipeMargin.pipeExpectedMargin` (PUR, testé) agrège Σ (pondéré × `mbPrev` %) sur l'assiette pipeline (`pipelineEligible`, même population que le pondéré), + taux moyen PONDÉRÉ + ventilation par BU. `mbPrev` absent → 0 % (aucune marge inventée ; dilue le taux = signal de qualification). Surfacé dans la vue analyses du Pipeline. Marge **prévisionnelle** (non confidentielle, cf. `pipeline.tsx`), distincte de la marge de livraison (Rentabilité, gatée).
+- **Concentration du pipe par client (NEUF sur le cockpit).** Pondéré groupé par client CANONIQUE (`clientKey`) + part du top 5 (risque de portefeuille). Calculé front sur l'assiette pipeline (même opps que le pondéré), miroir du patron `lostByCompetitor`/`winLossBySegment`. La concentration existait côté CAS livré (operations) ; ici c'est la concentration du **pipe** — angle distinct (risque futur, pas réalisé).
+- **Report MOTIVÉ (pas un oubli) :**
+  - **Couverture de la base client** — BLOQUÉ : il n'existe **aucune collection maître de clients** ; l'univers client est dérivé des agrégats (commandes/factures/opps). Un « taux de couverture » exige un dénominateur (base totale) qui n'existe pas → nécessite une **nouvelle source** (import `res.partner` Odoo ?), donc un ADR + décision métier, pas de l'additif pur.
+  - **Win-rate concurrentiel** — BLOQUÉ : le champ `competitor` n'est saisi **que sur les opps perdues** (étape 7) → un « taux de gain par concurrent » aurait `won` structurellement à 0. L'analyse de la perte existe déjà (« Perdu face à la concurrence »). Un vrai win-rate exigerait de saisir le concurrent aussi sur les gagnées (changement de modèle de saisie) → décision métier.
+
+### Conséquences
+- Le cockpit répond au « risque de marge » (gros pipe faiblement margé) et au « risque de portefeuille » (dépendance à quelques clients) — les deux angles que le seul CA pondéré masquait. Aucune fonction déployée nouvelle (front + lib pure). Les deux blocages sont documentés pour une reprise informée, pas contournés par une donnée inventée.
+
+---
+
 ## ADR-073 — Taux de gain EN VALEUR (won€/(won€+lost€)) en complément du taux en nombre
 
 - **Date :** 2026-07-22
