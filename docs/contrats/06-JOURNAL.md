@@ -2609,3 +2609,23 @@ indexé donc plusieurs colonnes à entête vide cohabitent) est l'outil exact po
 l'alignement sans grille CSS manuelle. Remonter l'état d'édition (modale) au bloc évite N modales pour N lignes.
 
 **Vérifs.** Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko. (Suite : Lots 2-5 = enrichissements IA.)
+
+---
+
+## 2026-07-22 — Centre de correction : IA globale (tout analyser + tout appliquer) (Lot 2/5)
+
+**Fait.** L'assistant IA était bloc par bloc (un bouton « IA » par type d'anomalie). Ajout d'une IA à
+l'échelle de TOUTE la base : l'état des propositions (`suggByType`/`aiInfoByType`) est REMONTÉ du bloc au
+`CorrectionCenter` (chaque bloc reçoit sa tranche via un setter par type, style dispatch). Deux commandes
+globales : **« Analyser tout à l'IA »** (boucle sur chaque bloc éligible — hors nav/dedupe, dans les droits —
+appelle `aiSuggestCorrections` + vérification adverse, alimente tous les blocs, toast récapitulatif) et
+**« Appliquer toutes les vérifiées (N) »** (applique en un clic toutes les propositions fiables/vérifiées à
+travers tous les blocs, un seul recalcul final). Prédicat d'éligibilité `aiBulkEligible` PARTAGÉ entre le lot
+d'un bloc et l'application globale (cohérence stricte). Zéro backend nouveau — réutilise le callable existant ;
+chaque écriture reste GOUVERNÉE (mêmes droits/audit/recalcul, l'IA propose, l'humain déclenche).
+
+**Appris.** Remonter l'état IA au centre (au lieu de le dupliquer) est ce qui rend l'action « toute la base »
+possible sans casser le bloc par bloc : le même `suggByType[type]` sert les deux. Un prédicat d'éligibilité
+unique évite qu'« appliquer le bloc » et « appliquer tout » divergent.
+
+**Vérifs.** Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko.
