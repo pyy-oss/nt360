@@ -28,8 +28,11 @@ export const ReferentielsAdmin: FC<Props> = () => {
 
 // Taux de change (XOF par unité de devise) pour la conversion automatique des BC en devise étrangère.
 function FxRatesCard() {
-  const { data } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
+  const { data, loading } = useDocData<{ rates?: Record<string, number> }>("config/fxRates");
   const [draft, setDraft] = useState<{ cur: string; rate: string }[] | null>(null);
+  // Garde de chargement (idiome admin.tsx ProjectionConfigCard) : sans elle, « Aucun taux » flashait avant
+  // la résolution du snapshot alors que des taux sont configurés.
+  if (loading && !data && draft == null) return null;
   const list = draft ?? Object.entries(data?.rates || {}).map(([cur, rate]) => ({ cur, rate: String(rate) }));
   const set = (i: number, k: "cur" | "rate", v: string) => setDraft(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   const add = () => setDraft([...list, { cur: "", rate: "" }]);
@@ -63,10 +66,12 @@ function FxRatesCard() {
 
 // Référentiel éditable (liste simple) — Project Managers / Business Units. Remplace la liste en base.
 function RefListCard({ kind, title, placeholder, tip, upper, clickupImport }: { kind: "projectManagers" | "businessUnits" | "territories" | "teams"; title: string; placeholder: string; tip: string; upper?: boolean; clickupImport?: boolean }) {
-  const { data } = useDocData<{ list?: string[] }>(`config/${kind}`);
+  const { data, loading } = useDocData<{ list?: string[] }>(`config/${kind}`);
   const [draft, setDraft] = useState<string[] | null>(null);
   const toast = useToast();
+  // Garde de chargement (idiome admin.tsx) : sans elle, « Aucune entrée » flashait avant le snapshot.
   const list = draft ?? (data?.list || []);
+  if (loading && !data && draft == null) return null;
   const set = (i: number, v: string) => setDraft(list.map((r, j) => (j === i ? v : r)));
   const add = () => setDraft([...list, ""]);
   const del = (i: number) => setDraft(list.filter((_, j) => j !== i));

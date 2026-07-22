@@ -8,7 +8,7 @@ import { Card, Table, Badge, Tip, Busy, Toggle, colText, cx, useToast, useConfir
 import { Select } from "../design/inputs";
 import { trackWrite } from "../lib/activity";
 import { setClickupConfig, syncClickupCaf, syncFromClickup, reconcileClickupLinks, clickupHealth, pushAllOrdersToClickup, pushOrderToClickup, dedupeClickupTasks, dedupeBcTasks, enrichClickup, reconcileBcLinks, importBcFromClickup, syncBcFromClickup, pushAllBcToClickup, setupClickupWebhook, deleteClickupWebhook } from "../lib/writes";
-import { T } from "../design/tokens";
+import { T, fmt } from "../design/tokens";
 import { ScoreRing } from "./_viz";
 import type { ClickupHealthSummary } from "../types";
 
@@ -32,7 +32,6 @@ function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHe
     </div>
   ) : null;
   if (health.commandesTotal == null) return errBanner ? <div className="mt-3">{errBanner}</div> : null;
-  const money = (n?: number) => (n ? (n / 1e6).toFixed(1) + " M" : "0");
   const Metric = ({ label, value, tone, sub }: { label: string; value: string | number; tone?: string; sub?: string }) => (
     <div className="rounded-lg bg-panel2 border border-line px-3 py-2">
       <div className="text-[11px] text-muted">{label}</div>
@@ -59,7 +58,7 @@ function ClickupHealthPanel({ health, listId, onBulkPush }: { health?: ClickupHe
         <Metric label="Synchronisées (statut/dates)" value={health.synced || 0} sub={`sur ${health.linked} liées`} />
         <Metric label="Tâches ClickUp" value={health.tasksTotal || 0} sub={`${health.tasksWithFp || 0} avec N° FP`} />
         <Metric label="Tâches orphelines" value={health.orphanTasks || 0} tone={(health.orphanTasks || 0) > 0 ? "text-gold" : "text-emerald"} sub="sans N° FP ou hors commandes actives" />
-        <Metric label="Écarts CAF" value={health.cafGapCount || 0} tone={(health.cafGapCount || 0) > 0 ? "text-clay" : "text-emerald"} sub={`${money(health.cafGapTotal)} d'écart`} />
+        <Metric label="Écarts CAF" value={health.cafGapCount || 0} tone={(health.cafGapCount || 0) > 0 ? "text-clay" : "text-emerald"} sub={`${fmt(health.cafGapTotal)} d'écart`} />
         {/* Dérive : lien app→tâche dont la tâche n'existe plus côté ClickUp (supprimée/déplacée). Non fiable si scan tronqué. */}
         <Metric label="Liens fantômes" value={health.phantomLinks || 0} tone={(health.phantomLinks || 0) > 0 ? "text-clay" : "text-emerald"} sub={health.truncated ? "scan tronqué (indicatif)" : "tâche liée introuvable"} />
         {(() => {

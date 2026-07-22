@@ -1504,7 +1504,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
   // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
   // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
-  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc, dcAliasDoc] = await Promise.all([
+  const [ordSnap, invSnap, oppSnap, bcSnap, shSnap, thrDoc, aliasDoc, cxlODoc, cxlIDoc, casOvrDoc, dcAliasDoc, cxlCDoc] = await Promise.all([
     // raf/designation : requis par mergeCommandes (RAF curaté + affaire) pour aligner l'assiette « commandes ».
     db.collection("orders").select("fp", "client", "am", "yearPo", "cas", "raf", "designation", "source").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "numero", "amountHt", "date", "dueDate", "linked").limit(MAX_SCAN + 1).get(),
@@ -1512,7 +1512,9 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     // composante de la clé de doublon BC (sinon bc_doublons sur-compté). Alignement avec dataQuality.
     db.collection("opportunities").select("fp", "client", "am", "amount", "stage", "stageLabel", "closingDate", "designation", "stale", "source", "ageDays", "probability", "visibleTo").limit(MAX_SCAN + 1).get(),
     // dc : requis pour le rapprochement DC → N° FP (ADR-054), aligné sur le recompute (aggregate.js).
-    db.collection("bcLines").select("fp", "dc", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status").limit(MAX_SCAN + 1).get(),
+    // source : requis par applyChargeDrops (ADR-069) — seules les lignes « fiche » supprimées par overlay
+    // sont exclues ; sans ce champ le drop ne matcherait jamais et le Centre re-compterait la charge.
+    db.collection("bcLines").select("fp", "dc", "bcNumber", "supplier", "currency", "amount", "amountXof", "expenseType", "status", "source").limit(MAX_SCAN + 1).get(),
     // commercial : mergeCommandes en dérive l'AM d'une commande enrichie par fiche (sinon commandes_sans_am divergerait).
     db.collection("projectSheets").select("fp", "client", "affaire", "saleTotal", "commercial").limit(MAX_SCAN + 1).get(),
     db.doc("config/alerts").get(),
@@ -1521,6 +1523,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     db.doc("config/cancelInvoices").get(),
     db.doc("config/orderCasOverride").get(),
     db.doc("config/dcAliases").get(),
+    db.doc("config/cancelCharges").get(), // ADR-069 : charges planifiées supprimées (parité avec le recompute)
   ]);
   let scanCapped = false;
   const withId = (snap) => { const s = sliceCapped(snap.docs); if (s.capped) scanCapped = true; return s.docs.map((d) => ({ id: d.id, ...d.data() })); };
@@ -1546,10 +1549,23 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
     const { resolveBcFp } = require("./domain/odooSync"); // require LOCAL (module fn-scoped, cf. buildFpAliasResolver)
     for (const b of bcLines) { if (b && (b.fp == null || b.fp === "") && b.dc) { const fp = resolveBcFp(b, dcAliasMap); if (fp) b.fp = fp; } }
   }
+  // SUPPRESSION DE CHARGE (overlay config/cancelCharges, ADR-069) — MÊME retrait que le recompute
+  // (aggregate.js) : une ligne d'achat PLANIFIÉ de fiche « supprimée » sort des lignes BC ET son montant
+  // quitte le coût planifié de la fiche (costTotal ↓). Sans cela, le Centre re-comptait comme anomalie
+  // (bc_sans_fournisseur / bc_doublons) une ligne que le score/hero (summary) avait déjà exclue → totaux
+  // divergents. Mute bcLines/sheets en place, APRÈS résolution des FP (alias/DC), AVANT mergeCommandes/issueDefs.
+  {
+    const { applyChargeDrops } = require("./domain/charges"); // require LOCAL (module fn-scoped)
+    // extraction inline des ids (itemsOfCorr n'est déclaré que plus bas — TDZ sur const).
+    const cancelledCharges = new Set((((cxlCDoc.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
+    applyChargeDrops(bcLines, sheets, cancelledCharges);
+  }
   // Sécurité par enregistrement : sous OWD « private », un data-steward non-administrateur ne corrige
   // que les opps de sa ligne hiérarchique (seul le flux opportunités est protégé par OWD — re-audit).
+  let oppScoped = false; // vrai si l'assiette opps est CADRÉE par visibilité (à SIGNALER au front — cf. audit Admin)
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     allOpps = allOpps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
+    oppScoped = true;
   }
   // MÊME dédup que le recompute — via la SOURCE UNIQUE domain/liveOpps (audit 40 axes, axe 27) : dédup
   // INTRA-live (salesData+odoo, le plus récent par FP) PUIS masquage des « saisie » couvertes par un FP
@@ -1618,7 +1634,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // Plan d'assainissement PRIORISÉ (par impact FCFA) — « par où commencer ». Calculé sur les buckets finaux
   // (y compris les incohérences ClickUp rapatriées ci-dessus) après enrichissement des recommandations.
   const plan = remediationPlan(buckets);
-  return { ok: true, buckets, plan, cap: CAP, capped: scanCapped, total: buckets.reduce((s, b) => s + b.count, 0) };
+  return { ok: true, buckets, plan, cap: CAP, capped: scanCapped, scoped: oppScoped, total: buckets.reduce((s, b) => s + b.count, 0) };
 });
 
 // ASSISTANT IA DU CENTRE DE CORRECTION — « l'IA PROPOSE, l'humain VALIDE ». Reçoit un lot d'anomalies

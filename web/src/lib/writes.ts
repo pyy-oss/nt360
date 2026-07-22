@@ -442,7 +442,7 @@ export type CorrectionBucket = { type: string; severity: "high" | "medium" | "lo
 // `plan` = plan d'assainissement priorisé (par impact FCFA) — « par où commencer ».
 export type RemediationRow = { type: string; label: string; severity: "high" | "medium" | "low"; count: number; impact: number; estimated: boolean };
 export type RemediationPlan = { rows: RemediationRow[]; totalImpact: number; totalCount: number; top: RemediationRow | null };
-export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; plan?: RemediationPlan; cap: number; total: number };
+export type CorrectionQueueResult = { ok: boolean; buckets: CorrectionBucket[]; plan?: RemediationPlan; cap: number; total: number; scoped?: boolean };
 /** File de correction : par type d'anomalie, les enregistrements concrets à corriger (plafonnés). */
 export async function correctionQueue(): Promise<CorrectionQueueResult> {
   const res = await withTransientRetry(() => httpsCallable(functions, "correctionQueue", { timeout: 120_000 })({}));
@@ -925,8 +925,16 @@ export async function setClientAliases(pairs: { from: string; to: string }[]) {
  *  jamais). Gouverné par le module RBAC de la donnée, audité, recompute derrière. Les identifiants
  *  sont des DOC IDS. Collections : orders / invoices / bcLines / projectSheets / opportunities. */
 export async function deleteRecords(collection: string, ids: string[]) {
-  const res = await httpsCallable(functions, "deleteRecords", { timeout: 300_000 })({ collection, ids });
-  return res.data as { ok: boolean; count: number };
+  // Le serveur borne chaque appel à 1000 ids (limite de commit Firestore) et signalait cette troncature
+  // en silence (count=1000, « purgées » affiché → reliquat oublié). On DÉCOUPE ici en lots de 1000 et on
+  // additionne les suppressions : une sélection de 1500 est réellement purgée en deux appels, pas à moitié.
+  const call = httpsCallable(functions, "deleteRecords", { timeout: 300_000 });
+  let count = 0;
+  for (let i = 0; i < ids.length; i += 1000) {
+    const res = await call({ collection, ids: ids.slice(i, i + 1000) });
+    count += (res.data as { count?: number }).count || 0;
+  }
+  return { ok: true, count };
 }
 /** Supprime un seul enregistrement (assainissement). */
 export const deleteRecord = (collection: string, id: string) => deleteRecords(collection, [id]);

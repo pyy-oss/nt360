@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-070 — Remédiation de l'audit du module Admin : parité d'assiette (charges supprimées) + honnêteté d'affichage, et cadrage assumé du Centre de correction sous OWD privé
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction (« go » sur remédiation de l'audit Admin, 17 constats vérifiés en adverse)
+
+### Contexte
+Un audit de fond du module Admin (50 agents, vérif adverse) a confirmé 17 constats : deux divergences de chiffres et une série d'« erreurs avalées / états trompeurs » d'affichage. Aucune fuite RBAC serveur (dimension à zéro).
+
+### Décisions
+- **Parité d'assiette `correctionQueue`** : le callable applique désormais `applyChargeDrops` (overlay `config/cancelCharges`, ADR-069) à l'identique du recompute (`aggregate.js`), après résolution des alias FP/DC et avant `mergeCommandes`/`issueDefs`. Une charge planifiée « supprimée » ne réapparaît plus comme anomalie dans le Centre alors que le score/hero l'a exclue. `source` ajouté au select bcLines (sans quoi le drop ne matche pas).
+- **`deleteRecords` — troncature signalée** : le serveur borne chaque appel à 1000 ids (limite de commit) mais retourne `requested`/`truncated` au lieu d'annoncer un succès total ; le client (`writes.ts`) DÉCOUPE en lots de 1000 → une sélection de 1500 est réellement purgée en deux appels, plus à moitié en silence.
+- **Erreurs de lecture DISTINCTES de l'état vide** : `listApiKeys`, `odooWebhookStatus`, le peek de `syncOrderAmount` — un échec n'est plus affiché « Aucune clé » / « Secret manquant » / « — » sans recours, mais comme un état d'erreur explicite avec « Réessayer ».
+- **Bascule « MFA obligatoire »** : plus d'échec avalé (`.catch(() => {})`) — busy + toast du message serveur réel (patron MntFeatureCard) + confirmation avertissant du **risque de verrouillage** (activer sans second facteur inscrit bloque ses propres actions d'admin).
+- **Gardes de chargement (anti-flash)** : QualityHero (« 100 % · 0 anomalie » optimiste), FxRatesCard/RefListCard (« Aucun taux/entrée »), abonnements bcLines/opportunities du Centre (troncature `truncated` signalée), dédup « Aucun doublon » quand le scan est `capped`.
+- **Conformité** : `money()`-dans-template-literal (« [object Object] » sur « Solder le RAF »), `money()` local de clickupAdmin (réinventait `fmt` → « M » au lieu de Md/k), retrait des emojis décoratifs (🎉/🧠/💡/🗺️/⚡) du Centre de correction (décision #130).
+- **Cadrage du Centre sous OWD privé — ASSUMÉ** : le hero « Qualité des données » est GLOBAL (summary, gated overview) ; le Centre de correction est record-scopé (confidentialité, propriétaire+hiérarchie) pour un non-admin. L'écart entre les deux totaux est donc NORMAL et VOLONTAIRE. On ne l'aligne pas (ce serait divulguer un décompte global d'opps hors périmètre) : on le SIGNALE par un bandeau « périmètre » quand le cadrage s'applique (`correctionQueue` retourne `scoped`).
+
+### Conséquences
+- Le Centre de correction et le cockpit Qualité donnent le même décompte à périmètre égal (parité charges) ; là où ils diffèrent (OWD privé), l'écart est expliqué à l'écran.
+- Aucune fonction déployée nouvelle (uniquement des callables existants enrichis) ; deploy-targets 200/200 inchangé.
+
+### Ce qu'on saura dans six mois
+Si le bandeau « périmètre » s'affiche pour la direction, c'est un bug de rôle (elle devrait être record-admin) ; sinon, c'est le fonctionnement attendu de la confidentialité par enregistrement.
+
 ## ADR-069 — « Supprimer la charge » : retrait TOTAL d'une charge planifiée (y compris du P&L) par overlay non destructif, BC lié annulé dans le même geste
 
 - **Date :** 2026-07-21
