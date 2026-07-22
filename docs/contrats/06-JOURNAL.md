@@ -2649,3 +2649,22 @@ non auto-applicables.
 déterministe » : requalifier en perdu ou solder à 0 sont des décisions imposées par l'anomalie, pas des devinettes.
 
 **Vérifs.** Functions 1378/1378 (+2), no-undef 167, node --check OK. Web 313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — ClickUp : DC obligatoire pour l'éligibilité de synchro (Lot 6, ADR-079)
+
+**Fait.** Sur demande (« exiger un DC lié au FP pour la synchro ClickUp ; sans DC, non éligible »), une commande
+n'est synchronisable vers ClickUp que si un DC (identifiant du BC Odoo) est lié à son N° FP. Helper
+`loadFpsWithDc()` (overlay `config/dcAliases` + bcLines portant un `dc`). Enforcement : `pushOrderToClickup`
+rejette (failed-precondition), `pushAllOrdersToClickup` saute (`skippedNoDc`). Diagnostic : `clickupHealth`
+(domaine pur) reçoit un prédicat `hasDc(fp)` → `unlinkedEligible`/`unlinkedNoDc` + `hasDc` par ligne. Cockpit :
+colonne « DC lié », bouton « DC requis » (renvoi Assainissement) pour les non éligibles, « tout créer » ne
+compte que les éligibles, note du nombre non éligible. Réversible : `config/clickup.requireDc === false`.
+
+**Appris.** Le DC vit sur les **bcLines** (pas les commandes) : « FP a un DC » = union dcAliases (DC→FP) +
+bcLines.dc. Garder le prédicat `hasDc` INJECTÉ dans le domaine pur (défaut `()=>true`) préserve la
+rétro-compatibilité des tests et isole l'I/O.
+
+**Vérifs.** Functions 1380/1380 (+2 clickupHealth), no-undef 167, deploy-targets 201, node --check OK. Web
+313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.

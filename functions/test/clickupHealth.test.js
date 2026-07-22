@@ -28,6 +28,22 @@ describe("clickupHealth — diagnostic de couverture", () => {
   const links = { [lkey("FP/1")]: "t1" };
   const syncMap = { [lkey("FP/1")]: { status: "3-en cours" } };
 
+  it("éligibilité DC : sans prédicat, tout est éligible (rétro-compatible)", () => {
+    const h = clickupHealth(orders, tasks2, links, syncMap, fpKey, safeId);
+    expect(h.unlinkedNoDc).toBe(0);
+    expect(h.unlinkedEligible).toBe(2);
+  });
+  it("éligibilité DC : une non-liée sans DC lié n'est pas créable (ADR-079)", () => {
+    // FP/2 a un DC, FP/3 non → 1 éligible, 1 non éligible parmi les 2 non liées.
+    const hasDc = (fp) => fp === fpKey("FP/2");
+    const h = clickupHealth(orders, tasks2, links, syncMap, fpKey, safeId, hasDc);
+    expect(h.unlinked).toBe(2);
+    expect(h.unlinkedNoDc).toBe(1);   // FP/3
+    expect(h.unlinkedEligible).toBe(1); // FP/2
+    expect(h.unlinkedSample.find((u) => u.fp === "FP/2").hasDc).toBe(true);
+    expect(h.unlinkedSample.find((u) => u.fp === "FP/3").hasDc).toBe(false);
+  });
+
   it("couverture, non liées, rattachables, orphelines", () => {
     const h = clickupHealth(orders, tasks2, links, syncMap, fpKey, safeId);
     expect(h.commandesTotal).toBe(3);
