@@ -2560,3 +2560,32 @@ de son propre travail récent est le meilleur rapport qualité/prix : les défau
 
 **Vérifs.** Functions 1376/1376 (no-undef 167, deploy-targets 200 — aucune fonction nouvelle), `node --check`
 index.js OK. Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Écran Factures : recherche serveur (N°/FP) + montant HT éditable
+
+**Fait.** Deux manques signalés sur l'écran Factures :
+- **Recherche « 0 résultat » sur une facture existante.** La liste s'abonne à `invoices` bornée à
+  `DEFAULT_SUB_CAP` (2000) et NON ordonnée ; la recherche de `<ListView>` ne filtre que les lignes
+  chargées → une facture au-delà du plafond (recherche par N° « JV/2026/07/0007 » ou par FP) restait
+  introuvable. Nouveau callable **`searchInvoices({q})`** (requireRead `facturation`, comme la collection) :
+  préfixe sur `numero` (range, variante MAJUSCULES si saisie en minuscules) + égalité sur le FP canonique
+  (`fpKey`, rapproche toutes les factures d'une affaire). Plafond 300, champs mono-indexés (aucun index
+  composite). Front : barre « Chercher dans toute la base » distincte de la recherche cliente ; les
+  résultats serveur remplacent la liste (bandeau honnête : filtres/segmentation non appliqués, plafond signalé).
+- **Montant non éditable.** `patchInvoice` n'acceptait que date/échéance. Ajout de `amountHt` (garde nombre
+  ≥ 0) dans le callable ET dans le correcteur inline `InvoiceDateFixer`. Le montant reste piloté par la
+  source (une correction est réécrite au prochain import delta, EXACTEMENT comme la date — même convention,
+  pas d'overlay). auditLog : montant en DRAPEAU (`amountChanged`), pas la valeur (l'auditLog se lit au droit
+  « habilitations » ⊉ « facturation » — cf. précédent marge/patchProjectSheet). `amountHt` pilote CAF = Σ
+  factures → `requestRecompute` réaligne CAF/surfacturation/cash.
+
+**Appris.** Un abonnement temps réel borné est une base de RECHERCHE partielle, jamais complète : dès qu'une
+recherche doit porter sur toute la base, elle passe par un callable serveur, pas par un filtre client sur les
+lignes chargées. Et une nouvelle donnée éditable de facturation (le montant) suit la convention EXISTANTE de
+`patchInvoice` (écriture directe réécrite au ré-import, drapeau d'audit) plutôt que d'inventer un overlay —
+règle « l'ERP gagne ».
+
+**Vérifs.** Functions 1376/1376 (`node --check` OK ; no-undef 167 ; deploy-targets 201 — +searchInvoices ;
+indexes 3 composites valides). Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko.

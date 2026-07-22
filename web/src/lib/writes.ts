@@ -2,7 +2,7 @@
 // ces écritures échouent côté serveur si le rôle est insuffisant (UI désactivée en amont).
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
-import type { MntContrat } from "../types";
+import type { MntContrat, Invoice } from "../types";
 
 // Un appel callable peut échouer TRANSITOIREMENT pendant un DÉPLOIEMENT des Cloud Functions : le temps
 // que la fonction soit remplacée, l'infra renvoie un 500/INTERNAL (parfois UNAVAILABLE / DEADLINE).
@@ -593,10 +593,18 @@ export async function runAutomations() {
   return res.data as { ok: boolean; created: number; evaluated: number };
 }
 
-/** Corrige une facture existante : date de facturation et/ou échéance (le montant reste piloté par
- *  la source — intégrité comptable). onCall : recalcule échéancier cash + qualité des données. */
-export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null }) {
+/** Corrige une facture existante : date de facturation, échéance et/ou montant HT. Le montant est
+ *  normalement piloté par la source (une correction manuelle est réécrite au prochain import delta,
+ *  comme la date). onCall : recalcule échéancier cash + CAF + surfacturation + qualité des données. */
+export async function patchInvoice(data: { id: string; date?: string | null; dueDate?: string | null; amountHt?: number }) {
   await httpsCallable(functions, "patchInvoice", { timeout: 300_000 })(data); // aligné serveur (300 s) — cf. createOrder
+}
+
+/** Recherche SERVEUR des factures par N° ou N° FP (la liste temps réel est bornée à DEFAULT_SUB_CAP :
+ *  une facture hors des premières N y était introuvable). Renvoie jusqu'à 300 factures. */
+export async function searchInvoices(q: string): Promise<{ rows: Invoice[]; truncated: boolean }> {
+  const res = await httpsCallable(functions, "searchInvoices")({ q });
+  return res.data as { rows: Invoice[]; truncated: boolean };
 }
 
 /** Corrige une commande P&L : année/CAS/RAF/N° FP + client/AM/BU/désignation (onCall : recalcule). */

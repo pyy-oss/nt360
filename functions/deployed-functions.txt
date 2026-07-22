@@ -127,6 +127,7 @@ scheduledClickupPull
 scheduledFirestoreExport
 scheduledRecompute
 scoreOpportunities
+searchInvoices
 setAlertThresholds
 setAutomations
 setBcStatus
