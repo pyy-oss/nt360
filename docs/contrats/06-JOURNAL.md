@@ -2589,3 +2589,23 @@ règle « l'ERP gagne ».
 
 **Vérifs.** Functions 1376/1376 (`node --check` OK ; no-undef 167 ; deploy-targets 201 — +searchInvoices ;
 indexes 3 composites valides). Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Centre de correction : refonte premium des blocs d'anomalies en tableaux (Lot 1/5)
+
+**Fait.** Les listes d'anomalies du Centre de correction (`cleanup.tsx`) étaient rendues en `flex-wrap` :
+chaque ligne un empilement horizontal indépendant → colonnes non alignées (« zig-zag »). Refonte : chaque
+bloc d'anomalies passe en **`Table`** (primitive maison) — colonnes ALIGNÉES (Réf, Client, Montant + colonnes
+d'action Correction/Actions/IA en ligne), contexte (Affaire, Étape, AM, Date, Source), Recommandation chiffrée
+et Proposition IA repliés dans le **détail dépliable**. Recherche/tri/pagination/filtres hérités de `Table`.
+Extraction de `FixControl` (éditeur inline par type) et `RowActions` (modifier/requalifier/annuler/ouvrir,
+modale remontée au bloc) depuis l'ancien `ItemFix` monolithique ; `AiInline`/`AiDetail`/`RecInline` compacts.
+La liste « Réconciliations proposées » du Dossier client passe aussi en `Table`. Zéro changement de logique
+ni de callable — refonte d'affichage pure.
+
+**Appris.** La primitive `Table` (split auto primaire/détail, colonnes d'action toujours en ligne, `colId`
+indexé donc plusieurs colonnes à entête vide cohabitent) est l'outil exact pour tuer le zig-zag : elle garantit
+l'alignement sans grille CSS manuelle. Remonter l'état d'édition (modale) au bloc évite N modales pour N lignes.
+
+**Vérifs.** Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko. (Suite : Lots 2-5 = enrichissements IA.)

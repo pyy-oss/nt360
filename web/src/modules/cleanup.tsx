@@ -11,7 +11,7 @@ import { useDocData, useCollectionData, useReloadOnWrite } from "../lib/hooks";
 import { useCanImport, useClaims, useCan } from "../lib/rbac";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
-import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast, Modal } from "../design/components";
+import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, det, money, useToast, Modal, type Col } from "../design/components";
 import { DateField, Select } from "../design/inputs";
 import { T, pct, fmtFull } from "../design/tokens";
 import { frDate } from "../lib/format";
@@ -215,16 +215,15 @@ function FieldFix({ label, placeholder, kind = "text", save, initial }: { label:
     </span>
   );
 }
-// Ligne de RECOMMANDATION concrète sous un item (💡) : valeur chiffrée + base de calcul. Pour les champs
-// pré-remplissables, c'est juste la justification ; pour les cas non éditables ici (écart valo, surfacturation),
-// c'est la recommandation elle-même. Rendu neutre, tokens existants.
-function RecNote({ rec }: { rec: CorrectionRec }) {
+// RECOMMANDATION concrète (valeur chiffrée + base de calcul), rendue COMPACTE dans la colonne
+// « Recommandation » du tableau. Pour les champs pré-remplissables c'est la justification ; pour les cas
+// non éditables ici (écart valo, surfacturation) c'est la recommandation elle-même. Tokens existants.
+function RecInline({ rec }: { rec: CorrectionRec }) {
   return (
-    <div className="text-[11px] text-muted mt-0.5 pl-1">
-      <span className="text-ink">Recommandation</span>
-      {rec.value != null && <> : <b className="tabnum">{rec.value.toLocaleString("fr-FR")}</b></>}
-      <span className="text-faint"> — {rec.basis}</span>
-    </div>
+    <span className="text-[12px]">
+      {rec.value != null && <b className="tabnum text-ink">{rec.value.toLocaleString("fr-FR")} </b>}
+      <span className="text-faint">{rec.basis}</span>
+    </span>
   );
 }
 function DateFix({ save }: { save: (v: string) => Promise<void> }) {
@@ -310,29 +309,33 @@ function aiProposalText(s: AiSuggestion): string {
   return AI_ACTION_LABEL[s.action] + (vals ? ` (${vals})` : "");
 }
 
-// Proposition IA sous une ligne : confiance + justification + « Appliquer » (écriture gouvernée) / « Ignorer ».
-function AiSuggestionRow({ item, s, canFix, onDone, onDismiss }: { item: CorrectionItem; s: AiSuggestion; canFix: boolean; onDone: () => Promise<void>; onDismiss: () => void }) {
+// Proposition IA rendue COMPACTE dans la colonne « IA » du tableau : confiance + « vérifiée » + boutons
+// (« Appliquer » = écriture gouvernée / « Ignorer »). Le libellé de la proposition et sa justification vont
+// dans la colonne de détail (dépliable) — la ligne principale reste étroite et alignée.
+function AiInline({ item, s, canFix, onDone, onDismiss }: { item: CorrectionItem; s: AiSuggestion; canFix: boolean; onDone: () => Promise<void>; onDismiss: () => void }) {
   const conf = Math.round(s.confidence * 100);
   const tone = s.verified ? "emerald" : s.confidence >= 0.75 ? "emerald" : s.confidence >= 0.5 ? "gold" : "steel";
   const applicable = s.action !== "review" && canFix;
   return (
-    <div className={cx("ml-6 mt-0.5 flex items-start gap-2 text-[11px] rounded px-2 py-1 border", s.verified ? "bg-emerald/5 border-emerald/25" : "bg-gold/5 border-gold/20")}>
-      <div className="flex flex-col gap-0.5 grow min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <Badge tone={tone}>{conf}%</Badge>
-          {s.verified && <span title={s.verifyReason || "Confirmée par une relecture adverse"}><Badge tone="emerald">✓ vérifiée</Badge></span>}
-          <span className="text-ink">{aiProposalText(s)}</span>
-        </div>
-        {s.rationale && <span className="text-faint">{s.rationale}</span>}
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {applicable && (
-          <Busy variant="ghost" label="Appliquer" okMsg="Appliqué (recalcul lancé)" errMsg="Application refusée"
-            fn={async () => { await applyAiSuggestion(item, s); await onDone(); }} />
-        )}
-        <button type="button" className="text-faint hover:underline" onClick={onDismiss}>Ignorer</button>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1.5 flex-wrap justify-end">
+      <Badge tone={tone}>{conf}%</Badge>
+      {s.verified && <span title={s.verifyReason || "Confirmée par une relecture adverse"}><Badge tone="emerald">✓</Badge></span>}
+      {applicable && (
+        <Busy variant="ghost" label="Appliquer" okMsg="Appliqué (recalcul lancé)" errMsg="Application refusée"
+          fn={async () => { await applyAiSuggestion(item, s); await onDone(); }} />
+      )}
+      <button type="button" className="text-faint hover:underline text-[11px]" onClick={onDismiss}>Ignorer</button>
+    </span>
+  );
+}
+
+// Justification IA (proposition lisible + rationale) — rendue dans la colonne de DÉTAIL du tableau.
+function AiDetail({ s }: { s: AiSuggestion }) {
+  return (
+    <span className="text-[12px]">
+      <span className="text-ink">{aiProposalText(s)}</span>
+      {s.rationale && <span className="text-faint"> — {s.rationale}</span>}
+    </span>
   );
 }
 
@@ -435,41 +438,75 @@ function OppFixModal({ item, onClose, onDone }: { item: CorrectionItem; onClose:
 // correction, annulation, renvoi vers l'écran source). `canFix` = droit d'écriture sur le module de la
 // donnée (sinon la ligne reste visible, mais en lecture avec une note). `suggestion`
 // (optionnelle) = proposition IA à afficher sous la ligne (appliquée uniquement sur clic humain).
-function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, onDismissSuggestion }: { item: CorrectionItem; kind: string; module?: string; ent?: FixEnt; canFix: boolean; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void>; suggestion?: AiSuggestion; onDismissSuggestion?: () => void }) {
-  const { go, canGo } = useNav();
-  const [edit, setEdit] = useState(false);
-  const ref = item.numero || item.fp || item.bcNumber || item.client || "—";
+// CONTRÔLE de correction spécifique au TYPE d'anomalie (éditeur inline) — rendu dans la colonne
+// « Correction » du tableau. Ne rend QUE le contrôle : le contexte (affaire, montant, AM…) et les actions
+// de ligne sont des COLONNES distinctes (alignées). `canFix` = droit d'écriture sur le module de la donnée.
+function FixControl({ item, kind, canFix, onDone }: { item: CorrectionItem; kind: string; canFix: boolean; onDone: () => Promise<void> }) {
   const done = () => onDone();
-  // CONTEXTE IDENTIFIANT : affaire, montant, étape, AM, date, provenance — pour reconnaître l'affaire
-  // sans ouvrir un autre écran (une ligne « client seul » n'est pas exploitable).
+  if (kind === "nav") return <span className="text-faint text-[11px]">→ actions</span>;
+  if (kind === "dedupe") return <span className="text-faint text-[11px]">→ Doublons (direction)</span>;
+  if (!canFix) return <span className="text-faint text-[11px]">hors de vos droits</span>;
+  switch (kind) {
+    case "fp-invoice": return (
+      <span className="inline-flex items-center gap-2 flex-wrap">
+        <FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await setInvoiceFp(item.id!, v.trim()); await done(); }} />
+        {looksCanonicalFp(item.fp) && (
+          <Busy variant="ghost" label="→ Générer" okMsg="Commande + opp gagnée créées (recalcul lancé)" errMsg="Génération refusée"
+            fn={async () => { await generateFromInvoices({ ids: [item.id!] }); await done(); }} />
+        )}
+      </span>);
+    case "date-invoice": return <DateFix save={async (v) => { await patchInvoice({ id: item.id!, date: v }); await done(); }} />;
+    case "date-invoice-due": return <DateFix save={async (v) => { await patchInvoice({ id: item.id!, dueDate: v }); await done(); }} />;
+    // Pré-rempli avec l'année portée par le N° FP lui-même (FP/AAAA/N) — jamais une année en dur.
+    case "num-order-year": return <FieldFix label="Année PO" kind="number" placeholder="AAAA" initial={yearOfFp(item.fp) ? String(yearOfFp(item.fp)) : undefined} save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />;
+    // « Projet ClickUp clôturé mais RAF non nul » : l'action attendue est de SOLDER — un clic, ici.
+    // fmtFull (chaîne) et PAS money() (JSX) dans le gabarit du label : interpolé dans un template literal,
+    // money() affichait « [object Object] » (piège documenté — audit Admin).
+    case "raf-order-zero": return (
+      <Busy variant="ghost" label={`Solder le RAF${(item.raf || 0) > 0 ? ` (${fmtFull(item.raf!)} → 0)` : ""}`} okMsg="RAF soldé (recalcul lancé)" errMsg="Correction refusée"
+        fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); await patchOrder({ fp: item.fp, raf: 0 }); await done(); }} />);
+    case "text-order-client": return <FieldFix label="Client" placeholder="Client" save={async (v) => { if (!v.trim()) throw new Error("client requis"); await patchOrder({ fp: item.fp!, client: v.trim() }); await done(); }} />;
+    case "text-order-am": return <FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />;
+    case "fp-opp": return <FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchOpportunity({ id: item.id!, fp: v.trim() }); await done(); }} />;
+    case "date-opp": return <DateFix save={async (v) => { await patchOpportunity({ id: item.id!, closingDate: v }); await done(); }} />;
+    case "num-opp-amount": return <FieldFix label="Montant" kind="number" placeholder="montant" initial={item.rec?.field === "amount" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchOpportunity({ id: item.id!, amount: n }); await done(); }} />;
+    case "fp-bc": return <FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchBcLine({ id: item.id!, fp: v.trim() }); await done(); }} />;
+    case "text-bc-supplier": return <FieldFix label="Fournisseur" placeholder="Fournisseur" save={async (v) => { if (!v.trim()) throw new Error("fournisseur requis"); await patchBcLine({ id: item.id!, supplier: v.trim() }); await done(); }} />;
+    case "amount-bc": return <BcConvertFix item={item} onDone={done} />;
+    case "num-sheet-sale": return <FieldFix label="Prix de vente" kind="number" placeholder="vente HT" initial={item.rec?.field === "saleTotal" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchProjectSheet({ fp: item.fp!, saleTotal: n }); await done(); }} />;
+    case "reconcile-pnl": return (
+      <span className="inline-flex items-center gap-2 flex-wrap">
+        <Busy variant="ghost" label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée"
+          fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); if (!((item.amount || 0) > 0)) throw new Error("montant de l'opp manquant"); await createOrder({ fp: item.fp, cas: item.amount!, client: item.client, am: item.am, designation: item.designation }); await done(); }} />
+        <span className="text-faint text-[11px]">ou « Dossier client » (réconcilier vers un FP existant)</span>
+      </span>);
+    default: return <span className="text-faint text-[11px]">correction à la source</span>;
+  }
+}
+
+// ACTIONS DE LIGNE par entité (colonne « Actions ») — écritures gouvernées par le module de la donnée
+// (caps) ; « modifier »/« requalifier » ouvrent la modale (édition remontée au bloc via onEdit) ; « ouvrir »
+// renvoie à l'écran source pré-filtré (canGo).
+function RowActions({ item, ent, kind, module, caps, onDone, onEdit }: { item: CorrectionItem; ent?: FixEnt; kind: string; module?: string; caps: Record<"import" | "pipeline" | "bc" | "rentabilite", boolean>; onDone: () => Promise<void>; onEdit: () => void }) {
+  const { go, canGo } = useNav();
+  const done = () => onDone();
+  if (!(ent || kind === "nav")) return <span className="text-faint text-[11px]">—</span>;
+  const ref = item.numero || item.fp || item.bcNumber || item.client || "—";
   const affaire = item.designation || item.affaire || "";
-  const amt = item.amount ?? item.cas ?? item.amountHt ?? item.amountXof ?? item.saleTotal;
-  const when = item.closingDate || item.date;
-  const ctx = (
-    <>
-      {affaire && <span className="text-muted truncate max-w-[26ch]" title={affaire}>{affaire}</span>}
-      {(amt || 0) > 0 && <span className="tabnum text-ink">{money(amt!)}</span>}
-      {ent === "opp" && item.stage != null && <span className="text-faint text-[11px]">{item.stageLabel || STAGE_SHORT[item.stage] || `étape ${item.stage}`}</span>}
-      {item.am && <span className="text-faint text-[11px]">{item.am}</span>}
-      {when && <span className="tabnum text-faint text-[11px]">{frDate(when)}</span>}
-      {item.source && <span className="text-faint text-[11px]">· {SRC_LABEL[item.source] || item.source}</span>}
-    </>
-  );
-  // ACTIONS DE LIGNE par entité — écritures gouvernées par le module de la donnée (caps), renvoi par canGo.
   const navModule = ent ? ENT_MODULE[ent] : module;
   const navSearch = ent === "invoice" ? (item.numero || item.fp || "") : ent === "bc" ? (item.bcNumber || item.fp || "") : (item.fp || item.client || "");
-  const actions = (ent || kind === "nav") ? (
-    <span className="inline-flex items-center gap-1.5 flex-wrap">
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap justify-end">
       {ent === "order" && item.fp && caps.import && (
         <>
-          <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Corriger la commande (année, client, AM, CAS, RAF) sans quitter le Centre">modifier</button>
+          <button type="button" className="text-gold hover:underline text-[11px]" onClick={onEdit} title="Corriger la commande (année, client, AM, CAS, RAF) sans quitter le Centre">modifier</button>
           <DangerBtn label="Annuler" okMsg="Commande annulée (recalcul lancé)" errMsg="Annulation refusée"
             confirm={`Annuler la commande ${item.fp}${item.client ? ` (${item.client})` : ""} ? Elle sort du carnet et du P&L. Overlay non destructif : rétablissable depuis Commandes → Annulées, et il survit aux ré-imports.`}
             fn={async () => { await setCancellation("orders", fpDocId(item.fp!), true, { label: affaire || undefined, client: item.client }); await done(); }} />
         </>
       )}
       {ent === "opp" && item.id && caps.pipeline && (
-        <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => setEdit(true)} title="Requalifier (perdue / suspendue / annulée) ou corriger l'opportunité sans quitter le Centre">requalifier</button>
+        <button type="button" className="text-gold hover:underline text-[11px]" onClick={onEdit} title="Requalifier (perdue / suspendue / annulée) ou corriger l'opportunité sans quitter le Centre">requalifier</button>
       )}
       {ent === "invoice" && item.id && caps.import && (
         <DangerBtn label="Annuler" okMsg="Facture annulée (recalcul lancé)" errMsg="Annulation refusée"
@@ -480,63 +517,7 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
         <button type="button" className="text-faint hover:underline text-[11px]" onClick={() => go(navModule, { search: navSearch || ref })} title="Ouvrir l'écran source pré-filtré">ouvrir</button>
       )}
     </span>
-  ) : null;
-  const row = (control: ReactNode) => (
-    <div>
-      <div className="flex items-center gap-2 flex-wrap text-[13px]">
-        <span className="tabnum text-faint">{ref}</span>
-        {item.client && item.client !== ref && <span className="text-muted">{item.client}</span>}
-        {ctx}
-        {control}
-        {actions}
-      </div>
-      {/* Recommandation concrète déterministe (valeur + base) — pré-remplit le champ ci-dessus ou guide l'action. */}
-      {item.rec && <RecNote rec={item.rec} />}
-      {suggestion && <AiSuggestionRow item={item} s={suggestion} canFix={canFix} onDone={onDone} onDismiss={() => onDismissSuggestion?.()} />}
-      {edit && ent === "order" && <OrderFixModal item={item} onClose={() => setEdit(false)} onDone={done} />}
-      {edit && ent === "opp" && <OppFixModal item={item} onClose={() => setEdit(false)} onDone={done} />}
-    </div>
   );
-  // Renvois (drill) : les actions de ligne (modale, annulation, « ouvrir ») portent désormais la correction.
-  if (kind === "nav") return row(actions ? null : <span className="text-faint text-[11px]">accès requis</span>);
-  if (kind === "dedupe") return row(<span className="text-faint text-[11px]">→ section « Doublons » ci-dessous (direction)</span>);
-  if (!canFix) return row(<span className="text-faint text-[11px]">correction hors de vos droits</span>);
-  switch (kind) {
-    case "fp-invoice": return row(
-      <span className="inline-flex items-center gap-2 flex-wrap">
-        <FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await setInvoiceFp(item.id!, v.trim()); await done(); }} />
-        {looksCanonicalFp(item.fp) && (
-          <Busy variant="ghost" label="→ Générer commande+opp" okMsg="Commande + opp gagnée créées (recalcul lancé)" errMsg="Génération refusée"
-            fn={async () => { await generateFromInvoices({ ids: [item.id!] }); await done(); }} />
-        )}
-      </span>);
-    case "date-invoice": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, date: v }); await done(); }} />);
-    case "date-invoice-due": return row(<DateFix save={async (v) => { await patchInvoice({ id: item.id!, dueDate: v }); await done(); }} />);
-    // Pré-rempli avec l'année portée par le N° FP lui-même (FP/AAAA/N) — jamais une année en dur.
-    case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="AAAA" initial={yearOfFp(item.fp) ? String(yearOfFp(item.fp)) : undefined} save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
-    // « Projet ClickUp clôturé mais RAF non nul » : l'action attendue est de SOLDER — un clic, ici.
-    // fmtFull (chaîne) et PAS money() (JSX) dans le gabarit du label : interpolé dans un template literal,
-    // money() affichait « [object Object] » (piège documenté — audit Admin).
-    case "raf-order-zero": return row(
-      <Busy variant="ghost" label={`Solder le RAF${(item.raf || 0) > 0 ? ` (${fmtFull(item.raf!)} → 0)` : ""}`} okMsg="RAF soldé (recalcul lancé)" errMsg="Correction refusée"
-        fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); await patchOrder({ fp: item.fp, raf: 0 }); await done(); }} />);
-    case "text-order-client": return row(<FieldFix label="Client" placeholder="Client" save={async (v) => { if (!v.trim()) throw new Error("client requis"); await patchOrder({ fp: item.fp!, client: v.trim() }); await done(); }} />);
-    case "text-order-am": return row(<FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />);
-    case "fp-opp": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchOpportunity({ id: item.id!, fp: v.trim() }); await done(); }} />);
-    case "date-opp": return row(<DateFix save={async (v) => { await patchOpportunity({ id: item.id!, closingDate: v }); await done(); }} />);
-    case "num-opp-amount": return row(<FieldFix label="Montant" kind="number" placeholder="montant" initial={item.rec?.field === "amount" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchOpportunity({ id: item.id!, amount: n }); await done(); }} />);
-    case "fp-bc": return row(<FieldFix label="N° FP" placeholder="FP/2026/…" save={async (v) => { if (!v.trim()) throw new Error("N° FP requis"); await patchBcLine({ id: item.id!, fp: v.trim() }); await done(); }} />);
-    case "text-bc-supplier": return row(<FieldFix label="Fournisseur" placeholder="Fournisseur" save={async (v) => { if (!v.trim()) throw new Error("fournisseur requis"); await patchBcLine({ id: item.id!, supplier: v.trim() }); await done(); }} />);
-    case "amount-bc": return row(<BcConvertFix item={item} onDone={done} />);
-    case "num-sheet-sale": return row(<FieldFix label="Prix de vente" kind="number" placeholder="vente HT" initial={item.rec?.field === "saleTotal" && item.rec.value != null ? String(item.rec.value) : undefined} save={async (v) => { const n = parseAmt(v); if (!(n > 0)) throw new Error("montant > 0"); await patchProjectSheet({ fp: item.fp!, saleTotal: n }); await done(); }} />);
-    case "reconcile-pnl": return row(
-      <span className="inline-flex items-center gap-2">
-        <Busy variant="ghost" label="Inscrire au P&L" okMsg="Commande créée (recalcul lancé)" errMsg="Création refusée"
-          fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); if (!((item.amount || 0) > 0)) throw new Error("montant de l'opp manquant"); await createOrder({ fp: item.fp, cas: item.amount!, client: item.client, am: item.am, designation: item.designation }); await done(); }} />
-        <span className="text-faint text-[11px]">ou section « Dossier client » ci-dessous pour réconcilier vers un FP existant</span>
-      </span>);
-    default: return row(<span className="text-faint text-[11px]">correction à la source</span>);
-  }
 }
 
 // Bloc d'un type d'anomalie : entête (sévérité, libellé, compte) repliable → lignes corrigeables.
@@ -588,6 +569,30 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
     await onDone();
     toast(`${ok} correction${ok > 1 ? "s" : ""} IA appliquée${ok > 1 ? "s" : ""}${fails.length ? ` — ${fails.length} refusée${fails.length > 1 ? "s" : ""} (à traiter à la main)` : ""}`, fails.length ? "err" : "ok");
   };
+  // Édition (modale) REMONTÉE au bloc : le tableau rend N lignes ; une seule modale, pilotée par la ligne
+  // sur laquelle on a cliqué « modifier »/« requalifier ».
+  const [editItem, setEditItem] = useState<CorrectionItem | null>(null);
+  const displayRef = (it: CorrectionItem) => String(it.numero || it.fp || it.bcNumber || it.client || "—");
+  const amtOf = (it: CorrectionItem) => it.amount ?? it.cas ?? it.amountHt ?? it.amountXof ?? it.saleTotal ?? 0;
+  const dismiss = (it: CorrectionItem) => setSugg((m) => { const n = { ...m }; delete n[refKeyOf(it)]; return n; });
+  // COLONNES ALIGNÉES (fini le flex-wrap en zig-zag) : essentiels en ligne (Réf, Client, Montant, Correction,
+  // Actions, IA), contexte + reco + justif IA repliés dans le détail dépliable. Les colonnes d'action (entête
+  // vide) restent toujours en ligne (splitCols). Recherche/tri/pagination fournis par <Table>.
+  const cols: Col[] = [
+    colText("Réf", (it: CorrectionItem) => <span className="tabnum text-faint">{displayRef(it)}</span>, displayRef),
+    colText("Client", (it: CorrectionItem) => { const r = displayRef(it); return it.client && it.client !== r ? it.client : <span className="text-faint">—</span>; }, (it: CorrectionItem) => it.client || ""),
+    det(colText("Affaire", (it: CorrectionItem) => { const a = it.designation || it.affaire; return a ? <span className="truncate max-w-[30ch] inline-block align-bottom" title={a}>{a}</span> : <span className="text-faint">—</span>; }, (it: CorrectionItem) => it.designation || it.affaire || "")),
+    colNum("Montant", (it: CorrectionItem) => { const a = amtOf(it); return a > 0 ? money(a) : <span className="text-faint">—</span>; }, amtOf),
+    ...(cfg.ent === "opp" ? [det(colText("Étape", (it: CorrectionItem) => it.stage != null ? (it.stageLabel || STAGE_SHORT[it.stage] || `étape ${it.stage}`) : "—", (it: CorrectionItem) => it.stage ?? 0))] : []),
+    det(colText("AM", (it: CorrectionItem) => it.am || "—", (it: CorrectionItem) => it.am || "")),
+    det(colText("Date", (it: CorrectionItem) => { const w = it.closingDate || it.date; return w ? <span className="tabnum">{frDate(w)}</span> : "—"; }, (it: CorrectionItem) => it.closingDate || it.date || "")),
+    det(colText("Source", (it: CorrectionItem) => it.source ? (SRC_LABEL[it.source] || it.source) : "—", (it: CorrectionItem) => it.source || "")),
+    det(colText("Recommandation", (it: CorrectionItem) => it.rec ? <RecInline rec={it.rec} /> : <span className="text-faint">—</span>)),
+    det(colText("Proposition IA", (it: CorrectionItem) => { const s = sugg[refKeyOf(it)]; return s ? <AiDetail s={s} /> : <span className="text-faint">—</span>; })),
+    colText("", (it: CorrectionItem) => <FixControl item={it} kind={cfg.kind} canFix={canFix} onDone={onDone} />),
+    colText("", (it: CorrectionItem) => <RowActions item={it} ent={cfg.ent} kind={cfg.kind} module={cfg.module} caps={caps} onDone={onDone} onEdit={() => setEditItem(it)} />),
+    colText("", (it: CorrectionItem) => { const s = sugg[refKeyOf(it)]; return s ? <AiInline item={it} s={s} canFix={canFix} onDone={onDone} onDismiss={() => dismiss(it)} /> : null; }),
+  ];
   return (
     <div className="border-t border-hair pt-2">
       <div className="w-full flex items-center gap-2 text-[13px] py-0.5">
@@ -612,12 +617,12 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
         <button type="button" onClick={onToggle} className="text-faint text-[11px] shrink-0">{open ? "▾ masquer" : "▸ corriger"}</button>
       </div>
       {open && (
-        <div className="mt-1.5 flex flex-col gap-1.5 pl-1">
+        <div className="mt-2 flex flex-col gap-2 pl-1">
           {aiInfo && (
             <div className="flex items-center gap-2 flex-wrap text-[11px] text-faint">
               <span>
                 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""}
-                {aiInfo.verified ? <> — <b className="text-emerald">{aiInfo.verifiedCount} vérifiée{aiInfo.verifiedCount > 1 ? "s" : ""}</b> par relecture adverse</> : <> applicable{aiInfo.actionable > 1 ? "s" : ""}</>}. <b>Vérifiez</b> puis « Appliquer » (écriture gouvernée).
+                {aiInfo.verified ? <> — <b className="text-emerald">{aiInfo.verifiedCount} vérifiée{aiInfo.verifiedCount > 1 ? "s" : ""}</b> par relecture adverse</> : <> applicable{aiInfo.actionable > 1 ? "s" : ""}</>}. <b>Vérifiez</b> puis « Appliquer » (écriture gouvernée). Dépliez une ligne (⌄) pour voir la proposition et sa justification.
                 {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
               </span>
               {canFix && bulkItems().length > 0 && (
@@ -626,13 +631,13 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
               )}
             </div>
           )}
-          {bucket.items.map((it, i) => (
-            <ItemFix key={it.id || it.fp || `${bucket.type}-${i}`} item={it} kind={cfg.kind} module={cfg.module} ent={cfg.ent} canFix={canFix} caps={caps} onDone={onDone}
-              suggestion={sugg[refKeyOf(it)]} onDismissSuggestion={() => setSugg((m) => { const n = { ...m }; delete n[refKeyOf(it)]; return n; })} />
-          ))}
+          <Table columns={cols} rows={bucket.items} colsKey={`corr-${bucket.type}`} rowKey={refKeyOf} pageSize={10} empty="Aucune ligne à corriger."
+            searchKeys={[displayRef, (it: CorrectionItem) => it.client || "", (it: CorrectionItem) => it.designation || it.affaire || ""]} />
           {bucket.count > bucket.items.length && (
             <div className="text-[11px] text-faint">… {bucket.count - bucket.items.length} de plus — corrigez ceux-ci puis « Rafraîchir ».</div>
           )}
+          {editItem && cfg.ent === "order" && <OrderFixModal item={editItem} onClose={() => setEditItem(null)} onDone={onDone} />}
+          {editItem && cfg.ent === "opp" && <OppFixModal item={editItem} onClose={() => setEditItem(null)} onDone={onDone} />}
         </div>
       )}
     </div>
@@ -928,20 +933,19 @@ function ClientReconcileSection() {
             <div className="text-sm font-medium text-ink">{dossier.client}</div>
 
             {dossier.suggestions.length > 0 && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <div className="text-[11px] text-muted uppercase tracking-wide">Réconciliations proposées</div>
-                {dossier.suggestions.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2 flex-wrap text-[13px]">
-                    <span className="tabnum text-faint">{s.from}</span>
-                    <span className="text-faint">→</span>
-                    <span className="tabnum text-ink">{s.to}</span>
-                    <Badge tone={s.targetHasInvoice ? "emerald" : "steel"}>{s.targetHasInvoice ? "FP facture" : "FP commande"}</Badge>
-                    {RECON_CONF[s.confidence] && <Badge tone={RECON_CONF[s.confidence].tone}>{RECON_CONF[s.confidence].label}</Badge>}
-                    <span className="text-muted">{RECON_REASON[s.reason] || s.reason}</span>
+                <Table columns={[
+                  colText("N° FP source", (s: any) => <span className="tabnum text-faint">{s.from}</span>, (s: any) => s.from),
+                  colText("→ cible (P&L)", (s: any) => <span className="tabnum text-ink">{s.to}</span>, (s: any) => s.to),
+                  colText("Type", (s: any) => <Badge tone={s.targetHasInvoice ? "emerald" : "steel"}>{s.targetHasInvoice ? "FP facture" : "FP commande"}</Badge>),
+                  colText("Signal", (s: any) => RECON_CONF[s.confidence] ? <Badge tone={RECON_CONF[s.confidence].tone}>{RECON_CONF[s.confidence].label}</Badge> : <span className="text-faint">—</span>),
+                  det(colText("Motif", (s: any) => RECON_REASON[s.reason] || s.reason)),
+                  colText("", (s: any) => (
                     <Busy variant="ghost" label="Réconcilier" okMsg="Réconciliation enregistrée (recalcul lancé)" errMsg="Réconciliation refusée"
                       fn={async () => { await setFpAlias(s.from, s.to); await openClient(dossier.client); await refreshList(); }} />
-                  </div>
-                ))}
+                  )),
+                ]} rows={dossier.suggestions} />
               </div>
             )}
 
