@@ -4562,6 +4562,16 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     });
     bcCtx = { bcDom, idBcKey, normCur, toXof, rates, known, dcAliases };
   }
+  // PARTNER (client Odoo) → base client de référence (B4 Phase 2, ADR-075). Odoo est source AUTORITAIRE de la
+  // création client : on ADDITIONNE la clé CANONIQUE (mêmes règles que le recompute : canonicalKey + alias) à
+  // config/clientsRef. Un client Odoo sans affaire entre dans la base → il compte en « inactif » jusqu'à sa 1ʳᵉ
+  // commande, ce que le périmètre « agrégats seuls » masquait. Collecté sur le lot, écrit UNE fois (arrayUnion).
+  let partnerNorm = null; const partnerKeys = new Set();
+  if (object === "partner") {
+    const { buildClientResolver } = require("./domain/clientName");
+    const pairs = ((await db.doc("config/clientAliases").get()).data() || {}).pairs || [];
+    partnerNorm = buildClientResolver(pairs);
+  }
   // BC Odoo : n'apporte QUE le statut d'ENGAGEMENT ou l'ANNULATION (jamais « facture »/« solde » — le solde
   // SOA reste un acte comptable, MÊME règle que l'import ClickUp `mapBcStatus`). « annule » accepté (ADR-068) :
   // une annulation Odoo sort le BC de l'engagement. Défaut « emis » (un BC Odoo est une commande émise).
@@ -4570,6 +4580,15 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
   // (safeId(fp)/safeId(numero) pour commande/facture ; odoo_+safeId(odooId||fp) pour une opp non rapprochée),
   // donc deux écritures concurrentes sur le même doc CONVERGENT (upsert idempotent) — parallélisation sûre.
   const processOne = async (rec) => {
+    // Client Odoo : pas de collection propre — on n'ajoute que la clé canonique à la base de référence (ci-dessous).
+    if (object === "partner") {
+      const name = String((rec && (rec.name || rec.client || rec.display_name)) || "").trim();
+      const key = name ? partnerNorm(name) : "";
+      if (!key) { errors.push({ error: "client sans nom", odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
+      partnerKeys.add(key);
+      results.push({ object: "partner", action: "queued", client: key });
+      return;
+    }
     const m = mapOdooRecord(object, rec);
     if (!m.ok) { errors.push({ error: m.error, odooId: (rec && (rec.odooId || rec.id)) || null }); return; }
     // --- BC fournisseur → bcLines (ADR-051) : priorité comptable/ClickUp + conversion XOF + statut d'engagement ---
@@ -4635,6 +4654,13 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
     const CONC = 8;
     for (let i = 0; i < batch.length; i += CONC) {
       await Promise.all(batch.slice(i, i + CONC).map((rec) => processOne(rec)));
+    }
+    // Clients Odoo collectés → base de référence (arrayUnion ADDITIF, jamais de retrait). Le `count`/tri sont
+    // rafraîchis au prochain recompute (déclenché juste après via `wrote`), qui recalcule aussi la couverture.
+    if (partnerKeys.size) {
+      await db.doc("config/clientsRef").set({ keys: FieldValue.arrayUnion(...partnerKeys), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      wrote = true;
+      await db.collection("auditLog").add({ uid: "odoo:webhook", action: "odoo_partner", module: "clients", entity: "clientsRef", entityId: "config", detail: { added: partnerKeys.size }, ts: FieldValue.serverTimestamp() });
     }
     if (wrote) await requestRecompute(null); // recompute différé/coalescé (un seul pour tout le lot)
     // État de réception (best-effort) : horodatage/volume du DERNIER envoi Odoo, affiché en Admin →

@@ -2515,3 +2515,20 @@ les nouveaux sans activité tombent en « inactifs »).
 
 **Vérifs.** Functions 1376/1376 (+4 clientCoverage ; no-undef 167, deploy-targets 200 — aucune fonction nouvelle,
 index Firestore valides), web 313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — B4 Phase 2 : le webhook Odoo alimente la base client de référence (ADR-076)
+
+**Fait.** Sur demande (« Phase 2 à faire en webhook entrant déjà existant »), ajout de l'objet
+`object: "partner"` au webhook `odooWebhook` : un client créé côté Odoo ajoute sa clé CANONIQUE (canonicalKey +
+alias, mêmes règles que le recompute) à `config/clientsRef.keys` via `arrayUnion` (additif, jamais de retrait,
+idempotent). Collecté sur le lot, écrit une fois, tracé (auditLog `odoo_partner`). Le recompute différé déjà
+déclenché (`if (wrote)`) rafraîchit le count et le taux de couverture. Doc `docs/ODOO_WEBHOOK.md` mise à jour.
+
+**Appris.** Réutiliser le webhook existant (signature HMAC, coalescing recompute, plafond de lot) plutôt qu'une
+nouvelle fonction = zéro surface de déploiement, zéro règle, zéro secret nouveau. La base client devient l'univers
+Odoo complet → le taux de couverture passe de « actifs / clients déjà vus » à « actifs / base réelle » (pénétration).
+
+**Vérifs.** Functions 1376/1376 (no-undef 167, deploy-targets 200 — aucune fonction nouvelle), index.js
+`node --check` OK. Aucun changement front, aucune règle.

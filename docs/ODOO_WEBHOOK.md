@@ -37,7 +37,7 @@ requests.post(URL, data=body, headers={"Content-Type": "application/json", "X-Si
 ## Contrat (corps JSON)
 
 ```json
-{ "object": "opportunity" | "order" | "invoice" | "bc", "records": [ { … } ] }
+{ "object": "opportunity" | "order" | "invoice" | "bc" | "partner", "records": [ { … } ] }
 ```
 
 `records` : jusqu'à **500** par requête (au-delà : tronqué, signalé par `truncated: true`). `record` (objet
@@ -126,6 +126,21 @@ Filet pour les BC dont le `fp` est absent/placeholder (rejeté par `fpKey`) mais
 un overlay curé côté nt360 (`config/dcAliases`, alimenté par un data-steward via l'écran *Assainissement →
 Rapprochement DC → N° FP*) rattache alors le BC à l'affaire. Non destructif, survit aux ré-imports. Le `fp`
 explicite d'Odoo **prime toujours** sur l'overlay.
+
+### object = "partner"  →  base client de référence `config/clientsRef` (ADR-075)
+Enregistre un **client** créé côté Odoo dans la **base de référence** (dénominateur du **taux de couverture**,
+écran *Base Clients*). Aucune collection propre : on **additionne** la **clé canonique** du nom (mêmes règles que
+le recompute : `canonicalKey` + alias `config/clientAliases`) à `config/clientsRef.keys` via `arrayUnion` — **additif,
+jamais de retrait** (un client sans affaire y reste et compte en « inactif » jusqu'à sa 1ʳᵉ commande). Idempotent
+(renvoi = même clé). Déclenche un recompute différé (le taux de couverture se rafraîchit).
+
+| Champ | Type | Notes |
+|---|---|---|
+| `name` | string | **requis** — nom du client (alias `client`, `display_name`). Canonicalisé (MAJUSCULES, formes juridiques/pays retirées). |
+| `odooId` | string | id Odoo (`res.partner:1234`) — tracé dans l'`auditLog`, non stocké dans la base. |
+
+Un client **sans nom** est rejeté (`errors[]`). Le montant/le CA ne sont **pas** attendus ici (l'activité vient
+des commandes/factures/opps) — l'objet `partner` ne fait qu'**élargir la base de référence**.
 
 ## Réponse
 
