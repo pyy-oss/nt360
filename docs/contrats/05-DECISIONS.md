@@ -3,6 +3,28 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-071 — Cohérence métier des cockpits : objectif CAF unifié (CODIR), dédup live partagée (commercial), garde de périmètre (Vue d'ensemble)
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction (« audit métier du cockpit, bilan CODIR, cockpit commercial » puis « go »)
+
+### Contexte
+Audit métier lean (4 chasseurs + vérif adverse sur haute/bloquant) des trois surfaces de pilotage : 9 constats confirmés, 0 réfuté. Un BLOQUANT : le Bilan CODIR affichait un objectif CAF = 0 (jauges à 0 %, faux « objectif dépassé », export PPTX « Atteinte 0 % ») en contradiction avec la Vue d'ensemble.
+
+### Décisions
+- **Objectif CAF — SOURCE UNIQUE de fusion.** Le recompute purge les objectifs du doc public `summaries/atterrissage_{fy}` (isolation RBAC) et les isole dans `summaries/atterrissageObjectifs_{fy}`. Chaque écran DOIT re-fusionner : cette fusion, dupliquée à l'identique en 4 endroits (Vue d'ensemble, CODIR — QUI L'AVAIT OUBLIÉE —, Cockpit ×2), est extraite dans `web/src/lib/atterrissage.mergeAtterrissageObjectifs`, testée (parité + dégradation RBAC + null au chargement). Cause racine éliminée.
+- **Dédup live — SOURCE UNIQUE partagée.** La dédup des opps live par `fpKey` (+ masquage des « saisie » couvertes), miroir de `aggregate.js`, était inline dans `overviewCalc.ts` mais ABSENTE d'OppList → un même FP en double (webhook Odoo + import Excel) sur-comptait le pondéré des « Certitudes »/« Top » du cockpit commercial. Extraite dans `web/src/lib/liveOpps.dedupeMaskLiveOpps`, utilisée par overviewCalc ET OppList.
+- **Vue d'ensemble — garde de périmètre honnête.** Ce cockpit n'honore que BU/AM/Client (opps/factures sans dimension PM fiable). Un filtre PM-seul ne « recalcule » plus rien sous un bandeau « vue recalculée pour le périmètre » trompeur : il est traité comme inactif (chiffres globaux, sans bandeau).
+- **Couverture RAF — numérateur robuste.** Le Cockpit lisait `summaries/pipeline_{currentFy}.tot.weighted`, doc absent en début d'exercice (aucune commande de l'année) → couverture 0× fausse. Aligné sur `att.pipelinePondere` (même source que CODIR, doc atterrissage toujours écrit et borné exercice).
+- **Prévision « Tout » — ratio à périmètre cohérent.** En mode « Tout » (`periodYear=0`), le réalisé cumule tous les millésimes : le quota (d'un seul exercice) n'est plus récupéré → `attainment=null` (au lieu d'une atteinte aberrante type 300 %).
+- **Libellés PPTX fidèles à l'écran.** « Certitude annuelle (pipeline pondéré) » → « Pipeline pondéré » ; « CAF Estimé yc Certitude » → « Projeté CAF (yc pipeline pondéré) » ; « Backlog YTD » → « Backlog (glissant) ».
+- **Filet de parité corrigé.** Le test « aged-lost » d'`overviewCalc.test.ts` ne portait pas de `ageDays` → la règle d'âge n'était jamais exercée (passait pour la mauvaise raison). Fixture aligné sur le champ réellement lu.
+
+### Conséquences
+- Bilan CODIR, Vue d'ensemble et Cockpit commercial affichent le MÊME objectif CAF et le MÊME pondéré à périmètre égal. Trois extractions de « source unique » (objectifs, dédup live) réduisent la surface de dérive future — c'est le patron qui a payé (le bug racine était une copie manquante).
+- Aucune fonction déployée nouvelle (un seul point backend : garde du quota en mode « Tout »).
+
 ## ADR-070 — Remédiation de l'audit du module Admin : parité d'assiette (charges supprimées) + honnêteté d'affichage, et cadrage assumé du Centre de correction sous OWD privé
 
 - **Date :** 2026-07-22

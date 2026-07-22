@@ -4,6 +4,7 @@ import { useState, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanExport, useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
+import { mergeAtterrissageObjectifs } from "../lib/atterrissage";
 import { useRecordScope } from "../lib/scope";
 import { T, fmt, pct } from "../design/tokens";
 import { Kpi, Card, Tip, EmptyState, KpiSkeletons, CardSkeleton, Busy, Chain, Stage, cx } from "../design/components";
@@ -61,7 +62,7 @@ export const Overview: FC<Props> = ({ period }) => {
   // l'affichage. Un rôle sans droit « objectifs » (ex. commercial) reçoit null → objectif/écart undefined
   // → « — » (les jauges masquent la cible). Fusion PROFONDE de `next` (garde le report public).
   const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
-  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
+  const att = mergeAtterrissageObjectifs(attBase, attObj); // SOURCE UNIQUE (parité CODIR/Cockpit — audit métier)
   const { data: trends } = useDocData<TrendsSummary>("summaries/trends");
   const objGlobal = useObjectives(period).get("global", "all"); // R/O global (si objectif de l'année sélectionnée)
   const isDirection = useClaims().role === "direction"; // le callable recompute est direction-only
@@ -69,7 +70,12 @@ export const Overview: FC<Props> = ({ period }) => {
   const [url, setUrl] = useState<string | null>(null);
   // Filtre transverse : quand un BU/AM/client est sélectionné, on RECALCULE la chaîne & les KPI
   // par périmètre côté client (les collections dégradent proprement à vide si l'accès manque).
-  const { active, f, match } = useFilters();
+  const { f, match } = useFilters();
+  // Ce cockpit n'HONORE que BU/AM/Client (opps & factures ne portent pas de dimension PM fiable — la
+  // ventiler filtrerait les commandes mais pas les opps/CAF → nouvelle divergence). Un filtre PM-SEUL
+  // ne « recalcule » donc rien ici : on le traite comme inactif (chiffres globaux, SANS bandeau « vue
+  // recalculée » trompeur) plutôt que d'afficher du global sous une étiquette de périmètre (audit métier).
+  const active = !!(f.bu || f.am || f.client);
   // Les collections brutes ne sont abonnées QUE si un filtre est actif (le recalcul par périmètre en
   // a besoin) — sinon la Vue d'ensemble (page la plus vue) n'ouvre aucun listener plein-collection.
   const { rows: cmdRows } = useCommandesRows(active);

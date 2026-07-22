@@ -18,6 +18,8 @@ import { winLossBySegment } from "../lib/winLoss";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { isDormantClosing, fpKey } from "../lib/ids"; // miroir client de l'exclusion dormante + clé FP canonique (parité recompute)
+import { dedupeMaskLiveOpps } from "../lib/liveOpps"; // dédup live par fpKey (SOURCE UNIQUE, parité cockpit/overviewCalc)
+import { mergeAtterrissageObjectifs } from "../lib/atterrissage"; // fusion objectifs (SOURCE UNIQUE, parité CODIR/Vue d'ensemble)
 import type { PipelineSummary, Opportunity, AtterrissageSummary, PeriodsConfig, AmsSummary, OverviewSummary, OppFunnelSummary, OppSlippageSummary } from "../types";
 
 // Libellés courts d'étape pour le funnel de transitions (from→to).
@@ -35,19 +37,19 @@ export const Pipeline: FC<Props> = ({ period }) => {
   // Objectifs isolés (doc gaté « objectifs ») re-fusionnés : un commercial (objectifs:none) reçoit null
   // → objectif undefined → les KPI de couverture d'objectif s'effacent (« — »). Un commercial_dir les voit.
   const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
-  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
-  // Pipeline de l'EXERCICE (indépendant du sélecteur de période) pour une couverture cohérente
-  // avec l'objectif/réalisé qui sont, eux, ancrés sur l'exercice courant.
-  const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
+  const att = mergeAtterrissageObjectifs(attBase, attObj); // SOURCE UNIQUE (parité Vue d'ensemble/CODIR)
   const { data: funnelC } = useDocData<OppFunnelSummary>("summaries/oppFunnel"); // funnel de conversion réel (Lot C)
   if (loading && !data) return <CardSkeleton />; // évite le flash « Aucune donnée » avant le 1er snapshot (F4)
   if (!data) return <EmptyState />;
   const funnel = buildStageFunnel(data.byStage);
   // Couverture du reste-à-faire : combien de fois le pipeline pondéré (exercice) couvre l'écart à
-  // l'objectif CAS. Numérateur et dénominateur au MÊME périmètre (currentFy). null si pas d'objectif.
+  // l'objectif CAS. Numérateur = att.pipelinePondere (MÊME source que le Bilan CODIR, doc atterrissage
+  // TOUJOURS écrit et borné exercice) — l'ancien pfy.tot.weighted (summaries/pipeline_{fy}) tombait à 0
+  // quand ce doc n'existait pas encore (début d'exercice, aucune commande de l'année) → couverture 0×
+  // fausse alors que CODIR affichait le pondéré non nul (audit métier). null si pas d'objectif.
   const hasObj = (att?.objectif || 0) > 0;
   const gap = Math.max((att?.objectif || 0) - (att?.realiseCas || 0), 0);
-  const coverage = hasObj && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
+  const coverage = hasObj && gap > 0 ? (att?.pipelinePondere || 0) / gap : null;
   const coverageLabel = coverage != null ? `${coverage.toFixed(2)}×` : hasObj ? "atteint" : "—";
   const cb = data.closing?.buckets;
   // Buckets serveur DISJOINTS par horizon : `mois` = clôture ce mois ; `trim` = clôture plus tard
@@ -522,9 +524,14 @@ export const OppList: FC<Props> = () => {
   // pour rester cohérent avec les KPI/agrégats (qui les excluent) ; elles sont signalées en Qualité des données.
   // MÉMOÏSÉ : filtrage plein-tableau (collection opportunities entière). Sans mémo, chaque frappe dans la
   // MODALE d'édition (état `f` co-localisé) re-filtrait tout le pipeline → lag de saisie à N grand.
+  // Dédup live par fpKey + masquage 'saisie' AVANT toute dérivation (SOURCE UNIQUE lib/liveOpps, miroir
+  // aggregate.js/overviewCalc) : sans elle, une affaire présente en double (webhook Odoo + import Excel)
+  // sur-comptait le pondéré des « Certitudes »/« Top » ici alors que le cockpit (opps dédupliquées) la
+  // comptait une fois → deux nombres pour la même métrique sur l'écran commercial (invariant violé).
+  const deduped = useMemo(() => dedupeMaskLiveOpps(allRows), [allRows]);
   const rows = useMemo(
-    () => allRows.filter((r) => !r.stale && !isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm))),
-    [allRows, match, clientKey, mine, meAm],
+    () => deduped.filter((r) => !r.stale && !isAgedLost(r) && match({ ...r, client: clientKey(r.client) }, ["bu", "am", "client"]) && (!mine || amMatch(r.am || "", meAm))),
+    [deduped, match, clientKey, mine, meAm],
   );
   // Flag « intégré au P&L » : FP des commandes (vue matérialisée). Le hook DOIT rester au-dessus
   // de tout retour anticipé (skeleton), sinon le nombre de hooks varie entre rendus → React #310.
@@ -925,8 +932,7 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const { data: attBase } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissage_${cfg.currentFy}` : null);
   // Objectifs isolés (doc gaté « objectifs ») re-fusionnés pour l'affichage ; null si pas d'accès → « — ».
   const { data: attObj } = useDocData<AtterrissageSummary>(cfg?.currentFy ? `summaries/atterrissageObjectifs_${cfg.currentFy}` : null);
-  const att = attBase ? { ...attBase, ...(attObj || {}), next: { ...(attBase.next || {}), ...(attObj?.next || {}) } } : attBase;
-  const { data: pfy } = useDocData<PipelineSummary>(cfg?.currentFy ? `summaries/pipeline_${cfg.currentFy}` : null);
+  const att = mergeAtterrissageObjectifs(attBase, attObj); // SOURCE UNIQUE (parité Vue d'ensemble/CODIR)
   // Signaux DC remontés au cockpit : glissement (risque prévision) + point de fuite du funnel. Globaux
   // (dérivés du journal des transitions/dates), donc mêmes docs que les vues détaillées — chiffres identiques.
   const { data: slip } = useDocData<OppSlippageSummary>("summaries/oppSlippage");
@@ -940,7 +946,8 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
   const pipe = data.tot?.weighted || 0; // Σ niveaux ACTIFS (échelle cumulée)
   const objectif = att?.objectif || 0;
   const gap = Math.max(objectif - (att?.realiseCas || 0), 0);
-  const coverage = objectif > 0 && gap > 0 ? (pfy?.tot?.weighted || 0) / gap : null;
+  // Numérateur = att.pipelinePondere (même source que CODIR, toujours écrit) — cf. correctif Cockpit ci-dessus.
+  const coverage = objectif > 0 && gap > 0 ? (att?.pipelinePondere || 0) / gap : null;
   const topAm = [...(ams?.rows || [])].sort((a, b) => b.pipelinePondere - a.pipelinePondere).slice(0, 5);
   const funnel = buildStageFunnel(data.byStage);
   // Pipeline COMPLET NON PONDÉRÉ : somme des montants BRUTS de toutes les phases actives (1→5) — le
