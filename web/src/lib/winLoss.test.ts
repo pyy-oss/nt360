@@ -45,6 +45,20 @@ describe("winLossBySegment — taux de gain par segment", () => {
     expect(web.winRate).toBeCloseTo(0.5, 6); // 1/(1+1) — l'annulé abaisse le taux (avant : 100 % sur 1 gagné seul)
   });
 
+  // Taux de gain EN VALEUR (montant gagné / clôturé) — distinct du taux EN NOMBRE (audit commercial DC/DG).
+  it("expose le taux de gain EN VALEUR (montant gagné / clôturé), ≠ taux en nombre", () => {
+    // Web : 1 gagné à 300 € vs 3 perdus à 20 € chacun (60 €). En NOMBRE : 1/4 = 25 %. En VALEUR : 300/360 ≈ 83 %.
+    const r = winLossBySegment([
+      { stage: 6, amount: 300, leadSource: "Web" },
+      { stage: 7, amount: 20, leadSource: "Web" },
+      { stage: 7, amount: 20, leadSource: "Web" },
+      { stage: 9, amount: 20, leadSource: "Web" }, // annulé → perdu (parité)
+    ] as any[], (o) => (o as any).leadSource || "—");
+    const web = r.find((x) => x.key === "Web")!;
+    expect(web.winRate).toBeCloseTo(0.25, 6);
+    expect(web.winRateValue).toBeCloseTo(300 / 360, 6);
+  });
+
   it("compte les AUTO-PÉRIMÉES par âge comme perdues (isAgedLost, parité back)", () => {
     const r = winLossBySegment([
       { stage: 6, amount: 100, leadSource: "Web" },

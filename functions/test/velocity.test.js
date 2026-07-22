@@ -32,6 +32,14 @@ describe("salesVelocity", () => {
     const v = salesVelocity(opps);
     expect(v.velocityIndex).toBe(Math.round(2 * (2 / 3) * 2000));
   });
+  it("taux de gain EN VALEUR = montant gagné / montant clôturé (≠ taux en nombre)", () => {
+    const v = salesVelocity(opps);
+    // gagné 1000+3000 = 4000 ; perdu 500 → 4000/4500 en valeur, alors que le taux en NOMBRE est 2/3.
+    expect(v.wonAmt).toBe(4000);
+    expect(v.lostAmt).toBe(500);
+    expect(v.winRateValue).toBeCloseTo(4000 / 4500, 6);
+    expect(v.winRateValue).not.toBeCloseTo(v.winRate, 3); // les deux taux divergent bien
+  });
   it("sans opps fermées : winRate 0 ; deal moyen = moyenne des ouvertes", () => {
     const v = salesVelocity([{ stage: 2, amount: 100 }, { stage: 4, amount: 300 }]);
     expect(v.winRate).toBe(0);
@@ -39,7 +47,7 @@ describe("salesVelocity", () => {
     expect(v.velocityIndex).toBe(0);
   });
   it("liste vide → zéros", () => {
-    expect(salesVelocity([])).toEqual({ openCount: 0, openWeighted: 0, winRate: 0, avgDeal: 0, won: 0, lost: 0, velocityIndex: 0 });
+    expect(salesVelocity([])).toEqual({ openCount: 0, openWeighted: 0, winRate: 0, winRateValue: 0, avgDeal: 0, won: 0, lost: 0, wonAmt: 0, lostAmt: 0, velocityIndex: 0 });
   });
   it("exclut du pondéré ouvert les opps DÉJÀ au carnet (bookedFps) — anti-double-compte, parité cockpit", () => {
     const withFp = [

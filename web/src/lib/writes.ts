@@ -268,7 +268,7 @@ export async function scoreOpportunities() {
 }
 
 // VÉLOCITÉ COMMERCIALE (Lot 8b) — indicateurs de dynamique du pipeline sur le périmètre visible.
-export type SalesVelocity = { ok: boolean; openCount: number; openWeighted: number; winRate: number; avgDeal: number; won: number; lost: number; velocityIndex: number };
+export type SalesVelocity = { ok: boolean; openCount: number; openWeighted: number; winRate: number; winRateValue: number; avgDeal: number; won: number; lost: number; wonAmt: number; lostAmt: number; velocityIndex: number };
 export async function salesVelocity() {
   const res = await httpsCallable(functions, "salesVelocity")({});
   return res.data as SalesVelocity;

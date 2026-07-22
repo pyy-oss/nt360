@@ -8,7 +8,7 @@ import { isAgedLost } from "./ids";
 // exclut stale/aged) ne remontent pas ici — le prédicat aged-lost reste pour la parité de définition.
 // PURE (aucun état, aucune horloge) → testable.
 export type WinLossRow = {
-  key: string; won: number; lost: number; total: number; winRate: number; wonAmount: number; lostAmount: number;
+  key: string; won: number; lost: number; total: number; winRate: number; winRateValue: number; wonAmount: number; lostAmount: number;
 };
 
 export function winLossBySegment(rows: Opportunity[], keyFn: (o: Opportunity) => string): WinLossRow[] {
@@ -19,11 +19,18 @@ export function winLossBySegment(rows: Opportunity[], keyFn: (o: Opportunity) =>
     const lost = st === 7 || st === 9 || isAgedLost(o); // perdu = Perdu OU Annulé OU auto-périmé (parité back)
     if (!won && !lost) continue; // seules les opps CLÔTURÉES (gagnées/perdues) comptent dans un taux de gain
     const k = keyFn(o) || "—";
-    const e = m.get(k) || { key: k, won: 0, lost: 0, total: 0, winRate: 0, wonAmount: 0, lostAmount: 0 };
+    const e = m.get(k) || { key: k, won: 0, lost: 0, total: 0, winRate: 0, winRateValue: 0, wonAmount: 0, lostAmount: 0 };
     if (won) { e.won++; e.wonAmount += o.amount || 0; } else { e.lost++; e.lostAmount += o.amount || 0; }
     m.set(k, e);
   }
   return [...m.values()]
-    .map((e) => ({ ...e, total: e.won + e.lost, winRate: e.won + e.lost > 0 ? e.won / (e.won + e.lost) : 0 }))
+    // winRateValue = montant gagné / montant clôturé : complète le taux EN NOMBRE (win rate). Un écart révèle
+    // qu'un segment gagne les petites affaires mais perd les grosses (ou l'inverse). Même population clôturée.
+    .map((e) => ({
+      ...e,
+      total: e.won + e.lost,
+      winRate: e.won + e.lost > 0 ? e.won / (e.won + e.lost) : 0,
+      winRateValue: e.wonAmount + e.lostAmount > 0 ? e.wonAmount / (e.wonAmount + e.lostAmount) : 0,
+    }))
     .sort((a, b) => b.total - a.total || b.winRate - a.winRate); // les segments les plus « joués » d'abord
 }

@@ -823,9 +823,10 @@ export const OppList: FC<Props> = () => {
             colNum("Gagné", (r) => r.won, (r) => r.won),
             colNum("Perdu", (r) => r.lost, (r) => r.lost),
             colNum("Taux de gain", (r) => <span className={cx(r.winRate >= 0.5 ? "text-emerald" : r.winRate >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRate)}</span>, (r) => r.winRate),
+            det(colNum("Taux (valeur)", (r) => <span className={cx(r.winRateValue >= 0.5 ? "text-emerald" : r.winRateValue >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRateValue)}</span>, (r) => r.winRateValue)),
             colNum("Montant gagné", (r) => money(r.wonAmount), (r) => r.wonAmount),
           ]} rows={winLossBySource} colsKey="pipeline-winloss-source" />
-          <Tip>Analyse win/loss par <b>canal d'acquisition</b> : sur les opportunités <b>clôturées</b>, part gagnée par origine de lead. Répond « quel canal convertit », complément du <b>montant perdu</b> par motif/concurrent ci-dessus. « — » = origine non renseignée.</Tip>
+          <Tip>Analyse win/loss par <b>canal d'acquisition</b> : sur les opportunités <b>clôturées</b>, part gagnée par origine de lead. Répond « quel canal convertit », complément du <b>montant perdu</b> par motif/concurrent ci-dessus. <b>Taux (valeur)</b> = part gagnée <b>en montant</b> : un écart avec le taux en nombre dit qu'on gagne les petites affaires et perd les grosses (ou l'inverse). « — » = origine non renseignée.</Tip>
         </Card>
       )}
       {winLossByBu.length > 0 && (
@@ -835,9 +836,10 @@ export const OppList: FC<Props> = () => {
             colNum("Gagné", (r) => r.won, (r) => r.won),
             colNum("Perdu", (r) => r.lost, (r) => r.lost),
             colNum("Taux de gain", (r) => <span className={cx(r.winRate >= 0.5 ? "text-emerald" : r.winRate >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRate)}</span>, (r) => r.winRate),
+            det(colNum("Taux (valeur)", (r) => <span className={cx(r.winRateValue >= 0.5 ? "text-emerald" : r.winRateValue >= 0.3 ? "text-gold" : "text-clay")}>{pct(r.winRateValue)}</span>, (r) => r.winRateValue)),
             colNum("Montant gagné", (r) => money(r.wonAmount), (r) => r.wonAmount),
           ]} rows={winLossByBu} colsKey="pipeline-winloss-bu" />
-          <Tip>Analyse win/loss par <b>Business Unit</b> : sur les opportunités <b>clôturées</b>, part gagnée par BU. Situe les BU les plus (et les moins) performantes en conversion.</Tip>
+          <Tip>Analyse win/loss par <b>Business Unit</b> : sur les opportunités <b>clôturées</b>, part gagnée par BU. Situe les BU les plus (et les moins) performantes en conversion. <b>Taux (valeur)</b> = part gagnée <b>en montant</b> (gagne-t-on les grosses affaires de la BU ?).</Tip>
         </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
@@ -1160,6 +1162,9 @@ function VelocityStrip({ refreshKey }: { refreshKey: number }) {
           éviter la collision « même libellé, deux nombres » signalée à l'audit. */}
       <Kpi label="Pondéré ouvert (visible)" value={fmt(v.openWeighted)} />
       <Kpi label="Taux de gain (instantané)" value={`${Math.round(v.winRate * 100)}%`} />
+      {/* Taux de gain EN VALEUR (montant gagné / clôturé) : un écart avec le taux en nombre dit qu'on gagne
+          les petites affaires et perd les grosses (ou l'inverse). Même population clôturée que le taux en nb. */}
+      <Kpi label="Taux de gain (valeur)" value={`${Math.round(v.winRateValue * 100)}%`} />
       <Kpi label="Deal moyen" value={fmt(v.avgDeal)} />
       <Kpi label="Indice de vélocité" value={fmt(v.velocityIndex)} />
     </div>

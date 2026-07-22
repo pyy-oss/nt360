@@ -3,6 +3,25 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-073 — Taux de gain EN VALEUR (won€/(won€+lost€)) en complément du taux en nombre
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (suite de l'audit taux, « go » Lot A2)
+
+### Contexte
+ADR-072 a rendu juste le **taux de gain en nombre**. Mais un taux en nombre seul ment par omission : gagner 8 petites affaires et perdre 2 grosses donne 80 % en nombre alors qu'on perd la majorité du **chiffre**. La question DC/DG « gagne-t-on les affaires qui comptent ? » exige un taux **en valeur**. Les montants gagné/perdu étaient déjà collectés (velocity `wonAmt` ; winLoss `wonAmount`/`lostAmount`) mais jamais exposés en ratio.
+
+### Décision
+- **`winRateValue = montant gagné / (montant gagné + montant perdu)`**, même **population clôturée** que le taux en nombre (`isWonOpp`/`isLostOpp`, ADR-072) — sinon les deux taux divergeraient pour une raison autre que la taille des deals. Ajouté à `domain/velocity.js` (+ `wonAmt`/`lostAmt` bruts) et à `lib/winLoss.WinLossRow`.
+- **Surfacé côté à côté** avec le taux en nombre : KPI « Taux de gain (valeur) » dans la barre de vélocité, colonne « Taux (valeur) » (repliable `det`) dans les tables win/loss par origine de lead et par BU. Le libellé dit explicitement « en montant » ; l'infobulle explique l'écart (petites vs grosses affaires).
+- **Le funnel par étape n'est PAS retouché** : `oppFunnel`/`stageConversion` mesurent des **transitions observées** (population et sémantique distinctes — un →9 annulé n'y est ni gain ni perte). Y injecter `isLostOpp` mélangerait deux métriques ; ce serait une autre décision, pas un correctif.
+
+### Conséquences
+- Le pilote voit d'un coup d'œil si un canal/BU gagne les **gros** deals ou seulement les petits. Aucune fonction déployée nouvelle (champs ajoutés au retour du callable existant `salesVelocity`).
+
+---
+
 ## ADR-072 — Justesse des taux : définition UNIQUE du taux de gain (annulés + périmées au dénominateur) et libellé honnête de la « Conversion projetée »
 
 - **Date :** 2026-07-22

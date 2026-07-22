@@ -2423,3 +2423,27 @@ un défaut de qualification amont — ce que l'ancienne formule masquait.
 
 **Vérifs.** Functions 1371/1371 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle),
 web 308/308 (+2 winLoss annulé/aged-lost, +4 oppLifecycle isWonOpp/isLostOpp), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Taux de gain EN VALEUR (Lot A2, ADR-073)
+
+**Fait.** Prolongement du Lot A : ajout du taux de gain **en valeur** (`winRateValue = montant gagné /
+(gagné + perdu)`) à côté du taux **en nombre**, sur la MÊME population clôturée (isWonOpp/isLostOpp,
+ADR-072). Backend `domain/velocity.js` (+ `wonAmt`/`lostAmt` bruts) et front `lib/winLoss.WinLossRow`
+— les montants étaient déjà collectés, ils n'étaient pas exposés en ratio. Surfacé : KPI « Taux de gain
+(valeur) » dans la barre de vélocité, colonne repliable « Taux (valeur) » dans les tables win/loss par
+origine de lead et par BU, infobulles expliquant l'écart. Type `SalesVelocity` (writes.ts) étendu.
+
+**Décision de périmètre.** Le funnel par étape (oppFunnel/stageConversion) n'est PAS touché : il mesure
+des transitions OBSERVÉES (population et sémantique distinctes — un →9 annulé n'y est ni gain ni perte).
+Y injecter isLostOpp mélangerait deux métriques. C'était le second volet envisagé d'A2 ; il s'avère déjà
+présent et correct sous une autre définition — rien à faire.
+
+**Appris.** Un taux en nombre seul ment par omission : gagner 8 petites affaires et perdre 2 grosses = 80 %
+en nombre mais minoritaire en chiffre. Le taux en valeur, côte à côte, répond « gagne-t-on les affaires qui
+comptent ? ». Le garder sur la même population clôturée évite qu'un écart entre les deux vienne d'autre chose
+que de la taille des deals.
+
+**Vérifs.** Functions 1372/1372 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle),
+web 309/309 (+1 winLoss valeur, +1 velocity valeur), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
