@@ -51,7 +51,11 @@ export const db = initializeFirestore(
   FIRESTORE_DB
 );
 export const auth = getAuth(app);
-export const functions = getFunctions(app);
+// Région des callables. Défaut gen2 = us-central1 (prod historique). Le projet dédié neurones-360 co-localise
+// les fonctions à europe-west1 (base nt360) : VITE_FUNCTIONS_REGION DOIT alors valoir la même région que
+// FUNCTIONS_REGION côté functions, sinon les httpsCallable tapent us-central1 → 404. `||` : var posée mais
+// vide → repli us-central1 (cohérent avec le repli ancien projet ci-dessus).
+export const functions = getFunctions(app, import.meta.env.VITE_FUNCTIONS_REGION || undefined);
 
 // Branchement Emulator Suite en dev (VITE_USE_EMULATORS=true).
 if (import.meta.env.VITE_USE_EMULATORS === "true") {
