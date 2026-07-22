@@ -53,14 +53,14 @@ jobs:
           VITE_FIREBASE_STORAGE_BUCKET: "neurones-360.firebasestorage.app"
           VITE_FIREBASE_MESSAGING_SENDER_ID: "165643317476"
           VITE_FIREBASE_APP_ID: "1:165643317476:web:228e6c75b34e5c8e37fcf1"
-          # Callables co-localisés à la base nt360 (europe-west1) — DOIT = FUNCTIONS_REGION côté functions.
-          VITE_FUNCTIONS_REGION: "europe-west1"
 
       # Env runtime des functions. APPCHECK_ENFORCE=false (obligatoire tant que la clé reCAPTCHA v2 n'est pas
-      # déployée au client). FUNCTIONS_REGION/RECOMPUTE_REGION/INGEST_REGION = europe-west1 → TOUTES les
-      # fonctions (callables + triggers) co-localisées à la base nommée nt360 (cf. functions/.env.example).
-      # FIRESTORE_DATABASE inchangé (nt360). NB : les URLs des webhooks/API du nouveau projet seront donc en
-      # europe-west1 — à répercuter au couplage externe (ClickUp/Odoo) au moment du cutover.
+      # déployée au client). RECOMPUTE_REGION/INGEST_REGION = europe-west1 : SEULS les triggers Firestore/Storage
+      # sont co-localisés à la base nommée nt360 (europe-west1) — obligatoire, un trigger doit tourner dans une
+      # région compatible avec sa base. Les callables/HTTP restent en us-central1 (défaut gen2), EXACTEMENT
+      # comme la prod (topologie identique : callables us-central1 lisant la base europe-west1). FIRESTORE_DATABASE
+      # inchangé (nt360). NB : firebase-tools n'applique PAS setGlobalOptions(region) lu depuis .env à la
+      # découverte — tenter de basculer les callables via une variable est inopérant (cf. run V2 #5).
       - name: Configurer l'env des functions (neurones-360)
         run: |
           {
@@ -68,7 +68,6 @@ jobs:
             printf 'BACKUP_BUCKET=%s\n' "${NEW_PROJECT}-backups"
             printf 'APPCHECK_ENFORCE=false\n'
             printf 'FIRESTORE_DATABASE=nt360\n'
-            printf 'FUNCTIONS_REGION=%s\n' "$NEW_REGION"
             printf 'RECOMPUTE_REGION=%s\n' "$NEW_REGION"
             printf 'INGEST_REGION=%s\n' "$NEW_REGION"
           } > functions/.env

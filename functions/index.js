@@ -2,7 +2,7 @@
 const { onObjectFinalized: _onObjectFinalized } = require("firebase-functions/v2/storage");
 const { onCall: _onCall, onRequest: _onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule: _onSchedule } = require("firebase-functions/v2/scheduler");
-const { logger, setGlobalOptions } = require("firebase-functions/v2");
+const { logger } = require("firebase-functions/v2");
 // Traduction CENTRALE `memoryMiB` → `memory` (lib/fnopts) : l'option maison `memoryMiB` était IGNORÉE
 // par firebase-functions v2 (availableMemoryMb null) — toutes les fonctions tournaient au défaut 256 Mio,
 // et importDelta (2 Gio voulus) mourait en OOM (503 sans CORS) sur tout fichier réel. Les builders sont
@@ -12,13 +12,6 @@ const onObjectFinalized = (opts, handler) => _onObjectFinalized(withMemory(opts)
 const onCall = (opts, handler) => (typeof opts === "function" ? _onCall(opts) : _onCall(withMemory(opts), handler));
 const onRequest = (opts, handler) => (typeof opts === "function" ? _onRequest(opts) : _onRequest(withMemory(opts), handler));
 const onSchedule = (opts, handler) => _onSchedule(typeof opts === "string" ? opts : withMemory(opts), handler);
-// Région PAR DÉFAUT des fonctions. Défaut gen2 = us-central1, région HISTORIQUE de la prod : la garder
-// sur le projet partagé (les URLs des webhooks/API — ClickUp, Odoo, /api — en dépendent, un changement
-// = delete/recreate qui casse les couplages). Le projet dédié neurones-360 co-localise TOUT à europe-west1
-// (base nommée nt360) en posant FUNCTIONS_REGION — variable définie UNIQUEMENT par le workflow V2, donc la
-// prod (variable absente) reste us-central1. À défaut, les callables tomberaient en us-central1 tandis que
-// les triggers (INGEST/RECOMPUTE_REGION) seraient en europe-west1 : split de région inutile.
-if (process.env.FUNCTIONS_REGION) setGlobalOptions({ region: process.env.FUNCTIONS_REGION });
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
