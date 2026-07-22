@@ -29,6 +29,27 @@ attendu : `summaries/*` (recalculés côté neuf, étape 7). **Tout autre écart
 bascule pas.** C'est ce gate qui rattrape un `config/*` manquant (alias FP/DC/clients, secrets HMAC des
 webhooks), des claims perdus, un import partiel.
 
+## Piège projet neuf : quotas Cloud Run / Cloud Build (étape 2)
+
+Un projet GCP **vierge** a des quotas par défaut très bas. Déployer ~136 functions gen2 d'un coup les
+dépasse : Cloud Run refuse la majorité des révisions (`Quota exceeded for total allowable CPU per project
+per region`), Cloud Functions plafonne le débit de créations (`Per project mutation requests per minute
+per region`, HTTP 429) et Cloud Build met les builds en file jusqu'à `EXPIRED`. Le workflow déploie donc
+en **deux étapes** : hosting + Firestore d'abord (léger, insensible aux quotas → le smoke
+`neurones-360.web.app` atterrit de façon fiable), puis les functions (tolérant, retry long).
+
+Pour faire passer **toutes** les functions, demander la hausse des quotas AVANT de relancer l'étape 2 :
+
+| Quota | Où | Cible indicative |
+|---|---|---|
+| Cloud Run — *Total CPU allocation, per project per region* (région des callables : `us-central1`) | Console → IAM & Admin → Quotas | ≥ 200 |
+| Cloud Run — même quota en `europe-west1` (triggers recompute/ingest) | idem | ≥ 50 |
+| Cloud Functions — *per project mutation requests per minute per region* | idem | valeur par défaut ok si le retry suffit |
+
+Les projets Blaze récents voient souvent ces quotas relevés automatiquement après le 1er usage : un
+**2ᵉ run** du workflow (les functions déjà créées sont ignorées) converge alors. Sinon, ouvrir la demande
+d'augmentation (approbation Google usuellement rapide) puis relancer.
+
 ## Rollback
 
 La bascule finale n'est que **variables GitHub + DNS/URL**. L'ancien projet `propulse-business-87f7a`

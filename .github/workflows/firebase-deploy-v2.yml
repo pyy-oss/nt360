@@ -94,27 +94,42 @@ jobs:
             fi
           done
 
-      # Déploiement scopé au nouveau projet via --config firebase.v2.json (site hosting neurones-360, base
-      # nt360). « storage » VOLONTAIREMENT hors cibles (mêmes raisons que la prod : le SA n'a pas forcément le
-      # droit sur le bucket par défaut → 403 qui ferait tout échouer). Cibles functions depuis la source unique
-      # deployed-functions.txt + triggers env-gated (RECOMPUTE_REGION est défini). Retry sur erreur transitoire.
-      - name: Deploy V2 (neurones-360, firebase.v2.json)
+      # ÉTAPE 1/2 — hosting + Firestore. Léger, sans build de conteneur → INSENSIBLE aux quotas Cloud Run /
+      # Cloud Build d'un projet NEUF. On la sépare des functions pour que le smoke (neurones-360.web.app)
+      # atterrisse de façon fiable même si le déploiement des functions bute sur les quotas (cf. plus bas).
+      # « storage » VOLONTAIREMENT hors cibles (le SA n'a pas forcément le droit sur le bucket par défaut → 403).
+      - name: Deploy V2 — hosting + Firestore (neurones-360)
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
+          npx firebase deploy \
+            --only "hosting,firestore:rules,firestore:indexes" \
+            --config firebase.v2.json \
+            --project "$NEW_PROJECT" --non-interactive
+          echo "Hosting + Firestore déployés. Smoke : https://neurones-360.web.app (base vide tant que les données ne sont pas importées — cf. docs/MIGRATION_PROJET.md Phase 3)."
+
+      # ÉTAPE 2/2 — functions. Cibles depuis la source unique deployed-functions.txt + triggers env-gated
+      # (RECOMPUTE_REGION est défini). PIÈGE PROJET NEUF : un projet vierge a des quotas Cloud Run (« total
+      # allowable CPU per project per region ») et Cloud Build (« Other API requests per minute ») TRÈS bas ;
+      # déployer ~136 functions d'un coup les dépasse → la majorité échoue en « Quota exceeded » / build
+      # EXPIRED. Chaque tentative n'en crée que quelques-unes de plus. Correctif durable : demander la HAUSSE
+      # des quotas (Cloud Run CPU/région + Cloud Functions mutations) puis relancer — cf. scripts/migrate/README.md.
+      # Backoff long (les quotas se libèrent à la minute). L'étape 1 ayant déjà réussi, un échec ici ne masque
+      # pas le hosting.
+      - name: Deploy V2 — functions (neurones-360, tolérant quotas projet neuf)
         run: |
           export GOOGLE_APPLICATION_CREDENTIALS="$HOME/sa.json"
           FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
           if [ -z "$FN_TARGETS" ]; then echo "::error::liste de fonctions vide"; exit 1; fi
-          # RECOMPUTE_REGION est fourni → déployer aussi les triggers env-gated (absents de deployed-functions.txt).
           FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest,functions:onMntApprovalDecided"
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
+              --only "$FN_TARGETS" \
               --config firebase.v2.json \
               --project "$NEW_PROJECT" --non-interactive; then
-              echo "Déploiement V2 OK (tentative $attempt)"; break
+              echo "Functions V2 OK (tentative $attempt)"; break
             fi
-            if [ "$attempt" -ge "$max" ]; then echo "::error::firebase deploy V2 a échoué après $max tentatives"; exit 1; fi
-            wait=$((attempt * 30)); echo "::warning::Déploiement V2 échoué (tentative $attempt/$max) — retry dans ${wait}s"
+            if [ "$attempt" -ge "$max" ]; then echo "::error::functions V2 échec après $max tentatives — probable quota projet neuf (Cloud Run CPU/région, Cloud Build). Demander la hausse des quotas puis relancer, cf. scripts/migrate/README.md."; exit 1; fi
+            wait=$((attempt * 60)); echo "::warning::functions V2 échec (tentative $attempt/$max) — quotas ? retry dans ${wait}s"
             sleep "$wait"; attempt=$((attempt + 1))
           done
-          echo "neurones-360 déployé à blanc. Smoke : https://neurones-360.web.app (base vide tant que les données ne sont pas importées — cf. docs/MIGRATION_PROJET.md Phase 3)."
