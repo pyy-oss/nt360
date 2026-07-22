@@ -76,7 +76,9 @@ export const Pipeline: FC<Props> = ({ period }) => {
         <Kpi label="Actif (brut)" value={fmt(data.tot?.brut)} sub={`${data.tot?.count ?? 0} opp.`} />
         <Kpi label="Pondéré projeté" value={fmt(data.tot?.weighted)} tone="gold" sub={`${projLabel} — ${data.tot?.countConf ?? 0} opp.`} />
         <Kpi label="Suspendu" value={fmt(data.susp?.brut)} sub={`${data.susp?.count ?? 0} opp.`} tone="clay" />
-        <Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`en valeur · gagné ${data.wonCount}/${(data.wonCount || 0) + (data.lostCount || 0)} en nombre`} />
+        {/* PROJETÉE (valeur) = Cmd / (Cmd + pondéré + perdu) — ce N'EST PAS un win rate (le pipeline est
+            escompté au dénominateur) → à ne pas comparer à la bande ESN 15-25 %. Le vrai win rate = gagné/(gagné+perdu) en nombre (sub). */}
+        <Kpi label="Conversion (projetée)" value={pct(ov?.ratios?.tauxConversionVente)} sub={`projeté en valeur · win rate ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)} en nb`} />
       </div>
       {tiers.length > 0 && (
         <Card title="Pondéré projeté — décomposition par niveau (on ne mélange pas)">
@@ -143,7 +145,9 @@ export const Pipeline: FC<Props> = ({ period }) => {
       {data.closing && (
         <>
           <div className={grid4}>
-            <Kpi label="Couverture reste-à-faire" value={coverageLabel} tone={coverage == null ? (hasObj ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré exercice / (objectif − réalisé CAS)" />
+            {/* Objectif/réalisé/couverture sont ancrés sur l'EXERCICE COURANT (att), pas sur la période du
+                sélecteur : quand elles diffèrent, on le dit (sinon le DC compare un pondéré de période à un objectif d'exercice). */}
+            <Kpi label="Couverture reste-à-faire" value={coverageLabel} tone={coverage == null ? (hasObj ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub={String(period) === String(cfg?.currentFy) ? "pondéré exercice / (objectif − réalisé CAS)" : `objectif & couverture : exercice ${cfg?.currentFy} (≠ période ${period})`} />
             <Kpi label="En retard de closing" value={fmt(data.closing.staleBrut)} tone="clay" sub={`${data.closing.staleCount ?? 0} opp.${data.closing.avgOverdueDays ? ` · ~${data.closing.avgOverdueDays} j de retard moyen` : " · D Prev dépassée"}`} />
             <Kpi label="À clôturer ce mois" value={fmt(moisPond)} tone="gold" sub={`${moisCount} opp. (pondéré)`} />
             <Kpi label="À clôturer ce trimestre" value={fmt(trimCumPond)} sub={`${trimCumCount} opp. · ce mois inclus`} />
@@ -775,6 +779,10 @@ export const OppList: FC<Props> = () => {
         </Modal>
       )}
       {view === "analyses" && (<>
+      {/* Les motifs de perte et taux de gain ci-dessous sont recalculés côté client sur l'abonnement PLAFONNÉ
+          (DEFAULT_SUB_CAP) : au-delà, ils portent sur un échantillon des opps les plus récentes → à signaler
+          (un « montant perdu par motif » sous-estimé et un « taux de gain » non représentatif induiraient en erreur). */}
+      <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
       {actions.length > 0 && (
         <Card title={`Prochaines actions commerciales · ${actions.length}`}>
           <Table columns={[
@@ -971,8 +979,9 @@ export const CommercialCockpit: FC<Props> = ({ period }) => {
       <div className={grid5}>
         <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Pondéré projeté" value={fmt(pipe)} tone="gold" sub={`${data.tot?.countConf ?? 0} opp. · voir Pipeline`} /></button>
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="Pipeline brut (non pondéré)" value={fmt(brutPhases)} tone="steel" sub="toutes phases 1→5 · voir la liste" /></button>
-        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion vente" value={pct(ov?.ratios?.tauxConversionVente)} sub={`en valeur · gagné ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)} en nombre`} /></button>
-        <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub="pondéré / (objectif − réalisé)" />
+        <button onClick={() => jump("pipeline")} className="text-left w-full"><Kpi label="Conversion (projetée)" value={pct(ov?.ratios?.tauxConversionVente)} sub={`projeté en valeur · win rate ${data.wonCount ?? 0}/${(data.wonCount || 0) + (data.lostCount || 0)} en nb`} /></button>
+        {/* Objectif/réalisé/couverture = EXERCICE COURANT (att), pas la période du sélecteur — signalé si elles diffèrent. */}
+        <Kpi label="Couverture reste-à-faire" value={coverage != null ? `${coverage.toFixed(2)}×` : objectif > 0 ? "atteint" : "—"} tone={coverage == null ? (objectif > 0 ? "emerald" : "steel") : coverage >= 1 ? "emerald" : "clay"} sub={String(period) === String(cfg?.currentFy) ? "pondéré / (objectif − réalisé)" : `objectif & couverture : exercice ${cfg?.currentFy} (≠ période ${period})`} />
         <button onClick={() => jump("opplist")} className="text-left w-full"><Kpi label="En retard de closing" value={fmt(data.closing?.staleBrut)} tone="clay" sub={`${data.closing?.staleCount ?? 0} opp. · à requalifier`} /></button>
       </div>
       {/* Signal COMPACT (le cockpit ne duplique plus la carte dormante pleine : son détail — 4 KPI + Tip —
