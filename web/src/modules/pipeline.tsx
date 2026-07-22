@@ -5,7 +5,7 @@ import { useProjectionWeight } from "../lib/useProjectionWeight";
 import { p01 } from "../lib/projection";
 import { useCan, useCanImport, useClaims } from "../lib/rbac";
 import { T, fmt, pct } from "../design/tokens";
-import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, Field, FormSection, useToast, cx, colText, colNum, det, money } from "../design/components";
+import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Modal, Field, FormSection, Eyebrow, useToast, cx, colText, colNum, det, money } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { Combo } from "../design/combo";
 import { AreaTrend, GroupedBars } from "../design/charts";
@@ -15,6 +15,7 @@ import { Props, grid4, grid5, cols2, objToArr, monthsAsc, STAGE_SHORT, HBars, bu
 import { useFilters } from "../lib/filters";
 import { useClientKey } from "../lib/clientName";
 import { winLossBySegment } from "../lib/winLoss";
+import { pipeExpectedMargin } from "../lib/pipeMargin";
 import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { isDormantClosing, fpKey } from "../lib/ids"; // miroir client de l'exclusion dormante + clé FP canonique (parité recompute)
@@ -627,6 +628,20 @@ export const OppList: FC<Props> = () => {
   // LOSS-only ci-dessus (helper PUR testé, même assiette `rows`).
   const winLossBySource = useMemo(() => winLossBySegment(rows, (o) => (o.leadSource || "").trim() || "—"), [rows]);
   const winLossByBu = useMemo(() => winLossBySegment(rows, (o) => o.bu || "AUTRE"), [rows]);
+  // MARGE ATTENDUE du pipe (Lot B, risque de marge DC/DG) : Σ pondéré × mbPrev % sur l'assiette pipeline
+  // (mêmes opps que le pondéré, `pipelineEligible`). Helper PUR testé. mbPrev = prévision NON confidentielle.
+  const pipeMargin = useMemo(() => pipeExpectedMargin(rows.filter(pipelineEligible).map((o) => ({ weighted: pw(o), mbPrev: o.mbPrev, bu: o.bu }))), [rows, pipelineEligible, pw]);
+  // CONCENTRATION du pipe par CLIENT (Lot B, risque de portefeuille) : pondéré groupé par client CANONIQUE
+  // (clientKey, anti-double-compte), + part du top 5. Même assiette pipeline que le pondéré. Répond « la
+  // structure du business » : un pipe très concentré sur quelques clients est un risque que le total masque.
+  const pipeByClient = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.filter(pipelineEligible).forEach((o) => { const k = clientKey(o.client) || "—"; m.set(k, (m.get(k) || 0) + pw(o)); });
+    const arr = [...m.entries()].map(([client, weighted]) => ({ name: client, v: Math.round(weighted) })).sort((a, b) => b.v - a.v);
+    const total = arr.reduce((s, x) => s + x.v, 0);
+    const top5 = arr.slice(0, 5).reduce((s, x) => s + x.v, 0);
+    return { arr, total, count: arr.length, concentration: total > 0 ? top5 / total : 0 };
+  }, [rows, pipelineEligible, pw, clientKey]);
   // Comptages par statut en UNE seule passe (au lieu de 5 `rows.filter` complets rejoués à chaque render).
   const segCounts = useMemo(() => {
     const c = { active: 0, won: 0, lost: 0, susp: 0, cxl: 0 };
@@ -840,6 +855,37 @@ export const OppList: FC<Props> = () => {
             colNum("Montant gagné", (r) => money(r.wonAmount), (r) => r.wonAmount),
           ]} rows={winLossByBu} colsKey="pipeline-winloss-bu" />
           <Tip>Analyse win/loss par <b>Business Unit</b> : sur les opportunités <b>clôturées</b>, part gagnée par BU. Situe les BU les plus (et les moins) performantes en conversion. <b>Taux (valeur)</b> = part gagnée <b>en montant</b> (gagne-t-on les grosses affaires de la BU ?).</Tip>
+        </Card>
+      )}
+      {/* MARGE ATTENDUE du pipe (Lot B) : le pondéré dit le CA escompté ; ceci dit la MARGE escomptée. */}
+      {pipeMargin.weighted > 0 && (
+        <Card title="Marge attendue du pipe (pondérée)">
+          <div className={grid4}>
+            <Kpi label="Marge attendue" value={fmt(pipeMargin.margin)} tone="emerald" sub="Σ pondéré × MB prév. %" />
+            <Kpi label="Taux de marge moyen" value={pct(pipeMargin.marginRate)} tone={pipeMargin.marginRate >= 0.25 ? "emerald" : pipeMargin.marginRate >= 0.15 ? "gold" : "clay"} sub="pondéré par le poids des opps" />
+            <Kpi label="Base pondérée" value={fmt(pipeMargin.weighted)} sub="assiette pipeline" />
+          </div>
+          {pipeMargin.byBu.length > 0 && (
+            <div className="mt-3">
+              <Eyebrow>Marge attendue par domaine (BU)</Eyebrow>
+              <HBars rows={pipeMargin.byBu.map((b) => ({ name: b.bu, v: b.margin }))} colorFn={() => T.emerald} />
+            </div>
+          )}
+          <Tip>Marge <b>attendue</b> du pipe = Σ (pondéré × <b>MB prévisionnel</b> de l'opp). Répond au risque de marge : un gros pipe à faible taux vaut moins qu'un pipe plus petit mieux margé. Une opp <b>sans MB prév.</b> compte pour 0 % (elle tire le taux vers le bas — signal de qualification). Marge <b>prévisionnelle</b> (non confidentielle), distincte de la marge de livraison (Rentabilité).</Tip>
+        </Card>
+      )}
+      {/* CONCENTRATION du pipe par CLIENT (Lot B) : risque de portefeuille — dépend-on de quelques clients ? */}
+      {pipeByClient.count > 0 && (
+        <Card title="Concentration du pipe (client)">
+          <div className={grid4}>
+            <Kpi label="Top 5 clients" value={pct(pipeByClient.concentration)} tone={pipeByClient.concentration >= 0.6 ? "clay" : pipeByClient.concentration >= 0.4 ? "gold" : "emerald"} sub="part du pondéré" />
+            <Kpi label="Clients au pipe" value={pipeByClient.count.toLocaleString("fr-FR")} sub={`${fmt(pipeByClient.total)} pondéré`} />
+          </div>
+          <div className="mt-3">
+            <Eyebrow>Top clients par pondéré</Eyebrow>
+            <HBars rows={pipeByClient.arr.slice(0, 10)} colorFn={() => T.gold} />
+          </div>
+          <Tip>Concentration du <b>pipeline pondéré</b> par client (clé canonique). La part du <b>top 5</b> mesure le risque de portefeuille : un pipe très concentré est fragile (perte d'un client = trou). Assiette identique au pondéré du cockpit.</Tip>
         </Card>
       )}
       <Card title={`Certitudes (IdC ≥ 90 %) · ${certitudes.length} opp. · ${fmt(certTotal)} pondéré`}>
