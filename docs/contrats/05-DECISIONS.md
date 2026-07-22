@@ -3,6 +3,28 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-075 — Base client de référence PERSISTANTE (union additive de la normalisation) + taux de couverture
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« B4 : on crée une base de référence basée sur la normalisation client en Phase 1 ; ensuite Odoo envoie chaque nouveau client créé »)
+
+### Contexte
+ADR-074 avait BLOQUÉ le taux de couverture de la base client faute de dénominateur (aucune collection maître de clients ; l'univers était dérivé des agrégats). Décision de le débloquer : la **normalisation client existante** (`domain/clientName.canonicalKey` + `config/clientAliases`) fournit déjà l'identité canonique ; il suffit de la **matérialiser en base de référence persistante**, qu'Odoo alimentera ensuite.
+
+### Décisions
+- **Base = `config/clientsRef` (overlay persistant, additif).** Au recompute, le set des clients CANONIQUES vus dans les agrégats (commandes/factures/opps — noms déjà canonisés par `normClient`) est **unionné** avec l'existant et réécrit. **Jamais de retrait** : un client churné reste dans la base → dénominateur STABLE (sinon le taux ne mesurerait que les clients encore actifs, ce qui n'a pas de sens). Overlay comme `clientAliases`/`cancelOrders` (survit aux ré-imports). **Odoo (Phase 2)** écrira dans le même doc les nouveaux clients (y compris sans activité).
+- **Taux de couverture — `domain/clientCoverage` (PUR, testé).** `couverture = clients avec commande (CAS>0) / base`. Décompose `actifs` (au carnet), `prospects` (vus sans commande), `inactifs` (dans la base, absents des agrégats courants = churn / Odoo sans activité). Écrit sur `summaries/clients_all` UNIQUEMENT (métrique globale, hors période), gaté « clients ».
+- **Surface.** Bloc « Couverture base client » dans la Base Clients (`operations.tsx`), lu de `clients_all` même quand une période est sélectionnée (métrique globale). Libellé honnête sur la provenance de la base (normalisation ; Odoo ensuite).
+
+### Conséquences
+- Le taux de couverture est disponible IMMÉDIATEMENT sur la base déjà connue, et s'étendra sans changement de code quand Odoo poussera les clients (le dénominateur grandit, les nouveaux clients sans activité tombent en « inactifs » jusqu'à leur 1ʳᵉ commande). Aucune fonction déployée nouvelle (recompute + lib pure + front). Un seul point d'attention : `config/clientsRef` grossit de façon monotone (borné par le nombre de clients — quelques milliers max, largement sous la limite doc Firestore).
+
+### Ce qu'on saura dans six mois
+Si `inactifs` explose après le branchement Odoo → beaucoup de clients Odoo sans aucune affaire (base commerciale à travailler), ce que le périmètre « agrégats seuls » masquait totalement.
+
+---
+
 ## ADR-074 — Cockpit DC/DG : marge attendue du pipe + concentration client ; report motivé de la couverture base client et du win-rate concurrentiel
 
 - **Date :** 2026-07-22

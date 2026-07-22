@@ -111,7 +111,9 @@ export interface RentabiliteSummary {
   perspectives?: { commande: RentabPerspective; facture: RentabPerspective };
 }
 
-export interface EntitySummary { period?: string; rows?: EntityRow[] }
+// Taux de couverture de la base client (B4) — présent uniquement sur le doc clients_all (métrique globale).
+export type ClientCoverage = { base: number; actifs: number; prospects: number; inactifs: number; couverture: number };
+export interface EntitySummary { period?: string; rows?: EntityRow[]; couverture?: ClientCoverage }
 export type AmRow = {
   am: string; cas: number; casFy: number; backlog: number; facture: number;
   pipelinePondere: number; activeCount: number; won: number; lost: number;

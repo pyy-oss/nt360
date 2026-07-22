@@ -615,6 +615,10 @@ const STATUT_TONE: Record<string, "emerald" | "gold" | "steel"> = { Actif: "emer
 
 export function EntityView({ period, kind }: Props & { kind: "clients" | "domaines" }) {
   const { data, loading, error } = useDocData<EntitySummary>(`summaries/${kind}_${period}`);
+  // Taux de couverture de la base client (B4) : métrique GLOBALE, portée UNIQUEMENT par clients_all. Quand une
+  // période précise est sélectionnée, on lit clients_all en plus pour l'afficher (sinon `data.couverture` est absent).
+  const { data: allClients } = useDocData<EntitySummary>(kind === "clients" && period !== "all" ? "summaries/clients_all" : null);
+  const couv = kind === "clients" ? (data?.couverture || allClients?.couverture) : undefined;
   const canMargin = useCanSeeMargin();
   // Marge par entité isolée dans un doc *Margin_* (lecture réservée à « Rentabilité ») — lu seulement
   // si le rôle a l'accès marge ; sinon jamais demandé (confidentialité opposable par les Rules).
@@ -690,6 +694,19 @@ export function EntityView({ period, kind }: Props & { kind: "clients" | "domain
             <Kpi label="Concentration top 5" value={pct(concentration)} tone={concentration >= 0.6 ? "clay" : "steel"} sub="part du CAS des 5 premiers" />
             <Kpi label="Taux de facturation" value={tot.cas > 0 ? pct(Math.min(tot.facture / tot.cas, 1)) : "—"} sub="facturé / CAS du portefeuille" />
           </div>
+          {/* COUVERTURE DE LA BASE CLIENT (B4) : base = union PERSISTANTE des clients canoniques connus
+              (normalisation ; Odoo l'alimentera). Actifs = clients avec commande. Métrique GLOBALE (≠ période). */}
+          {couv && (
+            <>
+              <div className={grid4}>
+                <Kpi label="Couverture base client" value={pct(couv.couverture)} tone={couv.couverture >= 0.5 ? "emerald" : couv.couverture >= 0.3 ? "gold" : "clay"} sub={`${couv.actifs.toLocaleString("fr-FR")} actifs / ${couv.base.toLocaleString("fr-FR")} base`} />
+                <Kpi label="Prospects" value={couv.prospects.toLocaleString("fr-FR")} sub="connus, sans commande" />
+                <Kpi label="Inactifs / churn" value={couv.inactifs.toLocaleString("fr-FR")} tone={couv.inactifs > 0 ? "clay" : "steel"} sub="dans la base, sans activité courante" />
+                <Kpi label="Base de référence" value={couv.base.toLocaleString("fr-FR")} sub="clients canoniques connus" />
+              </div>
+              <Tip>La <b>base client de référence</b> est l'union <b>persistante</b> des clients canoniques connus (issus de la <b>normalisation</b> ; Odoo enverra ensuite chaque nouveau client). <b>Couverture</b> = clients avec commande (CAS&gt;0) / base — un client <b>churné</b> reste au dénominateur (mesure honnête). Métrique <b>globale</b>, indépendante de la période sélectionnée.</Tip>
+            </>
+          )}
         </>
       )}
       <Card title={kind === "clients" ? "CAS par client (top 10)" : "CAS par domaine"}>

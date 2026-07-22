@@ -2493,3 +2493,25 @@ saisir le concurrent sur les gagnées (changement de modèle). Les deux sont des
 plutôt que d'inventer une base client ou un win-rate concurrentiel faux.
 
 **Vérifs.** web 313/313 (+4 pipeMargin), tsc/eslint 0, bundle 121,3 ≤ 122 Ko. Aucun backend touché.
+
+---
+
+## 2026-07-22 — Base client de référence persistante + taux de couverture (B4, ADR-075)
+
+**Fait.** Déblocage de B4 (couverture base client), reporté en ADR-074 faute de dénominateur. Décision Direction :
+matérialiser la NORMALISATION existante (canonicalKey + config/clientAliases) en base de référence persistante,
+qu'Odoo alimentera ensuite.
+- `config/clientsRef` : overlay ADDITIF (union au recompute des clients canoniques vus ; jamais de retrait →
+  dénominateur stable, un churné y reste). Odoo écrira dans le même doc en Phase 2.
+- `domain/clientCoverage` (PUR, testé, 4 cas) : couverture = clients avec commande / base ; ventile actifs /
+  prospects (vus sans commande) / inactifs (base sans activité courante). Écrit sur clients_all (global), gaté « clients ».
+- Front : bloc « Couverture base client » dans la Base Clients (operations.tsx), lu de clients_all même sous période
+  sélectionnée (métrique globale). Libellé honnête sur la provenance.
+
+**Appris.** Le blocage d'ADR-074 n'était pas « pas de données » mais « pas de dénominateur PERSISTANT ». La
+normalisation fournissait déjà l'identité ; il manquait de la FIGER en base additive. Une fois la base persistante,
+la couverture se calcule aujourd'hui et s'étend sans code quand Odoo poussera les clients (le dénominateur grandit,
+les nouveaux sans activité tombent en « inactifs »).
+
+**Vérifs.** Functions 1376/1376 (+4 clientCoverage ; no-undef 167, deploy-targets 200 — aucune fonction nouvelle,
+index Firestore valides), web 313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.

@@ -6,6 +6,7 @@ const { overview } = require("../domain/chaine");
 const { normalizeTiers } = require("../domain/projection");
 const { billingTrend } = require("../domain/billing");
 const { backlogFy } = require("../domain/backlog");
+const { clientCoverage } = require("../domain/clientCoverage");
 const { pipeline, dormantSummary, scopePrivateSummary } = require("../domain/pipeline");
 const { suppliers } = require("../domain/fournisseurs");
 const { facturation, rentabilite, byEntity } = require("../domain/reporting");
@@ -714,6 +715,22 @@ async function recomputeCore(db, only) {
 
   // Périodes disponibles = "Tout" + chaque année de commande (yearPo), la plus récente d'abord.
   const years = [...new Set(orders.map((o) => plausibleYear(o.yearPo)).filter((y) => y > 0))].sort((a, b) => b - a).map(String);
+  // BASE CLIENT DE RÉFÉRENCE + TAUX DE COUVERTURE (B4, ADR-075). La base = union PERSISTANTE des clients
+  // CANONIQUES connus (config/clientsRef) — ADDITIVE (jamais de retrait) : un client churné y reste (dénominateur
+  // stable), et Odoo pourra y ajouter des clients sans activité (Phase 2). Les noms sont DÉJÀ canonisés en amont
+  // (normClient appliqué aux collections). Couverture = clients avec commande (CAS>0) / base. Portée sur clients_all
+  // (métrique globale, indépendante de la période) → n'existe QUE sur le doc « all ». Gaté « clients » comme le reste.
+  let clientCouverture = null;
+  if (want("clients")) {
+    const seen = new Set(), active = new Set();
+    for (const o of orders) { if (o.client) { seen.add(o.client); if ((o.cas || 0) > 0) active.add(o.client); } }
+    for (const i of invoices) { if (i.client) seen.add(i.client); }
+    for (const o of opps) { if (o.client) seen.add(o.client); }
+    const refPrev = ((await db.doc("config/clientsRef").get()).data() || {}).keys || [];
+    const refSet = new Set([...refPrev, ...seen]); // union additive : la base ne perd jamais un client
+    w.push({ path: "config/clientsRef", data: { keys: [...refSet].sort(), count: refSet.size, ...stamp } });
+    clientCouverture = clientCoverage([...refSet], [...active], [...seen]);
+  }
   const periods = ["all", ...years];
   for (const period of periods) {
     const inv = filterInvoices(invoices, period); // factures DATÉES dans la période = CAF figé sur l'exercice
@@ -752,7 +769,7 @@ async function recomputeCore(db, only) {
     // l'accès « Rentabilité » (confidentialité côté serveur) ; le doc de base ne porte que CAS/facturé/backlog.
     if (want("clients")) {
       const cl = byEntity(ord, inv, (x) => x.client, oppP, tiers); // oppP → forecast/projeté par client (Bilan CODIR)
-      w.push({ path: `summaries/clients_${period}`, data: { period, rows: cl.map(({ mb, pmb, ...r }) => r), ...stamp } });
+      w.push({ path: `summaries/clients_${period}`, data: { period, rows: cl.map(({ mb, pmb, ...r }) => r), ...(period === "all" && clientCouverture ? { couverture: clientCouverture } : {}), ...stamp } });
       w.push({ path: `summaries/clientsMargin_${period}`, data: { period, rows: cl.map(({ key, mb, pmb }) => ({ key, mb, pmb })), ...stamp } });
     }
     if (want("domaines")) {
