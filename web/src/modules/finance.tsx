@@ -241,8 +241,11 @@ export const InvoiceList: FC<Props> = () => {
   // + alerts, seuil `surfacturationPct` éditable en Admin) et corrigée au Centre de correction (recommandation
   // chiffrée « facture en trop / relever le CAS », domain/remediation). On NE la recalcule PAS ici — on lit le
   // compte de l'agrégat qualité et on le SURFACE sur l'écran Factures (elle n'y était pas visible), avec un
-  // rebond vers la correction. RBAC : un rôle sans le module Qualité lit `null` → la tuile ne s'affiche pas.
-  const { data: dq } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  // rebond vers la correction. RBAC : `summaries/dataQuality` est gaté MODULE `overview` (firestore.rules) —
+  // on PRÉ-GATE le read (comme les autres reads conditionnels du fichier) pour ne pas déclencher un onSnapshot
+  // refusé à chaque affichage pour un rôle facturation sans overview ; sans droit → pas d'abonnement → tuile masquée.
+  const canDq = useCan("overview") !== "none";
+  const { data: dq } = useDocData<DataQualitySummary>(canDq ? "summaries/dataQuality" : null);
   const surfac = useMemo(() => (dq?.issues || []).find((x) => x.type === "surfacturation"), [dq]);
   const surfacCount = surfac?.count || 0;
   const [f, setF] = useState<"all" | "linked" | "orphan">(intent?.segment === "orphan" ? "orphan" : "all");

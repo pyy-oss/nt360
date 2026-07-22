@@ -2540,7 +2540,7 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
 exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
   const { scoreOpportunity, isOpen } = require("./domain/scoring");
-  const { isAgedLost } = require("./domain/oppLifecycle");
+  const { isAgedLost, isWonOpp, isLostOpp } = require("./domain/oppLifecycle");
   const { calibrate } = require("./domain/scoreCalib");
   const { dedupOppsByFp } = require("./domain/oppPipeline");
   // `source`/`ageDays` chargés pour EXCLURE la MÊME population que pipeline/board/vélocité (parité) :
@@ -2551,14 +2551,14 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
     .limit(MAX_SCAN + 1).get(); // scan borné (R1)
   const all = sliceCapped(snap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   // Calibration EMPIRIQUE (R6, dé-biais audit) : base + poids de catégorie dérivés du taux de gain HISTORIQUE.
-  // Population fermée DÉDUPLIQUÉE par FP (une 'saisie' ré-importée ne compte pas deux fois) et incluant les
-  // AUTO-PERDUES PAR ÂGE comme des PERTES — sinon le taux de gain de base est surévalué (ces affaires restent
-  // stockées en étape 1-5, donc absentes du dénominateur). Catégorie EFFECTIVE (posée sinon dérivée de l'étape)
-  // pour aligner les paliers de calibration sur le forecast (au lieu du champ brut, souvent vide).
+  // Population fermée DÉDUPLIQUÉE par FP, définition UNIQUE du win rate (oppLifecycle) : gagné = étape 6, perdu =
+  // étape 7 OU 9 (annulé) — l'ancienne version OMETTAIT l'étape 9 (audit session). Les AUTO-PERDUES PAR ÂGE sont
+  // EXCLUES (régime unifié ADR-077 : les périmées ne comptent nulle part dans le win rate — parité avec
+  // pipeline/am360/vélocité, tous sur population sans aged). Catégorie EFFECTIVE pour aligner les paliers sur le forecast.
   const { effectiveCategory } = require("./domain/forecast");
   const closed = dedupOppsByFp(all)
-    .filter((o) => Number(o.stage) === 6 || Number(o.stage) === 7 || isAgedLost(o))
-    .map((o) => ({ won: Number(o.stage) === 6, forecastCategory: effectiveCategory(o) }));
+    .filter((o) => !isAgedLost(o) && (isWonOpp(o) || isLostOpp(o)))
+    .map((o) => ({ won: isWonOpp(o), forecastCategory: effectiveCategory(o) }));
   const calib = calibrate(closed);
   // Population alignée sur pipeline/vélocité : NON `stale`, NON périmée par âge, DÉDUPLIQUÉE par FP (parité
   // aggregate.js). On DÉDUPLIQUE sur l'ensemble stale/aged-filtré (toutes étapes) AVANT de restreindre aux
@@ -2591,7 +2591,7 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   const { normalizeTiers } = require("./domain/projection");
   const { fpKey, plausibleYear } = require("./lib/ids");
   const { dedupOppsByFp } = require("./domain/oppPipeline");
-  const { isDormantClosing } = require("./domain/oppLifecycle");
+  const { isDormantClosing, isAgedLost } = require("./domain/oppLifecycle");
   const [projDoc, fiscalDoc] = await Promise.all([db.doc("config/projection").get(), db.doc("config/fiscal").get()]);
   const tiers = normalizeTiers(projDoc.data() || undefined);
   const excludeDormant = (projDoc.data() || {}).excludeDormant !== false;
@@ -2599,7 +2599,11 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
   // + exclusion des opps DÉJÀ au carnet ; `closingDate` : exclusion des DORMANTES (closing d'un exercice
   // révolu) — MÊME assiette que le « Pondéré projeté » du cockpit (invariant fort « même métrique = même nombre »).
   const snap = await db.collection("opportunities").select("stage", "amount", "probability", "ageDays", "source", "stale", "fp", "updatedAt", "closingDate", "visibleTo").limit(MAX_SCAN + 1).get();
-  let opps = sliceCapped(snap.docs).docs.map((d) => d.data()).filter((o) => o.stale !== true);
+  // Régime unifié du win rate (ADR-077) : on EXCLUT les auto-périmées par âge de la population, comme
+  // pipeline/am360/segments (dont la population est déjà filtrée `!isAgedLost` en amont). Sans ce filtre, la
+  // vélocité était le SEUL calcul à compter les périmées en perte → deux « Taux de gain » divergents sur le
+  // même écran (audit session, HAUTE). Les annulés (étape 9) restent comptés en perte partout (via isLostOpp).
+  let opps = sliceCapped(snap.docs).docs.map((d) => d.data()).filter((o) => o.stale !== true && !isAgedLost(o));
   if ((await recordAccessOwd("opportunities")) === "private" && !(await isRecordAdmin(req))) {
     opps = opps.filter((o) => Array.isArray(o.visibleTo) && o.visibleTo.includes(req.auth.uid));
   }

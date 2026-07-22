@@ -862,7 +862,7 @@ export const OppList: FC<Props> = () => {
         <Card title="Marge attendue du pipe (pondérée)">
           <div className={grid4}>
             <Kpi label="Marge attendue" value={fmt(pipeMargin.margin)} tone="emerald" sub="Σ pondéré × MB prév. %" />
-            <Kpi label="Taux de marge moyen" value={pct(pipeMargin.marginRate)} tone={pipeMargin.marginRate >= 0.25 ? "emerald" : pipeMargin.marginRate >= 0.15 ? "gold" : "clay"} sub="pondéré par le poids des opps" />
+            <Kpi label="Taux de marge moyen" value={pct(pipeMargin.marginRate)} tone={pipeMargin.marginRate >= 0.25 ? "emerald" : pipeMargin.marginRate >= 0.15 ? "gold" : "clay"} sub="pondéré ; opp sans MB prév. comptée à 0 %" />
             <Kpi label="Base pondérée" value={fmt(pipeMargin.weighted)} sub="assiette pipeline" />
           </div>
           {pipeMargin.byBu.length > 0 && (

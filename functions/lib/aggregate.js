@@ -722,13 +722,23 @@ async function recomputeCore(db, only) {
   // (métrique globale, indépendante de la période) → n'existe QUE sur le doc « all ». Gaté « clients » comme le reste.
   let clientCouverture = null;
   if (want("clients")) {
-    const seen = new Set(), active = new Set();
-    for (const o of orders) { if (o.client) { seen.add(o.client); if ((o.cas || 0) > 0) active.add(o.client); } }
+    // `active` = clients dont le CAS AGRÉGÉ (Σ par client) est > 0 — MÊME assiette que le KPI « Clients actifs »
+    // (byEntity agrège aussi par client) ; un décompte par-commande divergerait avec les avoirs (Σcas=0). Audit session.
+    const seen = new Set(), casByClient = new Map();
+    for (const o of orders) { if (o.client) { seen.add(o.client); casByClient.set(o.client, (casByClient.get(o.client) || 0) + (Number(o.cas) || 0)); } }
     for (const i of invoices) { if (i.client) seen.add(i.client); }
     for (const o of opps) { if (o.client) seen.add(o.client); }
+    const active = new Set([...casByClient].filter(([, c]) => c > 0).map(([k]) => k));
     const refPrev = ((await db.doc("config/clientsRef").get()).data() || {}).keys || [];
-    const refSet = new Set([...refPrev, ...seen]); // union additive : la base ne perd jamais un client
-    w.push({ path: "config/clientsRef", data: { keys: [...refSet].sort(), count: refSet.size, ...stamp } });
+    // Surveillance de taille : `config/clientsRef` est un champ tableau borné par la limite 1 MiB d'un doc
+    // Firestore (~15-25k clients). On alerte AVANT rupture (le recompute entier échouerait au commit sinon).
+    if (refPrev.length > 15000) require("firebase-functions/v2").logger.warn("config/clientsRef volumineux — approche la limite doc Firestore (1 MiB)", { size: refPrev.length });
+    const refSet = new Set([...refPrev, ...seen]); // base = existant ∪ vus (pour la couverture, en mémoire)
+    // ÉCRITURE via arrayUnion, JAMAIS un remplacement de tableau : le webhook `partner` (ADR-076) ajoute des
+    // clients hors du verrou recompute ; un `set` du tableau complet (snapshot pré-webhook) écraserait un client
+    // Odoo sans activité ajouté entre-temps → perte définitive (il n'est jamais dans `seen`). arrayUnion est
+    // commutatif et additif des DEUX côtés → plus de race lost-update (audit session, BLOQUANT).
+    if (seen.size) w.push({ path: "config/clientsRef", data: { keys: FieldValue.arrayUnion(...seen), ...stamp } });
     clientCouverture = clientCoverage([...refSet], [...active], [...seen]);
   }
   const periods = ["all", ...years];
