@@ -20,9 +20,10 @@ import {
   deleteRecords, callDedupe, setFpAlias, setDcAlias, reconClient, correctionQueue,
   setInvoiceFp, patchInvoice, patchOrder, patchOpportunity, patchBcLine, patchProjectSheet, createOrder, generateFromInvoices,
   setCancellation, fpDocId, importDcAliases, type DcMapImportResult,
-  aiSuggestCorrections,
+  aiSuggestCorrections, aiSuggestClientMerges, setClientAliases, type ClientMergeResult, type ClientMergeSuggestion,
   type DedupeResult, type ReconListItem, type ReconDossier, type ReconCluster, type CorrectionBucket, type CorrectionItem, type CorrectionRec, type RemediationPlan, type AiSuggestion,
 } from "../lib/writes";
+import { clientNames } from "../lib/clientNormWrites";
 
 // Un N° FP est GÉNÉRABLE (commande/opp) s'il est canonique (FP/AAAA/N) — sinon « N° FP inconnu » relève
 // d'abord d'une correction du N° FP. Aligné sur fpKey côté serveur (validation finale par le callable).
@@ -792,11 +793,81 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
         {buckets && buckets.length > 0 && <Tip>Chaque correction appelle le service gouverné par le <b>module de la donnée</b> (droits respectés) et relance le recalcul ; l'anomalie se résorbe après « Rafraîchir ». « <b>modifier</b> » / « <b>requalifier</b> » ouvrent la modale de correction ici même ; « <b>annuler</b> » sort l'enregistrement des chiffres (overlay rétablissable) ; « <b>ouvrir</b> » renvoie à l'écran source pré-filtré.</Tip>}
         {/* OUTILS DE RAPPROCHEMENT — intégrés au point unique (plus de cartes séparées sur la page). */}
         <ClientReconcileSection />
+        <ClientMergeAiSection />
         <FpReconcileSection />
         <DcReconcileSection />
         {isDirection && <DedupeSection />}
       </div>
     </Card>
+  );
+}
+
+// NORMALISATION CLIENTS ASSISTÉE IA (Lot 4) — SURFACE, dans le point unique de correction, les mêmes
+// fusions de graphies clients que l'atelier Référentiels → « Normalisation clients » : mêmes callables
+// (aiSuggestClientMerges juge « même entité », setClientAliases pose l'alias) et MÊME source unique
+// config/clientAliases. On ne recrée pas l'atelier (l'inventaire + la table éditable y vivent) : ici, juste
+// « proposer → cocher → appliquer » pour normaliser sur place les noms qui font diverger les dossiers
+// clients, avec renvoi vers l'atelier complet. Poser un alias reste réservé à la direction (setClientAliases).
+function ClientMergeAiSection() {
+  const canEdit = useCan("habilitations") === "write";
+  const { data: aliasCfg } = useDocData<{ pairs?: { from: string; to: string }[] }>(canEdit ? "config/clientAliases" : null);
+  const [ai, setAi] = useState<ClientMergeResult | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const { go } = useNav();
+  if (!canEdit) return null; // poser un alias = direction (comme la table de l'atelier)
+
+  const existing = aliasCfg?.pairs || [];
+  const covered = new Set(existing.map((r) => String(r.from || "").trim()).filter(Boolean));
+  // Propositions IA encore en attente (cible ≠ source, non déjà couverte par un alias posé).
+  const props = (ai?.suggestions || []).filter((s) => s.from && s.from !== s.to && !covered.has(s.from));
+
+  const run = async () => {
+    const inv = await clientNames();
+    // Inventaire des graphies (fréquence décroissante), borné au plafond serveur — troncature signalée.
+    const names = (inv.groups || []).flatMap((g) => g.variants).map((v) => ({ name: v.name, count: v.count }))
+      .sort((a, b) => b.count - a.count).slice(0, 400);
+    const r = await aiSuggestClientMerges(names);
+    setAi(r);
+    setSel((p) => new Set([...p, ...r.suggestions.filter((s) => s.confidence >= 0.9).map((s) => s.from)])); // ≥ 90 % pré-cochées
+  };
+  const toggle = (from: string) => setSel((p) => { const n = new Set(p); n.has(from) ? n.delete(from) : n.add(from); return n; });
+  const picked = props.filter((s) => sel.has(s.from));
+  const apply = async () => {
+    if (!picked.length) return;
+    // Fusion ADDITIVE dans la source unique : alias existants conservés (hors graphies re-posées) + cochés.
+    const merged = [...existing.filter((r) => !picked.some((p) => p.from === String(r.from || "").trim())), ...picked.map((p) => ({ from: p.from, to: p.to }))];
+    await setClientAliases(merged);
+    setSel(new Set());
+  };
+  const confTone = (c: number): "emerald" | "gold" | "clay" => (c >= 0.9 ? "emerald" : c >= 0.7 ? "gold" : "clay");
+
+  return (
+    <CorrSection title="Normalisation clients (IA)" hint={props.length ? `${props.length} proposée${props.length > 1 ? "s" : ""}` : undefined}>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Busy variant="gold" label={ai ? "Réanalyser (IA)" : "Proposer des fusions (IA)"} okMsg="Analyse IA prête" errMsg="Analyse IA indisponible" fn={run} />
+          {picked.length > 0 && (
+            <Busy variant="ghost" label={`Appliquer ${picked.length} fusion(s)`} okMsg="Fusions posées (recalcul lancé)" errMsg="Application refusée" fn={apply} />
+          )}
+          <button type="button" className="text-gold hover:underline text-[11px]" onClick={() => go("clientnorm")}>Atelier complet →</button>
+        </div>
+        {ai && props.length === 0 && <div className="text-[13px] text-muted">Aucune fusion en attente — l'IA n'a rien trouvé de plus (ou tout est déjà aliasé).</div>}
+        {props.length > 0 && (
+          <Table columns={[
+            colText("", (s: ClientMergeSuggestion) => (
+              <input type="checkbox" className="accent-gold" checked={sel.has(s.from)} onChange={() => toggle(s.from)} aria-label={`Sélectionner ${s.from}`} />
+            )),
+            colText("Graphie", (s: ClientMergeSuggestion) => s.from, (s: ClientMergeSuggestion) => s.from),
+            colText("→ Cible canonique", (s: ClientMergeSuggestion) => (
+              <span>{s.to} {!s.existingTarget && <span className="text-[10px] text-gold" title="Graphie corrigée par l'IA (absente de l'inventaire)">· corrigée</span>}</span>
+            ), (s: ClientMergeSuggestion) => s.to),
+            colNum("Confiance", (s: ClientMergeSuggestion) => <Badge tone={confTone(s.confidence)}>{Math.round(s.confidence * 100)} %</Badge>, (s: ClientMergeSuggestion) => s.confidence),
+            det(colText("Analyse", (s: ClientMergeSuggestion) => <span className="text-[12px] text-muted">{s.reason || "—"}</span>)),
+          ]} rows={props} />
+        )}
+        <Tip>L'IA juge quelles <b>graphies clients</b> désignent la <b>même entité</b> (abréviations, mot manquant, forme juridique) au-delà des quasi-doublons, sans rapprocher à tort (« ORANGE » ≠ « ORANGE BANK »). Les fusions ≥ 90 % sont pré-cochées ; cochez puis <b>appliquez</b> — rien n'est posé automatiquement. Un alias fusionne les graphies dans la <b>même source unique</b> que l'<b>atelier complet</b> (config/clientAliases) et relance le recalcul ; les <b>documents sources ne sont pas modifiés</b>. Normaliser les noms résorbe les dossiers clients qui divergent faute d'orthographe commune.{ai?.truncated ? " Analyse IA bornée aux graphies les plus fréquentes." : ""}</Tip>
+      </div>
+    </CorrSection>
   );
 }
 
