@@ -23,6 +23,9 @@ gcloud config set project "$PROJECT"
 
 # ------------------------------------------------------------------ 0. facturation + APIs
 echo "== Facturation Blaze =="
+# L'API Cloud Billing doit être active AVANT de lier la facturation ET pour que `firebase deploy` puisse
+# interroger le statut de facturation (sinon HTTP 403 « Cloud Billing API has not been used »).
+gcloud services enable cloudbilling.googleapis.com --project "$PROJECT" || true
 gcloud billing projects link "$PROJECT" --billing-account="$BILLING_ACCOUNT_ID" || true
 
 echo "== APIs (functions gen2 = run + eventarc + build + artifactregistry + pubsub) =="
