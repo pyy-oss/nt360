@@ -15,7 +15,7 @@ const { fpKey } = require("../lib/ids");
 function salesVelocity(opps, tiers, bookedFps) {
   const booked = bookedFps instanceof Set ? bookedFps : new Set();
   const notBooked = (o) => { const k = o.fp ? fpKey(o.fp) : ""; return !(k && booked.has(k)); };
-  let won = 0, lost = 0, wonAmt = 0, openCount = 0, openWeighted = 0, openAmt = 0;
+  let won = 0, lost = 0, wonAmt = 0, lostAmt = 0, openCount = 0, openWeighted = 0, openAmt = 0;
   for (const o of opps || []) {
     const st = Number(o.stage) || 0;
     const amt = Number(o.amount) || 0;
@@ -23,7 +23,7 @@ function salesVelocity(opps, tiers, bookedFps) {
     // oppLifecycle) — sinon annulés + périmées échappaient au dénominateur → taux optimiste. Les périmées
     // sortent aussi du pipeline OUVERT (isLostOpp les capte avant la branche « active »).
     if (isWonOpp(o)) { won++; wonAmt += amt; continue; }
-    if (isLostOpp(o)) { lost++; continue; }
+    if (isLostOpp(o)) { lost++; lostAmt += amt; continue; }
     if (st >= 1 && st <= 5) {
       if (!notBooked(o)) continue; // déjà au carnet → hors pipeline ouvert (parité cockpit, anti-double-compte)
       // Pondéré TIÉRÉ (projectionWeight) et NON le champ linéaire persisté `weighted` : source unique
@@ -33,9 +33,14 @@ function salesVelocity(opps, tiers, bookedFps) {
   }
   const closed = won + lost;
   const winRate = closed > 0 ? won / closed : 0;
+  // Taux de gain EN VALEUR (montant gagné / montant clôturé) : complète le taux EN NOMBRE. Un écart marqué
+  // révèle qu'on gagne les PETITES affaires et perd les GROSSES (ou l'inverse) — signal DC/DG que le taux
+  // en nombre masque. Même population clôturée (isWonOpp/isLostOpp), sinon les deux taux divergeraient.
+  const closedAmt = wonAmt + lostAmt;
+  const winRateValue = closedAmt > 0 ? wonAmt / closedAmt : 0;
   const avgDeal = won > 0 ? wonAmt / won : (openCount > 0 ? openAmt / openCount : 0);
   const velocityIndex = Math.round(openCount * winRate * avgDeal);
-  return { openCount, openWeighted: Math.round(openWeighted), winRate, avgDeal: Math.round(avgDeal), won, lost, velocityIndex };
+  return { openCount, openWeighted: Math.round(openWeighted), winRate, winRateValue, avgDeal: Math.round(avgDeal), won, lost, wonAmt: Math.round(wonAmt), lostAmt: Math.round(lostAmt), velocityIndex };
 }
 
 module.exports = { salesVelocity };
