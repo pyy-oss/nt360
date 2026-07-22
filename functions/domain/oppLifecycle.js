@@ -41,4 +41,17 @@ function isDormantClosing(o, currentFy) {
   return y > 0 && y < fy;
 }
 
-module.exports = { isAgedLost, isDormantClosing, AGE_LOST_DAYS, AGE_LOST_IDC };
+// TAUX DE TRANSFORMATION (win rate) — définition MÉTIER UNIQUE, partagée par tous les calculs de conversion
+// (pipeline.byAmConv/conv, am360.conv, velocity.winRate, front winLossBySegment). Un « gagné » = étape 6.
+// Un « perdu » = étape 7 (Perdu) OU étape 9 (Annulé — un deal annulé est un non-gagné) OU auto-périmé par
+// âge (isAgedLost : la source déclare « 9-LOST » une affaire > 366 j à IdC ≤ 90 %, mais sans re-stager l'opp
+// côté données → elle reste 1-5). Sans ces deux ajouts, le dénominateur du win rate omettait des pertes
+// réelles → taux structurellement OPTIMISTE, hors de la bande métier ESN (~15-25 %). Cf. audit commercial DC/DG.
+function isWonOpp(o) { return o && Number(o.stage) === 6; }
+function isLostOpp(o) {
+  if (!o) return false;
+  const s = Number(o.stage);
+  return s === 7 || s === 9 || isAgedLost(o);
+}
+
+module.exports = { isAgedLost, isDormantClosing, isWonOpp, isLostOpp, AGE_LOST_DAYS, AGE_LOST_IDC };

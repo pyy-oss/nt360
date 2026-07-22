@@ -195,7 +195,9 @@ export const Overview: FC<Props> = ({ period }) => {
         <Kpi label="Facturé (FY)" value={att ? fmt(att.factureN) : "—"} tone="emerald" delta={att?.croissanceFacture} sub={att ? "vs N-1 · global" : "atterrissage indispo."} />
         <Kpi label="Taux de facturation" value={pct(v.ratios?.tauxFacturation)} sub="Facturé / (Facturé + Backlog)" />
         <Kpi label="Taux d'encaissement" value={pct(v.ratios?.tauxEncaissement)} sub="Encaissé / Facturé (drapeau payé)" />
-        <Kpi label="Taux de conversion vente" value={pct(v.ratios?.tauxConversionVente)} sub="Commande / potentiel adressable pondéré" />
+        {/* PROJETÉE (valeur) = Cmd / (Cmd + pipeline pondéré + perdu) — pipeline escompté au dénominateur,
+            donc PAS un win rate ; ne pas comparer à la bande ESN 15-25 % (le vrai win rate est au Cockpit commercial). */}
+        <Kpi label="Conversion (projetée)" value={pct(v.ratios?.tauxConversionVente)} sub="Cmd / (Cmd + pondéré + perdu) — projeté, ≠ win rate" />
       </div>
 
 

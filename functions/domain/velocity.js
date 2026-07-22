@@ -6,7 +6,7 @@
 // proxy (la durée de cycle réelle nécessiterait des dates de création fiables, absentes des sources).
 
 const { projectionWeight } = require("./projection");
-const { isAgedLost } = require("./oppLifecycle");
+const { isWonOpp, isLostOpp } = require("./oppLifecycle");
 const { fpKey } = require("../lib/ids");
 
 // `bookedFps` (Set de fpKey déjà au carnet P&L) : une opp active dont le FP porte DÉJÀ une commande est
@@ -19,12 +19,12 @@ function salesVelocity(opps, tiers, bookedFps) {
   for (const o of opps || []) {
     const st = Number(o.stage) || 0;
     const amt = Number(o.amount) || 0;
-    if (st === 6) { won++; wonAmt += amt; }
-    else if (st === 7) { lost++; }
-    else if (st >= 1 && st <= 5) {
-      // Périmée par âge : exclue du pipeline actif, comme les agrégats (aggregate.js) → l'assiette
-      // « ouvertes » du VelocityStrip colle aux en-têtes de colonnes du Board.
-      if (isAgedLost(o)) continue;
+    // Win rate : gagné = étape 6 ; perdu = étape 7 OU 9 (annulé) OU auto-périmé par âge (règle métier unique,
+    // oppLifecycle) — sinon annulés + périmées échappaient au dénominateur → taux optimiste. Les périmées
+    // sortent aussi du pipeline OUVERT (isLostOpp les capte avant la branche « active »).
+    if (isWonOpp(o)) { won++; wonAmt += amt; continue; }
+    if (isLostOpp(o)) { lost++; continue; }
+    if (st >= 1 && st <= 5) {
       if (!notBooked(o)) continue; // déjà au carnet → hors pipeline ouvert (parité cockpit, anti-double-compte)
       // Pondéré TIÉRÉ (projectionWeight) et NON le champ linéaire persisté `weighted` : source unique
       // avec le cockpit Pipeline/Overview, sinon le même libellé « pipeline pondéré » affiche 2 valeurs.

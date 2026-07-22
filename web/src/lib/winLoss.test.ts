@@ -33,4 +33,25 @@ describe("winLossBySegment — taux de gain par segment", () => {
     const r = winLossBySegment(rows, (o) => (o.leadSource || "").trim() || "—");
     expect(r[0].key).toBe("Web"); // total 2 > Salon 1 / — 1
   });
+
+  // Parité avec le back (oppLifecycle.isLostOpp) : perdu = étape 7 OU 9 (annulé) OU auto-périmé par âge.
+  it("compte les ANNULÉS (étape 9) comme perdus (parité back, audit commercial)", () => {
+    const r = winLossBySegment([
+      { stage: 6, amount: 100, leadSource: "Web" },
+      { stage: 9, amount: 50, leadSource: "Web" }, // annulé → perdu
+    ] as any[], (o) => (o as any).leadSource || "—");
+    const web = r.find((x) => x.key === "Web")!;
+    expect(web).toMatchObject({ won: 1, lost: 1, total: 2 });
+    expect(web.winRate).toBeCloseTo(0.5, 6); // 1/(1+1) — l'annulé abaisse le taux (avant : 100 % sur 1 gagné seul)
+  });
+
+  it("compte les AUTO-PÉRIMÉES par âge comme perdues (isAgedLost, parité back)", () => {
+    const r = winLossBySegment([
+      { stage: 6, amount: 100, leadSource: "Web" },
+      { source: "salesData", stage: 3, ageDays: 500, probability: 0.5, amount: 80, leadSource: "Web" }, // périmée → perdu
+    ] as any[], (o) => (o as any).leadSource || "—");
+    const web = r.find((x) => x.key === "Web")!;
+    expect(web).toMatchObject({ won: 1, lost: 1 });
+    expect(web.winRate).toBeCloseTo(0.5, 6);
+  });
 });

@@ -2394,3 +2394,32 @@ entière, pas juste l'instance. L'audit calibré serré (1 sceptique, haute/bloq
 
 **Vérifs.** Functions 1367/1367 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle), web 306/306
 (+3 tests parité atterrissage ; overviewCalc.test toujours vert après refactor), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Justesse des taux de conversion (audit commercial DC/DG) — Lot A (ADR-072)
+
+**Fait.** Audit du cockpit commercial en posture Directeur commercial / DG, centré sur la question « nos taux
+reflètent-ils les 15-25 % du secteur ? ». Réponse : non, pour DEUX raisons longtemps confondues sous le mot
+« conversion ». (1) Le KPI « Conversion vente » de tête n'est pas un win rate mais un ratio PROJETÉ
+(`cmd / (cmd + pondéré + perdu)`) qui met le pipeline escompté au dénominateur → sort au-dessus de la fourchette
+par construction (pas un bug, un libellé trompeur). (2) Le vrai taux de gain comptait perdu = étape 7 SEULE : les
+annulés (9) et les auto-périmées par âge (isAgedLost) échappaient au dénominateur → win rate optimiste.
+
+Correctifs (Lot A). Prédicat de clôture UNIQUE : `oppLifecycle.isWonOpp` (6) / `isLostOpp` (7 OU 9 OU isAgedLost),
+appliqué à pipeline.js, am360.js, velocity.js (qui recalculaient stage===6/7 à la main). Miroir front identique
+dans lib/winLoss.ts. KPI de tête relibellé « Conversion (projetée) » avec sous-titre explicite (Vue d'ensemble +
+Pipeline ×2) — on ne remplace pas la formule projetée (elle sert la capacité d'atterrissage), on cesse de la faire
+passer pour un win rate ; le vrai win rate X/Y annoté à côté. TruncationNote en tête de la vue « analyses »
+(un taux sur échantillon tronqué le dit). Sous-titres couverture rendus conditionnels au décalage de période.
+
+**Appris.** Deux nombres appelés « conversion » n'étaient pas la même métrique — l'un mesure la CAPACITÉ (pipeline
+au dénominateur), l'autre la PERFORMANCE de closing. Le vrai correctif n'était pas de « baisser le taux » mais de
+NOMMER honnêtement chacun et d'unifier la définition du perdu. Sur l'exemple d'audit (6 gagnés / 4 perdus /
+8 annulés / 5 périmées) : 60 % (faux) → 26 % (juste, comparable secteur). Un win rate durablement < 15 % signalerait
+un défaut de qualification amont — ce que l'ancienne formule masquait.
+
+**Report assumé (Lot A2, à arbitrer).** Funnel par étape + taux de gain EN VALEUR (won€/(won€+lost€)) non traités.
+
+**Vérifs.** Functions 1371/1371 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle),
+web 308/308 (+2 winLoss annulé/aged-lost, +4 oppLifecycle isWonOpp/isLostOpp), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.

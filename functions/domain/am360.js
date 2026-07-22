@@ -6,7 +6,7 @@
 const { sum } = require("./chaine");
 const { projectionWeight, normalizeTiers } = require("./projection");
 const { fpKey, plausibleYear } = require("../lib/ids");
-const { isDormantClosing } = require("./oppLifecycle");
+const { isDormantClosing, isWonOpp, isLostOpp } = require("./oppLifecycle");
 
 // AM normalisé en MAJUSCULES : les parseurs uppercasent l'AM et l'appariement aux objectifs se fait
 // en majuscules — sans ceci, une saisie « Datcha » et un import « DATCHA » scindent le commercial.
@@ -66,8 +66,9 @@ function am360(orders, invoices, opps, objectives, fy, tiers, excludeDormant = t
 
       const myOpps = (opps || []).filter((o) => normAm(o.am) === am);
       const active = myOpps.filter((o) => o.stage >= 1 && o.stage <= 5);
-      const won = myOpps.filter((o) => o.stage === 6).length;
-      const lost = myOpps.filter((o) => o.stage === 7).length;
+      // Perdu = étape 7 OU 9 (annulé) OU auto-périmé par âge (règle métier unique) — parité avec pipeline.js.
+      const won = myOpps.filter(isWonOpp).length;
+      const lost = myOpps.filter(isLostOpp).length;
       // « Pondéré » = PROJECTION tiérée (défauts 100/20/5, configurables en Habilitations), cohérent avec pipeline/
       // atterrissage : NET du carnet — une opp active dont le FP porte déjà une commande est déjà dans le CAS,
       // l'inclure ici la double-compterait (parité chaine/atterrissage.alreadyBooked). activeCount reste brut.

@@ -8,7 +8,7 @@ const { sum } = require("./chaine");
 const { fpKey, plausibleYear } = require("../lib/ids");
 const { projectionWeight, tierBreakdown, normalizeTiers, p01 } = require("./projection");
 const { groupSum } = require("./backlog");
-const { isDormantClosing } = require("./oppLifecycle");
+const { isDormantClosing, isWonOpp, isLostOpp } = require("./oppLifecycle");
 
 const CONFIANCE_MIN = 0.9;
 const isActive = (o) => o.stage >= 1 && o.stage <= 5;
@@ -179,8 +179,10 @@ function pipeline(opps, asOf, tiers, orders, geleMonths = 6) {
   const proj = bookedFps.size ? active.filter(notBooked) : active; // opps projetables (hors carnet)
   const projected = proj.filter((o) => pw(o) > 0); // contribuent à la projection (IdC ≥ 50 %)
   const suspended = opps.filter((o) => o.stage === 8);
-  const won = opps.filter((o) => o.stage === 6);
-  const lost = opps.filter((o) => o.stage === 7);
+  // Win rate : perdu = étape 7 OU 9 (annulé) OU auto-périmé par âge (règle métier unique, oppLifecycle) —
+  // sinon le taux de transformation est optimiste (annulés + périmées hors dénominateur). Cf. audit commercial.
+  const won = opps.filter(isWonOpp);
+  const lost = opps.filter(isLostOpp);
 
   const byStage = {};
   for (const o of opps) {

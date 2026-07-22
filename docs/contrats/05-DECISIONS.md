@@ -3,6 +3,34 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-072 — Justesse des taux : définition UNIQUE du taux de gain (annulés + périmées au dénominateur) et libellé honnête de la « Conversion projetée »
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« auditer le calcul des taux de transformation ou conversion ; dans notre industrie les taux oscillent entre 15 et 25 % » puis « go »)
+
+### Contexte
+Audit du cockpit commercial en posture DC/DG. La question centrale : nos taux affichés reflètent-ils les 15-25 % du secteur ? Réponse : **non, pour deux raisons distinctes**, longtemps confondues sous le même mot « conversion ».
+1. Le KPI « Conversion vente » de tête (`chaine.js`) n'est **pas** un taux de gain : c'est `commandes / (commandes + pipeline pondéré + perdu)` — un ratio **projeté** qui met le pipeline escompté au dénominateur. Il sort mécaniquement **au-dessus** de la fourchette win-rate, par construction. Il n'y a pas de bug, il y a un **libellé trompeur**.
+2. Le vrai taux de gain (`gagné / (gagné + perdu)`) était calculé avec **perdu = étape 7 seule**. Les **annulés (étape 9)** et les **auto-périmées par âge** (`isAgedLost` : source salesData, étape 1-5, ≥ 366 j, IdC ≤ 90 %) échappaient au dénominateur → win rate **optimiste**, non comparable au secteur.
+
+### Décisions
+- **Prédicat de clôture UNIQUE (back).** `oppLifecycle.isWonOpp(o)` (= étape 6) et `isLostOpp(o)` (= étape 7 **OU** 9 **OU** `isAgedLost`) deviennent la seule définition de « gagné »/« perdu ». Appliqués à `domain/pipeline.js`, `domain/am360.js`, `domain/velocity.js` — qui recalculaient tous `stage===6`/`stage===7` à la main. Un annulé ou une périmée abaisse désormais le taux, comme il se doit.
+- **Miroir front à l'identique.** `web/src/lib/winLoss.ts` (`won = 6 ; lost = 7 || 9 || isAgedLost`) applique la MÊME règle que le back — invariant « même métrique = même nombre ». Testé des deux côtés (annulé + aged-lost au dénominateur).
+- **Libellé honnête, pas de faux recalcul.** Le KPI de tête est **relibellé** « Conversion (projetée) » avec sous-titre explicite « Cmd / (Cmd + pondéré + perdu) — projeté, ≠ win rate » (Vue d'ensemble + Pipeline ×2). On **n'écrase pas** la formule projetée (elle a son usage : capacité d'atterrissage), on cesse de la faire passer pour un win rate. Le vrai win rate en nombre (X/Y) est annoté à côté.
+- **Garde de troncature sur les vues d'analyse.** Les abonnements temps réel sont plafonnés (`DEFAULT_SUB_CAP=2000`, drapeau `truncated`). Un `TruncationNote` est ajouté en tête de la vue « analyses » du Pipeline : un taux calculé sur un échantillon tronqué le dit, au lieu de se présenter comme exhaustif.
+- **Garde de décalage de période.** Les sous-titres « objectif & couverture » du Pipeline deviennent conditionnels : quand la période affichée ≠ exercice courant, ils l'annoncent (`objectif & couverture : exercice {currentFy} (≠ période {period})`) au lieu de laisser croire que la couverture porte sur la période sélectionnée.
+
+### Conséquences
+- Le taux de gain affiché est enfin **comparable au secteur** (15-25 %) : sur l'exemple d'audit (6 gagnés / 4 perdus / 8 annulés / 5 périmées), il passe de 6/10 = 60 % (faux, optimiste) à 6/23 ≈ 26 % (juste). Les deux « taux » ne sont plus confondus : « Conversion projetée » (capacité) et « win rate » (performance de closing) portent des noms distincts.
+- Aucune fonction déployée nouvelle : refonte de prédicats purs + libellés/gardes d'affichage.
+- **Report assumé (Lot A2, à arbitrer) :** funnel par étape et taux de gain **EN VALEUR** (won€/(won€+lost€)) non traités ici — proposés séparément.
+
+### Ce qu'on saura dans six mois
+Si le win rate corrigé s'installe durablement **sous** 15 % → problème de qualification amont (trop d'opps ouvertes qui pourrissent en périmées), pas de closing. C'est précisément ce que l'ancienne formule masquait.
+
+---
+
 ## ADR-071 — Cohérence métier des cockpits : objectif CAF unifié (CODIR), dédup live partagée (commercial), garde de périmètre (Vue d'ensemble)
 
 - **Date :** 2026-07-22
