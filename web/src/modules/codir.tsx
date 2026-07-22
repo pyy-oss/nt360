@@ -10,6 +10,7 @@ import { FreshnessGuard, type Props } from "./_shared";
 import { T, fmt } from "../design/tokens";
 import { relTime } from "../lib/format";
 import { useDocData } from "../lib/hooks";
+import { mergeAtterrissageObjectifs } from "../lib/atterrissage";
 import { useCan, useCanExport, useClaims, useCanSeeMargin } from "../lib/rbac";
 import { callExportReport, upsertOpsBulletin, type OpsBulletin, type BulletinSection } from "../lib/writes";
 import type { AtterrissageSummary, EntitySummary, BacklogSummary, BillingTrendSummary, PeriodsConfig } from "../types";
@@ -384,7 +385,14 @@ function HotTopics({ fy, week }: { fy: number; week: number }) {
 export const Codir: FC<Props> = () => {
   const { data: cfg } = useDocData<PeriodsConfig>("config/periods");
   const fy = cfg?.currentFy;
-  const { data: att } = useDocData<AtterrissageSummary>(fy ? `summaries/atterrissage_${fy}` : null);
+  const { data: attBase } = useDocData<AtterrissageSummary>(fy ? `summaries/atterrissage_${fy}` : null);
+  // Objectifs annuels ISOLÉS dans un doc gaté « objectifs » (RBAC) : le recompute les PURGE du doc public
+  // (aggregate.js FieldValue.delete()). On les re-fusionne ici, à l'identique d'overview.tsx:63-64 et
+  // pipeline.tsx — sans quoi objectifCaf restait à 0 et TOUT le suivi d'objectif du one-pager (jauges,
+  // trajectoire, rythme requis, export PPTX) était faux et contredisait la Vue d'ensemble (audit métier).
+  // Fusion PROFONDE de `next` (garde le report public). Un rôle sans droit « objectifs » reçoit null → cible « — ».
+  const { data: attObj } = useDocData<AtterrissageSummary>(fy ? `summaries/atterrissageObjectifs_${fy}` : null);
+  const att = mergeAtterrissageObjectifs(attBase, attObj); // SOURCE UNIQUE (parité Vue d'ensemble — audit métier)
   // Top clients ALIGNÉS sur l'exercice courant (comme les KPI atterrissage) : commandes ET forecast
   // de l'exercice `fy`, et non tous exercices confondus (clients_all).
   const { data: clients } = useDocData<EntitySummary>(fy ? `summaries/clients_${fy}` : null);

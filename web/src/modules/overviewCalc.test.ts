@@ -189,8 +189,10 @@ describe("computeFilteredOverview — recalcul par périmètre (miroir de overvi
   it("opps fantômes (stale) et périmées par âge : exclues du pondéré (miroir aggregate.js)", () => {
     const oppsStale = [
       { bu: "ICT", am: "X", client: "ACME", amount: 500, stage: 3, probability: 0.95, closingDate: "2026-06-01", source: "salesData", fp: "FP/2026/1", stale: true },
-      // périmée : âge ≥ 366 j (dateCreation ancienne) ET IdC ≤ 90 %
-      { bu: "ICT", am: "X", client: "ACME", amount: 700, stage: 3, probability: 0.5, closingDate: "2026-06-01", source: "salesData", fp: "FP/2026/2", dateCreation: "2020-01-01" },
+      // périmée par ÂGE : ageDays ≥ 366 (le champ réellement lu par isAgedLost) ET IdC = 90 % (borne).
+      // IdC 0.9 ⇒ elle SERAIT une certitude si elle n'était pas périmée → SEULE la règle d'âge l'exclut
+      // (si isAgedLost cessait de l'exclure, certitudes dépasserait 300 et ce test échouerait).
+      { bu: "ICT", am: "X", client: "ACME", amount: 700, stage: 3, probability: 0.9, closingDate: "2026-06-01", source: "salesData", fp: "FP/2026/2", ageDays: 500 },
       { bu: "ICT", am: "X", client: "ACME", amount: 300, stage: 3, probability: 0.95, closingDate: "2026-06-01" }, // active
     ];
     const r = computeFilteredOverview([] as any, [] as any, oppsStale as any, "2026", mkMatch({ bu: "ICT" }));

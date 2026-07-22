@@ -2369,3 +2369,28 @@ couverte par un test unitaire (nécessiterait l'émulateur Firestore ; la règle
 elle, dans charges.test.js). Le garde-fou serveur MFA « refuser l'activation tant qu'aucun compte direction
 n'a de second facteur » n'est pas implémenté (nécessiterait une lecture des facteurs inscrits) : mitigé par
 la confirmation d'avertissement côté front.
+
+---
+
+## 2026-07-22 — Audit métier des cockpits (Vue d'ensemble / CODIR / commercial) — 8 correctifs (ADR-071)
+
+**Fait.** Audit métier lean (4 chasseurs : overview, CODIR, commercial, cohérence inter-écrans ; vérif adverse
+1 sceptique sur haute/bloquant seulement — 8 agents, ~830 k tokens, ~6× moins cher que l'audit Admin). 9 constats
+confirmés, 0 réfuté ; 8 distincts après dédoublonnage (le bloquant trouvé 2×). Tous corrigés en une PR.
+
+BLOQUANT : le Bilan CODIR ne fusionnait pas les objectifs isolés (atterrissageObjectifs_) → objectifCaf=0,
+jauges 0 %, faux « objectif dépassé », export PPTX « Atteinte 0 % », en contradiction avec la Vue d'ensemble.
+Correctif : fusion extraite en SOURCE UNIQUE (lib/atterrissage) + test de parité. Hautes : filtre PM ignoré en
+silence sous bandeau « recalculée » (garde de périmètre honnête) ; OppList ne dédupliquait pas les opps live par
+fpKey (dédup extraite en lib/liveOpps, partagée avec overviewCalc → OppList) → sur-compte du pondéré. Moyennes :
+prévision « Tout » (quota d'un exercice ÷ réalisé pluriannuel → attainment masqué) ; couverture RAF (numérateur
+aligné sur att.pipelinePondere, toujours écrit) ; labels PPTX fidèles à l'écran. Basse : filet de parité aged-lost
+corrigé (fixture sans ageDays → règle d'âge jamais exercée).
+
+**Appris.** Les 3 bugs de cohérence avaient la MÊME cause : une logique « source unique » copiée-collée dont UNE
+copie divergeait (ou manquait). Extraire (mergeAtterrissageObjectifs, dedupeMaskLiveOpps) + tester tue la classe
+entière, pas juste l'instance. L'audit calibré serré (1 sceptique, haute/bloquant) a rendu 0 faux positif pour
+6× moins cher — le bon défaut pour les prochains audits.
+
+**Vérifs.** Functions 1367/1367 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle), web 306/306
+(+3 tests parité atterrissage ; overviewCalc.test toujours vert après refactor), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.

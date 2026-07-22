@@ -2515,8 +2515,12 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
   // Quota = objectif CAS annuel GLOBAL de l'exercice. Sous OWD private (scoped), un objectif d'ENTREPRISE
   // n'est PAS attribuable à un sous-périmètre → quota (et donc atteinte) masqués : pas de référence trompeuse
   // (attainment devient null). Le « réalisé » cloisonné ci-dessus reste, lui, exposé pour le périmètre.
+  // Quota récupéré UNIQUEMENT pour un exercice EXPLICITE (periodYear). En mode « Tout » (periodYear=0) le
+  // réalisé `closed` cumule TOUS les millésimes du carnet : le comparer au quota d'un SEUL exercice donnait
+  // une atteinte aberrante (ex. 900/300 = 300 %). Sans exercice de référence, quota=0 → attainment=null
+  // (numérateur et dénominateur DOIVENT partager le même périmètre — même règle que « Couverture RAF »).
   let quota = 0;
-  if (!scoped) {
+  if (!scoped && periodYear) {
     const objSnap = await db.collection("objectives").where("fiscalYear", "==", targetFy).where("scope", "==", "global").get();
     quota = objSnap.docs.reduce((s, d) => s + (Number(d.data().targetCas) || 0), 0);
   }
