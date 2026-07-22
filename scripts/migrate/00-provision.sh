@@ -15,7 +15,7 @@ DB="nt360"
 PROJECT_NUMBER="165643317476"
 RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 DEPLOY_SA="firebase-adminsdk-fbsvc@neurones-360.iam.gserviceaccount.com"   # SA de déploiement (FIREBASE_SERVICE_ACCOUNT_V2)
-BILLING_ACCOUNT_ID="REMPLACE-XXXXXX-XXXXXX-XXXXXX"                       # `gcloud billing accounts list`
+BILLING_ACCOUNT_ID="018171-3E5BE8-C81AFD"                       # `gcloud billing accounts list`
 IMPORTS_BUCKET="neurones-360-imports"
 BACKUP_BUCKET="neurones-360-backups"
 
