@@ -34,7 +34,7 @@ const MODULE_LABEL: Record<string, string> = {
   bc: "BC fournisseurs", fournisseurs: "Fournisseurs", rentabilite: "Rentabilité",
   objectifs: "Objectifs", habilitations: "Habilitations", qualite: "Qualité",
   clients: "Clients", prevision: "Prévision", facturation: "Facturation", pnlprojet: "P&L projet",
-  domaines: "Domaines", maintenance: "Contrats de maintenance",
+  domaines: "Domaines", maintenance: "Contrats de maintenance", partenariats: "Partenariats",
 };
 // Modules GOUVERNABLES connus (source de vérité de la matrice) — garantit une ligne pour CHAQUE module même
 // s'il n'a encore aucune entrée stockée dans config/permissions (sinon un module récent, ex. `maintenance`,
