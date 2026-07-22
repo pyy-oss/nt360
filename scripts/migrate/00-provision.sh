@@ -30,6 +30,7 @@ gcloud services enable \
   cloudfunctions.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
   artifactregistry.googleapis.com eventarc.googleapis.com pubsub.googleapis.com \
   firestore.googleapis.com firebasehosting.googleapis.com firebaserules.googleapis.com \
+  firebaseextensions.googleapis.com \
   secretmanager.googleapis.com cloudscheduler.googleapis.com storage.googleapis.com \
   --project "$PROJECT"
 
@@ -61,7 +62,7 @@ for ROLE in \
   roles/firebase.admin roles/cloudfunctions.admin roles/run.admin \
   roles/cloudbuild.builds.editor roles/artifactregistry.admin roles/eventarc.admin \
   roles/pubsub.admin roles/cloudscheduler.admin roles/secretmanager.admin \
-  roles/iam.serviceAccountUser roles/datastore.importExportAdmin roles/serviceusage.serviceUsageConsumer ; do
+  roles/iam.serviceAccountUser roles/datastore.importExportAdmin roles/serviceusage.serviceUsageAdmin ; do
   gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${DEPLOY_SA}" --role="$ROLE" --condition=None >/dev/null
 done
 
