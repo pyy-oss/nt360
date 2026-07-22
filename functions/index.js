@@ -1735,6 +1735,47 @@ exports.aiSuggestClientMerges = onCallG(
   },
 );
 
+// ASSISTANT IA — SYNTHÈSE « PAR OÙ COMMENCER » : narre le plan d'assainissement DÉTERMINISTE
+// (remediationPlan, déjà priorisé par impact FCFA) en une feuille de route hiérarchisée. Lecture seule
+// gouvernée « import » (comme correctionQueue) ; AUCUNE écriture. Le plan chiffré vient du front (parité
+// avec ce que le steward voit) ; re-borné + sanitisé serveur. L'IA ordonne/explique mais ne cite que les
+// types fournis et n'invente aucun chiffre (normalizeSynthesis écarte tout type hors plan). « L'IA éclaire,
+// l'humain agit » : chaque étape renvoie à son bloc de correction déjà existant.
+exports.aiRemediationSummary = onCallG(
+  "aiRemediationSummary",
+  { secrets: [ANTHROPIC_API_KEY], memoryMiB: 256, timeoutSeconds: 120 },
+  async (req) => {
+    await requireRead(req, "import");
+    if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'analyses IA en peu de temps — patientez un instant.");
+    const apiKey = ANTHROPIC_API_KEY.value();
+    if (!apiKey) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — assistant IA indisponible.");
+    // Plan fourni par le front (parité) — re-borné/sanitisé serveur (garde-fou coût/exfiltration) : on ne
+    // conserve que les champs de synthèse, jamais le détail des enregistrements.
+    const rawRows = Array.isArray(req.data?.plan?.rows) ? req.data.plan.rows : [];
+    if (!rawRows.length) throw new HttpsError("invalid-argument", "plan d'assainissement requis");
+    const plan = {
+      rows: rawRows.slice(0, 50).map((r) => ({
+        type: String((r && r.type) || "").slice(0, 60), label: String((r && r.label) || "").slice(0, 120),
+        severity: r && r.severity, count: Number(r && r.count) || 0, impact: Number(r && r.impact) || 0, estimated: !!(r && r.estimated),
+      })).filter((r) => r.type),
+      totalImpact: Number(req.data?.plan?.totalImpact) || 0, totalCount: Number(req.data?.plan?.totalCount) || 0,
+    };
+    if (!plan.rows.length) throw new HttpsError("invalid-argument", "plan d'assainissement vide");
+
+    const { summarizeRemediation } = require("./lib/aiRemediation");
+    let out;
+    try {
+      out = await summarizeRemediation(apiKey, { plan });
+    } catch (e) {
+      if (e && e.code === "ai_refusal") throw new HttpsError("failed-precondition", "Le modèle a refusé de produire la synthèse.");
+      logger.error("aiRemediationSummary a échoué", { message: e && e.message });
+      throw new HttpsError("internal", "L'assistant IA n'a pas pu produire de synthèse (réessayez).");
+    }
+    await logOps({ kind: "ai", action: "remediationSummary", status: "ok", uid: req.auth.uid, detail: { rows: plan.rows.length, steps: out.steps.length, model: out.model, usage: out.usage } });
+    return { ok: true, headline: out.headline, steps: out.steps, model: out.model };
+  },
+);
+
 // === CONSULTANTS / RESSOURCES (Lot 11 « 20/10 DirOps ») — annuaire des ressources délivrantes de l'ESN,
 // fondation du plan de charge (Lot 12) et des KPI d'activité (Lot 13). ACCÈS 100% PAR CALLABLE (Admin
 // SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps

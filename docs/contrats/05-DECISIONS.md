@@ -3,6 +3,31 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-080 — Synthèse IA « par où commencer » : narration PAR-DESSUS le plan déterministe, jamais un chiffre inventé
+
+- **Date :** 2026-07-22
+- **Statut :** Accepté
+- **Décideur :** Direction commerciale (« enrichir le Centre de correction de fonctions IA pour réduire l'effort de correction » — 4 enrichissements retenus, dont « Synthèse IA "par où commencer" »)
+
+### Contexte
+Le Centre de correction affiche déjà un **plan d'assainissement déterministe** (`domain/remediation.remediationPlan`) : les chantiers priorisés par **impact FCFA**, sévérité, nombre. C'est la vérité opposable. On veut une couche IA qui rende ce plan plus **lisible/actionnable** (narration « par où commencer », effet d'entraînement) sans jamais devenir une seconde source de vérité chiffrée.
+
+### Décision
+Nouveau callable **`aiRemediationSummary`** (secret `ANTHROPIC_API_KEY`, Opus courant `claude-opus-4-8`, réflexion adaptative, gestion `stop_reason === "refusal"`) qui **narre** le plan, mais sous garde-fous stricts (« n'invente aucune donnée ») :
+- **Lecture seule** (`requireRead("import")`), aucune écriture, `rateLimit` IA partagé (20/min).
+- Le **plan chiffré vient du front** (parité avec ce que le steward voit), re-borné/sanitisé serveur (≤ 50 lignes, champs de synthèse seulement — jamais le détail des enregistrements).
+- Séparation **pur/IO** : `domain/aiRemediation` (prompt + `normalizeSynthesis`, testé vitest) ; `lib/aiRemediation` (appel SDK). `normalizeSynthesis` **écarte tout `type` absent du plan** → l'IA ne peut ni inventer un chantier ni citer un chiffre non fourni (le prompt ne transmet que labels/comptes/impacts).
+- **Un seul passage** (pas de vérification adverse comme `aiCorrection`) : c'est une narration, pas une écriture actionnable.
+- **Front** : la synthèse s'affiche AU-DESSUS du classement FCFA (qui reste la référence, jamais remplacé) ; chaque étape renvoie à son bloc de correction existant (`onGo(type)`). Libellés résolus depuis le plan (jamais un libellé inventé).
+
+### Conséquences
+- « L'IA éclaire, l'humain agit » : le steward garde le classement déterministe comme socle et gagne une lecture priorisée en langage naturel. Aucune dépendance nouvelle, aucun droit nouveau, une fonction déployée de plus (`deployed-functions.txt`).
+
+### Ce qu'on saura dans six mois
+Si la narration IA n'apporte rien au-delà du classement FCFA (ou coûte trop en appels), on la retire côté front sans toucher au plan déterministe — la synthèse est une couche facultative.
+
+---
+
 ## ADR-079 — Éligibilité ClickUp : une commande n'est synchronisable que si un DC (Odoo) est lié à son N° FP
 
 - **Date :** 2026-07-22

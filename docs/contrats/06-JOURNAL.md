@@ -2688,3 +2688,28 @@ comme la table d'alias de l'atelier). Zéro backend nouveau ; primitives réutil
 La source unique reste `config/clientAliases` : les deux écrans y posent des alias à l'identique.
 
 **Vérifs.** Web 313/313, tsc/eslint 0, build OK, bundle 121,4 ≤ 122 Ko. Aucun changement backend, aucune règle.
+
+---
+
+## 2026-07-22 — Centre de correction : synthèse IA « par où commencer » (Lot 5/5, ADR-080)
+
+**Fait.** Dernier des 5 lots d'enrichissement du Centre de correction. Nouveau callable
+`aiRemediationSummary` (secret ANTHROPIC_API_KEY, Opus `claude-opus-4-8`, thinking adaptatif, refusal géré) :
+il NARRE le plan d'assainissement déterministe (`remediationPlan`, déjà priorisé par impact FCFA) en une
+feuille de route « par où commencer ». Séparation pur/IO : `domain/aiRemediation` (prompt +
+`normalizeSynthesis`, testé vitest) ; `lib/aiRemediation` (appel SDK). `normalizeSynthesis` écarte tout
+`type` hors plan → l'IA ne peut ni inventer un chantier ni citer un chiffre non fourni. Lecture seule
+(`requireRead("import")`), plan fourni par le front (parité) re-borné serveur, rateLimit IA partagé.
+Front : la synthèse s'affiche AU-DESSUS du classement FCFA (qui reste la référence) dans
+`RemediationPlanCard` ; chaque étape renvoie à son bloc via `onGo(type)`.
+
+**Appris.** La frontière « n'invente aucune donnée » s'applique aussi à une IA de SYNTHÈSE : on ne lui laisse
+narrer QUE les types/chiffres du plan (garde `normalizeSynthesis` + prompt sans autre chiffre). Un seul
+passage suffit (narration, pas écriture) — pas de vérification adverse comme `aiCorrection`.
+
+**Vérifs.** Functions 1384/1384 (+4 domain), no-undef 169, deploy-targets 202 (+1), node --check OK. Web
+313/313, tsc/eslint 0, bundle 121,5 ≤ 122 Ko.
+
+**Bilan programme.** Les 5 lots du Centre de correction sont livrés : tableaux alignés (1), IA globale (2),
+actions IA auto-applicables (3, ADR-078), normalisation clients assistée IA (4), synthèse « par où
+commencer » (5, ADR-080) — plus le sélecteur de PM ClickUp et le Lot 6 (DC obligatoire, ADR-079).
