@@ -7,7 +7,7 @@ import { T, fmt, pct } from "../design/tokens";
 import { Card, Kpi, Table, Badge, Tip, TruncationNote, EmptyState, ErrorState, CardSkeleton, Busy, DangerBtn, ListView, Segmented, Eyebrow, colText, colNum, money, det, cx, useToast, type BulkAction } from "../design/components";
 import { Select, DateField } from "../design/inputs";
 import { AreaTrend, DonutBU, GroupedBars } from "../design/charts";
-import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, deleteRecord, setCancellation } from "../lib/writes";
+import { upsertObjective, deleteObjective, objectiveId, setInvoiceFp, patchInvoice, searchInvoices, deleteRecord, setCancellation } from "../lib/writes";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 import { Props, grid4, cols2, monthsAsc, topArr, toDonut, HBars, buBadge, ImportButton, FilterNote, FpLink, useBusinessUnits } from "./_shared";
@@ -207,17 +207,23 @@ function FpFixer({ id }: { id: string }) {
   );
 }
 
-// Correction inline d'une facture : date de facturation + date d'échéance (le montant n'est pas
-// éditable — il reste piloté par la source). Comble « factures sans date / sans échéance ».
+// Correction inline d'une facture : date de facturation, date d'échéance et montant HT. Le montant est
+// normalement piloté par la source (une correction manuelle est réécrite au prochain import delta, comme
+// la date) ; on l'expose pour corriger une saisie erronée / un avoir. Numéraire → saisie libre (espaces,
+// virgule décimale) parsée comme ailleurs (cf. cleanup). Comble « factures sans date / sans échéance ».
 function InvoiceDateFixer({ inv }: { inv: Invoice }) {
   const [date, setDate] = useState(inv.date || "");
   const [due, setDue] = useState(inv.dueDate || "");
-  const changed = date !== (inv.date || "") || due !== (inv.dueDate || "");
+  const [amt, setAmt] = useState(inv.amountHt != null ? String(inv.amountHt) : "");
+  const parsedAmt = Number(amt.replace(/\s/g, "").replace(",", "."));
+  const amtChanged = amt.trim() !== "" && Number.isFinite(parsedAmt) && parsedAmt >= 0 && parsedAmt !== (inv.amountHt ?? NaN);
+  const changed = date !== (inv.date || "") || due !== (inv.dueDate || "") || amtChanged;
   return (
     <span className="inline-flex flex-wrap gap-1 items-center">
       <DateField className="w-36 !py-1 text-xs" ariaLabel="Date de facturation" value={date} onChange={setDate} placeholder="facturation" />
       <DateField className="w-36 !py-1 text-xs" ariaLabel="Date d'échéance" value={due} onChange={setDue} placeholder="échéance" />
-      {changed && inv.id && <Busy variant="ghost" label="MàJ" okMsg="Facture mise à jour" fn={() => patchInvoice({ id: inv.id!, date: date || null, dueDate: due || null })} />}
+      <input className="field w-28 !py-1 text-xs text-right" inputMode="decimal" aria-label={`Montant HT de la facture ${inv.numero || inv.id}`} placeholder="montant HT" value={amt} onChange={(e) => setAmt(e.target.value)} />
+      {changed && inv.id && <Busy variant="ghost" label="MàJ" okMsg="Facture mise à jour" fn={() => patchInvoice({ id: inv.id!, date: date || null, dueDate: due || null, ...(amtChanged ? { amountHt: parsedAmt } : {}) })} />}
     </span>
   );
 }
@@ -255,6 +261,26 @@ export const InvoiceList: FC<Props> = () => {
   const orphan = useMemo(() => rows.filter((r) => r.linked !== true && !cancelled.has(r.id!)), [rows, cancelled]);
   const orphanAmt = useMemo(() => orphan.reduce((s, r) => s + (r.amountHt || 0), 0), [orphan]);
   const filtered = useMemo(() => (f === "all" ? rows : f === "orphan" ? orphan : rows.filter((r) => r.linked === true)), [f, rows, orphan]);
+  // Recherche SERVEUR (par N° ou N° FP) : l'abonnement temps réel est BORNÉ (DEFAULT_SUB_CAP) et non
+  // ordonné, donc une facture hors des premières N restait introuvable via la recherche cliente (« 0
+  // résultat / 2000 »). On interroge alors Firestore directement (callable searchInvoices). Quand un
+  // résultat serveur est actif, il REMPLACE la liste temps réel (les filtres BU/client et la segmentation
+  // ne s'y appliquent pas — c'est une recherche transverse à toute la base).
+  const [serverQ, setServerQ] = useState("");
+  const [serverRes, setServerRes] = useState<Invoice[] | null>(null);
+  const [serverTrunc, setServerTrunc] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchErr, setSearchErr] = useState<string | null>(null);
+  const runServerSearch = async () => {
+    const q = serverQ.trim();
+    setSearchErr(null);
+    if (q.length < 2) { setSearchErr("Saisir au moins 2 caractères."); return; }
+    setSearching(true);
+    try { const res = await searchInvoices(q); setServerRes(res.rows); setServerTrunc(res.truncated); }
+    catch (e: any) { setSearchErr(String(e?.message || e?.code || "").replace(/^functions\//, "") || "Recherche échouée."); }
+    finally { setSearching(false); }
+  };
+  const clearServer = () => { setServerRes(null); setServerTrunc(false); setSearchErr(null); setServerQ(""); };
   if (loading && !allRows.length) return <CardSkeleton />;
   // Actions en masse (réservées à qui peut importer, comme les actions par ligne) : annulation / rétablissement
   // en LOT, réutilisant l'overlay `setCancellation` (statut persistant, rétablissable, survit au ré-import).
@@ -291,8 +317,20 @@ export const InvoiceList: FC<Props> = () => {
         </div>
       )}
       <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap"><Segmented value={f} onChange={setF} ariaLabel="Filtrer les factures" options={[{ value: "all", label: "Toutes" }, { value: "linked", label: "Rattachées" }, { value: "orphan", label: "Non rattachées", count: orphan.length }]} />{canImport && <ImportButton label="Importer un delta" />}</div>}>
+        {/* Recherche serveur (toute la base) : distincte de la recherche cliente de <ListView> (qui ne voit
+            que les lignes chargées). Comble « recherche par N° / FP → 0 résultat » quand la facture est
+            au-delà du plafond d'abonnement. */}
+        <div className="flex flex-col gap-1.5 mb-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input className="field w-full sm:w-80 !py-1.5 text-sm" aria-label="Rechercher une facture dans toute la base par N° ou N° FP" placeholder="Chercher par N° ou FP dans toute la base…" value={serverQ} onChange={(e) => setServerQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runServerSearch(); } }} />
+            <button type="button" className="btn-ghost !py-1.5" disabled={searching} onClick={runServerSearch}>{searching ? "…" : "Rechercher"}</button>
+            {serverRes && <button type="button" className="btn-ghost !py-1.5" onClick={clearServer}>Effacer</button>}
+          </div>
+          {searchErr && <div className="text-xs text-clay">{searchErr}</div>}
+          {serverRes && <div className="text-xs text-muted">Résultats serveur (toute la base) · {serverRes.length.toLocaleString("fr-FR")} facture{serverRes.length > 1 ? "s" : ""}{serverTrunc ? " — plafonné à 300, affinez la recherche" : ""}. Les filtres BU/client et la segmentation ne s'y appliquent pas.</div>}
+        </div>
         <ListView
-          rows={filtered}
+          rows={serverRes ?? filtered}
           colsKey="factures"
           initialSearch={intent?.search}
           searchKeys={[(r) => r.numero, (r) => r.fp, (r) => r.client]}

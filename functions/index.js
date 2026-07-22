@@ -2914,14 +2914,58 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds:
   const patch = { updatedAt: FieldValue.serverTimestamp() };
   if (d.date !== undefined) patch.date = d.date ? chk(d.date, "Date de facturation") : null;
   if (d.dueDate !== undefined) patch.dueDate = d.dueDate ? chk(d.dueDate, "Date d'échéance") : null;
-  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date ou échéance requise)");
+  // Montant HT éditable (correction de saisie, avoir, ligne mal agrégée). Comme la date/échéance, une
+  // correction manuelle est ÉCRASÉE par le prochain import delta si la source porte encore la facture :
+  // même convention que le reste de patchInvoice (pas d'overlay). amountHt pilote CAF = Σ factures →
+  // le recompute réaligne CAF/surfacturation/cash. Garde : nombre fini ≥ 0.
+  let amountChanged = false;
+  if (d.amountHt !== undefined && d.amountHt !== null && String(d.amountHt).trim() !== "") {
+    const amt = Number(d.amountHt);
+    if (!Number.isFinite(amt) || amt < 0) throw new HttpsError("invalid-argument", "Montant HT invalide (nombre ≥ 0 attendu)");
+    patch.amountHt = amt;
+    amountChanged = true;
+  }
+  if (Object.keys(patch).length <= 1) throw new HttpsError("invalid-argument", "rien à corriger (date, échéance ou montant requis)");
   await ref.set(patch, { merge: true });
   await db.collection("auditLog").add({
     uid: req.auth.uid, action: "patch_invoice", module: "facturation", entity: "invoice", entityId: id,
-    detail: { date: patch.date ?? null, dueDate: patch.dueDate ?? null }, ts: FieldValue.serverTimestamp(),
+    // Montant en DRAPEAU, pas la valeur : l'auditLog se lit au droit « habilitations » (⊉ « facturation ») —
+    // y écrire le montant en clair contournerait le cloisonnement de la facturation (cf. patchProjectSheet/marge).
+    detail: { date: patch.date ?? null, dueDate: patch.dueDate ?? null, amountChanged }, ts: FieldValue.serverTimestamp(),
   });
-  await requestRecompute(); // date/échéance → échéancier cash, encours âgés, qualité des données
+  await requestRecompute(); // date/échéance/montant → échéancier cash, CAF, surfacturation, encours âgés, qualité
   return { ok: true, id };
+});
+
+// --- Recherche SERVEUR des factures par N° ou N° FP. La liste temps réel de l'écran Factures est bornée
+// (DEFAULT_SUB_CAP) et non ordonnée : une facture hors des premières N restait introuvable (« 0 résultat
+// / 2000 » signalé). On interroge donc Firestore DIRECTEMENT — préfixe sur le N° (range) + égalité sur le
+// FP canonique (fpKey, rapproche toutes les factures d'une même affaire). Lecture gatée « facturation »
+// (même droit que la collection invoices dans les règles). ---
+exports.searchInvoices = onCallG("searchInvoices", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
+  await requireRead(req, "facturation");
+  const q = String(req.data?.q || "").trim();
+  if (q.length < 2) throw new HttpsError("invalid-argument", "saisir au moins 2 caractères");
+  const { fpKey } = require("./lib/ids");
+  const CAP = 300;
+  const byId = new Map();
+  // Ne renvoie QUE les champs utiles au front (type Invoice) : évite de sérialiser des Timestamp
+  // (updatedAt) et de fuir des champs de travail. Mêmes clés que la collection.
+  const pick = (id, d) => ({ id, numero: d.numero ?? null, fp: d.fp ?? null, client: d.client ?? null, bu: d.bu ?? null, date: d.date ?? null, dueDate: d.dueDate ?? null, amountHt: d.amountHt ?? null, linked: d.linked === true, paymentStatus: d.paymentStatus ?? null, paid: d.paid === true, lines: d.lines ?? 1, dc: d.dc ?? null });
+  const collect = (snap) => { for (const doc of snap.docs) if (!byId.has(doc.id)) byId.set(doc.id, pick(doc.id, doc.data())); };
+  // 1) Préfixe sur le N° de facture (\uf8ff = borne haute standard d'un préfixe Firestore ; champ
+  //    mono-indexé → pas d'index composite requis). Le préfixe est SENSIBLE à la casse, or les N° Odoo
+  //    sont en MAJUSCULES : on tente donc aussi la variante majuscule si la saisie est en minuscules
+  //    (sinon « jv/… » ne trouvait rien — la classe de bug même qu'on corrige).
+  const prefixes = q === q.toUpperCase() ? [q] : [q, q.toUpperCase()];
+  for (const pfx of prefixes) {
+    if (byId.size >= CAP) break;
+    collect(await db.collection("invoices").where("numero", ">=", pfx).where("numero", "<", pfx + "\uf8ff").limit(CAP).get());
+  }
+  // 2) Égalité sur le FP canonique : rapproche TOUTES les factures d'une affaire (le N° cherché peut être un FP).
+  const fp = fpKey(q);
+  if (fp && byId.size < CAP) collect(await db.collection("invoices").where("fp", "==", fp).limit(CAP).get());
+  return { rows: [...byId.values()].slice(0, CAP), truncated: byId.size >= CAP };
 });
 
 // --- Correction d'une fiche affaire : prix de VENTE et/ou de REVIENT (comble « fiche sans prix de
