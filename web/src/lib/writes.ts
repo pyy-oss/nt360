@@ -455,7 +455,7 @@ export async function correctionQueue(): Promise<CorrectionQueueResult> {
 // habituelles sur clic. Lecture-analyse gouvernée « import ». Réessaie sur codes transitoires (déploiement).
 export type AiCorrectionAction =
   | "review" | "set_invoice_fp" | "generate_from_invoice"
-  | "patch_order" | "patch_opportunity" | "patch_bc_line";
+  | "patch_order" | "patch_opportunity" | "patch_bc_line" | "settle_raf";
 export type AiSuggestion = {
   ref: string; action: AiCorrectionAction; fields: Record<string, string | number>;
   confidence: number; rationale: string;

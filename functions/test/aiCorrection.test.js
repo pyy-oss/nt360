@@ -98,6 +98,20 @@ describe("aiCorrection — assistant IA du Centre de correction (l'IA propose, o
       expect(out[0].action).toBe("review");
       expect(out[0].rationale).toMatch(/copie/);
     });
+    it("requalification opp (fantôme/âgée) : stage 7 ou 9 accepté, tout autre stage → review", () => {
+      const recs = [{ id: "op1", fp: "FP/2026/1" }, { id: "op2", fp: "FP/2026/2" }];
+      const ok = normalizeSuggestions({ suggestions: [{ ref: "op1", action: "patch_opportunity", fields: { stage: 7 }, confidence: 0.8 }] }, recs, "opps_fantomes");
+      expect(ok[0].action).toBe("patch_opportunity");
+      expect(ok[0].fields).toEqual({ stage: 7 });
+      // stage 6 (gagné) n'est PAS une sortie de pipeline → champ écarté → plus de champ → review
+      const bad = normalizeSuggestions({ suggestions: [{ ref: "op2", action: "patch_opportunity", fields: { stage: 6 }, confidence: 0.8 }] }, recs, "opps_agees");
+      expect(bad[0].action).toBe("review");
+    });
+    it("solder RAF clôturé : action « settle_raf » SANS champ reste actionnable (valeur déterministe 0)", () => {
+      const recs = [{ fp: "FP/2026/9", raf: 500000 }];
+      const out = normalizeSuggestions({ suggestions: [{ ref: "FP/2026/9", action: "settle_raf", confidence: 0.9, rationale: "clôturé" }] }, recs, "clickup_cloture_avec_raf");
+      expect(out[0].action).toBe("settle_raf"); // fieldless : ne retombe pas en review
+    });
     it("tri : les propositions actionnables passent avant les « review », puis par confiance", () => {
       const recs = [{ id: "a", fp: "FP/2026/1" }, { id: "b", fp: "FP/2026/2" }, { id: "c" }];
       const parsed = { suggestions: [

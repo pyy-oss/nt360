@@ -2629,3 +2629,23 @@ possible sans casser le bloc par bloc : le même `suggByType[type]` sert les deu
 unique évite qu'« appliquer le bloc » et « appliquer tout » divergent.
 
 **Vérifs.** Web 313/313, tsc/eslint 0, build + bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Centre de correction : nouvelles actions IA auto-applicables (décisions, pas d'invention) (Lot 3/5, ADR-078)
+
+**Fait.** Extension de l'assistant IA à deux nouvelles actions AUTO-applicables — mais uniquement des DÉCISIONS /
+valeurs déterministes, jamais une valeur devinée (garde-fou « n'invente aucune donnée » intact) :
+- **Requalification opp fantôme/âgée** (`opps_fantomes`, `opps_agees`) → `patch_opportunity` avec `stage` borné
+  à 7 (perdu) ou 9 (annulé) uniquement (`sanitizeField("stage")` rejette tout autre). Cap `pipeline`.
+- **Solder un RAF ClickUp-clôturé** (`clickup_cloture_avec_raf`) → action `settle_raf` sans champ (RAF = 0
+  déterministe ; fieldless ⇒ ne retombe pas en « review »).
+Front : `applyAiSuggestion` gère stage + settle_raf ; type `AiCorrectionAction` élargi ; le gate IA passe de
+« kind ≠ nav » à « kind ≠ dedupe » (l'IA couvre désormais aussi les blocs nav qui portent une action). Tests
+domain ajoutés (stage 7/9 ok, stage 6 rejeté ; settle_raf fieldless reste actionnable). Montant/date/FP restent
+non auto-applicables.
+
+**Appris.** La frontière utile n'est pas « champ monétaire ou non » mais « valeur INVENTÉE vs DÉCISION/valeur
+déterministe » : requalifier en perdu ou solder à 0 sont des décisions imposées par l'anomalie, pas des devinettes.
+
+**Vérifs.** Functions 1378/1378 (+2), no-undef 167, node --check OK. Web 313/313, tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
