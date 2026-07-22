@@ -2447,3 +2447,26 @@ que de la taille des deals.
 
 **Vérifs.** Functions 1372/1372 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle),
 web 309/309 (+1 winLoss valeur, +1 velocity valeur), tsc/eslint 0, bundle 121,3 ≤ 122 Ko.
+
+---
+
+## 2026-07-22 — Surfacturation surfacée sur l'écran Factures (réutilise l'existant)
+
+**Fait.** Demande « implémenter détection et correction des surfacturations ». Recherche préalable :
+la fonctionnalité EXISTE déjà de bout en bout — détection `domain/dataQuality.js` (constat « surfacturation »
+high, Σfactures > CAS × (1+seuil)) + `domain/alerts.js` (alerte high), seuil `surfacturationPct` (défaut 0,5 %)
+éditable en Admin, correction chiffrée `domain/remediation.js` (« vérifier une facture en trop, ou relever le
+CAS ») exposée au Centre de correction (`cleanup.tsx`, module `cleanup`). Règle « ne recrée pas ce qui existe » →
+RIEN recréé. Seul manque réel : ce n'était pas visible sur l'écran Revenu › Factures où l'utilisateur se trouvait.
+
+Correctif (additif, front seul) : tuile « Affaires surfacturées » (compte lu de `summaries/dataQuality`, MÊME
+prédicat que le Centre de correction) à côté de « Factures non rattachées », avec rebond `go("cleanup")` vers la
+correction chiffrée. RBAC : rôle sans module Qualité → lit `null` → tuile masquée. Tuile `.card` autonome (pas de
+`<Kpi>` imbriqué → pas de double cadre).
+
+**Appris.** Le réflexe « chercher avant de créer » a évité de rebâtir un moteur de détection/correction déjà
+présent et testé — ce qui aurait créé une 2ᵉ vérité (deux comptes de surfacturées divergents). Le vrai besoin
+n'était pas d'implémenter, mais de RENDRE VISIBLE là où le pilote regarde. NB : le RAF dérivé est plancher à 0
+(`max(cas−facturé,0)`) — la surfacturation n'est donc PAS captée par un RAF négatif mais par le prédicat dédié.
+
+**Vérifs.** web tsc/eslint 0, tests modules 15/15, bundle 121,3 ≤ 122 Ko. Aucun backend touché.

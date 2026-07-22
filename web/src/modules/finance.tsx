@@ -16,7 +16,7 @@ import { useClientKey } from "../lib/clientName";
 import { frDate } from "../lib/format";
 import { marginWaterfall } from "../lib/waterfall";
 import { MARGIN } from "../lib/thresholds";
-import type { FacturationSummary, RentabiliteSummary, ReceivablesSummary, Objective, Invoice, CancellationsDoc } from "../types";
+import type { FacturationSummary, RentabiliteSummary, ReceivablesSummary, Objective, Invoice, CancellationsDoc, DataQualitySummary } from "../types";
 
 // 3 — Objectifs / R-O
 const SCOPES = [
@@ -236,7 +236,15 @@ export const InvoiceList: FC<Props> = () => {
   // stables → identités de tableaux stables → la mémo interne de <ListView> tient (audit perf 2026-07).
   const rows = useMemo(() => allRows.filter((r) => match({ ...r, client: clientKey(r.client) }, ["bu", "client"])), [allRows, match, clientKey]); // les factures ne portent pas d'AM
   const canImport = useCanImport();
-  const { intent } = useNav();
+  const { intent, go, canGo } = useNav();
+  // SURFACTURATION (Σ factures d'une affaire > CAS commandé) : détectée côté serveur (domain/dataQuality
+  // + alerts, seuil `surfacturationPct` éditable en Admin) et corrigée au Centre de correction (recommandation
+  // chiffrée « facture en trop / relever le CAS », domain/remediation). On NE la recalcule PAS ici — on lit le
+  // compte de l'agrégat qualité et on le SURFACE sur l'écran Factures (elle n'y était pas visible), avec un
+  // rebond vers la correction. RBAC : un rôle sans le module Qualité lit `null` → la tuile ne s'affiche pas.
+  const { data: dq } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  const surfac = useMemo(() => (dq?.issues || []).find((x) => x.type === "surfacturation"), [dq]);
+  const surfacCount = surfac?.count || 0;
   const [f, setF] = useState<"all" | "linked" | "orphan">(intent?.segment === "orphan" ? "orphan" : "all");
   // Drill-through depuis le Centre d'alertes (« factures non rattachées ») → segment pré-sélectionné.
   useEffect(() => { if (intent?.segment === "orphan") setF("orphan"); }, [intent]);
@@ -263,9 +271,20 @@ export const InvoiceList: FC<Props> = () => {
       <FilterNote dims="BU / client" />
       {invError && <ErrorState error={invError} />}
       <TruncationNote show={truncated} cap={DEFAULT_SUB_CAP} />
-      {orphan.length > 0 && (
+      {(orphan.length > 0 || surfacCount > 0) && (
         <div className={grid4}>
-          <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />
+          {orphan.length > 0 && <Kpi label="Factures non rattachées" value={orphan.length.toLocaleString("fr-FR")} tone="clay" sub={`${fmt(orphanAmt)} FCFA`} />}
+          {/* Surfacturation : affaires dont le facturé dépasse le CAS commandé. Compte issu de l'agrégat qualité
+              (même prédicat que le Centre de correction et l'alerte). Tuile `.card` autonome (comme <Kpi>, sans
+              double cadre) + rebond vers la correction chiffrée. */}
+          {surfacCount > 0 && (
+            <div className="card p-3 sm:p-4 min-w-0 flex flex-col">
+              <div className="text-xs text-muted truncate">Affaires surfacturées</div>
+              <div className="font-display text-[22px] sm:text-[26px] leading-tight tabnum mt-1 text-clay">{surfacCount.toLocaleString("fr-FR")}</div>
+              <div className="text-xs text-muted mt-1">Σ factures &gt; CAS commandé</div>
+              {canGo("cleanup") && <button type="button" onClick={() => go("cleanup")} className="btn-ghost !px-2 !py-1 text-xs self-start mt-2 text-gold">Corriger dans Qualité &amp; correction →</button>}
+            </div>
+          )}
         </div>
       )}
       <Card title={`Factures · ${rows.length.toLocaleString("fr-FR")}`} actions={<div className="flex gap-1.5 items-center flex-wrap"><Segmented value={f} onChange={setF} ariaLabel="Filtrer les factures" options={[{ value: "all", label: "Toutes" }, { value: "linked", label: "Rattachées" }, { value: "orphan", label: "Non rattachées", count: orphan.length }]} />{canImport && <ImportButton label="Importer un delta" />}</div>}>
