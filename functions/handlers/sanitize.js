@@ -71,7 +71,11 @@ function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, ass
     await requireWrite(req, module);
     if (rateLimit && !(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de suppressions en peu de temps — patientez un instant.");
     // Rejette les id vides OU contenant « / » (segments de chemin imbriqués inattendus) — défense en profondeur.
-    const ids = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter((x) => x && !x.includes("/")).slice(0, 1000);
+    const validIds = (Array.isArray(d.ids) ? d.ids : []).map((x) => String(x || "")).filter((x) => x && !x.includes("/"));
+    const ids = validIds.slice(0, 1000); // plafond par appel (le client découpe en lots ≤1000 — cf. writes.ts)
+    // Troncature SIGNALÉE (jamais silencieuse) : au-delà du plafond, on renvoie `requested`/`truncated` pour
+    // que l'appelant boucle plutôt que de croire tout supprimé (le client le fait déjà ; garde-fou pour tout autre appelant).
+    const truncated = validIds.length > ids.length;
     if (!ids.length) throw new HttpsError("invalid-argument", "aucun identifiant fourni");
     // VISIBILITÉ PAR ENREGISTREMENT (OWD private) : pour une collection record-scopée (opportunités), un
     // rédacteur non-admin d'enregistrement ne peut supprimer QUE dans son périmètre — parité stricte avec
@@ -101,7 +105,7 @@ function createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, ass
       detail: { collection, count: ids.length, ids: ids.slice(0, 500), truncated: ids.length > 500 }, ts: FieldValue.serverTimestamp(),
     });
     await refreshNow("deleteRecords");
-    return { ok: true, count: ids.length };
+    return { ok: true, count: ids.length, requested: validIds.length, truncated };
   });
 
   // ANNULATION (statut « Annulée » persistant, overlay config/cancel* qui SURVIT aux ré-imports delta).

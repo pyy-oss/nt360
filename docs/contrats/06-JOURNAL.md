@@ -2337,3 +2337,35 @@ guarded() trace le message réel dans opsLog → à lire en prod si l'erreur per
 (capture prise 9 min après la fin d'un déploiement).
 
 **Vérifs.** Web 303/303, tsc/eslint 0, bundle 121,1 ≤ 122 Ko (aucun changement functions).
+
+---
+
+## 2026-07-22 — Remédiation de l'audit du module Admin (17 constats vérifiés, ADR-070)
+
+**Fait.** Audit de fond du module Admin (workflow 50 agents, chasse × 6 dimensions + double vérif adverse par
+constat) : 22 chassés → 17 confirmés / 5 réfutés (14 utilisateur, 3 technique). Dimension « RBAC & sécurité
+serveur » à ZÉRO (callables tous gardés). Après dédoublonnage : 12 constats distincts, tous traités en une
+PR (une seule, plus économe qu'un double cycle CI/déploiement).
+
+Correctifs (backend) : parité `correctionQueue` — `applyChargeDrops` (ADR-069) appliqué comme au recompute
+(+ `source` au select bcLines) ; `deleteRecords` — troncature 1000 SIGNALÉE (`requested`/`truncated`) et
+client découpé en lots ; `correctionQueue` retourne `scoped` (cadrage OWD privé).
+Correctifs (front) : `[object Object]` sur « Solder le RAF » (fmtFull) ; erreurs de lecture distinctes de
+l'état vide (listApiKeys, odooWebhookStatus, peek Montant) + « Réessayer » ; bascule MFA — busy + toast réel
++ confirmation anti-verrouillage ; anti-flash (QualityHero, Référentiels, dédup capped) ; troncature des
+abonnements du Centre signalée ; `money()` local ClickUp → `fmt` ; retrait emojis (🎉/🧠/💡/🗺️/⚡) ; bandeau
+« périmètre » expliquant l'écart hero↔Centre sous OWD privé.
+
+**Appris.** Rechute du piège `money()`-dans-template-literal (encore, sur « Solder le RAF ») : c'est un
+anti-pattern récurrent — un lint dédié (interdire `money(` dans un backtick) le tuerait à la source, à
+envisager. La vérif adverse a bien fait son travail : 5 réfutés dont 2 « recompute différé inerte » (faux —
+`requestRecompute` a un repli SYNCHRONE) qui auraient été de faux correctifs coûteux.
+
+**Vérifs.** Functions 1367/1367 (no-undef 166, deploy-targets 200/200 — aucune fonction nouvelle), web 303/303,
+tsc/eslint 0, bundle 121,2 ≤ 122 Ko.
+
+**À noter (non fait ici).** La parité `correctionQueue`↔recompute sur les charges supprimées n'est pas
+couverte par un test unitaire (nécessiterait l'émulateur Firestore ; la règle PURE `applyChargeDrops` l'est,
+elle, dans charges.test.js). Le garde-fou serveur MFA « refuser l'activation tant qu'aucun compte direction
+n'a de second facteur » n'est pas implémenté (nécessiterait une lecture des facteurs inscrits) : mitigé par
+la confirmation d'avertissement côté front.

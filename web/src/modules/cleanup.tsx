@@ -13,7 +13,7 @@ import { useNav } from "../lib/nav";
 import { useRecordScope } from "../lib/scope";
 import { Card, Tip, Badge, Busy, DangerBtn, Table, colText, colNum, cx, money, useToast, Modal } from "../design/components";
 import { DateField, Select } from "../design/inputs";
-import { T, pct } from "../design/tokens";
+import { T, pct, fmtFull } from "../design/tokens";
 import { frDate } from "../lib/format";
 import { plausibleYear } from "../lib/ids";
 import {
@@ -100,6 +100,9 @@ function CorrSection({ title, hint, children }: { title: string; hint?: string; 
 function DedupeSection() {
   const [res, setRes] = useState<DedupeResult | null>(null);
   const totalDup = res ? Object.values(res.result).reduce((s, r) => s + r.duplicates, 0) : 0;
+  // Collections dont le scan a été tronqué au plafond : « aucun doublon » n'y vaut que pour la partie
+  // scannée (parité avec admin.tsx DedupeCard) — sans quoi le verdict affirmait à tort la base propre.
+  const cappedCols = res ? Object.entries(res.result).filter(([, s]) => s.capped).map(([c]) => DEDUPE_LABEL[c] || c) : [];
   return (
     <CorrSection title="Doublons (factures / opportunités / BC)" hint="direction">
       <div className="flex gap-2 flex-wrap items-center">
@@ -139,7 +142,8 @@ function DedupeSection() {
           )}
           <Tip>{res.applied
             ? "Doublons supprimés — le meilleur enregistrement de chaque groupe (source figée, plus récent, plus complet) est conservé ; agrégats recalculés."
-            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — vérifiez l'aperçu (✓ conservé / ✗ écartés) puis cliquez « Supprimer ». Clé : N° FP canonique (opps/BC), numéro (factures).` : "Aucun doublon détecté."}</Tip>
+            : totalDup > 0 ? `${totalDup.toLocaleString("fr-FR")} doublon(s) détecté(s) — vérifiez l'aperçu (✓ conservé / ✗ écartés) puis cliquez « Supprimer ». Clé : N° FP canonique (opps/BC), numéro (factures).`
+            : cappedCols.length ? `Aucun doublon dans la partie scannée — analyse PARTIELLE (volume au-delà du plafond : ${cappedCols.join(", ")}). Des doublons peuvent subsister hors périmètre scanné.` : "Aucun doublon détecté."}</Tip>
         </div>
       ) : (
         <Tip>Analyse les factures, opportunités et BC fournisseurs (même clé métier ⇒ doublon), puis supprime les redondances en conservant le meilleur enregistrement de chaque groupe.</Tip>
@@ -217,7 +221,7 @@ function FieldFix({ label, placeholder, kind = "text", save, initial }: { label:
 function RecNote({ rec }: { rec: CorrectionRec }) {
   return (
     <div className="text-[11px] text-muted mt-0.5 pl-1">
-      💡 <span className="text-ink">Recommandation</span>
+      <span className="text-ink">Recommandation</span>
       {rec.value != null && <> : <b className="tabnum">{rec.value.toLocaleString("fr-FR")}</b></>}
       <span className="text-faint"> — {rec.basis}</span>
     </div>
@@ -313,7 +317,6 @@ function AiSuggestionRow({ item, s, canFix, onDone, onDismiss }: { item: Correct
   const applicable = s.action !== "review" && canFix;
   return (
     <div className={cx("ml-6 mt-0.5 flex items-start gap-2 text-[11px] rounded px-2 py-1 border", s.verified ? "bg-emerald/5 border-emerald/25" : "bg-gold/5 border-gold/20")}>
-      <span aria-hidden className="shrink-0">🧠</span>
       <div className="flex flex-col gap-0.5 grow min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <Badge tone={tone}>{conf}%</Badge>
@@ -512,8 +515,10 @@ function ItemFix({ item, kind, module, ent, canFix, caps, onDone, suggestion, on
     // Pré-rempli avec l'année portée par le N° FP lui-même (FP/AAAA/N) — jamais une année en dur.
     case "num-order-year": return row(<FieldFix label="Année PO" kind="number" placeholder="AAAA" initial={yearOfFp(item.fp) ? String(yearOfFp(item.fp)) : undefined} save={async (v) => { const y = Math.trunc(Number(v)); if (!(y >= 2000)) throw new Error("année invalide"); await patchOrder({ fp: item.fp!, yearPo: y }); await done(); }} />);
     // « Projet ClickUp clôturé mais RAF non nul » : l'action attendue est de SOLDER — un clic, ici.
+    // fmtFull (chaîne) et PAS money() (JSX) dans le gabarit du label : interpolé dans un template literal,
+    // money() affichait « [object Object] » (piège documenté — audit Admin).
     case "raf-order-zero": return row(
-      <Busy variant="ghost" label={`Solder le RAF${(item.raf || 0) > 0 ? ` (${money(item.raf!)} → 0)` : ""}`} okMsg="RAF soldé (recalcul lancé)" errMsg="Correction refusée"
+      <Busy variant="ghost" label={`Solder le RAF${(item.raf || 0) > 0 ? ` (${fmtFull(item.raf!)} → 0)` : ""}`} okMsg="RAF soldé (recalcul lancé)" errMsg="Correction refusée"
         fn={async () => { if (!item.fp) throw new Error("N° FP manquant"); await patchOrder({ fp: item.fp, raf: 0 }); await done(); }} />);
     case "text-order-client": return row(<FieldFix label="Client" placeholder="Client" save={async (v) => { if (!v.trim()) throw new Error("client requis"); await patchOrder({ fp: item.fp!, client: v.trim() }); await done(); }} />);
     case "text-order-am": return row(<FieldFix label="Commercial (AM)" placeholder="Commercial" save={async (v) => { if (!v.trim()) throw new Error("AM requis"); await patchOrder({ fp: item.fp!, am: v.trim() }); await done(); }} />);
@@ -591,10 +596,10 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
           <span className="text-ink truncate">{bucket.label}</span>
         </button>
         {canFix && cfg.kind !== "nav" && (
-          <Busy variant="ghost" label="🧠 IA" okMsg="Propositions IA prêtes" errMsg="Analyse IA refusée" fn={runAi} />
+          <Busy variant="ghost" label="IA" okMsg="Propositions IA prêtes" errMsg="Analyse IA refusée" fn={runAi} />
         )}
         {bulkGen && !confirmBulk && (
-          <button type="button" className="text-gold hover:underline text-[11px] shrink-0" onClick={() => setConfirmBulk(true)} title="Créer commande + opp gagnée pour toutes les factures non rattachées (FP canonique)">⚡ tout générer</button>
+          <button type="button" className="text-gold hover:underline text-[11px] shrink-0" onClick={() => setConfirmBulk(true)} title="Créer commande + opp gagnée pour toutes les factures non rattachées (FP canonique)">tout générer</button>
         )}
         {bulkGen && confirmBulk && (
           <span className="inline-flex items-center gap-1.5 shrink-0 text-[11px]">
@@ -611,12 +616,12 @@ function CorrectionBlock({ bucket, open, onToggle, canFix, caps, onDone }: { buc
           {aiInfo && (
             <div className="flex items-center gap-2 flex-wrap text-[11px] text-faint">
               <span>
-                🧠 IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""}
+                IA : {aiInfo.actionable} proposition{aiInfo.actionable > 1 ? "s" : ""}
                 {aiInfo.verified ? <> — <b className="text-emerald">{aiInfo.verifiedCount} vérifiée{aiInfo.verifiedCount > 1 ? "s" : ""}</b> par relecture adverse</> : <> applicable{aiInfo.actionable > 1 ? "s" : ""}</>}. <b>Vérifiez</b> puis « Appliquer » (écriture gouvernée).
                 {aiInfo.truncated && " Lot tronqué (60 max) — relancez après correction."}
               </span>
               {canFix && bulkItems().length > 0 && (
-                <Busy variant="ghost" label={`⚡ Appliquer les ${verifRan ? "vérifiées" : "fiables"} (${bulkItems().length})`}
+                <Busy variant="ghost" label={`Appliquer les ${verifRan ? "vérifiées" : "fiables"} (${bulkItems().length})`}
                   okMsg="Propositions appliquées" errMsg="Application refusée" fn={applyBulk} />
               )}
             </div>
@@ -677,8 +682,9 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
   const [buckets, setBuckets] = useState<CorrectionBucket[] | null>(null);
   const [plan, setPlan] = useState<RemediationPlan | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [scoped, setScoped] = useState(false); // assiette opps CADRÉE par visibilité (OWD privé, non-admin)
   const caps = { import: useCanImport(), pipeline: useCan("pipeline") === "write", bc: useCan("bc") === "write", rentabilite: useCan("rentabilite") === "write" };
-  const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); setPlan(r.plan || null); };
+  const load = async () => { const r = await correctionQueue(); setBuckets(r.buckets); setPlan(r.plan || null); setScoped(!!r.scoped); };
   const canFixBucket = (b: CorrectionBucket) => { const cap = FIX[b.type]?.cap; return cap ? !!caps[cap] : true; };
   return (
     <Card title="Centre de correction" actions={
@@ -688,8 +694,14 @@ function CorrectionCenter({ isDirection }: { isDirection: boolean }) {
       </div>
     }>
       <div className="flex flex-col gap-2">
-        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec le contexte de l'affaire, l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…), les <b>actions de ligne</b> (modifier, requalifier, annuler, ouvrir), une <b>💡 recommandation chiffrée</b> quand elle est déductible, et l'assistant <b>🧠 IA</b>. Cliquez <b>Analyser</b>.</Tip>}
-        {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine. 🎉</div>}
+        {buckets == null && <Tip>Point <b>unique</b> des anomalies : liste, <b>anomalie par anomalie</b>, les enregistrements concrets à corriger — avec le contexte de l'affaire, l'éditeur idoine <b>directement ici</b> (N° FP, année, montant, fournisseur, conversion devise…), les <b>actions de ligne</b> (modifier, requalifier, annuler, ouvrir), une <b>recommandation chiffrée</b> quand elle est déductible, et l'<b>assistant IA</b>. Cliquez <b>Analyser</b>.</Tip>}
+        {scoped && buckets && (
+          <div className="flex items-center gap-2 text-[12px] text-muted border border-hair rounded-lg px-3 py-1.5">
+            <Badge tone="gold">périmètre</Badge>
+            <span>Sous confidentialité par enregistrement (OWD privé), les anomalies d'<b>opportunités</b> listées ici sont cadrées sur votre périmètre (propriétaire + hiérarchie). Le total du bandeau « Qualité des données » ci-dessus est global — d'où un écart normal entre les deux.</span>
+          </div>
+        )}
+        {buckets && buckets.length === 0 && <div className="text-[13px] text-emerald">Aucune anomalie à corriger — base saine.</div>}
         {plan && buckets && buckets.length > 0 && <RemediationPlanCard plan={plan} onGo={(t) => setOpen((o) => ({ ...o, [t]: true }))} />}
         {buckets && buckets.map((b) => (
           <CorrectionBlock key={b.type} bucket={b} open={!!open[b.type]} onToggle={() => setOpen((o) => ({ ...o, [b.type]: !o[b.type] }))} canFix={canFixBucket(b)} caps={caps} onDone={load} />
@@ -906,7 +918,7 @@ function ClientReconcileSection() {
                 </div>
               ), (r: ReconListItem) => r.suggestions),
             ]} rows={list} />
-          ) : <div className="text-[13px] text-muted">Aucun client à rapprocher — tous les N° FP concordent. 🎉</div>
+          ) : <div className="text-[13px] text-muted">Aucun client à rapprocher — tous les N° FP concordent.</div>
         )}
         {scanned && <div className="text-[11px] text-faint">Analyse : {scanned.orders} commandes · {scanned.invoices} factures · {scanned.opps} opportunités.</div>}
 
@@ -954,7 +966,14 @@ function ClientReconcileSection() {
 // Entête PREMIUM du cockpit « Qualité & Correction » : score (anneau), anomalies, volumes ingérés et
 // tendance 30 j — réunit ce qu'affichait l'ancien écran « Qualité des données » (Référentiels), désormais
 // intégré ici (point unique). Bande gradient discrète, thème-aware via les tokens.
-function QualityHero({ data, days }: { data?: DataQualitySummary | null; days: { score: number }[] }) {
+function QualityHero({ data, days, loading }: { data?: DataQualitySummary | null; days: { score: number }[]; loading?: boolean }) {
+  // Garde de chargement : sans elle, `score ?? 1` affichait « 100 % · 0 anomalie » (base saine optimiste
+  // et fausse) tant que le summary n'était pas résolu, puis basculait sur le vrai score — flash trompeur.
+  if (loading && !data) return (
+    <div className="relative overflow-hidden rounded-2xl border border-hair bg-gradient-to-br from-panel2/50 to-panel px-5 py-4">
+      <div className="h-16 animate-pulse rounded-xl bg-hair/40" />
+    </div>
+  );
   const score = data?.score ?? 1;
   const color = score >= 0.9 ? T.emerald : score >= 0.7 ? T.gold : T.clay;
   const totalAnomalies = (data?.issues || []).reduce((s, i) => s + i.count, 0);
@@ -1003,7 +1022,7 @@ function QualityHero({ data, days }: { data?: DataQualitySummary | null; days: {
 }
 
 export const Cleanup: FC<Props> = () => {
-  const { data } = useDocData<DataQualitySummary>("summaries/dataQuality");
+  const { data, loading: dqLoading } = useDocData<DataQualitySummary>("summaries/dataQuality");
   const { data: qh } = useDocData<QualityHistory>("summaries/qualityHistory");
   const canImport = useCanImport();
   const canBc = useCan("bc") !== "none";
@@ -1013,9 +1032,13 @@ export const Cleanup: FC<Props> = () => {
   // NB : plus de chargement des `invoices` ici — les factures non rattachées sont traitées au Centre de
   // correction (prédicat FP CANONIQUE côté serveur), pas via le drapeau `linked` (jamais persisté à
   // l'ingestion → obsolète : il flaguait à tort quasi toutes les factures). Alignement des vues qualité.
-  const { rows: bcLines } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
+  const { rows: bcLines, truncated: bcTrunc } = useCollectionData<BcLine>(canBc ? "bcLines" : null);
   const oppScope = useRecordScope("opportunities"); // cadrage propriétaire+hiérarchie sous OWD « private »
-  const { rows: opps } = useCollectionData<Opportunity>(canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  const { rows: opps, truncated: oppTrunc } = useCollectionData<Opportunity>(canPipe && oppScope.ready ? "opportunities" : null, oppScope.constraints, oppScope.scoped ? "s" : "");
+  // Troncature SIGNALÉE (jamais silencieuse) : l'abonnement temps réel est plafonné (DEFAULT_SUB_CAP).
+  // Au-delà, les compteurs de purge ci-dessous portent sur un sous-ensemble → on avertit plutôt que
+  // de laisser croire la base entièrement balayée (cf. Qualité serveur = assiette complète).
+  const purgeTrunc = bcTrunc || oppTrunc;
 
   // BC NON RÉPARABLES : ni FP, ni fournisseur, ni N° BC, ni montant XOF → ligne vide/fantôme.
   const junkBcIds = bcLines.filter((b) => b.id && !b.fp && !b.supplier && !b.bcNumber && !((b.amountXof || 0) > 0)).map((b) => b.id!) as string[];
@@ -1024,10 +1047,16 @@ export const Cleanup: FC<Props> = () => {
   const days = (qh?.days || []).slice(-30);
   return (
     <div className="flex flex-col gap-4">
-      <QualityHero data={data} days={days} />
+      <QualityHero data={data} days={days} loading={dqLoading} />
 
       <Card title="Purge en lot">
         <div className="flex flex-col gap-2.5">
+          {purgeTrunc && (
+            <div className="flex items-center gap-2 text-[12px] text-clay border-b border-hair pb-2">
+              <Badge tone="clay">volume &gt; plafond</Badge>
+              <span>Les compteurs et listes de purge ci-dessous sont <b>partiels</b> (abonnement temps réel plafonné). Relancez après une première purge, ou passez par le Centre de correction (assiette complète, bornée côté serveur).</span>
+            </div>
+          )}
           {canImport && (
             <div className="flex items-center justify-between gap-2 text-[13px] border-b border-hair pb-2">
               <span className="text-ink">Factures non rattachées</span>

@@ -732,6 +732,19 @@ function SecurityCard({ users: _users }: { users: UserRow[] }) {
   const { data: owd } = useDocData<Partial<RecordAccess>>("config/recordAccess");
   const { data: sec } = useDocData<{ require2fa?: boolean }>("config/security");
   const [derive, setDerive] = useState(true);
+  const toast = useToast();
+  const [mfaBusy, setMfaBusy] = useState(false);
+  // MFA obligatoire : l'échec n'est plus avalé (busy + toast du message serveur réel — patron MntFeatureCard),
+  // et l'activation demande confirmation (risque de VERROUILLAGE : une session sans 2e facteur inscrit se voit
+  // refuser toutes les actions d'admin dès que le drapeau passe à true — cf. audit Admin).
+  const setMfa = async (v: boolean) => {
+    if (mfaBusy) return;
+    if (v && !window.confirm("Activer « MFA obligatoire » ?\n\nToutes les actions d'administration exigeront alors un 2e facteur. Si votre compte n'a pas encore de second facteur (TOTP) inscrit, VOS propres actions d'admin seront bloquées jusqu'à son inscription.\n\nConfirmer l'activation ?")) return;
+    setMfaBusy(true);
+    try { await callSetSecurityConfig(v); toast(v ? "MFA obligatoire ACTIVÉ" : "MFA obligatoire désactivé", "ok"); }
+    catch (e: any) { toast(`Échec — ${String(e?.message || e?.code || "").replace(/^functions\//, "") || "action refusée"}`, "err"); }
+    finally { setMfaBusy(false); }
+  };
   const opps = owd?.opportunities === "private" ? "private" : "public";
   const accts = owd?.accounts === "private" ? "private" : "public";
   const OwdRow = ({ label, obj, value }: { label: string; obj: keyof RecordAccess; value: "public" | "private" }) => (
@@ -758,7 +771,7 @@ function SecurityCard({ users: _users }: { users: UserRow[] }) {
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-hair pt-3">
         <div><div className="text-[13px]">MFA obligatoire (actions sensibles)</div><div className="text-[11px] text-muted">Exige un 2e facteur pour les opérations d'administration.</div></div>
-        <Toggle checked={!!sec?.require2fa} onChange={(v) => { callSetSecurityConfig(v).catch(() => {}); }} ariaLabel="MFA obligatoire" />
+        <Toggle checked={!!sec?.require2fa} onChange={setMfa} disabled={mfaBusy} ariaLabel="MFA obligatoire" />
       </div>
       <Tip>Passez un objet en <b>privé</b> APRÈS un ré-indexage (sinon les enregistrements sans propriétaire seraient invisibles des non-administrateurs). La direction et les administrateurs (droit « habilitations ») voient tout. Le SSO et le fournisseur MFA se configurent côté Identity Platform (console Firebase).</Tip>
     </Card>
@@ -810,7 +823,13 @@ export function ApiKeysCard() {
   const [canRead, setCanRead] = useState(true);
   const [canWriteScope, setCanWriteScope] = useState(false);
   const [fresh, setFresh] = useState<string | null>(null);
-  const load = async () => { try { const r = await listApiKeys(); setKeys(r.keys); } catch { setKeys([]); } };
+  // État d'erreur DISTINCT de l'état vide : un échec de lecture (réseau, droit, MFA requis) ne doit pas
+  // s'afficher comme « Aucune clé » (l'admin croirait l'organisation sans clé et en émettrait en double).
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const load = async () => {
+    try { const r = await listApiKeys(); setKeys(r.keys); setLoadErr(null); }
+    catch (e: any) { setLoadErr(String(e?.message || e?.code || "").replace(/^functions\//, "") || "lecture impossible"); }
+  };
   useEffect(() => { load().catch(() => {}); }, []);
   return (
     <Card title="Clés API (API REST /v1)" actions={
@@ -841,6 +860,8 @@ export function ApiKeysCard() {
             </div>
           ))}
         </div>
+      ) : loadErr ? (
+        <div className="text-[12px] text-clay">Impossible de charger les clés — {loadErr}. <button type="button" className="underline" onClick={() => { load().catch(() => {}); }}>Réessayer</button></div>
       ) : <Tip>Aucune clé. Créez une clé pour permettre à un système tiers d'appeler l'API REST : <code>GET /v1/opportunities</code>, <code>POST /v1/opportunities</code>, <code>GET /v1/accounts</code> — en-tête <code>Authorization: Bearer nt360_…</code>.</Tip>}
     </Card>
   );
@@ -946,7 +967,11 @@ export function OdooWebhookCard() {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof odooWebhookStatus>> | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [secret, setSecret] = useState("");
-  useEffect(() => { odooWebhookStatus().then((s) => { setStatus(s); setEnabled(s.enabled); }).catch(() => setStatus({ enabled: false, hasSecret: false })); }, []);
+  // État d'erreur DISTINCT de l'état réel {hasSecret:false} : un échec de lecture du statut ne doit pas
+  // s'afficher « Secret manquant » (l'admin ressaisirait un secret pourtant configuré, ou croirait l'intégration cassée).
+  const [statusErr, setStatusErr] = useState<string | null>(null);
+  const loadStatus = () => { setStatusErr(null); odooWebhookStatus().then((s) => { setStatus(s); setEnabled(s.enabled); }).catch((e: any) => setStatusErr(String(e?.message || e?.code || "").replace(/^functions\//, "") || "statut indisponible")); };
+  useEffect(() => { loadStatus(); }, []);
   const live = !!status && status.hasSecret && status.enabled;
   const save = async () => {
     const patch: { secret?: string; enabled?: boolean } = { enabled };
@@ -958,7 +983,8 @@ export function OdooWebhookCard() {
     <Card title="Webhook entrant — Odoo" actions={<Busy label="Enregistrer" okMsg="Intégration Odoo enregistrée" errMsg="Enregistrement refusé" fn={save} />}>
       <div className="flex flex-col gap-2 text-[13px]">
         <div className="flex items-center gap-2">
-          {status == null ? <Badge>chargement…</Badge> : live ? <Badge tone="emerald">Active</Badge> : status.hasSecret ? <Badge tone="clay">Désactivée</Badge> : <Badge tone="clay">Secret manquant</Badge>}
+          {statusErr ? <span className="inline-flex items-center gap-1.5"><Badge tone="clay">statut indisponible</Badge><button type="button" className="text-[11px] underline text-muted" onClick={loadStatus}>Réessayer</button></span>
+            : status == null ? <Badge>chargement…</Badge> : live ? <Badge tone="emerald">Active</Badge> : status.hasSecret ? <Badge tone="clay">Désactivée</Badge> : <Badge tone="clay">Secret manquant</Badge>}
           <span className="text-[11px] text-muted">Réception des mises à jour Odoo (source autoritaire) — opportunités, commandes, factures.</span>
         </div>
         <label className="flex items-center gap-2"><Toggle checked={enabled} onChange={setEnabled} ariaLabel="Activer l'intégration Odoo" />Activer la réception (interrupteur — coupe l'intégration sans supprimer le secret)</label>
