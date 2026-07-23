@@ -611,12 +611,9 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
 // creditLines / billingMilestones. L'écriture directe SDK est fermée → plus de donnée d'objectif posée
 // sans contrôle ni journal. Droit « objectifs ». Recompute des summaries qui lisent objectives (needObj :
 // atterrissage / ams / pipeline / news / alerts) → R/O et écarts d'objectif se rafraîchissent. ---
-// Objectifs (R/O CODIR) EXTRAITS dans handlers/objectives.js (patron R3). Deps injectées ; exports
-// déclarés ici (garde-fou de déploiement par nom).
-const { createObjectives } = require("@nt360/functions-shared/handlers/objectives");
-const _objectives = createObjectives({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
-exports.upsertObjective = _objectives.upsertObjective;
-exports.deleteObjective = _objectives.deleteObjective;
+// Objectifs (R/O CODIR) : EXTRAITS dans le codebase Firebase `functions-commerce/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 3), avec les fiches affaire. Handler partagé
+// (@nt360/functions-shared/handlers/objectives) ; seul le point d'entrée change.
 
 // postWebhook (notifications d'alerte Slack/Teams : POST JSON {text}) : extrait dans lib/runtime
 // (createRuntime, en tête de fichier) — partagé avec la colonne vertébrale onCallG/guarded. Sans
@@ -3166,14 +3163,9 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
 // FINALE, la fiche alimente le P&L de la commande (backbone orders + projectSheets/margin isolée),
 // consommé par mergeCommandes au prochain recompute. Doc id = safeId(FP) → 1 fiche par commande.
 // ============================================================================
-const { createFiches } = require("@nt360/functions-shared/handlers/fiches");
-const _fiches = createFiches({ onCallG, HttpsError, db, FieldValue, requestRecompute });
-exports.createFiche = _fiches.createFiche;
-exports.updateFiche = _fiches.updateFiche;
-exports.ficheAdvance = _fiches.ficheAdvance;
-exports.ficheReject = _fiches.ficheReject;
-exports.getFiche = _fiches.getFiche;
-exports.listFiches = _fiches.listFiches;
+// Fiches affaire : EXTRAITES dans le codebase Firebase `functions-commerce/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 3). Handler partagé (@nt360/functions-shared/handlers/fiches) ; seul
+// le point d'entrée change.
 
 // --- upsertOpsBulletin : enregistre le BULLETIN HEBDO « Hot Topics Opérations » (commentaires /
 // points clés d'une semaine d'exercice). Saisie MANUELLE (Phase 1) ; réservé à la DIRECTION et au

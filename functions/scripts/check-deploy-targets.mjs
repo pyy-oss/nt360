@@ -20,6 +20,7 @@ const CODEBASES = [
   { name: "default", root: join(here, "..") },                        // functions/
   { name: "partenariats", root: join(here, "..", "..", "functions-par") },
   { name: "rh", root: join(here, "..", "..", "functions-rh") },
+  { name: "commerce", root: join(here, "..", "..", "functions-commerce") },
 ];
 
 function exportsOf(root) {

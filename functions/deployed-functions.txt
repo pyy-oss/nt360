@@ -18,12 +18,6 @@ odooWebhook
 correctionQueue
 createApiKey
 createOrder
-createFiche
-updateFiche
-ficheAdvance
-ficheReject
-getFiche
-listFiches
 upsertOpsBulletin
 createUser
 curateNews
@@ -74,7 +68,6 @@ upsertMntIntervention
 upsertMntTicket
 upsertTimesheet
 deleteContact
-deleteObjective
 deleteOpportunity
 deleteRecords
 deleteReport
@@ -180,6 +173,5 @@ upsertSupplierInvoice
 deleteSupplierInvoice
 supplierNames
 setCostModel
-upsertObjective
 upsertOpportunity
 importDcAliases

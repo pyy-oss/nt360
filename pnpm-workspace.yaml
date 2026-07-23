@@ -4,3 +4,4 @@ packages:
   - "functions-shared"
   - "functions-par"
   - "functions-rh"
+  - "functions-commerce"

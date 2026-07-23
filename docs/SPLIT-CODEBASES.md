@@ -165,7 +165,17 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
    une fois le canal différé validé (ils écrivent des summaries).
    Vérifié EN SANDBOX : `default` 179 + `partenariats` 21 + `rh` 3 = 203 exports (inchangé) ;
    `check-deploy-targets` **178 + 21 + 3 = 202, disjoints** ; `check-no-undef` 173 fichiers ; 1386 tests verts.
-3. **Étapes 3..n** — un codebase par extraction, même procédure.
+2ter. **Étape 3 FAITE (code) — codebase `commerce` (`functions-commerce/`)** : OBJECTIFS (R/O CODIR) +
+   FICHES AFFAIRE (8 callables), retirés de `functions/index.js`. Seul couplage = recompute → **différé**
+   (même préalable que partenariats : canal différé vivant en prod). Les OPPORTUNITÉS rejoindront `commerce`
+   plus tard (après remontée au socle des helpers d'index.js : `visibleToFor`, `oppScope`, `fireOutbound`…).
+   Vérifié EN SANDBOX : `default` 171 + `partenariats` 21 + `rh` 3 + `commerce` 8 = 203 (inchangé) ;
+   `check-deploy-targets` **170 + 21 + 3 + 8 = 202, disjoints** ; `check-no-undef` 174 fichiers ; 1386 tests verts.
+3. **Étapes 4..n** — un codebase (ou une remontée de helpers au socle) par extraction, même procédure.
+   Restent couplés (helpers d'index.js à remonter au socle d'abord) : `opportunities` (visibleToFor,
+   oppScope, fireOutbound), `reports` (scopedOpps, loadUsersMap), `automations` (loadUsersMap, nowISO10),
+   `maintenance` (loadUsersMap, anyDirectionUid). Extractibles avec préalable différé seul : `sanitize`,
+   `staffing`+`timesheets` (→ `rh`, additif).
 4. **Étape finale** — `functions` résiduel devient `functions-core`.
 
 ## Définition de terminé
