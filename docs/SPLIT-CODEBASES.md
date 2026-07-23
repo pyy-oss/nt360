@@ -88,6 +88,29 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
 1. **Étape 0** — créer `functions-shared` (déplacer lib/domain/parsers + extraire l'infra d'index.js).
    `functions` continue de tout exporter en important `functions-shared`. **Aucun changement de topologie
    de déploiement** → deploy identique, risque quasi nul, valide la mécanique du package partagé.
+   **Sous-étape faite (socle infra, `functions/lib/runtime.js`)** : le premier pas — extraire l'infra
+   transverse d'`index.js` dans un module partagé injecté (`createRuntime(deps)`) — est réalisé et
+   vérifié EN L'ÉTAT (sans changement de topologie), en 4 incréments deploy-neutres :
+   - inc 1 : `logOps`, `assertPlainId`, `rateLimit` ;
+   - inc 2 : `requireWrite`, `requireRead` (matrice opposable) ;
+   - inc 3 : `onCallG` / `guarded` / `EXPECTED_ERR` / `SLOW_CALLABLE_MS` + `postWebhook` (colonne
+     vertébrale des callables) ;
+   - inc 4 : `isRecordAdmin`, `recordAccessOwd`, `assertRecordVisible`, `requireStrongAuth` (RBAC
+     record-level + MFA).
+
+   Chaque incrément vérifié : **203 exports** (identiques à la découverte Firebase), `check-no-undef`
+   vert, `check-deploy-targets` vert, **1386 tests** verts, et — pour les helpers à `require`
+   paresseux (`../domain/authz`) — un **appel forcé** confirmant que le chemin résout (le piège qui
+   passe le harness de chargement ET les tests mais casserait en prod). `createRuntime` est un simple
+   déplacement de code (corps extraits tels quels) : comportement runtime STRICTEMENT inchangé.
+
+   **Reste de l'Étape 0 (non fait ici, nécessite le workspace `functions-shared` + staging)** : bouger
+   `lib/`/`domain/`/`parsers/` dans le package partagé et transformer `functions/` en simple
+   consommateur `workspace:*`. `requestRecompute` / `refreshNowBestEffort` NE sont volontairement PAS
+   extraits dans le socle : ils dépendent de `recomputeSummaries` (orchestrateur du recompute), qui
+   appartient à `core`, pas à l'infra partagée — les extraire tirerait de la logique cœur dans le
+   package partagé. C'est la frontière où l'Étape 0 (socle) s'arrête et l'Étape 1 (topologie) prend le
+   relais.
 2. **Étape 1** — extraire le **1er** codebase le moins couplé (`ops` ou `partenariats`) dans son dossier +
    entrée, l'ajouter à `firebase.json`, le retirer de `functions`. Deploy-valider (vérifier 0 suppression
    inattendue). Rollback = retirer l'entrée.
@@ -103,5 +126,9 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
 
 ---
 
-**État** : PLAN validé, exécution NON commencée (nécessite un environnement avec CLI firebase + staging pour
-la validation déploiement de chaque étape). Voir le garde-fou ci-dessus avant toute exécution.
+**État** : PLAN validé. **Socle infra de l'Étape 0 EXÉCUTÉ et vérifié en l'état** (`functions/lib/runtime.js`,
+`createRuntime` — 4 incréments, cf. §Séquence pt 1) : déplacement de code deploy-neutre, 203 exports
+inchangés, guards + 1386 tests verts. **Reste à faire** : le package `functions-shared` (déplacement
+lib/domain/parsers) puis les Étapes 1+ (changement de topologie), qui nécessitent un environnement avec
+CLI firebase + **staging** pour la validation déploiement de chaque étape. Voir le garde-fou ci-dessus
+avant toute exécution des étapes de topologie.
