@@ -1683,16 +1683,9 @@ exports.aiRemediationSummary = onCallG(
 // SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps
 // et les managers voient l'annuaire) ; le COÛT (CJM) est CONFIDENTIEL → masqué sauf droit « rentabilite »
 // (même règle que la marge). Écriture (gestion du staffing) gouvernée « pipeline ». Audité.
-// Consultants (Lot 11) + Plan de charge / staffing (Lot 12) EXTRAITS dans handlers/staffing.js
-// (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom).
-const { createStaffing } = require("@nt360/functions-shared/handlers/staffing");
-const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow: recomputeSummaries, logOps });
-exports.upsertConsultant = _staffing.upsertConsultant;
-exports.deleteConsultant = _staffing.deleteConsultant;
-exports.listConsultants = _staffing.listConsultants;
-exports.upsertAssignment = _staffing.upsertAssignment;
-exports.deleteAssignment = _staffing.deleteAssignment;
-exports.staffingPlan = _staffing.staffingPlan;
+// Consultants + Plan de charge / staffing : EXTRAITS dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 4), avec les CRA/timesheets. Handler partagé
+// (@nt360/functions-shared/handlers/staffing) ; seul le point d'entrée change.
 
 // CONTRATS DE MAINTENANCE (module mnt_, Lot 1) — contrat adossé au N° FP + engagements SLA embarqués.
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
@@ -1803,20 +1796,9 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, months, openOppCount: opps.length, ...plan };
 });
 
-// === CRA / TEMPS CONSTATÉ + ACTIVITÉ ESN (Lots 15/17/19/20/21/22 « 20/10 DirOps ») EXTRAIT dans
-// handlers/timesheets.js (patron R3). CRA mensuel → TACE/occupation réels, tendance, auto-CRA ClickUp,
-// P&L par ressource et pré-facturation. Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createTimesheets } = require("@nt360/functions-shared/handlers/timesheets");
-const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow: recomputeSummaries, logOps });
-exports.upsertTimesheet = _timesheets.upsertTimesheet;
-exports.deleteTimesheet = _timesheets.deleteTimesheet;
-exports.timesheetKpis = _timesheets.timesheetKpis;
-exports.taceHistory = _timesheets.taceHistory;
-exports.importTimesheets = _timesheets.importTimesheets;
-exports.syncClickupTimesheets = _timesheets.syncClickupTimesheets;
-exports.resourcePnl = _timesheets.resourcePnl;
-exports.preBillingFromCra = _timesheets.preBillingFromCra;
-exports.deliveryMarginByAffaire = _timesheets.deliveryMarginByAffaire;
+// === CRA / TEMPS CONSTATÉ + ACTIVITÉ ESN : EXTRAIT dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 4), avec le staffing. Handler partagé
+// (@nt360/functions-shared/handlers/timesheets) ; seul le point d'entrée change.
 
 // === VIVIER / RECRUTEMENT (candidats) : EXTRAIT dans le codebase Firebase `functions-rh/` (split,
 // docs/SPLIT-CODEBASES.md, Étape 2). Les 3 callables (createCandidates) sont désormais déclarés là-bas

@@ -171,7 +171,16 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
    plus tard (après remontée au socle des helpers d'index.js : `visibleToFor`, `oppScope`, `fireOutbound`…).
    Vérifié EN SANDBOX : `default` 171 + `partenariats` 21 + `rh` 3 + `commerce` 8 = 203 (inchangé) ;
    `check-deploy-targets` **170 + 21 + 3 + 8 = 202, disjoints** ; `check-no-undef` 174 fichiers ; 1386 tests verts.
-3. **Étapes 4..n** — un codebase (ou une remontée de helpers au socle) par extraction, même procédure.
+2quater. **Étape 4 FAITE (code) — `staffing` + `timesheets` rejoignent `rh`** : consultants/plan de charge
+   (6) + CRA/temps/rentabilité ressource (15→9 exports timesheets) ajoutés au codebase `rh` existant.
+   Couplage recompute → **différé** (`recomputeNow: requestRecompute`), + secret ClickUp (même nom). NB :
+   ces 15 fonctions passent de `default` à `rh` = **transfert** (comme les autres) ; les futurs ajouts À
+   `rh` seront eux additifs. Vérifié EN SANDBOX : `default` 156 + `partenariats` 21 + `rh` 18 + `commerce` 8
+   = 203 (inchangé) ; `check-deploy-targets` **155 + 21 + 18 + 8 = 202, disjoints** ; `check-no-undef` 174 ;
+   1386 tests verts.
+3. **Étapes 5..n** — reste : `sanitize` (→ ops, différé seul) ; puis remontée au socle des helpers d'index.js
+   (`visibleToFor`, `oppScope`, `fireOutbound`, `loadUsersMap`, `scopedOpps`, `nowISO10`, `anyDirectionUid`)
+   qui débloque `opportunities` (→ commerce), `reports`/`automations` (→ ops), `maintenance` (→ mnt).
    Restent couplés (helpers d'index.js à remonter au socle d'abord) : `opportunities` (visibleToFor,
    oppScope, fireOutbound), `reports` (scopedOpps, loadUsersMap), `automations` (loadUsersMap, nowISO10),
    `maintenance` (loadUsersMap, anyDirectionUid). Extractibles avec préalable différé seul : `sanitize`,

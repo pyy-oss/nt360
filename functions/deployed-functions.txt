@@ -32,11 +32,8 @@ dedupe
 dedupeClickupTasks
 dedupeBcTasks
 deleteActivity
-deliveryMarginByAffaire
 generateFromInvoices
-deleteAssignment
 deleteClickupWebhook
-deleteConsultant
 deleteMntContrat
 deleteMntIntervention
 deleteMntTicket
@@ -46,19 +43,10 @@ aiMntLignees
 applyMntLignee
 revertMntAutoStatut
 setMntWatch
-deleteTimesheet
-listConsultants
 mntSlaSweep
-preBillingFromCra
-resourcePnl
-staffingPlan
-taceHistory
-timesheetKpis
-upsertAssignment
 submitMntDecision
 submitAstreinte
 listAstreintes
-upsertConsultant
 upsertMntContrat
 importMntContrats
 aiSuggestMntContrats
@@ -66,7 +54,6 @@ aiAnalyzeChurn
 mntContratPnl
 upsertMntIntervention
 upsertMntTicket
-upsertTimesheet
 deleteContact
 deleteOpportunity
 deleteRecords
@@ -79,7 +66,6 @@ fuzzyDuplicateClients
 exportReport
 forecastRollup
 importBcFromClickup
-importTimesheets
 importDelta
 importLegacyBackup
 importOpportunities
@@ -159,7 +145,6 @@ setupClickupWebhook
 submitForApproval
 syncBcFromClickup
 syncClickupCaf
-syncClickupTimesheets
 syncFromClickup
 syncOrderAmount
 syncSalesData
