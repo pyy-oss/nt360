@@ -1,9 +1,20 @@
 name: CI
 
+# push sur main (validation post-merge) + toute PR (validation pré-merge). On NE relance PLUS le CI
+# sur chaque push de branche : une branche à PR ouverte recevait DEUX runs par commit (event `push` +
+# event `pull_request`) — coût de runner doublé. La PR couvre les branches ; `push:[main]` couvre main.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+# Un seul run CI par branche à la fois : un nouveau commit ANNULE le run en cours devenu obsolète
+# (cancel-in-progress) au lieu d'empiler des runs parallèles (install + couverture + émulateur règles +
+# build + Playwright ≈ plusieurs minutes de runner chacun). C'est le pendant CI de la sérialisation des
+# déploiements — ce qui rend un empilement structurellement impossible.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
