@@ -6,6 +6,14 @@ name: Firebase Hosting Preview
 on:
   pull_request:
 
+# Un seul build+déploiement de preview par PR à la fois : un nouveau push ANNULE la preview en cours
+# devenue obsolète (cancel-in-progress) au lieu d'empiler des builds de hosting. (On NE filtre PAS par
+# `paths` ici, à dessein : une preview « skipped » pourrait perturber une protection de branche exigeant
+# ce check — le filtrage par paths reste réservé au workflow de déploiement, qui n'est pas un check de PR.)
+concurrency:
+  group: preview-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   checks: write
   contents: read

@@ -5,6 +5,15 @@ name: Firebase Deploy (main)
 on:
   push:
     branches: [main]
+    # Ne PAS redéployer (donc ne pas rebâtir de conteneurs Cloud Build ni republier le hosting) pour un
+    # merge qui ne touche QUE de la doc / des notes / la config d'agent : ces chemins n'affectent ni l'app
+    # buildée (web/) ni les fonctions. Un merge mixte (doc + code) déclenche bien le déploiement. C'est
+    # cette barrière qui évite qu'un simple merge de doc coûte un cycle de build complet.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".audit/**"
+      - ".claude/**"
 
 # Un SEUL déploiement Firebase à la fois. Deux merges rapprochés sur main lançaient deux `firebase deploy`
 # CONCURRENTS sur le même projet → collision Cloud Run / Artifact Registry (HTTP 409 « service already
