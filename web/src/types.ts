@@ -134,6 +134,8 @@ export interface OppSlippageSummary {
 export interface OppFunnelSummary {
   transitions?: { from: number; to: number; count: number; amount: number }[];
   won?: number; lost?: number; advanced?: number; regressed?: number; winRate?: number; total?: number;
+  // Win-rate EN VALEUR (montant gagné / tranché) — un gros deal perdu pèse alors autant qu'il vaut.
+  wonAmount?: number; lostAmount?: number; winRateValue?: number;
   // Taux de PROGRESSION par étape active (« où meurent les deals ») — dérivé des transitions.
   byStage?: { stage: number; out: number; advanced: number; regressed: number; lost: number; won: number; advanceRate: number; lossRate: number }[];
   // TEMPS moyen par étape active (« time-in-stage ») — séjours CLOS reconstitués depuis les horodatages.

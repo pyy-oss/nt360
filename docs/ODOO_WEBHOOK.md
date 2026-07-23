@@ -55,7 +55,7 @@ Rapprochement : par **N° FP** (canonicalisé), sinon par **odooId**, sinon cré
 | `am` | string | Commercial. |
 | `bu` | string | Business Unit (normalisée ; défaut `AUTRE`). |
 | `amount` | number | Montant HT (entier XOF). |
-| `stage` | number | Étape 1–6 (bornée). |
+| `stage` | number | Étape **1–9** (bornée) : 1 Qualification · 2 Montage · 3 Transmise · 4 Négociation · 5 Contractualisation · 6 **Gagné** · 7 **Perdu** · 8 Suspendu · 9 Annulé. **Ne mappez jamais un deal perdu sur 5** (= Contractualisation, actif à 80 %) : Perdu = **7**, sinon le funnel de conversion ne voit pas la transition « perdu ». |
 | `probability` | number | IdC en **%** (0–100) ; défaut selon l'étape. |
 | `mbPrev` | number | **MB prévisionnel** = marge brute en **%** (0–100, bornée). Alias acceptés : `mb`, `margin`, `marge`. Miroir de la colonne « MB » du LIVE Excel — sert de repli de marge au carnet (ADR-056). Écrit **seulement si fourni ET numérique** (n'écrase pas une valeur saisie ; « N/A » ignoré). |
 | `closingDate` | string | `AAAA-MM-JJ` (dates sentinelles rejetées). |
@@ -237,7 +237,7 @@ def _nt360_send(env, obj, records):
 ## 3. Mapper chaque modèle Odoo vers le contrat nt360
 
 Renseignez **au minimum les champs requis** (`fp` **ou** `odooId` pour l'opportunité ; `fp` pour la
-commande ; `numero` pour la facture). Adaptez les accès aux **champs personnalisés** de votre base (le N° FP
+commande ; `numero` pour la facture ; `bcNumber` pour le BC ; `name` pour le partner). Adaptez les accès aux **champs personnalisés** de votre base (le N° FP
 et la BU sont souvent des champs `x_studio_…` — remplacez les `TODO` par vos noms réels).
 
 ```python
@@ -245,7 +245,20 @@ def _fp(rec):        return rec.x_studio_fp or ""        # TODO: votre champ N°
 def _bu(rec):        return rec.x_studio_bu or ""         # TODO: votre champ Business Unit
 def _dc(rec):        return rec.x_studio_dc or ""         # TODO: votre champ N° DC (réf. externe, EN PLUS du FP)
 def _iso(d):         return d and str(d)[:10] or ""       # date/datetime Odoo → 'AAAA-MM-JJ'
-STAGE_MAP = {"New": 1, "Qualified": 2, "Proposition": 3, "Négociation": 4, "Won": 6, "Lost": 5}  # TODO: vos étapes → 1..6
+# nt360 étapes CANONIQUES : 1 Qualification · 2 Montage · 3 Transmise · 4 Négociation · 5 Contractualisation
+# · 6 Gagné · 7 Perdu · 8 Suspendu · 9 Annulé.  Adaptez la CLÉ (vos étapes CRM Odoo) ; la VALEUR doit rester
+# ces numéros — en particulier 6 = gagné et 7 = PERDU (jamais 5 : un perdu mappé sur 5 compte comme actif à
+# 80 % et le funnel de conversion ne voit pas la transition « perdu »).
+STAGE_MAP = {"New": 1, "Qualification": 1, "Montage": 2, "Proposition": 3, "Transmise": 3,
+             "Négociation": 4, "Contractualisation": 5, "Won": 6, "Lost": 7,
+             "Suspendu": 8, "Annulé": 9}  # TODO: vos étapes → 1..9
+
+def _stage(l):
+    # Odoo marque souvent un « perdu » par active=False (+ lost_reason) plutôt que par une étape dédiée :
+    # dans ce cas, forcer 7 quel que soit le stage_id courant. Sinon, traduire l'étape via STAGE_MAP.
+    if getattr(l, "active", True) is False and (l.probability or 0) == 0:
+        return 7
+    return STAGE_MAP.get(l.stage_id.name, 1)
 
 # crm.lead → opportunity
 def map_lead(l):
@@ -255,7 +268,7 @@ def map_lead(l):
         "designation": l.name or "",                       # nom / objet de l'affaire
         "am": l.user_id.name or "", "bu": _bu(l),
         "amount": l.expected_revenue or 0,
-        "stage": STAGE_MAP.get(l.stage_id.name, 1),
+        "stage": _stage(l),                               # 1..9 (6=gagné, 7=PERDU) — cf. STAGE_MAP
         "probability": l.probability or 0,                # IdC en % (0-100)
         "mbPrev": l.margin_percent or None,               # MB prévisionnel = marge brute en % (0-100), optionnel
         "closingDate": _iso(l.date_deadline),
@@ -311,6 +324,15 @@ def map_bc(p):
         "dc": _dc(p),                                      # réf. externe DC (en plus du FP ; sert de filet de rapprochement)
         "dateCreation": _iso(p.create_date),
     }
+
+# res.partner → partner  (client créé côté Odoo → ÉLARGIT la base client de référence, ADR-075).
+# N'envoyez QUE les VRAIS clients (pas les fournisseurs / contacts internes) : filtrez sur customer_rank.
+# Aucun montant attendu — l'activité vient des opps/commandes/factures ; partner ne fait qu'ajouter le nom.
+def map_partner(c):
+    return {
+        "odooId": "res.partner:%s" % c.id,
+        "name": c.name or c.display_name or "",            # canonicalisé côté nt360 (MAJUSCULES, formes juridiques retirées)
+    }
 ```
 
 Exemple d'appel dans une Server Action déclenchée sur `sale.order` :
@@ -329,6 +351,7 @@ Une *Automated Action* (`base.automation`) par modèle, **sur création et mise 
 | `sale.order` | À la création & mise à jour | `_nt360_send(env, "order", [map_order(r) for r in records])` |
 | `account.move` | À la validation (`state == 'posted'`) & mise à jour | `_nt360_send(env, "invoice", [map_invoice(r) for r in records])` |
 | `purchase.order` | À la confirmation (`state in ('purchase','done')`) & mise à jour | `_nt360_send(env, "bc", [map_bc(r) for r in records])` |
+| `res.partner` *(optionnel)* | À la création & mise à jour, filtré `customer_rank > 0` | `_nt360_send(env, "partner", [map_partner(r) for r in records])` — alimente la base client de référence (taux de couverture). |
 
 - **Idempotence** : renvoyer le même enregistrement est sans danger — nt360 fait un **upsert** sur un id
   déterministe (`fp`/`numero`/N° BC) ou par rapprochement `fp`→`odooId`. Aucun doublon.
@@ -355,6 +378,7 @@ PLAN = [
     ("account.move",   "invoice",     map_invoice, [("move_type", "=", "out_invoice"),   # factures CLIENT
                                                     ("state", "=", "posted")]),          # validées
     ("purchase.order", "bc",          map_bc,      [("state", "in", ("purchase", "done"))]),  # BC confirmés
+    ("res.partner",    "partner",     map_partner, [("customer_rank", ">", 0)]),              # clients (base de couverture) — optionnel
 ]
 for model, obj, mapper, domain in PLAN:
     Model  = env[model].sudo()
@@ -428,7 +452,7 @@ curl -sS -X POST "$URL" -H 'Content-Type: application/json' -H "X-Signature: $SI
 - [ ] `nt360.webhook_url` renseignée (URL déployée de `odooWebhook`).
 - [ ] Test `curl` signé → `200 {ok:true}`.
 - [ ] Champs `x_studio_fp` / `x_studio_bu` (ou équivalents) mappés dans `_fp`/`_bu`.
-- [ ] Table `STAGE_MAP` alignée sur vos étapes CRM → **1..6** (6 = gagné).
-- [ ] 3 Automated Actions (lead / order / invoice) sur création **et** mise à jour.
+- [ ] Table `STAGE_MAP` alignée sur vos étapes CRM → **1..9** (6 = gagné, **7 = perdu**, 8 = suspendu, 9 = annulé) ; « perdu » Odoo (`active=False`) forcé à **7**.
+- [ ] **4** Automated Actions (lead / order / invoice / **BC**) sur création **et** mise à jour — **+ partner** (`res.partner`, `customer_rank>0`) si vous alimentez la base clients (taux de couverture).
 - [ ] Rejeu prévu sur erreur réseau/`5xx` (renvoi idempotent).
 - [ ] Backfill initial paginé par lots ≤ 500.

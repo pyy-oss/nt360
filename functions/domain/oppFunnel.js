@@ -8,28 +8,34 @@
 //
 // @param {Array<{from?:number,to?:number,amount?:number,at?:any}>} history
 // @returns {{transitions:{from:number,to:number,count:number,amount:number}[], won:number, lost:number,
-//            advanced:number, regressed:number, winRate:number, total:number}}
+//            advanced:number, regressed:number, winRate:number, total:number,
+//            wonAmount:number, lostAmount:number, winRateValue:number}}
 function oppFunnel(history) {
   const trans = new Map(); // "from>to" → {from,to,count,amount}
   let won = 0, lost = 0, advanced = 0, regressed = 0, total = 0;
+  let wonAmount = 0, lostAmount = 0; // assiette EN VALEUR (montant des transitions Gagné/Perdu)
   for (const h of Array.isArray(history) ? history : []) {
     const from = Number(h && h.from) || 0;
     const to = Number(h && h.to) || 0;
     if (!to) continue; // transition inexploitable (pas d'étape cible)
     total++;
+    const amount = Number(h && h.amount) || 0;
     const k = `${from}>${to}`;
     const e = trans.get(k) || { from, to, count: 0, amount: 0 };
     e.count++;
-    e.amount += Number(h && h.amount) || 0;
+    e.amount += amount;
     trans.set(k, e);
-    if (to === 6) won++;             // passage en Gagné
-    else if (to === 7) lost++;       // passage en Perdu
+    if (to === 6) { won++; wonAmount += amount; }          // passage en Gagné
+    else if (to === 7) { lost++; lostAmount += amount; }   // passage en Perdu
     if (to > from && to <= 5) advanced++;        // progression dans le funnel actif
     else if (from >= 1 && from <= 5 && to < from) regressed++; // recul dans le funnel actif
   }
   const transitions = [...trans.values()].sort((a, b) => (a.from - b.from) || (a.to - b.to));
   const winRate = (won + lost) > 0 ? won / (won + lost) : 0;
-  return { transitions, won, lost, advanced, regressed, winRate, total };
+  // Win-rate EN VALEUR : part du montant gagné dans le montant tranché (gagné+perdu). Un gros deal perdu
+  // pèse alors autant qu'il vaut, là où le win-rate en NOMBRE le compte comme une opp parmi d'autres.
+  const winRateValue = (wonAmount + lostAmount) > 0 ? wonAmount / (wonAmount + lostAmount) : 0;
+  return { transitions, won, lost, advanced, regressed, winRate, total, wonAmount, lostAmount, winRateValue };
 }
 
 // Taux de PROGRESSION par étape (« où meurent les deals ») dérivé des transitions : pour chaque étape
