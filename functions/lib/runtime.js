@@ -8,7 +8,8 @@
 //
 // @param {{db, logger, HttpsError, FieldValue, onCall}} deps — services runtime déjà initialisés côté entrée.
 //        `onCall` = le wrapper maison (withMemory) autour de firebase-functions v2 https.onCall.
-// @returns {{logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook}}
+// @returns {{logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook,
+//            isRecordAdmin, recordAccessOwd, assertRecordVisible, requireStrongAuth}}
 function createRuntime({ db, logger, HttpsError, FieldValue, onCall }) {
   // Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
   // échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
@@ -76,6 +77,45 @@ function createRuntime({ db, logger, HttpsError, FieldValue, onCall }) {
     if (!canRead(matrix, role, module)) throw new HttpsError("permission-denied", `droit de lecture « ${module} » requis`);
   }
 
+  // « Administrateur d'enregistrements » = voit TOUT quel que soit l'OWD (direction ou droit
+  // d'écriture « habilitations »). Aligné sur le helper isRecordAdmin() des Security Rules.
+  async function isRecordAdmin(req) {
+    if (req.auth?.token?.nt360Role === "direction") return true;
+    const { canWrite } = require("../domain/authz");
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    return canWrite(matrix, req.auth?.token?.nt360Role, "habilitations");
+  }
+  // OWD courant d'un objet (config/recordAccess) : 'private' ou 'public' (défaut). Lecture unique.
+  async function recordAccessOwd(obj) {
+    const cfg = (await db.doc("config/recordAccess").get()).data() || {};
+    return cfg[obj] === "private" ? "private" : "public";
+  }
+
+  // GARDE RBAC PAR ENREGISTREMENT (audit) : sous OWD « private », une mutation ciblée (réattribution,
+  // édition, suppression, activité) exige que l'appelant VOIE déjà l'enregistrement (visibleTo). Sans
+  // cela, un rôle « pipeline » pouvait, par simple énumération d'id, éditer / SE RÉATTRIBUER (et donc
+  // lire) un enregistrement privé hors de son périmètre — les Security Rules cadrent la LECTURE directe
+  // mais pas ces callables Admin SDK. Les admins d'enregistrement (direction / droit habilitations) et
+  // l'OWD « public » (défaut historique) passent sans restriction. `curData` = doc DÉJÀ chargé.
+  async function assertRecordVisible(req, coll, curData) {
+    if (await isRecordAdmin(req)) return;
+    if ((await recordAccessOwd(coll)) !== "private") return;
+    const vt = Array.isArray(curData && curData.visibleTo) ? curData.visibleTo : [];
+    if (!vt.includes(req.auth.uid)) throw new HttpsError("permission-denied", "enregistrement non visible (OWD privé) — action refusée");
+  }
+
+  // Exige un 2e facteur (MFA) pour les actions sensibles SI config/security.require2fa est actif. Le jeton
+  // Firebase porte `firebase.sign_in_second_factor` quand l'utilisateur s'est authentifié avec un second
+  // facteur. Direction INCLUSE (pas d'exception : un compte admin est la cible la plus sensible). Par
+  // défaut inactif (require2fa=false) → aucun changement de comportement tant que la direction ne l'active pas.
+  async function requireStrongAuth(req) {
+    const sec = (await db.doc("config/security").get()).data() || {};
+    if (!sec.require2fa) return;
+    if (!req.auth?.token?.firebase?.sign_in_second_factor) {
+      throw new HttpsError("permission-denied", "authentification à deux facteurs requise pour cette action");
+    }
+  }
+
   // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
   // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
   async function postWebhook(url, text) {
@@ -134,7 +174,10 @@ function createRuntime({ db, logger, HttpsError, FieldValue, onCall }) {
     return onCall(merged, guarded(action, handler));
   }
 
-  return { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook };
+  return {
+    logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook,
+    isRecordAdmin, recordAccessOwd, assertRecordVisible, requireStrongAuth,
+  };
 }
 
 module.exports = { createRuntime };

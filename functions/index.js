@@ -65,7 +65,8 @@ const { MAX_SCAN, sliceCapped } = require("./domain/scan");
 // withMemory) — comportement inchangé. Placé tôt (avant toute définition qui les référence, dont les
 // exports onCallG(...) et les factories qui reçoivent onCallG) pour éviter tout TDZ.
 const { createRuntime } = require("./lib/runtime");
-const { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook } = createRuntime({ db, logger, HttpsError, FieldValue, onCall });
+const { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook,
+  isRecordAdmin, recordAccessOwd, assertRecordVisible, requireStrongAuth } = createRuntime({ db, logger, HttpsError, FieldValue, onCall });
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
@@ -1922,44 +1923,10 @@ async function reindexAllVisibility(opts = {}) {
   await commitChunks(cSnap.docs, (d) => accOwner[d.data().accountId] || null);
   return { updated, derived };
 }
-// « Administrateur d'enregistrements » = voit TOUT quel que soit l'OWD (direction ou droit
-// d'écriture « habilitations »). Aligné sur le helper isRecordAdmin() des Security Rules.
-async function isRecordAdmin(req) {
-  if (req.auth?.token?.nt360Role === "direction") return true;
-  const { canWrite } = require("./domain/authz");
-  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
-  return canWrite(matrix, req.auth?.token?.nt360Role, "habilitations");
-}
-// OWD courant d'un objet (config/recordAccess) : 'private' ou 'public' (défaut). Lecture unique.
-async function recordAccessOwd(obj) {
-  const cfg = (await db.doc("config/recordAccess").get()).data() || {};
-  return cfg[obj] === "private" ? "private" : "public";
-}
-
-// GARDE RBAC PAR ENREGISTREMENT (audit) : sous OWD « private », une mutation ciblée (réattribution,
-// édition, suppression, activité) exige que l'appelant VOIE déjà l'enregistrement (visibleTo). Sans
-// cela, un rôle « pipeline » pouvait, par simple énumération d'id, éditer / SE RÉATTRIBUER (et donc
-// lire) un enregistrement privé hors de son périmètre — les Security Rules cadrent la LECTURE directe
-// mais pas ces callables Admin SDK. Les admins d'enregistrement (direction / droit habilitations) et
-// l'OWD « public » (défaut historique) passent sans restriction. `curData` = doc DÉJÀ chargé.
-async function assertRecordVisible(req, coll, curData) {
-  if (await isRecordAdmin(req)) return;
-  if ((await recordAccessOwd(coll)) !== "private") return;
-  const vt = Array.isArray(curData && curData.visibleTo) ? curData.visibleTo : [];
-  if (!vt.includes(req.auth.uid)) throw new HttpsError("permission-denied", "enregistrement non visible (OWD privé) — action refusée");
-}
-
-// Exige un 2e facteur (MFA) pour les actions sensibles SI config/security.require2fa est actif. Le jeton
-// Firebase porte `firebase.sign_in_second_factor` quand l'utilisateur s'est authentifié avec un second
-// facteur. Direction INCLUSE (pas d'exception : un compte admin est la cible la plus sensible). Par
-// défaut inactif (require2fa=false) → aucun changement de comportement tant que la direction ne l'active pas.
-async function requireStrongAuth(req) {
-  const sec = (await db.doc("config/security").get()).data() || {};
-  if (!sec.require2fa) return;
-  if (!req.auth?.token?.firebase?.sign_in_second_factor) {
-    throw new HttpsError("permission-denied", "authentification à deux facteurs requise pour cette action");
-  }
-}
+// isRecordAdmin / recordAccessOwd / assertRecordVisible / requireStrongAuth : gardes RBAC PAR
+// ENREGISTREMENT (OWD private + visibleTo) et exigence MFA — extraites dans lib/runtime (createRuntime,
+// en tête de fichier). Comportement inchangé : mêmes lectures config (permissions/recordAccess/security),
+// même alignement sur les Security Rules. Voir lib/runtime.js.
 
 // Réaffecte le PROPRIÉTAIRE d'un enregistrement (opportunité ou compte) et recalcule sa visibleTo.
 // Gouverné « pipeline » (comme les autres mutations d'opp/compte), audité. Pour un compte, propage la
