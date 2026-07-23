@@ -589,7 +589,7 @@ export const Maintenance: FC<Props> = () => {
     colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
     ...(pnl.hasCost ? [
       colNum("Coût", (r: MntContratPnlRow) => (
-        <span className="tabnum" title={`Interventions (TMA) ${money(r.coutInterventions || 0)} + P&L affaire ${money(r.coutPnl || 0)} + Astreintes ${money(r.coutAstreintes || 0)}`}>{money(r.cout || 0)}</span>
+        <span className="tabnum" title={`Interventions (TMA) ${money(r.coutInterventions || 0)} + P&L affaire ${money(r.coutPnl || 0)}${(r.coutPnlReel || 0) > 0 ? ` (dont réel fournisseur ${money(r.coutPnlReel || 0)} — coût retenu = max planifié/réel, ADR-081)` : ""} + Astreintes ${money(r.coutAstreintes || 0)}`}>{money(r.cout || 0)}</span>
       ), (r: MntContratPnlRow) => r.cout || 0),
       colNum("Marge", (r: MntContratPnlRow) => (
         <span className={cx("tabnum", (r.marge || 0) < 0 ? "text-clay" : "text-emerald")}>
