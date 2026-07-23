@@ -675,9 +675,17 @@ function createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, 
       const aSnap = await db.collection("mnt_astreintes").limit(MAX_SCAN + 1).get();
       Object.assign(astreinteCostByFp, aggAst(sliceCapped(aSnap.docs).docs.map((d) => d.data())));
     }
+    // Coût RÉEL fournisseur par FP (Σ factures fournisseur, ADR-081) : la marge retient max(planifié, réel)
+    // par affaire → prudente ET fidèle aux dépassements décaissés. Même droit `rentabilite` (coût confidentiel).
+    const realCostByFp = {};
+    if (hasCost) {
+      const { supplierCostByFp } = require("../domain/fournisseurs");
+      const fSnap = await db.collection("supplierInvoices").limit(MAX_SCAN + 1).get();
+      Object.assign(realCostByFp, supplierCostByFp(sliceCapped(fSnap.docs).docs.map((d) => d.data())));
+    }
     const { computeContratPnl } = require("../domain/mntContratPnl");
     const asOf = new Date().toISOString().slice(0, 10);
-    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost, pnlCostByFp, astreinteCostByFp), hasCost };
+    return { ok: true, rows: computeContratPnl(contrats, interventions, cjmById, asOf, hasCost, pnlCostByFp, astreinteCostByFp, realCostByFp), hasCost };
   });
 
   return { upsertMntContrat, importMntContrats, aiSuggestMntContrats, aiMntLignees, applyMntLignee, aiAnalyzeChurn, aiMntContratStatut, revertMntAutoStatut, mntContratPnl, deleteMntContrat, setMntContratStatut, setMntWatch, upsertMntTicket, deleteMntTicket, upsertMntIntervention, deleteMntIntervention, submitMntDecision, submitAstreinte, listAstreintes };

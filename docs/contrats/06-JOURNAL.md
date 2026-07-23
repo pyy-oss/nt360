@@ -2713,3 +2713,29 @@ passage suffit (narration, pas écriture) — pas de vérification adverse comme
 **Bilan programme.** Les 5 lots du Centre de correction sont livrés : tableaux alignés (1), IA globale (2),
 actions IA auto-applicables (3, ADR-078), normalisation clients assistée IA (4), synthèse « par où
 commencer » (5, ADR-080) — plus le sélecteur de PM ClickUp et le Lot 6 (DC obligatoire, ADR-079).
+
+---
+
+## 2026-07-23 — Reprise dev projet actuel (migration gelée) : perf overview, recensement dette, marge mnt réelle
+
+**Contexte.** Migration vers projet dédié `neurones-360` **gelée** (compromission du compte Google
+propriétaire — account takeover ; prod `propulse-business-87f7a` intacte, compte séparé). Workflow V2
+désactivé (renommé `.disabled`, #590). On finalise sur le projet actuel ; backlog validé en interactif.
+
+**Fait.**
+- **Perf (#591)** : dérivations lourdes d'`overview.tsx` mémoïsées (`computeFilteredOverview`, `points`,
+  `liveInvoices`, `projTiers`) selon le patron `finance.tsx` ; `useMemo` placés AVANT les early-returns
+  (règle des hooks, ESLint CI). Comportement inchangé, 313 tests web verts.
+- **Recensement dette (lecture seule)** : 0 `TODO`/`FIXME`/`HACK`/`@ts-ignore`, 0 bloc de code commenté.
+  Dette balisée = 13 `eslint-disable react-hooks/exhaustive-deps` (idiome primitives design) + 179 `any`
+  (idiome accesseurs de colonnes). Vraie dette = documentée (runbooks). **Pas de lot de nettoyage justifié.**
+- **Marge maintenance réelle (ADR-081)** : `computeContratPnl` retient `max(coût planifié, coût réel
+  fournisseur)` par FP (`supplierCostByFp`, enfin câblé). Deux appelants synchronisés (callable Rentabilité
+  + recompute) ; `supplierInvoices` ajouté au gate `needCredit`. Additif : sans facture fournisseur, coût =
+  planifié → chiffres identiques. Champ `coutPnlReel` exposé (droit `rentabilite`). 1385 tests functions verts.
+
+**Décidé (interactif).** Odoo : lancer (dev Odoo dispo) ; source de vérité Odoo↔Excel : statu quo ;
+astreintes → ligne de fiche affaire ; funnel win-rate en valeur : à ajouter ; découpe `index.js` : plus tard.
+
+**Reste.** Astreintes objet porteur (fiche), funnel valeur, extension Odoo (émission côté Odoo) ; sécurité
+ops (couper facturation `neurones-360` + secret `FIREBASE_SERVICE_ACCOUNT_V2`).

@@ -3,6 +3,45 @@
 > Append-only. On ne modifie pas un ADR : on en écrit un nouveau qui le remplace.
 > Une décision non écrite est une décision qui sera re-débattue dans trois mois, sans mémoire.
 
+## ADR-081 — Marge contrat de maintenance : coût affaire = max(coût planifié, coût réel fournisseur) par FP
+
+- **Date :** 2026-07-23
+- **Statut :** Accepté
+- **Décideur :** Direction (arbitrage backlog : « brancher la marge maintenance sur les factures fournisseur réelles » — sémantique « max(planifié, réel) » retenue en interactif)
+
+### Contexte
+`computeContratPnl` (rentabilité par contrat) calculait le coût affaire à partir du **seul coût carnet
+PLANIFIÉ** (`costTotal` = achats BC + provisions, rapproché par `fpKey`). Le coût **RÉEL** — Σ des
+factures fournisseur (`supplierCostByFp`, Lot 8b/ADR-P21) — était correct et testé mais **jamais câblé**
+dans la marge. Un dépassement d'achat déjà décaissé restait donc invisible de la marge tant que la fiche
+n'était pas mise à jour.
+
+### Décision
+Le coût affaire retenu pour la marge = **`max(coût planifié, coût réel fournisseur)`** par N° FP :
+- **réel > planifié** → dépassement réel décaissé, reflété dans la marge (plus dure) ;
+- **planifié > réel** → provisions non encore facturées **conservées** (pas de marge optimiste) ;
+- **aucune facture fournisseur** → réel = 0 → `max` = planifié → **chiffres identiques à l'existant** (additif).
+
+Câblé aux **deux** appelants (invariant « une métrique = un nombre ») : le callable `mntContratPnl`
+(vue Rentabilité) et le recompute (`aggregate.js` → `summaries/mnt_risque`). `supplierInvoices` ajouté
+au gate `needCredit` (recompute `only=['maintenance']`). Champ `coutPnlReel` exposé (droit `rentabilite`)
+pour la réconciliation planifié↔réel côté front.
+
+### Alternatives écartées
+- **Remplacer** le planifié par le réel dès qu'une facture existe : perd les provisions non facturées →
+  marge **optimiste**, contraire à l'esprit PRUDENT du module (ADR-033). Écarté.
+- **Réconciliation d'affichage seule** (marge inchangée) : n'aurait rien corrigé au fond (marge toujours
+  aveugle aux dépassements). Écarté.
+
+### Conséquences
+- La marge devient un **plancher plus fidèle** : elle intègre les dépassements réels sans jamais
+  sous-estimer le coût. Reste MASQUÉE sans droit `rentabilite`.
+- Le palier de risque de marge (`mnt_risque`) peut se durcir pour les affaires en dépassement réel.
+
+### Ce qu'on saura dans six mois
+Si les utilisateurs saisissent peu de factures fournisseur, l'effet est nul (max = planifié) → réévaluer
+l'incitation à la saisie plutôt que la règle.
+
 ## ADR-080 — Synthèse IA « par où commencer » : narration PAR-DESSUS le plan déterministe, jamais un chiffre inventé
 
 - **Date :** 2026-07-22
