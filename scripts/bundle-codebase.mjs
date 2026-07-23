@@ -27,6 +27,7 @@
 
 import esbuild from "esbuild";
 import { builtinModules } from "node:module";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
@@ -34,9 +35,14 @@ import url from "node:url";
 const repoRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "..");
 const srcRel = process.argv[2];
 if (!srcRel) {
-  console.error("usage: node scripts/bundle-codebase.mjs <codebaseDir>");
+  console.error("usage: node scripts/bundle-codebase.mjs <codebaseDir> [--install]");
   process.exit(2);
 }
+// --install : installe node_modules DANS .deploy (deps réelles, plus de workspace:*). REQUIS au
+// déploiement : firebase-tools charge le code LOCALEMENT pour découvrir les triggers et exige
+// firebase-functions résoluble depuis le dossier source (sinon « Failed to find location of Firebase
+// Functions SDK »). Inutile pour la garde CI (elle charge via le node_modules hoïsté du repo).
+const doInstall = process.argv.includes("--install");
 const srcDir = path.join(repoRoot, srcRel);
 const outDir = path.join(srcDir, ".deploy");
 const entry = path.join(srcDir, "index.js");
@@ -133,5 +139,16 @@ for (const f of fs.readdirSync(srcDir)) {
   }
 }
 
+// node_modules local (discovery firebase-tools) mais EXCLU de l'upload : Cloud Build réinstalle
+// depuis package.json (deps réelles, npm sait résoudre). Évite un upload lourd inutile.
+fs.writeFileSync(path.join(outDir, ".gcloudignore"), "node_modules/\n");
+
+let installed = false;
+if (doInstall) {
+  execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", "--no-package-lock", "--prefix", outDir],
+    { stdio: "pipe" });
+  installed = true;
+}
+
 const kb = Math.round(fs.statSync(path.join(outDir, "index.js")).size / 1024);
-console.log(`✅ ${srcRel} → .deploy/ (bundle ${kb} KB, ${Object.keys(deps).length} deps: ${Object.keys(deps).join(", ")}${envCopied ? `, ${envCopied} .env` : ""})`);
+console.log(`✅ ${srcRel} → .deploy/ (bundle ${kb} KB, ${Object.keys(deps).length} deps: ${Object.keys(deps).join(", ")}${envCopied ? `, ${envCopied} .env` : ""}${installed ? ", node_modules installé" : ""})`);
