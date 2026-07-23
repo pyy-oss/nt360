@@ -59,11 +59,13 @@ db.settings({ ignoreUndefinedProperties: true });
 const { MAX_SCAN, sliceCapped } = require("./domain/scan");
 
 // Socle d'exécution partagé (Étape 0 du split en codebases, docs/SPLIT-CODEBASES.md) : logOps /
-// assertPlainId / rateLimit extraits dans lib/runtime pour être réutilisables par de futurs points
-// d'entrée. Injection des services déjà initialisés — comportement inchangé. Placé tôt (avant toute
-// définition qui les référence) pour éviter tout TDZ.
+// assertPlainId / rateLimit / requireWrite / requireRead + la colonne vertébrale des callables
+// (onCallG et son postWebhook d'alerte) extraits dans lib/runtime pour être réutilisables par de
+// futurs points d'entrée. Injection des services déjà initialisés (dont `onCall`, le wrapper maison
+// withMemory) — comportement inchangé. Placé tôt (avant toute définition qui les référence, dont les
+// exports onCallG(...) et les factories qui reçoivent onCallG) pour éviter tout TDZ.
 const { createRuntime } = require("./lib/runtime");
-const { logOps, assertPlainId, rateLimit, requireWrite, requireRead } = createRuntime({ db, logger, HttpsError, FieldValue });
+const { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook } = createRuntime({ db, logger, HttpsError, FieldValue, onCall });
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
@@ -615,12 +617,9 @@ const _objectives = createObjectives({ onCallG, HttpsError, db, FieldValue, requ
 exports.upsertObjective = _objectives.upsertObjective;
 exports.deleteObjective = _objectives.deleteObjective;
 
-// --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
-// config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
-async function postWebhook(url, text) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-  if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
-}
+// postWebhook (notifications d'alerte Slack/Teams : POST JSON {text}) : extrait dans lib/runtime
+// (createRuntime, en tête de fichier) — partagé avec la colonne vertébrale onCallG/guarded. Sans
+// URL/désactivé, tout no-op côté appelant.
 
 // --- NOTIFICATIONS EMAIL (Office 365 / Microsoft Graph). config/emailNotify (direction) + secret client
 // dans Secret Manager (GRAPH_CLIENT_SECRET). Envoi BEST-EFFORT (n'échoue jamais l'action appelante). ---
@@ -673,57 +672,10 @@ exports.sendTestEmail = onCallG("sendTestEmail", { secrets: [GRAPH_CLIENT_SECRET
   return { ok: true, ...r };
 });
 
-// Codes HttpsError « attendus » (rejets de validation/autorisation) : ne PAS les traiter comme des
-// incidents. Tout le reste = échec inattendu → journalisé dans opsLog + alerte webhook.
-const EXPECTED_ERR = new Set(["invalid-argument", "permission-denied", "unauthenticated", "failed-precondition", "not-found", "already-exists"]);
-
-// Enveloppe un handler onCall : capture les échecs INATTENDUS (observabilité), les trace dans
-// opsLog et, si un webhook est configuré, envoie une alerte de crash — puis re-propage l'erreur.
-// Seuil de LATENCE au-delà duquel un callable est jugé « lent » et tracé (observabilité SLA — R5). Un
-// Directeur des Opérations a besoin de voir les appels qui dérivent avant qu'ils ne deviennent des pannes.
-const SLOW_CALLABLE_MS = 8_000;
-function guarded(action, handler) {
-  return async (req) => {
-    const t0 = Date.now();
-    try {
-      const out = await handler(req);
-      // Succès : on ne journalise QUE les appels anormalement lents (pas de bruit sur le chemin nominal),
-      // avec leur durée → signal de latence exploitable dans Cloud Logging + collection ops.
-      const ms = Date.now() - t0;
-      if (ms >= SLOW_CALLABLE_MS) {
-        logger.warn(`${action} lent`, { action, durationMs: ms, uid: (req.auth && req.auth.uid) || null });
-        await logOps({ kind: "callable", action, status: "slow", uid: (req.auth && req.auth.uid) || null, durationMs: ms });
-      }
-      return out;
-    } catch (e) {
-      if (e && e.code && EXPECTED_ERR.has(e.code)) throw e; // rejet métier normal → pas un incident
-      const msg = (e && e.message) || String(e);
-      const durationMs = Date.now() - t0;
-      logger.error(`${action} a échoué`, { action, message: msg, durationMs, stack: e && e.stack });
-      await logOps({ kind: "callable", action, status: "error", uid: (req.auth && req.auth.uid) || null, error: msg, durationMs });
-      try {
-        const cfg = (await db.doc("config/notifications").get()).data();
-        if (cfg && cfg.enabled && cfg.webhookUrl) await postWebhook(cfg.webhookUrl, `⚠️ nt360 — échec de « ${action} » : ${msg}`);
-      } catch (_) { /* alerte best-effort */ }
-      throw e;
-    }
-  };
-}
-
-// onCall enveloppé par guarded() (observabilité). Supporte onCall(handler) ET onCall(opts, handler).
-// Fonction DÉCLARÉE (hoistée) car utilisée par des exports définis plus haut dans le fichier.
-//
-// App Check (F8) — ENFORCEMENT côté serveur, piloté par la variable d'environnement APPCHECK_ENFORCE.
-// OFF par défaut : activer (APPCHECK_ENFORCE=true) UNIQUEMENT une fois la clé reCAPTCHA v3 déployée
-// au client (VITE_APPCHECK_SITE_KEY) ET App Check enregistré dans la console Firebase — sinon TOUS
-// les appels callables seraient rejetés. Le drapeau est lu au chargement, à l'enregistrement de
-// chaque callable ; il permet de basculer par simple variable d'env, sans modifier le code.
-function onCallG(action, opts, handler) {
-  if (typeof opts === "function") { handler = opts; opts = {}; }
-  // enforceAppCheck ajouté quand le drapeau est actif ; un opts explicite reste prioritaire.
-  const merged = process.env.APPCHECK_ENFORCE === "true" ? { enforceAppCheck: true, ...opts } : opts;
-  return onCall(merged, guarded(action, handler));
-}
+// onCallG (+ guarded, EXPECTED_ERR, SLOW_CALLABLE_MS) : colonne vertébrale des callables — extraite
+// dans lib/runtime (createRuntime, en tête de fichier). Enveloppe chaque handler onCall pour tracer
+// les échecs INATTENDUS (opsLog + alerte webhook) et les appels lents (SLA R5), et applique
+// l'enforcement App Check (drapeau APPCHECK_ENFORCE). Comportement inchangé — voir lib/runtime.js.
 
 // requireWrite / requireRead : extraits dans lib/runtime (createRuntime, en tête de fichier). Gouvernance
 // par la matrice opposable (config/permissions) inchangée — même source que Security Rules + front.

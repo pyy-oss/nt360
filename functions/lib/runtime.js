@@ -6,9 +6,10 @@
 // historique inline dans index.js (mêmes corps, extraits tels quels) — ce module ne change RIEN au
 // runtime, il déplace seulement le code pour le rendre partageable.
 //
-// @param {{db, logger, HttpsError, FieldValue}} deps — services runtime déjà initialisés côté entrée.
-// @returns {{logOps, assertPlainId, rateLimit}}
-function createRuntime({ db, logger, HttpsError, FieldValue }) {
+// @param {{db, logger, HttpsError, FieldValue, onCall}} deps — services runtime déjà initialisés côté entrée.
+//        `onCall` = le wrapper maison (withMemory) autour de firebase-functions v2 https.onCall.
+// @returns {{logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook}}
+function createRuntime({ db, logger, HttpsError, FieldValue, onCall }) {
   // Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
   // échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
   async function logOps(entry) {
@@ -75,7 +76,65 @@ function createRuntime({ db, logger, HttpsError, FieldValue }) {
     if (!canRead(matrix, role, module)) throw new HttpsError("permission-denied", `droit de lecture « ${module} » requis`);
   }
 
-  return { logOps, assertPlainId, rateLimit, requireWrite, requireRead };
+  // --- Notifications d'alerte (webhook entrant Slack/Teams : POST JSON {text}). L'URL vit dans
+  // config/notifications (lecture réservée aux habilitations) ; sans URL/désactivé, tout no-op. ---
+  async function postWebhook(url, text) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!res.ok) throw new Error(`webhook HTTP ${res.status}`);
+  }
+
+  // Codes HttpsError « attendus » (rejets de validation/autorisation) : ne PAS les traiter comme des
+  // incidents. Tout le reste = échec inattendu → journalisé dans opsLog + alerte webhook.
+  const EXPECTED_ERR = new Set(["invalid-argument", "permission-denied", "unauthenticated", "failed-precondition", "not-found", "already-exists"]);
+
+  // Enveloppe un handler onCall : capture les échecs INATTENDUS (observabilité), les trace dans
+  // opsLog et, si un webhook est configuré, envoie une alerte de crash — puis re-propage l'erreur.
+  // Seuil de LATENCE au-delà duquel un callable est jugé « lent » et tracé (observabilité SLA — R5). Un
+  // Directeur des Opérations a besoin de voir les appels qui dérivent avant qu'ils ne deviennent des pannes.
+  const SLOW_CALLABLE_MS = 8_000;
+  function guarded(action, handler) {
+    return async (req) => {
+      const t0 = Date.now();
+      try {
+        const out = await handler(req);
+        // Succès : on ne journalise QUE les appels anormalement lents (pas de bruit sur le chemin nominal),
+        // avec leur durée → signal de latence exploitable dans Cloud Logging + collection ops.
+        const ms = Date.now() - t0;
+        if (ms >= SLOW_CALLABLE_MS) {
+          logger.warn(`${action} lent`, { action, durationMs: ms, uid: (req.auth && req.auth.uid) || null });
+          await logOps({ kind: "callable", action, status: "slow", uid: (req.auth && req.auth.uid) || null, durationMs: ms });
+        }
+        return out;
+      } catch (e) {
+        if (e && e.code && EXPECTED_ERR.has(e.code)) throw e; // rejet métier normal → pas un incident
+        const msg = (e && e.message) || String(e);
+        const durationMs = Date.now() - t0;
+        logger.error(`${action} a échoué`, { action, message: msg, durationMs, stack: e && e.stack });
+        await logOps({ kind: "callable", action, status: "error", uid: (req.auth && req.auth.uid) || null, error: msg, durationMs });
+        try {
+          const cfg = (await db.doc("config/notifications").get()).data();
+          if (cfg && cfg.enabled && cfg.webhookUrl) await postWebhook(cfg.webhookUrl, `⚠️ nt360 — échec de « ${action} » : ${msg}`);
+        } catch (_) { /* alerte best-effort */ }
+        throw e;
+      }
+    };
+  }
+
+  // onCall enveloppé par guarded() (observabilité). Supporte onCall(handler) ET onCall(opts, handler).
+  //
+  // App Check (F8) — ENFORCEMENT côté serveur, piloté par la variable d'environnement APPCHECK_ENFORCE.
+  // OFF par défaut : activer (APPCHECK_ENFORCE=true) UNIQUEMENT une fois la clé reCAPTCHA v3 déployée
+  // au client (VITE_APPCHECK_SITE_KEY) ET App Check enregistré dans la console Firebase — sinon TOUS
+  // les appels callables seraient rejetés. Le drapeau est lu au chargement, à l'enregistrement de
+  // chaque callable ; il permet de basculer par simple variable d'env, sans modifier le code.
+  function onCallG(action, opts, handler) {
+    if (typeof opts === "function") { handler = opts; opts = {}; }
+    // enforceAppCheck ajouté quand le drapeau est actif ; un opts explicite reste prioritaire.
+    const merged = process.env.APPCHECK_ENFORCE === "true" ? { enforceAppCheck: true, ...opts } : opts;
+    return onCall(merged, guarded(action, handler));
+  }
+
+  return { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook };
 }
 
 module.exports = { createRuntime };
