@@ -22,14 +22,23 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const LIST = resolve(HERE, "../deployed-functions.txt");
+// Depuis le split en codebases (docs/SPLIT-CODEBASES.md) : UN manifeste par codebase. La liste complète
+// = l'union de tous. `firebase deploy --only functions:<nom>` retrouve le codebase propriétaire de <nom>.
+const MANIFESTS = [
+  resolve(HERE, "../deployed-functions.txt"),               // codebase default (functions/)
+  resolve(HERE, "../../functions-par/deployed-functions.txt"), // codebase partenariats (functions-par/)
+];
 
 function fullTargets() {
-  // Source unique de vérité des fonctions déployables (une par ligne ; # et vides ignorées),
-  // le même fichier que vérifie check-deploy-targets.mjs contre les exports de index.js.
-  const lines = readFileSync(LIST, "utf8")
-    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-  return lines.map((fn) => `functions:${fn}`);
+  // Union des sources uniques de vérité (une fonction/ligne ; # et vides ignorées), les mêmes fichiers
+  // que vérifie check-deploy-targets.mjs contre les exports de chaque index.js.
+  const names = [];
+  for (const m of MANIFESTS) {
+    for (const l of readFileSync(m, "utf8").split("\n").map((s) => s.trim())) {
+      if (l && !l.startsWith("#")) names.push(l);
+    }
+  }
+  return names.map((fn) => `functions:${fn}`);
 }
 
 // Un chemin modifié impacte-t-il le DÉPLOIEMENT des fonctions ? Oui si sous functions/ OU functions-shared/
@@ -39,7 +48,8 @@ function fullTargets() {
 function affectsFunctions(path) {
   const inFunctions = path.startsWith("functions/");
   const inShared = path.startsWith("functions-shared/");
-  if (!inFunctions && !inShared) return false;
+  const inPar = path.startsWith("functions-par/");
+  if (!inFunctions && !inShared && !inPar) return false;
   if (path.startsWith("functions/test/") || path.startsWith("functions-shared/test/")) return false;
   if (path.endsWith(".md")) return false;
   return true;

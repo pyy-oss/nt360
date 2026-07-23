@@ -1722,33 +1722,11 @@ exports.submitMntDecision = _maintenance.submitMntDecision;
 exports.submitAstreinte = _maintenance.submitAstreinte;
 exports.listAstreintes = _maintenance.listAstreintes;
 
-// PARTENARIATS & CERTIFICATIONS (par_) — Lot 1 : référentiel partenaire (par_partners). Même patron
-// d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
-// config/parFeature). Exports déclarés ici (déploiement par nom).
-const { createPartenariats } = require("@nt360/functions-shared/handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, recomputeNow: recomputeSummaries, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
-exports.upsertParPartner = _partenariats.upsertParPartner;
-exports.deleteParPartner = _partenariats.deleteParPartner;
-exports.upsertParCertification = _partenariats.upsertParCertification;
-exports.deleteParCertification = _partenariats.deleteParCertification;
-exports.setParPartnerMap = _partenariats.setParPartnerMap;
-exports.upsertParAssignment = _partenariats.upsertParAssignment;
-exports.setParAssignmentStatus = _partenariats.setParAssignmentStatus;
-exports.deleteParAssignment = _partenariats.deleteParAssignment;
-exports.pushParAssignmentToClickup = _partenariats.pushParAssignmentToClickup;
-exports.generateParActionPlan = _partenariats.generateParActionPlan;
-exports.generateParQbr = _partenariats.generateParQbr;
-exports.suggestParPartnerMap = _partenariats.suggestParPartnerMap;
-exports.importParCertifications = _partenariats.importParCertifications;
-exports.importParCertificationsFile = _partenariats.importParCertificationsFile;
-// Avantages programme (PAR-L3) : deal registrations, fonds marketing (MDF), rebates.
-exports.upsertParDealReg = _partenariats.upsertParDealReg;
-exports.setParDealRegStatus = _partenariats.setParDealRegStatus;
-exports.deleteParDealReg = _partenariats.deleteParDealReg;
-exports.upsertParMdf = _partenariats.upsertParMdf;
-exports.deleteParMdf = _partenariats.deleteParMdf;
-exports.upsertParRebate = _partenariats.upsertParRebate;
-exports.deleteParRebate = _partenariats.deleteParRebate;
+// PARTENARIATS & CERTIFICATIONS (par_) : EXTRAIT dans le codebase Firebase dédié `functions-par/`
+// (split, docs/SPLIT-CODEBASES.md, Étape 1). Les ~21 callables (createPartenariats) sont désormais
+// déclarés là-bas et déployés sous le codebase `partenariats` — plus dans ce monolithe. Le handler
+// (@nt360/functions-shared/handlers/partenariats) reste partagé ; seul le point d'entrée change.
+// NB : `parRelancesSweep` (scheduler, couplé aux helpers email de ce fichier) RESTE ici pour l'instant.
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
