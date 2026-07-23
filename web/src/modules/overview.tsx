@@ -1,6 +1,6 @@
 // 1 — Cockpit décisionnel : atterrissage exercice (décision n°1) + chaîne de valeur
 // non additive + KPIs de pilotage (marge, cash) + alertes actionnables + tendance.
-import { useState, type FC } from "react";
+import { useState, useMemo, type FC } from "react";
 import { useDocData, useCollectionData } from "../lib/hooks";
 import { useCanExport, useCanSeeMargin, useClaims, useCan } from "../lib/rbac";
 import { useFilters } from "../lib/filters";
@@ -103,13 +103,27 @@ export const Overview: FC<Props> = ({ period }) => {
   // Niveaux de projection configurés (Certitudes/Forecast/Pipe) : appliqués au recalcul filtré pour
   // rester cohérent avec les agrégats serveur (mêmes poids/activation).
   const { data: projCfg } = useDocData<ProjectionConfig>("config/projection");
-  const projTiers = normalizeTiers(projCfg || undefined);
+  const projTiers = useMemo(() => normalizeTiers(projCfg || undefined), [projCfg]);
   // Overlay de réconciliation N° FP (config/fpAliases) : passé au recalcul filtré pour redirriger le FP des
   // opps/factures brutes vers le FP du P&L, EN MIROIR du recompute serveur (sinon la Vue d'ensemble filtrée
   // diverge de l'agrégat — double-compte pipeline, factures aliasées non rattachées).
   const { data: fpAliases } = useDocData<{ map?: Record<string, string> }>(active ? "config/fpAliases" : null);
   // Résolveur de nom client canonique (miroir serveur) — aligne le filtre client sur les clés de clients_all.
   const clientKey = useClientKey();
+  const fy = att?.fy || cfg?.currentFy;
+  // Dérivations lourdes MÉMOÏSÉES (patron finance.tsx) — placées AVANT les early-returns (règle des hooks,
+  // gardée par l'ESLint CI). `match`/`clientKey`/`projTiers` sont stables → computeFilteredOverview ne
+  // re-tourne qu'à changement réel d'entrée (sinon recalcul complet à CHAQUE render en vue filtrée).
+  const cancelledInv = useMemo(() => new Set((cxlInv?.items || []).map((e) => e.id)), [cxlInv]);
+  const liveInvoices = useMemo(() => (cancelledInv.size ? allInvoices.filter((i) => !cancelledInv.has(i.id!)) : allInvoices), [allInvoices, cancelledInv]);
+  const excludeDormant = (projCfg as { excludeDormant?: boolean } | null)?.excludeDormant !== false;
+  const filtered = useMemo(
+    () => (active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases?.map, clientKey, Number(fy) || undefined, excludeDormant) : null),
+    [active, cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases, clientKey, fy, excludeDormant]
+  );
+  const points = useMemo(() => (trends?.points || []).map((p) => ({
+    name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
+  })), [trends]);
   const fresh = cfg?.lastRecomputeAt ? relTime(cfg.lastRecomputeAt) : "";
   const actions = (
     <div className="flex flex-wrap gap-2 items-center justify-end">
@@ -122,17 +136,8 @@ export const Overview: FC<Props> = ({ period }) => {
   if (loading && !data) return <div className="flex flex-col gap-4"><KpiSkeletons n={4} /><CardSkeleton h={120} /></div>;
   if (!data) return <div className="flex flex-col gap-3"><div className="flex justify-end">{actions}</div><AlertsBanner /><EmptyState /></div>;
 
-  const fy = att?.fy || cfg?.currentFy;
-  const points = (trends?.points || []).map((p) => ({
-    name: p.date, "Projeté CAS": p.projeteCas || 0, "Réalisé CAS": p.casReel || 0, "Facturé": p.caf || 0, Backlog: p.backlog || 0,
-  }));
-  // Vue par périmètre si le filtre est actif, sinon l'agrégat serveur. Factures annulées retirées
-  // (parité serveur/finance.tsx) avant recalcul du CAF filtré.
-  const cancelledInv = new Set((cxlInv?.items || []).map((e) => e.id));
-  const liveInvoices = cancelledInv.size ? allInvoices.filter((i) => !cancelledInv.has(i.id!)) : allInvoices;
-  // Exclusion des DORMANTES (miroir aggregate) : `currentFy` (exercice) + drapeau config/projection.
-  const excludeDormant = (projCfg as { excludeDormant?: boolean } | null)?.excludeDormant !== false;
-  const filtered = active ? computeFilteredOverview(cmdRows, liveInvoices, allOpps, period, match, projTiers, fpAliases?.map, clientKey, Number(fy) || undefined, excludeDormant) : null;
+  // `filtered`/`points`/`fy` sont dérivés & mémoïsés en amont (avant les early-returns). Vue par périmètre
+  // si le filtre est actif, sinon l'agrégat serveur ; factures annulées déjà retirées (parité finance.tsx).
   const v = filtered ?? data;
   const filterLabel = [f.bu, f.am, f.client].filter(Boolean).join(" · ");
   // Marge : recalcul filtré (cmdRows) si filtre actif, sinon doc marge gated (undefined si non autorisé).
