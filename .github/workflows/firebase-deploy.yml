@@ -138,10 +138,14 @@ jobs:
       # Un hook `predeploy` referait ce build, mais on le fait ICI explicitement pour que les .deploy/
       # existent AVANT que firebase lise la config, et pour recopier functions/.env (écrit plus haut)
       # dans functions/.deploy/ (Firebase lit le .env DANS le dossier source du codebase).
+      # --install : installe node_modules DANS chaque .deploy (deps réelles). Requis car firebase-tools
+      # charge le code LOCALEMENT pour découvrir les triggers et exige firebase-functions résoluble
+      # depuis le dossier source. Ce node_modules est exclu de l'upload (.gcloudignore) → Cloud Build
+      # réinstalle depuis package.json.
       - name: Bundle des codebases (esbuild → .deploy self-contained)
         run: |
           for cb in functions functions-par functions-rh functions-commerce functions-ops; do
-            node scripts/bundle-codebase.mjs "$cb"
+            node scripts/bundle-codebase.mjs "$cb" --install
           done
 
       # Projet PARTAGÉ : déploiement scopé (site hosting dédié, base Firestore nommée
