@@ -58,6 +58,13 @@ db.settings({ ignoreUndefinedProperties: true });
 // dépassement, puis troncature SIGNALÉE (jamais silencieuse) via `sliceCapped` + auditLog côté appelant.
 const { MAX_SCAN, sliceCapped } = require("./domain/scan");
 
+// Socle d'exécution partagé (Étape 0 du split en codebases, docs/SPLIT-CODEBASES.md) : logOps /
+// assertPlainId / rateLimit extraits dans lib/runtime pour être réutilisables par de futurs points
+// d'entrée. Injection des services déjà initialisés — comportement inchangé. Placé tôt (avant toute
+// définition qui les référence) pour éviter tout TDZ.
+const { createRuntime } = require("./lib/runtime");
+const { logOps, assertPlainId, rateLimit } = createRuntime({ db, logger, HttpsError, FieldValue });
+
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
 // dual-region eur4 (non déployable comme région de fonction). Le trigger n'est donc exporté
@@ -291,47 +298,8 @@ async function refreshNowBestEffort(action, scope) {
   }
 }
 
-// Journal d'EXPLOITATION : trace persistante des recomputes (manuels/planifiés) et de leurs
-// échecs, pour l'observabilité (surfacé en Admin). N'échoue jamais l'action appelante.
-async function logOps(entry) {
-  try {
-    await db.collection("opsLog").add({ ...entry, ts: FieldValue.serverTimestamp() });
-  } catch (e) {
-    logger.error("opsLog: écriture impossible", { message: e && e.message });
-  }
-}
-
-// Rejette un id destiné à un chemin de document s'il est vide ou contient « / » (segments imbriqués
-// inattendus). Défense en profondeur sur les callables construisant db.doc(`collection/${id}`) à partir
-// d'une entrée client (Firestore traite déjà les segments littéralement, mais on refuse tôt et clair).
-function assertPlainId(id, label = "id") {
-  const s = String(id == null ? "" : id);
-  if (!s || s.includes("/")) throw new HttpsError("invalid-argument", `${label} invalide`);
-  return s;
-}
-
-// Limiteur de débit par (uid, type) — best-effort, transactionnel sur rateLimits/{kind}_{uid} avec une
-// fenêtre glissante. Renvoie true si l'action est AUTORISÉE, false si le quota est dépassé (l'appelant
-// abandonne alors silencieusement). Anti-flood des journaux écrits par tout compte authentifié (errorLog).
-async function rateLimit(uid, kind, maxPerWindow, windowMs) {
-  if (!uid) return false;
-  const ref = db.doc(`rateLimits/${kind}_${uid}`);
-  try {
-    return await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const now = Date.now();
-      const d = snap.exists ? snap.data() : null;
-      const within = d && typeof d.windowStartMs === "number" && (now - d.windowStartMs) < windowMs;
-      const count = within ? (Number(d.count) || 0) : 0;
-      if (count >= maxPerWindow) return false;
-      tx.set(ref, { windowStartMs: within ? d.windowStartMs : now, count: count + 1, updatedMs: now }, { merge: true });
-      return true;
-    });
-  } catch (e) {
-    logger.warn("rateLimit: transaction échouée (fail-open)", { kind, message: e && e.message });
-    return true; // en cas d'erreur d'infra, ne pas bloquer l'action légitime
-  }
-}
+// logOps / assertPlainId / rateLimit : extraits dans lib/runtime (createRuntime, en tête de fichier)
+// pour être partageables par de futurs points d'entrée (split codebases). Comportement inchangé.
 
 // --- setUserRole : pose du rôle (custom claim), admin uniquement (§8) ---
 const ROLES = ["direction", "commercial_dir", "commercial", "pmo", "achats", "assistante", "lecture", "finance", "directeur_contrats", "data_steward"];
