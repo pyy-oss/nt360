@@ -1,17 +1,19 @@
 {
-  "name": "functions",
+  "name": "@nt360/functions-shared",
+  "version": "0.0.0",
+  "private": true,
   "engines": {
     "node": "20"
   },
-  "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "test:rules": "vitest run --config vitest.rules.config.js"
+    "test": "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js",
+    "test:coverage": "vitest run --config vitest.config.js --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@google-cloud/firestore": "^7",
-    "@nt360/functions-shared": "workspace:*",
     "exceljs": "^4",
     "fflate": "^0.8",
     "firebase-admin": "^12",
@@ -20,8 +22,7 @@
     "pdfkit": "^0.15"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^3",
-    "firebase": "^10",
+    "@vitest/coverage-v8": "^2",
     "vitest": "^2"
   }
 }

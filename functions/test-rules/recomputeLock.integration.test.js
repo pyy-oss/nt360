@@ -8,7 +8,7 @@ import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
 import { initializeApp, deleteApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
-const { runSerialized } = require("../lib/aggregate");
+const { runSerialized } = require("@nt360/functions-shared/lib/aggregate");
 const LOCK = "config/recomputeLock";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

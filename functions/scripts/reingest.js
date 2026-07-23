@@ -10,8 +10,8 @@
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
-const { IMPORTS_BUCKET, FIRESTORE_DB } = require("../lib/config");
-const { reingestBucket } = require("../lib/reingest");
+const { IMPORTS_BUCKET, FIRESTORE_DB } = require("@nt360/functions-shared/lib/config");
+const { reingestBucket } = require("@nt360/functions-shared/lib/reingest");
 
 const saPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "propulse-business-87f7a";

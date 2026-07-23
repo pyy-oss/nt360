@@ -9,6 +9,11 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."); // dossier functions/
+// Le code serveur PARTAGÉ (lib/domain/parsers/handlers) vit désormais dans le package @nt360/functions-shared
+// (split en codebases, docs/SPLIT-CODEBASES.md). On lint donc les DEUX : le point d'entrée (functions/) et le socle.
+// ESLint tourne depuis la RACINE du dépôt : sinon les fichiers hors du cwd (functions-shared/*) sont « ignorés ».
+const repoRoot = path.resolve(root, "..");
+const shared = path.join(repoRoot, "functions-shared");
 
 // Globals Node (CommonJS) — évite la dépendance au paquet `globals` (non installé au niveau workspace).
 const nodeGlobals = {
@@ -21,7 +26,7 @@ const nodeGlobals = {
 };
 
 const eslint = new ESLint({
-  cwd: root,
+  cwd: repoRoot,
   overrideConfigFile: true, // ignore toute config eslint alentour → garde autonome et déterministe
   overrideConfig: [{
     files: ["**/*.js"],
@@ -40,7 +45,10 @@ const eslint = new ESLint({
 });
 
 // Code SERVEUR déployé uniquement (pas les tests, ni coverage/node_modules).
-const targets = ["index.js", "lib", "domain", "parsers", "handlers", "scripts"].map((p) => path.join(root, p));
+const targets = [
+  path.join(root, "index.js"), path.join(root, "scripts"),
+  ...["lib", "domain", "parsers", "handlers"].map((p) => path.join(shared, p)),
+];
 const results = await eslint.lintFiles(targets);
 const problems = results.filter((r) => r.errorCount > 0);
 

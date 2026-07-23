@@ -20,6 +20,9 @@ importers:
       '@google-cloud/firestore':
         specifier: ^7
         version: 7.11.6
+      '@nt360/functions-shared':
+        specifier: workspace:*
+        version: link:../functions-shared
       exceljs:
         specifier: ^4
         version: 4.4.0
@@ -42,12 +45,43 @@ importers:
       '@firebase/rules-unit-testing':
         specifier: ^3
         version: 3.0.4(firebase@10.14.1)
-      '@vitest/coverage-v8':
-        specifier: ^2
-        version: 2.1.9(vitest@2.1.9(@types/node@26.0.1)(jsdom@25.0.1(canvas@2.11.2)))
       firebase:
         specifier: ^10
         version: 10.14.1
+      vitest:
+        specifier: ^2
+        version: 2.1.9(@types/node@26.0.1)(jsdom@25.0.1(canvas@2.11.2))
+
+  functions-shared:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.110.0
+        version: 0.110.0
+      '@google-cloud/firestore':
+        specifier: ^7
+        version: 7.11.6
+      exceljs:
+        specifier: ^4
+        version: 4.4.0
+      fflate:
+        specifier: ^0.8
+        version: 0.8.3
+      firebase-admin:
+        specifier: ^12
+        version: 12.7.0
+      firebase-functions:
+        specifier: ^5
+        version: 5.1.1(firebase-admin@12.7.0)
+      pdfjs-dist:
+        specifier: 3.11.174
+        version: 3.11.174
+      pdfkit:
+        specifier: ^0.15
+        version: 0.15.2
+    devDependencies:
+      '@vitest/coverage-v8':
+        specifier: ^2
+        version: 2.1.9(vitest@2.1.9(@types/node@26.0.1)(jsdom@25.0.1(canvas@2.11.2)))
       vitest:
         specifier: ^2
         version: 2.1.9(@types/node@26.0.1)(jsdom@25.0.1(canvas@2.11.2))
