@@ -63,7 +63,7 @@ const { MAX_SCAN, sliceCapped } = require("./domain/scan");
 // d'entrée. Injection des services déjà initialisés — comportement inchangé. Placé tôt (avant toute
 // définition qui les référence) pour éviter tout TDZ.
 const { createRuntime } = require("./lib/runtime");
-const { logOps, assertPlainId, rateLimit } = createRuntime({ db, logger, HttpsError, FieldValue });
+const { logOps, assertPlainId, rateLimit, requireWrite, requireRead } = createRuntime({ db, logger, HttpsError, FieldValue });
 
 // --- F2 : Ingestion SheetJS idempotente (Storage trigger sur gs://nt360) ---
 // Le déclencheur Storage doit être dans la MÊME région que le bucket. gs://nt360 est en
@@ -725,28 +725,8 @@ function onCallG(action, opts, handler) {
   return onCall(merged, guarded(action, handler));
 }
 
-// Autorisation d'ÉCRITURE d'un callable, GOUVERNÉE PAR LA MATRICE OPPOSABLE (config/permissions) —
-// même source que les Security Rules et le front. Révoquer un droit dans Habilitations a donc un
-// effet RÉEL sur les mutations serveur. `direction` = superviseur (write partout). Lève sinon.
-async function requireWrite(req, module) {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  const role = req.auth.token?.nt360Role;
-  if (role === "direction") return;
-  const { canWrite } = require("./domain/authz");
-  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
-  if (!canWrite(matrix, role, module)) throw new HttpsError("permission-denied", `droit d'écriture « ${module} » requis`);
-}
-
-// Autorisation de LECTURE d'un callable (même matrice opposable) : pour les callables qui ne mutent
-// rien mais exposent des données gouvernées par un module (ex. dossier de rapprochement client).
-async function requireRead(req, module) {
-  if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
-  const role = req.auth.token?.nt360Role;
-  if (role === "direction") return;
-  const { canRead } = require("./domain/authz");
-  const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
-  if (!canRead(matrix, role, module)) throw new HttpsError("permission-denied", `droit de lecture « ${module} » requis`);
-}
+// requireWrite / requireRead : extraits dans lib/runtime (createRuntime, en tête de fichier). Gouvernance
+// par la matrice opposable (config/permissions) inchangée — même source que Security Rules + front.
 
 // --- Matrice de droits : édition via CALLABLE validé + audité (jamais en écriture directe). RÉSERVÉ
 // À LA DIRECTION : réécrire la matrice = pouvoir s'auto-accorder « write » partout (escalade). On

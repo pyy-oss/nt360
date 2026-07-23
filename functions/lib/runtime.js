@@ -51,7 +51,31 @@ function createRuntime({ db, logger, HttpsError, FieldValue }) {
     }
   }
 
-  return { logOps, assertPlainId, rateLimit };
+  // Autorisation d'ÉCRITURE d'un callable, GOUVERNÉE PAR LA MATRICE OPPOSABLE (config/permissions) —
+  // même source que les Security Rules et le front. Révoquer un droit dans Habilitations a donc un
+  // effet RÉEL sur les mutations serveur. `direction` = superviseur (write partout). Lève sinon.
+  // NB : require("../domain/authz") — chemin relatif à CE module (lib/), pas à index.js.
+  async function requireWrite(req, module) {
+    if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+    const role = req.auth.token?.nt360Role;
+    if (role === "direction") return;
+    const { canWrite } = require("../domain/authz");
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    if (!canWrite(matrix, role, module)) throw new HttpsError("permission-denied", `droit d'écriture « ${module} » requis`);
+  }
+
+  // Autorisation de LECTURE d'un callable (même matrice opposable) : pour les callables qui ne mutent
+  // rien mais exposent des données gouvernées par un module (ex. dossier de rapprochement client).
+  async function requireRead(req, module) {
+    if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
+    const role = req.auth.token?.nt360Role;
+    if (role === "direction") return;
+    const { canRead } = require("../domain/authz");
+    const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
+    if (!canRead(matrix, role, module)) throw new HttpsError("permission-denied", `droit de lecture « ${module} » requis`);
+  }
+
+  return { logOps, assertPlainId, rateLimit, requireWrite, requireRead };
 }
 
 module.exports = { createRuntime };
