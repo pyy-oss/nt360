@@ -5,6 +5,41 @@
 > pendant laquelle les callables peuvent flancher (CORS transitoire pendant la reconciliation Cloud Run —
 > cf. incident du 2026-07-23). Un split par domaine ramène cette fenêtre à quelques fonctions par changement.
 
+## ADR-SPLIT-02 — Bundle esbuild des codebases (le `workspace:*` ne se déploie pas tel quel)
+
+**Contexte / incident.** Le split (5 codebases + package `@nt360/functions-shared`) a été mergé puis
+déployé (run `Firebase Deploy (main)` #597, 2026-07-23) et a **échoué** : chaque codebase dépend de
+`@nt360/functions-shared` en `"workspace:*"`. Au déploiement, Firebase envoie le source de chaque
+fonction à **Cloud Build, qui lance `npm install`** (npm, **pas** pnpm) → npm ne connaît pas le protocole
+`workspace:` → `npm error code EUNSUPPORTEDPROTOCOL` → le build de conteneur échoue pour **les ~95
+fonctions du codebase `default`** (idem pour les codebases extraits). C'était le **risque résiduel de
+l'Étape 0** signalé comme non vérifiable en sandbox (« empaquetage de la dépendance workspace par
+firebase-tools »). Aucune coupure : « Failed to **update** » ⇒ les fonctions gardent leur version
+précédente ; mais `main` devenait **non déployable**.
+
+**Décision (esbuild bundle).** On **compile** chaque codebase avec esbuild (`scripts/bundle-codebase.mjs`)
+dans `<codebase>/.deploy/` :
+- `@nt360/functions-shared` (et ses sous-chemins) est **inliné** dans le bundle → **plus aucune
+  dépendance `workspace:*`** dans le `package.json` déployé.
+- Tout autre import « bare » reste **externe** (réinstallé par npm côté Cloud Build). `firebase-functions`
+  et `firebase-admin` **doivent** rester externes : le Functions Framework les `require` pour découvrir
+  les triggers (les inliner casse la découverte des `__endpoint`).
+- Le `package.json` déployé ne liste que les deps **réellement référencées** par le bundle (metafile
+  esbuild) → pas de dep lourde inutile (pdfkit/pdfjs/exceljs) dans un petit codebase (règle coûts GCP).
+- `firebase.json` pointe `source` sur `<codebase>/.deploy` ; un hook **`predeploy`** relance le bundle,
+  et le workflow le fait **explicitement avant** `firebase deploy` (pour que les `.deploy/` existent et
+  pour recopier `functions/.env` — Firebase lit le `.env` **dans** le dossier source du codebase).
+
+**Dépendance ajoutée (ADR).** `esbuild` en **devDependency** racine (outil de build, jamais expédié).
+
+**Garde-fou CI.** `functions/scripts/check-bundle-codebases.mjs` compile les 5 codebases et vérifie que
+chaque `.deploy/` est **self-contained** (0 `workspace:*`) et expose **exactement** les fonctions du
+manifeste (parité découverte Firebase ⇔ cibles nommées). Ne remplace pas un vrai `firebase deploy`
+(le `npm install` de Cloud Build reste hors sandbox) mais verrouille tout le vérifiable statiquement.
+
+**Prérequis inchangés** (cf. §Séquence) : canal recompute différé vivant (`RECOMPUTE_REGION`), et
+déploiement de **transfert** en une seule commande couvrant `default` + les codebases extraits.
+
 ## ⚠️ Garde-fou de validation (NON négociable)
 
 Un split de codebases se valide **uniquement** par un vrai `firebase deploy`. Le mécanisme est piégeux :

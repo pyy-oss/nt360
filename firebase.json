@@ -26,11 +26,11 @@
   },
   "storage": { "rules": "storage.rules" },
   "functions": [
-    { "source": "functions", "codebase": "default", "runtime": "nodejs20" },
-    { "source": "functions-par", "codebase": "partenariats", "runtime": "nodejs20" },
-    { "source": "functions-rh", "codebase": "rh", "runtime": "nodejs20" },
-    { "source": "functions-commerce", "codebase": "commerce", "runtime": "nodejs20" },
-    { "source": "functions-ops", "codebase": "ops", "runtime": "nodejs20" }
+    { "source": "functions/.deploy", "codebase": "default", "runtime": "nodejs20", "predeploy": ["node scripts/bundle-codebase.mjs functions"] },
+    { "source": "functions-par/.deploy", "codebase": "partenariats", "runtime": "nodejs20", "predeploy": ["node scripts/bundle-codebase.mjs functions-par"] },
+    { "source": "functions-rh/.deploy", "codebase": "rh", "runtime": "nodejs20", "predeploy": ["node scripts/bundle-codebase.mjs functions-rh"] },
+    { "source": "functions-commerce/.deploy", "codebase": "commerce", "runtime": "nodejs20", "predeploy": ["node scripts/bundle-codebase.mjs functions-commerce"] },
+    { "source": "functions-ops/.deploy", "codebase": "ops", "runtime": "nodejs20", "predeploy": ["node scripts/bundle-codebase.mjs functions-ops"] }
   ],
   "emulators": {
     "auth": { "port": 9099 },

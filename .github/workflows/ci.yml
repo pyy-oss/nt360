@@ -55,6 +55,12 @@ jobs:
       - name: Cohérence du déploiement (exports index.js ⇔ deployed-functions.txt)
         run: node functions/scripts/check-deploy-targets.mjs
 
+      # Garde « bundle déployable » (ADR-SPLIT-02) : compile les 5 codebases (esbuild) et vérifie
+      # que chaque .deploy/ est self-contained (aucun workspace:*, que npm côté Cloud Build ne sait
+      # pas résoudre → cause de l'échec du deploy #597) et expose exactement les fonctions du manifeste.
+      - name: Garde bundle déployable (esbuild, self-contained)
+        run: node functions/scripts/check-bundle-codebases.mjs
+
       # Garde anti-ReferenceError (no-undef sur le code SERVEUR) : attrape un identifiant utilisé sans
       # require/définition dans sa portée AVANT le déploiement (classe du bug « buildFpAliasResolver is
       # not defined » qui ne se voyait qu'en prod, faute d'étape de compilation côté functions).
