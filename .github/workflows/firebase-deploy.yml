@@ -5,6 +5,15 @@ name: Firebase Deploy (main)
 on:
   push:
     branches: [main]
+    # Ne PAS redéployer (donc ne pas rebâtir de conteneurs Cloud Build ni republier le hosting) pour un
+    # merge qui ne touche QUE de la doc / des notes / la config d'agent : ces chemins n'affectent ni l'app
+    # buildée (web/) ni les fonctions. Un merge mixte (doc + code) déclenche bien le déploiement. C'est
+    # cette barrière qui évite qu'un simple merge de doc coûte un cycle de build complet.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".audit/**"
+      - ".claude/**"
 
 # Un SEUL déploiement Firebase à la fois. Deux merges rapprochés sur main lançaient deux `firebase deploy`
 # CONCURRENTS sur le même projet → collision Cloud Run / Artifact Registry (HTTP 409 « service already
@@ -20,6 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # HEAD^..HEAD pour le déploiement SÉLECTIF (functions/scripts/deploy-targets.mjs). Sans cette
+          # profondeur, le git diff échoue → le script retombe (fail-safe) sur la liste complète.
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
@@ -136,8 +149,12 @@ jobs:
           # (une fonction/ligne ; lignes # et vides ignorées). Le même fichier est vérifié en CI contre
           # les exports de index.js (functions/scripts/check-deploy-targets.mjs) → plus de dérive possible :
           # une nouvelle fonction non listée fait échouer le check AVANT le merge, pas silencieusement en prod.
-          FN_TARGETS=$(grep -vE '^\s*(#|$)' functions/deployed-functions.txt | sed 's/^/functions:/' | paste -sd,)
-          if [ -z "$FN_TARGETS" ]; then echo "::error::liste de fonctions vide"; exit 1; fi
+          # Déploiement SÉLECTIF (barrière coûts) : deploy-targets.mjs dérive les cibles `functions:` du
+          # git diff HEAD^..HEAD. Si le merge ne touche RIEN sous functions/, la liste est VIDE → aucune
+          # fonction redéployée (0 conteneur Cloud Build). Au moindre doute (base absente, clone superficiel,
+          # diff en échec), le script retombe sur la liste COMPLÈTE (fail-safe : jamais moins sûr qu'avant).
+          FN_TARGETS=$(node functions/scripts/deploy-targets.mjs)
+          echo "Cibles fonctions retenues : ${FN_TARGETS:-<aucune — hosting/firestore seulement>}"
           # Trigger du recompute DIFFÉRÉ : env-gated (exporté uniquement si RECOMPUTE_REGION est défini) donc
           # VOLONTAIREMENT ABSENT de deployed-functions.txt (le garde-fou CI n'attrape que les exports de
           # premier niveau). Quand la région est fournie, on l'ajoute aux cibles pour qu'il soit déployé EN
@@ -147,11 +164,16 @@ jobs:
           # onMntApprovalDecided (application des décisions d'approbation de contrat, ADR-022) est le MÊME cas :
           # env-gated sur RECOMPUTE_REGION (co-localisé à la base nommée), absent de deployed-functions.txt,
           # ajouté ici quand la région est fournie pour être déployé avec son env runtime.
-          if [ -n "$RECOMPUTE_REGION" ]; then FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest,functions:onMntApprovalDecided"; fi
+          # Fonctions env-gated : seulement si des fonctions sont DÉJÀ dans le lot (sinon rien à co-déployer).
+          if [ -n "$FN_TARGETS" ] && [ -n "$RECOMPUTE_REGION" ]; then FN_TARGETS="${FN_TARGETS},functions:onRecomputeRequest,functions:onMntApprovalDecided"; fi
+          # Cible --only : hosting/firestore TOUJOURS (bon marché, idempotent) ; functions seulement si non vide
+          # (pas de virgule finale ni de token `functions` nu — ce dernier déclencherait un déploiement complet).
+          ONLY="hosting,firestore:rules,firestore:indexes"
+          if [ -n "$FN_TARGETS" ]; then ONLY="${ONLY},${FN_TARGETS}"; fi
           attempt=1; max=4
           while true; do
             if npx firebase deploy \
-              --only "hosting,firestore:rules,firestore:indexes,${FN_TARGETS}" \
+              --only "$ONLY" \
               --project "${{ vars.FIREBASE_PROJECT_ID || 'propulse-business-87f7a' }}" --non-interactive; then
               echo "Déploiement OK (tentative $attempt)"; break
             fi

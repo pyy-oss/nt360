@@ -1021,6 +1021,10 @@ exports.curateNews = onSchedule({ schedule: "every day 05:30", secrets: [ANTHROP
 // une erreur explicite si le secret n'est pas configuré, pour guider le provisionnement.
 exports.curateNewsNow = onCallG("curateNewsNow", { secrets: [ANTHROPIC_API_KEY], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
+  // Plafond de débit (barrière coûts) : aligné sur le bucket "ai" partagé par TOUS les autres callables IA
+  // (20/min/compte). Comble le seul point d'appel Anthropic qui n'en avait pas — une rafale de « rafraîchir »
+  // déclenchait autant d'appels Sonnet payants. Même bucket ⇒ le budget IA reste borné toutes surfaces confondues.
+  if (!(await rateLimit(req.auth.uid, "ai", 20, 60_000))) throw new HttpsError("resource-exhausted", "Trop de rafraîchissements de curation en peu de temps — patientez un instant.");
   const r = await runNewsCuration(req.auth.uid);
   if (r.skipped) throw new HttpsError("failed-precondition", "ANTHROPIC_API_KEY non configuré (Secret Manager) — curation indisponible.");
   return r;
