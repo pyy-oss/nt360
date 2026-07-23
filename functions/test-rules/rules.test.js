@@ -79,6 +79,23 @@ describe("Lectures selon la matrice", () => {
   });
 });
 
+// Cloisonnement de l'app SŒUR (projet Firebase PARTAGÉ) : un compte authentifié SANS le claim namespacé
+// nt360Role — typiquement un utilisateur de l'autre application du même projet — ne doit RIEN lire de la
+// base nt360. Garantit « accès STRICT à la base par cette seule application » (canRead/canWrite = isNt360).
+describe("Cloisonnement app sœur (auth sans nt360Role)", () => {
+  // Authentifié avec un claim GÉNÉRIQUE (role) mais PAS nt360Role → satisfait signedIn() mais pas isNt360().
+  const asSister = () => testEnv.authenticatedContext("sister-uid", { role: "direction" }).firestore();
+  it("ne lit PAS un agrégat RBAC (orders / overview)", async () => {
+    await assertFails(getDoc(doc(asSister(), "orders/FP_2026_1")));
+  });
+  it("ne lit PAS la matrice de droits (config/permissions)", async () => {
+    await assertFails(getDoc(doc(asSister(), "config/permissions")));
+  });
+  it("ne lit PAS les fournisseurs (creditLines)", async () => {
+    await assertFails(getDoc(doc(asSister(), "creditLines/S1")));
+  });
+});
+
 describe("Collections sources : écriture client toujours refusée", () => {
   it("direction ne peut PAS écrire orders (Admin SDK only)", async () => {
     await assertFails(setDoc(doc(as("direction"), "orders/FP_X"), { source: "pnl" }));

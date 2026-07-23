@@ -1,0 +1,8 @@
+upsertObjective
+deleteObjective
+createFiche
+updateFiche
+ficheAdvance
+ficheReject
+getFiche
+listFiches

@@ -25,7 +25,13 @@
     "indexes": "firestore.indexes.json"
   },
   "storage": { "rules": "storage.rules" },
-  "functions": [{ "source": "functions", "codebase": "default", "runtime": "nodejs20" }],
+  "functions": [
+    { "source": "functions", "codebase": "default", "runtime": "nodejs20" },
+    { "source": "functions-par", "codebase": "partenariats", "runtime": "nodejs20" },
+    { "source": "functions-rh", "codebase": "rh", "runtime": "nodejs20" },
+    { "source": "functions-commerce", "codebase": "commerce", "runtime": "nodejs20" },
+    { "source": "functions-ops", "codebase": "ops", "runtime": "nodejs20" }
+  ],
   "emulators": {
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },

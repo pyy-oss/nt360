@@ -1,0 +1,15 @@
+{
+  "name": "@nt360/functions-rh",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@nt360/functions-shared": "workspace:*",
+    "firebase-admin": "^12",
+    "firebase-functions": "^5"
+  }
+}

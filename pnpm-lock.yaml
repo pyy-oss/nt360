@@ -52,6 +52,54 @@ importers:
         specifier: ^2
         version: 2.1.9(@types/node@26.0.1)(jsdom@25.0.1(canvas@2.11.2))
 
+  functions-commerce:
+    dependencies:
+      '@nt360/functions-shared':
+        specifier: workspace:*
+        version: link:../functions-shared
+      firebase-admin:
+        specifier: ^12
+        version: 12.7.0
+      firebase-functions:
+        specifier: ^5
+        version: 5.1.1(firebase-admin@12.7.0)
+
+  functions-ops:
+    dependencies:
+      '@nt360/functions-shared':
+        specifier: workspace:*
+        version: link:../functions-shared
+      firebase-admin:
+        specifier: ^12
+        version: 12.7.0
+      firebase-functions:
+        specifier: ^5
+        version: 5.1.1(firebase-admin@12.7.0)
+
+  functions-par:
+    dependencies:
+      '@nt360/functions-shared':
+        specifier: workspace:*
+        version: link:../functions-shared
+      firebase-admin:
+        specifier: ^12
+        version: 12.7.0
+      firebase-functions:
+        specifier: ^5
+        version: 5.1.1(firebase-admin@12.7.0)
+
+  functions-rh:
+    dependencies:
+      '@nt360/functions-shared':
+        specifier: workspace:*
+        version: link:../functions-shared
+      firebase-admin:
+        specifier: ^12
+        version: 12.7.0
+      firebase-functions:
+        specifier: ^5
+        version: 5.1.1(firebase-admin@12.7.0)
+
   functions-shared:
     dependencies:
       '@anthropic-ai/sdk':

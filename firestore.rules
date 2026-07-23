@@ -13,8 +13,13 @@ service cloud.firestore {
     function isNt360() { return signedIn() && request.auth.token.nt360Role != null; }
     function matrix() { return get(/databases/$(db)/documents/config/permissions).data.matrix; }
     function level(m) { return role() == 'direction' ? 'write' : matrix()[role()][m]; }
-    function canRead(m)  { return signedIn() && level(m) in ['read','write']; }
-    function canWrite(m) { return signedIn() && level(m) == 'write'; }
+    // Accès STRICT à la base nt360 (projet Firebase PARTAGÉ) : on exige le claim namespacé nt360Role
+    // (isNt360) — PAS seulement `signedIn()` — pour que canRead/canWrite EXCLUENT explicitement tout
+    // compte authentifié par l'app SŒUR (qui satisfait signedIn() mais n'a pas de nt360Role). Sans ce
+    // guard, l'exclusion reposait sur le fait que matrix()[null] déclenche une erreur de règle (donc un
+    // refus implicite) : robuste mais fragile. Ici, le refus est EXPLICITE. Défense en profondeur.
+    function canRead(m)  { return isNt360() && level(m) in ['read','write']; }
+    function canWrite(m) { return isNt360() && level(m) == 'write'; }
 
     // Drapeau du module Contrats de maintenance (ADR-009). ABSENT ⇒ éteint (fail-closed) : aucune
     // collection mnt_* n'est alors lisible, même pour un rôle porteur du droit `maintenance`. C'est

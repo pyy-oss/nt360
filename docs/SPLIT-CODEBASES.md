@@ -131,10 +131,67 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
    `requestRecompute` / `refreshNowBestEffort` NE sont volontairement PAS extraits dans le socle : ils
    dépendent de `recomputeSummaries` (orchestrateur du recompute), qui appartient à `core`, pas à l'infra
    partagée. C'est la frontière où l'Étape 0 (socle) s'arrête et l'Étape 1 (topologie) prend le relais.
-2. **Étape 1** — extraire le **1er** codebase le moins couplé (`ops` ou `partenariats`) dans son dossier +
-   entrée, l'ajouter à `firebase.json`, le retirer de `functions`. Deploy-valider (vérifier 0 suppression
-   inattendue). Rollback = retirer l'entrée.
-3. **Étapes 2..n** — un codebase par PR, même procédure.
+2. **Étape 1 FAITE (code) — codebase `partenariats` (`functions-par/`)** : les 21 callables
+   `createPartenariats` sont désormais déclarés dans `functions-par/index.js` (même patron d'injection,
+   handler partagé `@nt360/functions-shared/handlers/partenariats`), retirés de `functions/index.js`,
+   `firebase.json` gagne `{ source: "functions-par", codebase: "partenariats" }`. `parRelancesSweep`
+   (scheduler couplé aux helpers email) RESTE dans `default`. **Recompute DIFFÉRÉ** imposé (le codebase ne
+   porte pas `recomputeSummaries`) : `recomputeNow: undefined` → `requestRecompute` écrit
+   `config/recomputeRequest`. Outillage rendu multi-codebases : `deployed-functions.txt` par codebase,
+   `check-deploy-targets` (par codebase + invariant **disjoint** + total), `deploy-targets` (union des
+   manifestes), `check-no-undef` (lint aussi `functions-par/index.js`).
+
+   Vérifié EN SANDBOX : `default` charge 182 exports, `partenariats` 21 (total inchangé) ; `check-deploy-targets`
+   = **default 181 + partenariats 21 = 202, ensembles disjoints** (invariant : rien perdu, rien dupliqué) ;
+   `check-no-undef` (172 fichiers) + **1386 tests** verts.
+
+   ⚠️ **DEUX préalables au déploiement (ne PAS merger sans)** :
+   - **(a) Canal recompute différé VIVANT en prod** : déployer le trigger `onRecomputeRequest` (codebase
+     `default`) + poser `RECOMPUTE_REGION` (alignée sur la base nommée). Sinon les mutations partenariats
+     déposent des demandes JAMAIS traitées → **KPI partenariats périmés**. Vérifier end-to-end : muter un
+     partenaire → une demande apparaît dans `config/recomputeRequest` → les `summaries` se rafraîchissent.
+   - **(b) Déploiement de TRANSFERT (les 21 changent de codebase `default` → `partenariats`)** : à faire en
+     **une commande couvrant les DEUX codebases** — `firebase deploy --only functions:default,functions:partenariats`
+     — pour que Firebase transfère la propriété sans fenêtre où les fonctions seraient supprimées d'un côté
+     avant d'être créées de l'autre. NE PAS déployer `partenariats` seul en premier. Faire d'abord un
+     `--dry-run` et **vérifier qu'AUCUNE suppression inattendue** n'est proposée (seul le transfert des 21).
+   Rollback = retirer l'entrée `functions-par` de `firebase.json` + restaurer le bloc dans `functions/index.js`.
+2bis. **Étape 2 FAITE (code) — codebase `rh` (`functions-rh/`)** : démarre avec les CANDIDATS
+   (`upsertCandidate` / `deleteCandidate` / `listCandidates`), retirés de `functions/index.js`.
+   `createCandidates` est le handler **le MOINS couplé** du dépôt (aucun recompute, aucun secret, aucun
+   helper d'index.js — uniquement le socle) → **pas de préalable « recompute différé »**, seul le
+   déploiement de transfert s'applique (les 3 fonctions passent `default` → `rh`, même procédure §pt 2b).
+   staffing / timesheets rejoindront `rh` PLUS TARD en **ajout additif** (mêmes codebase → pas un transfert),
+   une fois le canal différé validé (ils écrivent des summaries).
+   Vérifié EN SANDBOX : `default` 179 + `partenariats` 21 + `rh` 3 = 203 exports (inchangé) ;
+   `check-deploy-targets` **178 + 21 + 3 = 202, disjoints** ; `check-no-undef` 173 fichiers ; 1386 tests verts.
+2ter. **Étape 3 FAITE (code) — codebase `commerce` (`functions-commerce/`)** : OBJECTIFS (R/O CODIR) +
+   FICHES AFFAIRE (8 callables), retirés de `functions/index.js`. Seul couplage = recompute → **différé**
+   (même préalable que partenariats : canal différé vivant en prod). Les OPPORTUNITÉS rejoindront `commerce`
+   plus tard (après remontée au socle des helpers d'index.js : `visibleToFor`, `oppScope`, `fireOutbound`…).
+   Vérifié EN SANDBOX : `default` 171 + `partenariats` 21 + `rh` 3 + `commerce` 8 = 203 (inchangé) ;
+   `check-deploy-targets` **170 + 21 + 3 + 8 = 202, disjoints** ; `check-no-undef` 174 fichiers ; 1386 tests verts.
+2quater. **Étape 4 FAITE (code) — `staffing` + `timesheets` rejoignent `rh`** : consultants/plan de charge
+   (6) + CRA/temps/rentabilité ressource (15→9 exports timesheets) ajoutés au codebase `rh` existant.
+   Couplage recompute → **différé** (`recomputeNow: requestRecompute`), + secret ClickUp (même nom). NB :
+   ces 15 fonctions passent de `default` à `rh` = **transfert** (comme les autres) ; les futurs ajouts À
+   `rh` seront eux additifs. Vérifié EN SANDBOX : `default` 156 + `partenariats` 21 + `rh` 18 + `commerce` 8
+   = 203 (inchangé) ; `check-deploy-targets` **155 + 21 + 18 + 8 = 202, disjoints** ; `check-no-undef` 174 ;
+   1386 tests verts.
+2quinquies. **Étape 5 FAITE (code) — codebase `ops` (`functions-ops/`)** : ASSAINISSEMENT (`deleteRecords`,
+   `setCancellation`, `purgeCollections`), retirés de `functions/index.js`. Tous deps socle (dont gardes
+   record-level) + recompute **différé**. `reports`/`automations`/`outbound` rejoindront `ops` après la
+   remontée de helpers ci-dessous. Vérifié EN SANDBOX : `default` 153 + `partenariats` 21 + `rh` 18 +
+   `commerce` 8 + `ops` 3 = 203 (inchangé) ; `check-deploy-targets` **152 + 21 + 18 + 8 + 3 = 202, disjoints** ;
+   `check-no-undef` 175 ; 1386 tests verts.
+3. **Étapes 6..n** — reste : remontée au socle des helpers d'index.js (`visibleToFor`, `oppScope`,
+   `fireOutbound`, `loadUsersMap`, `scopedOpps`, `nowISO10`, `anyDirectionUid`) puis extraction de
+   `opportunities` (→ commerce), `reports`/`automations` (→ ops), `maintenance` (→ mnt). Ces extractions
+   nécessitent d'abord de rendre les helpers partagés (comme le socle) — refactor plus profond d'index.js.
+   Restent couplés (helpers d'index.js à remonter au socle d'abord) : `opportunities` (visibleToFor,
+   oppScope, fireOutbound), `reports` (scopedOpps, loadUsersMap), `automations` (loadUsersMap, nowISO10),
+   `maintenance` (loadUsersMap, anyDirectionUid). Extractibles avec préalable différé seul : `sanitize`,
+   `staffing`+`timesheets` (→ `rh`, additif).
 4. **Étape finale** — `functions` résiduel devient `functions-core`.
 
 ## Définition de terminé
@@ -146,7 +203,9 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
 
 ---
 
-**État** : PLAN validé. **Étape 0 EXÉCUTÉE et vérifiée en l'état** (deploy-neutre, un seul codebase) :
+**État** : PLAN validé. **Étape 0 EXÉCUTÉE, MERGÉE (#597)** (deploy-neutre) + **Étape 1 (codebase
+`partenariats`) FAITE côté code, en attente de déploiement** (topologie — voir les DEUX préalables §Séquence
+pt 2 : canal différé vivant + déploiement de transfert des deux codebases). Étape 0 =
 socle infra `lib/runtime.js` (4 incréments) **puis** package partagé `@nt360/functions-shared` (déplacement
 lib/domain/parsers/handlers/test, `functions/` consommateur `workspace:*`). 203 exports inchangés,
 `firebase.json` inchangé, guards + 1386 tests verts. **Reste à faire** : les Étapes 1+ (changement de

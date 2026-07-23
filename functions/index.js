@@ -611,12 +611,9 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
 // creditLines / billingMilestones. L'écriture directe SDK est fermée → plus de donnée d'objectif posée
 // sans contrôle ni journal. Droit « objectifs ». Recompute des summaries qui lisent objectives (needObj :
 // atterrissage / ams / pipeline / news / alerts) → R/O et écarts d'objectif se rafraîchissent. ---
-// Objectifs (R/O CODIR) EXTRAITS dans handlers/objectives.js (patron R3). Deps injectées ; exports
-// déclarés ici (garde-fou de déploiement par nom).
-const { createObjectives } = require("@nt360/functions-shared/handlers/objectives");
-const _objectives = createObjectives({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
-exports.upsertObjective = _objectives.upsertObjective;
-exports.deleteObjective = _objectives.deleteObjective;
+// Objectifs (R/O CODIR) : EXTRAITS dans le codebase Firebase `functions-commerce/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 3), avec les fiches affaire. Handler partagé
+// (@nt360/functions-shared/handlers/objectives) ; seul le point d'entrée change.
 
 // postWebhook (notifications d'alerte Slack/Teams : POST JSON {text}) : extrait dans lib/runtime
 // (createRuntime, en tête de fichier) — partagé avec la colonne vertébrale onCallG/guarded. Sans
@@ -1686,16 +1683,9 @@ exports.aiRemediationSummary = onCallG(
 // SDK) : consultants/* est read:false+write:false côté rules. Lecture gouvernée « overview » (le DirOps
 // et les managers voient l'annuaire) ; le COÛT (CJM) est CONFIDENTIEL → masqué sauf droit « rentabilite »
 // (même règle que la marge). Écriture (gestion du staffing) gouvernée « pipeline ». Audité.
-// Consultants (Lot 11) + Plan de charge / staffing (Lot 12) EXTRAITS dans handlers/staffing.js
-// (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom).
-const { createStaffing } = require("@nt360/functions-shared/handlers/staffing");
-const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow: recomputeSummaries, logOps });
-exports.upsertConsultant = _staffing.upsertConsultant;
-exports.deleteConsultant = _staffing.deleteConsultant;
-exports.listConsultants = _staffing.listConsultants;
-exports.upsertAssignment = _staffing.upsertAssignment;
-exports.deleteAssignment = _staffing.deleteAssignment;
-exports.staffingPlan = _staffing.staffingPlan;
+// Consultants + Plan de charge / staffing : EXTRAITS dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 4), avec les CRA/timesheets. Handler partagé
+// (@nt360/functions-shared/handlers/staffing) ; seul le point d'entrée change.
 
 // CONTRATS DE MAINTENANCE (module mnt_, Lot 1) — contrat adossé au N° FP + engagements SLA embarqués.
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
@@ -1722,33 +1712,11 @@ exports.submitMntDecision = _maintenance.submitMntDecision;
 exports.submitAstreinte = _maintenance.submitAstreinte;
 exports.listAstreintes = _maintenance.listAstreintes;
 
-// PARTENARIATS & CERTIFICATIONS (par_) — Lot 1 : référentiel partenaire (par_partners). Même patron
-// d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
-// config/parFeature). Exports déclarés ici (déploiement par nom).
-const { createPartenariats } = require("@nt360/functions-shared/handlers/partenariats");
-const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, recomputeNow: recomputeSummaries, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
-exports.upsertParPartner = _partenariats.upsertParPartner;
-exports.deleteParPartner = _partenariats.deleteParPartner;
-exports.upsertParCertification = _partenariats.upsertParCertification;
-exports.deleteParCertification = _partenariats.deleteParCertification;
-exports.setParPartnerMap = _partenariats.setParPartnerMap;
-exports.upsertParAssignment = _partenariats.upsertParAssignment;
-exports.setParAssignmentStatus = _partenariats.setParAssignmentStatus;
-exports.deleteParAssignment = _partenariats.deleteParAssignment;
-exports.pushParAssignmentToClickup = _partenariats.pushParAssignmentToClickup;
-exports.generateParActionPlan = _partenariats.generateParActionPlan;
-exports.generateParQbr = _partenariats.generateParQbr;
-exports.suggestParPartnerMap = _partenariats.suggestParPartnerMap;
-exports.importParCertifications = _partenariats.importParCertifications;
-exports.importParCertificationsFile = _partenariats.importParCertificationsFile;
-// Avantages programme (PAR-L3) : deal registrations, fonds marketing (MDF), rebates.
-exports.upsertParDealReg = _partenariats.upsertParDealReg;
-exports.setParDealRegStatus = _partenariats.setParDealRegStatus;
-exports.deleteParDealReg = _partenariats.deleteParDealReg;
-exports.upsertParMdf = _partenariats.upsertParMdf;
-exports.deleteParMdf = _partenariats.deleteParMdf;
-exports.upsertParRebate = _partenariats.upsertParRebate;
-exports.deleteParRebate = _partenariats.deleteParRebate;
+// PARTENARIATS & CERTIFICATIONS (par_) : EXTRAIT dans le codebase Firebase dédié `functions-par/`
+// (split, docs/SPLIT-CODEBASES.md, Étape 1). Les ~21 callables (createPartenariats) sont désormais
+// déclarés là-bas et déployés sous le codebase `partenariats` — plus dans ce monolithe. Le handler
+// (@nt360/functions-shared/handlers/partenariats) reste partagé ; seul le point d'entrée change.
+// NB : `parRelancesSweep` (scheduler, couplé aux helpers email de ce fichier) RESTE ici pour l'instant.
 
 // KPI D'ACTIVITÉ (Lot 13 « 20/10 DirOps ») — taux d'occupation, intercontrat, jours facturables, CA staffé
 // et marge prévisionnels, agrégés global + par BU + par consultant. Calcul serveur (source unique
@@ -1828,29 +1796,14 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   return { ok: true, months, openOppCount: opps.length, ...plan };
 });
 
-// === CRA / TEMPS CONSTATÉ + ACTIVITÉ ESN (Lots 15/17/19/20/21/22 « 20/10 DirOps ») EXTRAIT dans
-// handlers/timesheets.js (patron R3). CRA mensuel → TACE/occupation réels, tendance, auto-CRA ClickUp,
-// P&L par ressource et pré-facturation. Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createTimesheets } = require("@nt360/functions-shared/handlers/timesheets");
-const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow: recomputeSummaries, logOps });
-exports.upsertTimesheet = _timesheets.upsertTimesheet;
-exports.deleteTimesheet = _timesheets.deleteTimesheet;
-exports.timesheetKpis = _timesheets.timesheetKpis;
-exports.taceHistory = _timesheets.taceHistory;
-exports.importTimesheets = _timesheets.importTimesheets;
-exports.syncClickupTimesheets = _timesheets.syncClickupTimesheets;
-exports.resourcePnl = _timesheets.resourcePnl;
-exports.preBillingFromCra = _timesheets.preBillingFromCra;
-exports.deliveryMarginByAffaire = _timesheets.deliveryMarginByAffaire;
+// === CRA / TEMPS CONSTATÉ + ACTIVITÉ ESN : EXTRAIT dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 4), avec le staffing. Handler partagé
+// (@nt360/functions-shared/handlers/timesheets) ; seul le point d'entrée change.
 
-// === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
-// (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». EXTRAIT dans
-// handlers/candidates.js (patron R3). Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createCandidates } = require("@nt360/functions-shared/handlers/candidates");
-const _candidates = createCandidates({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId });
-exports.upsertCandidate = _candidates.upsertCandidate;
-exports.deleteCandidate = _candidates.deleteCandidate;
-exports.listCandidates = _candidates.listCandidates;
+// === VIVIER / RECRUTEMENT (candidats) : EXTRAIT dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 2). Les 3 callables (createCandidates) sont désormais déclarés là-bas
+// et déployés sous le codebase `rh`. Handler partagé (@nt360/functions-shared/handlers/candidates) ; seul
+// le point d'entrée change. staffing/timesheets rejoindront `rh` plus tard (ajout additif, pas transfert).
 
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
@@ -2793,14 +2746,9 @@ exports.runAutomations = _automations.runAutomations;
 // derrière. Le DELTA reste prioritaire : si une future ligne source réintroduit ce record (même
 // clé), il réapparaît — la suppression assainit l'existant, elle ne verrouille pas contre la source.
 // Les identifiants sont des DOC IDS (pas de re-transformation : safeId n'est pas idempotent). ---
-// === ASSAINISSEMENT (suppression d'enregistrements + annulation) — EXTRAIT dans handlers/sanitize.js
-// (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
-// pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
-const { createSanitize } = require("@nt360/functions-shared/handlers/sanitize");
-const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow: recomputeSummaries, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
-exports.deleteRecords = _sanitize.deleteRecords;
-exports.setCancellation = _sanitize.setCancellation;
-exports.purgeCollections = _sanitize.purgeCollections;
+// === ASSAINISSEMENT (suppression d'enregistrements + annulation) : EXTRAIT dans le codebase Firebase
+// `functions-ops/` (split, docs/SPLIT-CODEBASES.md, Étape 5). Handler partagé
+// (@nt360/functions-shared/handlers/sanitize) ; seul le point d'entrée change.
 
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :
@@ -3192,14 +3140,9 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
 // FINALE, la fiche alimente le P&L de la commande (backbone orders + projectSheets/margin isolée),
 // consommé par mergeCommandes au prochain recompute. Doc id = safeId(FP) → 1 fiche par commande.
 // ============================================================================
-const { createFiches } = require("@nt360/functions-shared/handlers/fiches");
-const _fiches = createFiches({ onCallG, HttpsError, db, FieldValue, requestRecompute });
-exports.createFiche = _fiches.createFiche;
-exports.updateFiche = _fiches.updateFiche;
-exports.ficheAdvance = _fiches.ficheAdvance;
-exports.ficheReject = _fiches.ficheReject;
-exports.getFiche = _fiches.getFiche;
-exports.listFiches = _fiches.listFiches;
+// Fiches affaire : EXTRAITES dans le codebase Firebase `functions-commerce/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 3). Handler partagé (@nt360/functions-shared/handlers/fiches) ; seul
+// le point d'entrée change.
 
 // --- upsertOpsBulletin : enregistre le BULLETIN HEBDO « Hot Topics Opérations » (commentaires /
 // points clés d'une semaine d'exercice). Saisie MANUELLE (Phase 1) ; réservé à la DIRECTION et au

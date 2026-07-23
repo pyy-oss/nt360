@@ -2,3 +2,7 @@ packages:
   - "web"
   - "functions"
   - "functions-shared"
+  - "functions-par"
+  - "functions-rh"
+  - "functions-commerce"
+  - "functions-ops"
