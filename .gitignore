@@ -39,3 +39,6 @@ web/playwright/.cache/
 # Données réelles (confidentielles) — ne pas committer
 *.xlsx
 seed/data/
+
+# Audit coûts GCP — données/scratch d'exploration (hors contexte, non versionné)
+.audit/
