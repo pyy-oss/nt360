@@ -104,13 +104,33 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
    passe le harness de chargement ET les tests mais casserait en prod). `createRuntime` est un simple
    déplacement de code (corps extraits tels quels) : comportement runtime STRICTEMENT inchangé.
 
-   **Reste de l'Étape 0 (non fait ici, nécessite le workspace `functions-shared` + staging)** : bouger
-   `lib/`/`domain/`/`parsers/` dans le package partagé et transformer `functions/` en simple
-   consommateur `workspace:*`. `requestRecompute` / `refreshNowBestEffort` NE sont volontairement PAS
-   extraits dans le socle : ils dépendent de `recomputeSummaries` (orchestrateur du recompute), qui
-   appartient à `core`, pas à l'infra partagée — les extraire tirerait de la logique cœur dans le
-   package partagé. C'est la frontière où l'Étape 0 (socle) s'arrête et l'Étape 1 (topologie) prend le
-   relais.
+   **Sous-étape 0b FAITE (package `@nt360/functions-shared`)** : `lib/`, `domain/`, `parsers/`, `handlers/`
+   et `test/` sont physiquement déplacés (git mv, layout interne préservé → tous les `require` internes du
+   socle restent valides) dans le package workspace `functions-shared` (`@nt360/functions-shared`).
+   `functions/` ne garde que `index.js` + `scripts/` + les tests de règles, et déclare
+   `"@nt360/functions-shared": "workspace:*"` ; ses 246 `require("./lib|domain|handlers|parsers/…")`
+   pointent désormais sur `@nt360/functions-shared/…`. **Toujours un seul codebase** (`firebase.json`
+   inchangé, `source: "functions"`, `codebase: "default"`) → **deploy-neutre, aucun changement de
+   topologie**. Outillage adapté dans le même lot : `check-no-undef` (lint des DEUX arbres depuis la racine),
+   `deploy-targets` (un changement sous `functions-shared/` déclenche le déploiement), tests vitest au
+   niveau du socle, scripts racine + CI.
+
+   Vérifié EN SANDBOX : `pnpm install` relie le `workspace:*` ; `functions/index.js` charge = **203 exports**
+   en résolvant `@nt360/functions-shared` via le symlink pnpm (résolution Node réelle du package partagé,
+   le piège n°1 d'un split workspace) ; `check-no-undef` (171 fichiers) + `check-deploy-targets` (202) verts ;
+   **1386 tests** verts.
+
+   ⚠️ **Résidu deploy (non vérifiable sans un vrai `firebase deploy`)** : au déploiement du codebase
+   `functions`, firebase-tools doit **empaqueter** la dépendance workspace `@nt360/functions-shared` (dont la
+   source est HORS du dossier `functions/` uploadé). firebase-tools ≥ 13 gère les workspaces pnpm, mais ce
+   n'est validable qu'à un déploiement réel. Si la résolution échoue au deploy (échec NON destructif : le
+   déploiement n'aboutit pas, les fonctions en place ne bougent pas), repli : `predeploy` avec
+   `pnpm --filter functions deploy <dir>` (isole functions/ + ses deps workspace dans un dossier autonome),
+   puis pointer `source` sur ce dossier.
+
+   `requestRecompute` / `refreshNowBestEffort` NE sont volontairement PAS extraits dans le socle : ils
+   dépendent de `recomputeSummaries` (orchestrateur du recompute), qui appartient à `core`, pas à l'infra
+   partagée. C'est la frontière où l'Étape 0 (socle) s'arrête et l'Étape 1 (topologie) prend le relais.
 2. **Étape 1** — extraire le **1er** codebase le moins couplé (`ops` ou `partenariats`) dans son dossier +
    entrée, l'ajouter à `firebase.json`, le retirer de `functions`. Deploy-valider (vérifier 0 suppression
    inattendue). Rollback = retirer l'entrée.
@@ -126,9 +146,12 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
 
 ---
 
-**État** : PLAN validé. **Socle infra de l'Étape 0 EXÉCUTÉ et vérifié en l'état** (`functions/lib/runtime.js`,
-`createRuntime` — 4 incréments, cf. §Séquence pt 1) : déplacement de code deploy-neutre, 203 exports
-inchangés, guards + 1386 tests verts. **Reste à faire** : le package `functions-shared` (déplacement
-lib/domain/parsers) puis les Étapes 1+ (changement de topologie), qui nécessitent un environnement avec
-CLI firebase + **staging** pour la validation déploiement de chaque étape. Voir le garde-fou ci-dessus
-avant toute exécution des étapes de topologie.
+**État** : PLAN validé. **Étape 0 EXÉCUTÉE et vérifiée en l'état** (deploy-neutre, un seul codebase) :
+socle infra `lib/runtime.js` (4 incréments) **puis** package partagé `@nt360/functions-shared` (déplacement
+lib/domain/parsers/handlers/test, `functions/` consommateur `workspace:*`). 203 exports inchangés,
+`firebase.json` inchangé, guards + 1386 tests verts. **Reste à faire** : les Étapes 1+ (changement de
+topologie — extraire un codebase à la fois), qui nécessitent un environnement avec CLI firebase +
+**staging** (ou au minimum un `firebase deploy … --dry-run`) pour la validation déploiement de chaque
+étape, ET le préalable « canal de recompute différé réellement vivant en prod » (cf. §blocage recompute).
+Voir le garde-fou ci-dessus avant toute exécution des étapes de topologie. Résidu deploy de l'Étape 0
+(empaquetage de la dépendance workspace) : cf. §Séquence pt 1.

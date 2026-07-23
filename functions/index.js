@@ -7,7 +7,7 @@ const { logger } = require("firebase-functions/v2");
 // par firebase-functions v2 (availableMemoryMb null) — toutes les fonctions tournaient au défaut 256 Mio,
 // et importDelta (2 Gio voulus) mourait en OOM (503 sans CORS) sur tout fichier réel. Les builders sont
 // enveloppés SOUS LEUR NOM d'origine : les ~175 sites gardent leur forme, la mémoire est enfin appliquée.
-const { withMemory } = require("./lib/fnopts");
+const { withMemory } = require("@nt360/functions-shared/lib/fnopts");
 const onObjectFinalized = (opts, handler) => _onObjectFinalized(withMemory(opts), handler);
 const onCall = (opts, handler) => (typeof opts === "function" ? _onCall(opts) : _onCall(withMemory(opts), handler));
 const onRequest = (opts, handler) => (typeof opts === "function" ? _onRequest(opts) : _onRequest(withMemory(opts), handler));
@@ -17,13 +17,13 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 const { getAuth } = require("firebase-admin/auth");
 // Lecture/écriture de classeurs via exceljs (remplace xlsx@0.18 — CVE-2023-30533). readWorkbook est ASYNC.
-const { readWorkbook, aoaToXlsxBase64 } = require("./lib/xlsxRead");
+const { readWorkbook, aoaToXlsxBase64 } = require("@nt360/functions-shared/lib/xlsxRead");
 
 const { getApp } = require("firebase-admin/app");
-const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("./lib/config");
-const { buildWrites, fiscalYearFromOrders } = require("./lib/ingest");
-const { applyWrites, stripLiveOpps, resolveLogisticsFx, resolveBcDc, backfillBcFpFromDc } = require("./lib/apply");
-const { parseBuffer, reingestBucket } = require("./lib/reingest");
+const { IMPORTS_BUCKET, FIRESTORE_DB, BACKUP_BUCKET } = require("@nt360/functions-shared/lib/config");
+const { buildWrites, fiscalYearFromOrders } = require("@nt360/functions-shared/lib/ingest");
+const { applyWrites, stripLiveOpps, resolveLogisticsFx, resolveBcDc, backfillBcFpFromDc } = require("@nt360/functions-shared/lib/apply");
+const { parseBuffer, reingestBucket } = require("@nt360/functions-shared/lib/reingest");
 const { defineSecret } = require("firebase-functions/params");
 // Token API ClickUp (Secret Manager) — utilisé seulement par les fonctions d'intégration ClickUp.
 const CLICKUP_TOKEN = defineSecret("CLICKUP_TOKEN");
@@ -56,7 +56,7 @@ db.settings({ ignoreUndefinedProperties: true });
 // Garde-fou des scans pleins de collection (R1 scalabilité) — borne mémoire/latence des callables
 // d'administration qui lisent une collection entière. Lecture bornée à MAX_SCAN+1 pour DÉTECTER un
 // dépassement, puis troncature SIGNALÉE (jamais silencieuse) via `sliceCapped` + auditLog côté appelant.
-const { MAX_SCAN, sliceCapped } = require("./domain/scan");
+const { MAX_SCAN, sliceCapped } = require("@nt360/functions-shared/domain/scan");
 
 // Socle d'exécution partagé (Étape 0 du split en codebases, docs/SPLIT-CODEBASES.md) : logOps /
 // assertPlainId / rateLimit / requireWrite / requireRead + la colonne vertébrale des callables
@@ -64,7 +64,7 @@ const { MAX_SCAN, sliceCapped } = require("./domain/scan");
 // futurs points d'entrée. Injection des services déjà initialisés (dont `onCall`, le wrapper maison
 // withMemory) — comportement inchangé. Placé tôt (avant toute définition qui les référence, dont les
 // exports onCallG(...) et les factories qui reçoivent onCallG) pour éviter tout TDZ.
-const { createRuntime } = require("./lib/runtime");
+const { createRuntime } = require("@nt360/functions-shared/lib/runtime");
 const { logOps, assertPlainId, rateLimit, requireWrite, requireRead, onCallG, postWebhook,
   isRecordAdmin, recordAccessOwd, assertRecordVisible, requireStrongAuth } = createRuntime({ db, logger, HttpsError, FieldValue, onCall });
 
@@ -178,7 +178,7 @@ if (process.env.RECOMPUTE_REGION) {
       // éteint ENTRE la soumission de l'approbation et sa décision → sans cette garde, décider une approbation
       // mnt_ en attente muterait quand même mnt_astreintes/mnt_contrats + auditLog(module:maintenance).
       // Cohérent avec submitAstreinte / la décision de contrat, déjà gâtées par le drapeau (ADR-009).
-      const { isMntEnabled } = require("./domain/mntFeature");
+      const { isMntEnabled } = require("@nt360/functions-shared/domain/mntFeature");
       if (!isMntEnabled((await db.doc("config/mntFeature").get()).data())) return; // module éteint → rien
       // ASTREINTES (ADR-035) — comptabilisation à la décision : approuvée → l'astreinte devient « validee »
       // (elle pèse alors en charge dans la rentabilité), rejetée → « rejetee ». On agit à la TRANSITION vers
@@ -208,7 +208,7 @@ if (process.env.RECOMPUTE_REGION) {
       const contratId = after.entityId;
       if (!contratId) return;
       try {
-        const { applyMntDecision } = require("./domain/mntDecision");
+        const { applyMntDecision } = require("@nt360/functions-shared/domain/mntDecision");
         const ref = db.doc(`mnt_contrats/${contratId}`);
         const snap = await ref.get();
         if (!snap.exists) return; // contrat supprimé entre-temps
@@ -235,7 +235,7 @@ async function updateFiscalYearFromOrders() {
 // Recalcul des agrégats — implémenté en F3 (lib/aggregate). Sans-op si absent.
 async function recomputeSummaries(only) {
   try {
-    const { recomputeAll } = require("./lib/aggregate");
+    const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
     await recomputeAll(db, only);
   } catch (e) {
     if (e.code !== "MODULE_NOT_FOUND") throw e;
@@ -444,7 +444,7 @@ exports.setAlertThresholds = onCallG("setAlertThresholds", async (req) => {
 // d'activité (Lot 13). Pas de recompute (lu à la volée par activityKpis). ---
 exports.setStaffingTargets = onCallG("setStaffingTargets", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  const { validateTargets } = require("./domain/staffingTarget");
+  const { validateTargets } = require("@nt360/functions-shared/domain/staffingTarget");
   const cfg = validateTargets(req.data);
   await db.doc("config/staffingTargets").set(cfg, { merge: false });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "staffing_targets", module: "habilitations", entity: "config", entityId: "staffingTargets", detail: { occupancy: cfg.occupancy }, ts: FieldValue.serverTimestamp() });
@@ -537,7 +537,7 @@ exports.setSupplierAliases = onCallG("setSupplierAliases", { memoryMiB: 512, tim
 // canonique effective (`cleanName` + alias). Lecture bornée (MAX_SCAN). Gâté `fournisseurs` (lecture).
 exports.supplierNames = onCallG("supplierNames", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "fournisseurs");
-  const { groupSupplierNames } = require("./domain/supplierName");
+  const { groupSupplierNames } = require("@nt360/functions-shared/domain/supplierName");
   const [ord, bc, inv, aliasDoc] = await Promise.all([
     db.collection("orders").select("suppliers").limit(MAX_SCAN + 1).get(),
     db.collection("bcLines").select("supplier").limit(MAX_SCAN + 1).get(),
@@ -571,9 +571,9 @@ exports.supplierNames = onCallG("supplierNames", { memoryMiB: 512, timeoutSecond
 // dates ISO, montants > 0) et borne le report dérivé au RAF (aucune incohérence même en cas de dérive). ---
 exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "backlog"); // gouverné par la matrice (module « backlog »)
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
-  const { normalizeMilestones } = require("./domain/milestones");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
+  const { normalizeMilestones } = require("@nt360/functions-shared/domain/milestones");
   const fp = fpKey(req.data?.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
   const milestones = normalizeMilestones(req.data?.milestones);
@@ -613,7 +613,7 @@ exports.setBillingMilestones = onCallG("setBillingMilestones", { memoryMiB: 512,
 // atterrissage / ams / pipeline / news / alerts) → R/O et écarts d'objectif se rafraîchissent. ---
 // Objectifs (R/O CODIR) EXTRAITS dans handlers/objectives.js (patron R3). Deps injectées ; exports
 // déclarés ici (garde-fou de déploiement par nom).
-const { createObjectives } = require("./handlers/objectives");
+const { createObjectives } = require("@nt360/functions-shared/handlers/objectives");
 const _objectives = createObjectives({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute });
 exports.upsertObjective = _objectives.upsertObjective;
 exports.deleteObjective = _objectives.deleteObjective;
@@ -625,16 +625,16 @@ exports.deleteObjective = _objectives.deleteObjective;
 // --- NOTIFICATIONS EMAIL (Office 365 / Microsoft Graph). config/emailNotify (direction) + secret client
 // dans Secret Manager (GRAPH_CLIENT_SECRET). Envoi BEST-EFFORT (n'échoue jamais l'action appelante). ---
 async function loadEmailCfg() {
-  const { normalizeEmailConfig } = require("./domain/emailNotify");
+  const { normalizeEmailConfig } = require("@nt360/functions-shared/domain/emailNotify");
   return normalizeEmailConfig((await db.doc("config/emailNotify").get()).data());
 }
 // Envoie un email via Graph si la config est prête ET le secret présent. Retourne un statut (jamais throw
 // si `soft`). `to` : string|liste. Journalise les échecs dans opsLog (observabilité).
 async function sendEmail(cfg, { to, subject, html, cc }, { soft = true } = {}) {
-  const { canSend } = require("./domain/emailNotify");
+  const { canSend } = require("@nt360/functions-shared/domain/emailNotify");
   const secret = GRAPH_CLIENT_SECRET.value();
   if (!canSend(cfg) || !secret) return { ok: false, skipped: "not-configured" };
-  const { sendMail } = require("./lib/graphMail");
+  const { sendMail } = require("@nt360/functions-shared/lib/graphMail");
   try {
     return await sendMail({ tenant: cfg.tenantId, clientId: cfg.clientId, clientSecret: secret, sender: cfg.sender, to, subject, html, cc });
   } catch (e) {
@@ -649,7 +649,7 @@ async function sendEmail(cfg, { to, subject, html, cc }, { soft = true } = {}) {
 exports.setEmailNotifyConfig = onCallG("setEmailNotifyConfig", { timeoutSeconds: 30 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   await requireStrongAuth(req); // MFA sur la config des notifications (tenant/expéditeur email direction)
-  const { normalizeEmailConfig } = require("./domain/emailNotify");
+  const { normalizeEmailConfig } = require("@nt360/functions-shared/domain/emailNotify");
   const cfg = normalizeEmailConfig(req.data);
   await db.doc("config/emailNotify").set(cfg, { merge: true });
   await db.collection("auditLog").add({
@@ -662,7 +662,7 @@ exports.setEmailNotifyConfig = onCallG("setEmailNotifyConfig", { timeoutSeconds:
 // Envoi d'un email de TEST (valide l'app Azure + le secret de bout en bout). Direction. Remonte l'échec.
 exports.sendTestEmail = onCallG("sendTestEmail", { secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 60 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  const { isEmail } = require("./domain/emailNotify");
+  const { isEmail } = require("@nt360/functions-shared/domain/emailNotify");
   const cfg = await loadEmailCfg();
   const to = String(req.data?.to || "").trim();
   if (!isEmail(to)) throw new HttpsError("invalid-argument", "adresse de test invalide");
@@ -689,7 +689,7 @@ exports.sendTestEmail = onCallG("sendTestEmail", { secrets: [GRAPH_CLIENT_SECRET
 exports.setPermissions = onCallG("setPermissions", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   await requireStrongAuth(req); // MFA sur la réécriture de la matrice de droits (octroi de privilège majeur)
-  const { validateMatrix } = require("./domain/authz");
+  const { validateMatrix } = require("@nt360/functions-shared/domain/authz");
   const matrix = req.data?.matrix;
   const v = validateMatrix(matrix);
   if (!v.ok) throw new HttpsError("invalid-argument", `matrice invalide : ${v.error}`);
@@ -745,7 +745,7 @@ exports.alertDigest = onSchedule({ schedule: "every day 07:00", secrets: [GRAPH_
   // Email direction (best-effort, indépendant du webhook).
   let emailOk = false;
   if (emailOn) {
-    const { buildAlertsEmail } = require("./domain/emailNotify");
+    const { buildAlertsEmail } = require("@nt360/functions-shared/domain/emailNotify");
     const mail = buildAlertsEmail(crit, al.fy);
     const r = await sendEmail(emailCfg, { to: emailCfg.recipients.alerts, subject: mail.subject, html: mail.html });
     emailOk = !!(r && r.ok);
@@ -762,7 +762,7 @@ exports.alertDigest = onSchedule({ schedule: "every day 07:00", secrets: [GRAPH_
 exports.emailRelancesDigest = onSchedule({ schedule: "every day 07:15", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
   const cfg = await loadEmailCfg();
   if (!cfg.enabled || !cfg.triggers.relances) return;
-  const { buildRelancesEmail, emailForName } = require("./domain/emailNotify");
+  const { buildRelancesEmail, emailForName } = require("@nt360/functions-shared/domain/emailNotify");
   const [cre, bc, jal] = await Promise.all([
     db.doc("summaries/relancesCreances").get(), db.doc("summaries/relancesBc").get(), db.doc("summaries/relancesJalons").get(),
   ]);
@@ -792,7 +792,7 @@ exports.emailRelancesDigest = onSchedule({ schedule: "every day 07:15", secrets:
 exports.emailCodirDigest = onSchedule({ schedule: "every monday 08:00", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
   const cfg = await loadEmailCfg();
   if (!cfg.enabled || !cfg.triggers.codir || !cfg.recipients.codir.length) return;
-  const { buildCodirEmail } = require("./domain/emailNotify");
+  const { buildCodirEmail } = require("@nt360/functions-shared/domain/emailNotify");
   const news = (await db.doc("summaries/news").get()).data() || {};
   const bulletins = (news.bulletins || []).filter((b) => b.severity !== "info"); // faits marquants (hors info)
   const mail = buildCodirEmail(bulletins, `Synthèse hebdomadaire — ${bulletins.length} fait(s) marquant(s).`);
@@ -805,7 +805,7 @@ exports.emailCodirDigest = onSchedule({ schedule: "every monday 08:00", secrets:
 // config/mntFeature : éteint (défaut) ⇒ no-op STRICT (aucune lecture mnt_*, aucun email) — « éteint =
 // ERP d'avant » (C7/C8/C10). Planifié après le recompute + les autres digests (07:00–07:15).
 exports.mntSlaSweep = onSchedule({ schedule: "every day 07:30", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
-  const { isMntEnabled } = require("./domain/mntFeature");
+  const { isMntEnabled } = require("@nt360/functions-shared/domain/mntFeature");
   const mntCfg = (await db.doc("config/mntFeature").get()).data();
   if (!isMntEnabled(mntCfg)) return; // module éteint → rien
   const cfg = await loadEmailCfg();
@@ -813,7 +813,7 @@ exports.mntSlaSweep = onSchedule({ schedule: "every day 07:30", secrets: [GRAPH_
   const risque = (await db.doc("summaries/mnt_risque").get()).data() || {};
   const items = (risque.items || []).filter((i) => i && i.niveau !== "vert"); // Ambre et plus
   if (!items.length) return;
-  const { buildMntRisqueEmail, emailForName } = require("./domain/emailNotify");
+  const { buildMntRisqueEmail, emailForName } = require("@nt360/functions-shared/domain/emailNotify");
   // Digest DIRECTION (global) — réutilise la liste de destinataires « codir » (direction/CODIR).
   let sentDir = 0;
   if (cfg.recipients.codir.length) {
@@ -843,7 +843,7 @@ exports.mntSlaSweep = onSchedule({ schedule: "every day 07:30", secrets: [GRAPH_
 // + trigger `partenariats`. Éteint = no-op strict. Lit summaries/par_relances + par_alerts (produits au
 // recompute 05:00 ; planifié après pour lire des summaries frais). Best-effort (sendEmail soft). ADR-P08.
 exports.parRelancesSweep = onSchedule({ schedule: "every day 07:45", secrets: [GRAPH_CLIENT_SECRET], timeoutSeconds: 120 }, async () => {
-  const { isParEnabled } = require("./domain/parFeature");
+  const { isParEnabled } = require("@nt360/functions-shared/domain/parFeature");
   const parCfg = (await db.doc("config/parFeature").get()).data();
   if (!isParEnabled(parCfg)) return; // module éteint → rien (aucune lecture par_*)
   const cfg = await loadEmailCfg();
@@ -852,7 +852,7 @@ exports.parRelancesSweep = onSchedule({ schedule: "every day 07:45", secrets: [G
   const alerts = (await db.doc("summaries/par_alerts").get()).data() || {};
   const relItems = rel.items || [], alertItems = alerts.items || [];
   if (!relItems.length && !alertItems.length) return;
-  const { buildParManagerEmail, buildParDirectionEmail, groupParRelancesByManager, groupParAlertsByManager } = require("./domain/emailNotify");
+  const { buildParManagerEmail, buildParDirectionEmail, groupParRelancesByManager, groupParAlertsByManager } = require("@nt360/functions-shared/domain/emailNotify");
   // Digest DIRECTION — vue d'ensemble (relances + renouvellements), réutilise la liste « codir ».
   let sentDir = 0;
   if (cfg.recipients.codir.length) {
@@ -889,8 +889,8 @@ async function runNewsCuration(uid) {
     await logOps({ kind: "scheduled", action: "curateNews", status: "skipped", uid: uid || null, detail: { reason: "ANTHROPIC_API_KEY non configuré" } });
     return { ok: false, skipped: true };
   }
-  const { buildSignals, CURATION_THRESHOLD } = require("./domain/newsCuration");
-  const { scoreSignals } = require("./lib/anthropic");
+  const { buildSignals, CURATION_THRESHOLD } = require("@nt360/functions-shared/domain/newsCuration");
+  const { scoreSignals } = require("@nt360/functions-shared/lib/anthropic");
   // Bulletins ACTIFS = union des 6 docs news* (cloisonnés). Sert à connaître les types en vigueur ;
   // buildSignals part du catalogue complet et enrichit avec ces bulletins (domaine/sévérité réels).
   const NEWS_DOCS = ["news", "newsFacturation", "newsFournisseurs", "newsBacklog", "newsBc", "newsPipeline"];
@@ -978,7 +978,7 @@ exports.logClientError = onCallG("logClientError", { memoryMiB: 256, timeoutSeco
 exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 1024, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
-  const { recomputeAll } = require("./lib/aggregate");
+  const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
   const t0 = Date.now();
   try {
     const res = await recomputeAll(db, req.data?.only);
@@ -998,7 +998,7 @@ exports.recompute = onCallG("recompute", { secrets: [CLICKUP_TOKEN], memoryMiB: 
 // --- Recompute PLANIFIÉ quotidien : garantit des agrégats jamais datés, indépendamment des
 // imports/sync. Trace succès et échecs dans opsLog (observabilité). ---
 exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async () => {
-  const { recomputeAll } = require("./lib/aggregate");
+  const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
   const t0 = Date.now();
   try {
     const res = await recomputeAll(db);
@@ -1016,7 +1016,7 @@ exports.scheduledRecompute = onSchedule({ schedule: "every day 05:00", secrets: 
 
 // --- F6 : Sync Sales_DATA quotidien (Cloud Scheduler) ---
 async function runSalesSync(objectKey) {
-  const { applySalesSync } = require("./lib/sync");
+  const { applySalesSync } = require("@nt360/functions-shared/lib/sync");
   const key = objectKey || "sync/sales_data.xlsx";
   const file = getStorage().bucket(IMPORTS_BUCKET).file(key);
   const [exists] = await file.exists();
@@ -1028,7 +1028,7 @@ async function runSalesSync(objectKey) {
   // recalcul ne doit pas faire échouer la synchro (le prochain recompute rattrape). Recalcul complet car une
   // opp gagnée peut devenir commande (CAS/backlog/rentabilité).
   try {
-    const { recomputeAll } = require("./lib/aggregate");
+    const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
     await recomputeAll(db);
   } catch (re) {
     logger.error("syncSalesData : recompute post-synchro échoué — opps synchronisées, agrégats au prochain recompute", { message: re && re.message });
@@ -1160,7 +1160,7 @@ exports.reingest = onCallG("reingest", { memoryMiB: 1024, timeoutSeconds: 540 },
 // Recalcule ensuite (rattachement, taux de facturation, RAF dérivé des commandes opp/fiche). ---
 exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const id = String(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "id facture requis");
   assertPlainId(id, "id facture");
@@ -1186,7 +1186,7 @@ exports.setInvoiceFp = onCallG("setInvoiceFp", { memoryMiB: 512, timeoutSeconds:
 // Réservé au droit « import » (data-steward), audité, recompute complet (impacte tout le carnet). ---
 exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const from = fpKey(req.data?.from);
   const rawTo = req.data?.to;
   const to = (rawTo === "" || rawTo == null) ? "" : fpKey(rawTo);
@@ -1225,7 +1225,7 @@ exports.setFpAlias = onCallG("setFpAlias", { memoryMiB: 512, timeoutSeconds: 300
 // audité, recompute complet (un BC nouvellement rattaché peut alimenter le carnet coût/SOA). ---
 exports.setDcAlias = onCallG("setDcAlias", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const from = String(req.data?.from == null ? "" : req.data.from).trim();
   const rawTo = req.data?.to;
   const to = (rawTo === "" || rawTo == null) ? "" : fpKey(rawTo);
@@ -1279,13 +1279,13 @@ exports.importDcAliases = onCallG("importDcAliases", { memoryMiB: 512, timeoutSe
   const b64 = req.data && req.data.fileB64;
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "fichier requis (fileB64)");
   if (b64.length > 30_000_000) throw new HttpsError("invalid-argument", "fichier trop volumineux (> ~22 Mo)"); // même plafond qu'importDelta
-  const { readWorkbook, sheetToJson } = require("./lib/xlsxRead");
+  const { readWorkbook, sheetToJson } = require("@nt360/functions-shared/lib/xlsxRead");
   let aoa;
   try { const wb = await readWorkbook(Buffer.from(b64, "base64")); aoa = sheetToJson(wb.Sheets[wb.SheetNames[0]], { header: 1 }); }
   catch (e) { throw new HttpsError("invalid-argument", "classeur illisible : " + ((e && e.message) || e)); }
 
-  const { planDcMapImport } = require("./domain/dcMapImport");
-  const { fpKey } = require("./lib/ids");
+  const { planDcMapImport } = require("@nt360/functions-shared/domain/dcMapImport");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const ref = db.doc("config/dcAliases");
   const map = { ...(((await ref.get()).data() || {}).map || {}) };
   const plan = planDcMapImport(aoa, map, fpKey);
@@ -1327,15 +1327,15 @@ exports.importDcAliases = onCallG("importDcAliases", { memoryMiB: 512, timeoutSe
 // pas les agrégats et ne tourne que quand un data-steward ouvre l'écran. ---
 exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "import");
-  const { reconcileClients } = require("./domain/reconcile");
-  const { fpKey } = require("./lib/ids");
-  const { buildFpAliasResolver } = require("./lib/ids");
-  const { buildClientResolver } = require("./domain/clientName");
+  const { reconcileClients } = require("@nt360/functions-shared/domain/reconcile");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { buildFpAliasResolver } = require("@nt360/functions-shared/lib/ids");
+  const { buildClientResolver } = require("@nt360/functions-shared/domain/clientName");
   // Lecture ciblée (projection des seuls champs utiles) — payload et mémoire réduits. Scans BORNÉS
   // (R1) sur les TROIS collections (orders/invoices désormais plafonnés comme opps) → mémoire/latence
   // bornées même sur gros volumes ; `capped` remonté pour l'observabilité (troncature JAMAIS silencieuse).
-  const { isAgedLost } = require("./domain/oppLifecycle");
-  const { safeId } = require("./lib/sheets");
+  const { isAgedLost } = require("@nt360/functions-shared/domain/oppLifecycle");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const [ordSnap, invSnap, oppSnap, aliasDoc, clientDoc, cxlODoc, cxlIDoc] = await Promise.all([
     db.collection("orders").select("fp", "client", "cas", "raf", "source", "affaire", "designation").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("fp", "client", "amountHt", "date", "numero", "linked").limit(MAX_SCAN + 1).get(),
@@ -1404,8 +1404,8 @@ exports.reconClient = onCallG("reconClient", { memoryMiB: 512, timeoutSeconds: 1
 // par type pour borner le payload ; `count` reste le total réel. ---
 exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "import");
-  const { issueDefs } = require("./domain/dataQuality");
-  const { isAgedLost } = require("./domain/oppLifecycle");
+  const { issueDefs } = require("@nt360/functions-shared/domain/dataQuality");
+  const { isAgedLost } = require("@nt360/functions-shared/domain/oppLifecycle");
   // TOUS les scans sont BORNÉS (MAX_SCAN) — pas seulement les opps : sur un carnet volumineux, charger
   // orders/invoices/bcLines/sheets sans limite pouvait saturer la mémoire (OOM → « INTERNAL »). Mémoire
   // portée à 1 GiB pour la marge. Une troncature éventuelle est signalée (`capped`) plutôt que silencieuse.
@@ -1440,7 +1440,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // CORRECTION lui-même (faux positifs signalés au terrain). Non destructif (en mémoire, avant issueDefs).
   const fpAliasMap = ((aliasDoc.data() || {}).map) || {};
   if (Object.keys(fpAliasMap).length) {
-    const { buildFpAliasResolver } = require("./lib/ids"); // require LOCAL (les autres requires de ce module sont fn-scoped) — sinon ReferenceError « buildFpAliasResolver is not defined »
+    const { buildFpAliasResolver } = require("@nt360/functions-shared/lib/ids"); // require LOCAL (les autres requires de ce module sont fn-scoped) — sinon ReferenceError « buildFpAliasResolver is not defined »
     const canonFp = buildFpAliasResolver(fpAliasMap);
     for (const rows of [orders, invoices, allOpps, bcLines, sheets]) {
       for (const r of rows) if (r && r.fp != null && r.fp !== "") r.fp = canonFp(r.fp);
@@ -1451,7 +1451,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // DANS LE CENTRE DE CORRECTION alors que le cockpit Qualité (aggregate) l'aura rattaché → divergence.
   const dcAliasMap = ((dcAliasDoc.data() || {}).map) || {};
   if (Object.keys(dcAliasMap).length) {
-    const { resolveBcFp } = require("./domain/odooSync"); // require LOCAL (module fn-scoped, cf. buildFpAliasResolver)
+    const { resolveBcFp } = require("@nt360/functions-shared/domain/odooSync"); // require LOCAL (module fn-scoped, cf. buildFpAliasResolver)
     for (const b of bcLines) { if (b && (b.fp == null || b.fp === "") && b.dc) { const fp = resolveBcFp(b, dcAliasMap); if (fp) b.fp = fp; } }
   }
   // SUPPRESSION DE CHARGE (overlay config/cancelCharges, ADR-069) — MÊME retrait que le recompute
@@ -1460,7 +1460,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // (bc_sans_fournisseur / bc_doublons) une ligne que le score/hero (summary) avait déjà exclue → totaux
   // divergents. Mute bcLines/sheets en place, APRÈS résolution des FP (alias/DC), AVANT mergeCommandes/issueDefs.
   {
-    const { applyChargeDrops } = require("./domain/charges"); // require LOCAL (module fn-scoped)
+    const { applyChargeDrops } = require("@nt360/functions-shared/domain/charges"); // require LOCAL (module fn-scoped)
     // extraction inline des ids (itemsOfCorr n'est déclaré que plus bas — TDZ sur const).
     const cancelledCharges = new Set((((cxlCDoc.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
     applyChargeDrops(bcLines, sheets, cancelledCharges);
@@ -1476,9 +1476,9 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // INTRA-live (salesData+odoo, le plus récent par FP) PUIS masquage des « saisie » couvertes par un FP
   // live. L'ancienne ré-implémentation locale ignorait Odoo et ne dédupliquait pas les live entre elles →
   // buckets opp du Centre de correction SUR-COMPTÉS vs cockpit Qualité dès qu'Odoo était actif.
-  const { fpKey: fpKeyCorr } = require("./lib/ids"); // aussi utilisé plus bas (recommandations par FP)
+  const { fpKey: fpKeyCorr } = require("@nt360/functions-shared/lib/ids"); // aussi utilisé plus bas (recommandations par FP)
   {
-    const { dedupeLiveOpps, maskSaisieCovered } = require("./domain/liveOpps");
+    const { dedupeLiveOpps, maskSaisieCovered } = require("@nt360/functions-shared/domain/liveOpps");
     const { oppsDedup, liveFps } = dedupeLiveOpps(allOpps);
     allOpps = maskSaisieCovered(oppsDedup, liveFps);
   }
@@ -1495,8 +1495,8 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // orderCasOverride) + exclusion des annulations — au lieu de scanner les lignes P&L brutes. Ainsi
   // surfacturation (CAS fusionné), commandes_sans_client/am (client/AM hérités de l'opp/fiche) et
   // factures_orphelines (commandes annulées écartées) donnent le MÊME nombre que la Vue Qualité.
-  const { mergeCommandes } = require("./domain/commandes");
-  const { safeId: safeIdCorr } = require("./lib/sheets");
+  const { mergeCommandes } = require("@nt360/functions-shared/domain/commandes");
+  const { safeId: safeIdCorr } = require("@nt360/functions-shared/lib/sheets");
   const itemsOfCorr = (snap) => new Set((((snap.data() || {}).items) || []).map((e) => e && e.id).filter(Boolean));
   const cancelledOrders = itemsOfCorr(cxlODoc), cancelledInvoices = itemsOfCorr(cxlIDoc);
   const casOverrideMap = ((casOvrDoc.data() || {}).map) || {};
@@ -1514,7 +1514,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   const CAP = 100; // borne de payload par type ; `count` = total réel (le steward corrige, on rescanne)
   // RECOMMANDATIONS CONCRÈTES (au-delà de la détection) : valeur chiffrée déductible d'un enregistrement
   // rattaché (jamais inventée). ctx = commande fusionnée par fpKey (cas/casPnl) + Σ factures par fpKey.
-  const { recommendCorrection, remediationPlan } = require("./domain/remediation");
+  const { recommendCorrection, remediationPlan } = require("@nt360/functions-shared/domain/remediation");
   const orderByFp = new Map(ordersDq.map((o) => [fpKeyCorr(o.fp), o]).filter(([k]) => k));
   const billedByFp = new Map();
   for (const i of invoicesDq) { const k = fpKeyCorr(i.fp); if (k) billedByFp.set(k, (billedByFp.get(k) || 0) + (Number(i.amountHt) || 0)); }
@@ -1529,7 +1529,7 @@ exports.correctionQueue = onCallG("correctionQueue", { memoryMiB: 1024, timeoutS
   // corrigent pas en une valeur → buckets « drill-through » (la ligne renvoie à l'écran commandes pré-filtré).
   const cuSyncMap = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   if (Object.keys(cuSyncMap).length) {
-    const { clickupSignals } = require("./domain/clickupSignals");
+    const { clickupSignals } = require("@nt360/functions-shared/domain/clickupSignals");
     const asOf = new Date().toISOString().slice(0, 10);
     const clientByFp = new Map(ordersDq.map((o) => [o.fp, o.client || ""]));
     for (const iss of clickupSignals(ordersDq, cuSyncMap, safeIdCorr, asOf).issues) {
@@ -1582,7 +1582,7 @@ exports.aiSuggestCorrections = onCallG(
       context = { orders: ordSnap.docs.map((d) => { const o = d.data() || {}; return { fp: o.fp, client: o.client, cas: o.cas }; }).filter((o) => o.fp) };
     }
 
-    const { suggestCorrections } = require("./lib/aiCorrection");
+    const { suggestCorrections } = require("@nt360/functions-shared/lib/aiCorrection");
     let out;
     try {
       out = await suggestCorrections(apiKey, { type, records: batch, context });
@@ -1626,7 +1626,7 @@ exports.aiSuggestClientMerges = onCallG(
       .map((n) => ({ name: String((n && n.name) != null ? n.name : n || "").slice(0, 120), count: Number(n && n.count) || 0 }))
       .filter((n) => n.name);
     if (!names.length) throw new HttpsError("invalid-argument", "aucun nom exploitable");
-    const { aiSuggestClientMerges: runAi } = require("./lib/aiClientNorm");
+    const { aiSuggestClientMerges: runAi } = require("@nt360/functions-shared/lib/aiClientNorm");
     let out;
     try {
       out = await runAi(apiKey, names, { entity });
@@ -1667,7 +1667,7 @@ exports.aiRemediationSummary = onCallG(
     };
     if (!plan.rows.length) throw new HttpsError("invalid-argument", "plan d'assainissement vide");
 
-    const { summarizeRemediation } = require("./lib/aiRemediation");
+    const { summarizeRemediation } = require("@nt360/functions-shared/lib/aiRemediation");
     let out;
     try {
       out = await summarizeRemediation(apiKey, { plan });
@@ -1688,7 +1688,7 @@ exports.aiRemediationSummary = onCallG(
 // (même règle que la marge). Écriture (gestion du staffing) gouvernée « pipeline ». Audité.
 // Consultants (Lot 11) + Plan de charge / staffing (Lot 12) EXTRAITS dans handlers/staffing.js
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom).
-const { createStaffing } = require("./handlers/staffing");
+const { createStaffing } = require("@nt360/functions-shared/handlers/staffing");
 const _staffing = createStaffing({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, recomputeNow: recomputeSummaries, logOps });
 exports.upsertConsultant = _staffing.upsertConsultant;
 exports.deleteConsultant = _staffing.deleteConsultant;
@@ -1700,7 +1700,7 @@ exports.staffingPlan = _staffing.staffingPlan;
 // CONTRATS DE MAINTENANCE (module mnt_, Lot 1) — contrat adossé au N° FP + engagements SLA embarqués.
 // Callable-only ; double garde requireWrite('maintenance') + drapeau config/mntFeature (module éteint
 // par défaut → aucune écriture). Extraction dans handlers/maintenance.js (patron d'injection).
-const { createMaintenance } = require("./handlers/maintenance");
+const { createMaintenance } = require("@nt360/functions-shared/handlers/maintenance");
 const _maintenance = createMaintenance({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, loadUsersMap, anyDirectionUid, ANTHROPIC_API_KEY, rateLimit, logOps, requestRecompute });
 exports.upsertMntContrat = _maintenance.upsertMntContrat;
 exports.importMntContrats = _maintenance.importMntContrats;
@@ -1725,7 +1725,7 @@ exports.listAstreintes = _maintenance.listAstreintes;
 // PARTENARIATS & CERTIFICATIONS (par_) — Lot 1 : référentiel partenaire (par_partners). Même patron
 // d'injection que maintenance. Collections par_* callable-only ; double garde (requireWrite + drapeau
 // config/parFeature). Exports déclarés ici (déploiement par nom).
-const { createPartenariats } = require("./handlers/partenariats");
+const { createPartenariats } = require("@nt360/functions-shared/handlers/partenariats");
 const _partenariats = createPartenariats({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, requestRecompute, recomputeNow: recomputeSummaries, ANTHROPIC_API_KEY, CLICKUP_TOKEN, rateLimit, logOps });
 exports.upsertParPartner = _partenariats.upsertParPartner;
 exports.deleteParPartner = _partenariats.deleteParPartner;
@@ -1755,9 +1755,9 @@ exports.deleteParRebate = _partenariats.deleteParRebate;
 // domain/activityKpi). Le COÛT/MARGE ne sont exposés qu'avec le droit « rentabilite » (confidentialité).
 exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "overview");
-  const { monthsRange } = require("./domain/assignment");
-  const { computeActivity } = require("./domain/activityKpi");
-  const { canRead } = require("./domain/authz");
+  const { monthsRange } = require("@nt360/functions-shared/domain/assignment");
+  const { computeActivity } = require("@nt360/functions-shared/domain/activityKpi");
+  const { canRead } = require("@nt360/functions-shared/domain/authz");
   const role = req.auth.token?.nt360Role;
   const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
   const canCost = canRead(matrix, role, "rentabilite");
@@ -1778,7 +1778,7 @@ exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds:
   for (const c of consultants) if (c.cjm != null) costById[c.id] = Number(c.cjm);
   const kpi = computeActivity(consultants, assignments, months, costById, canCost);
   // Objectifs d'occupation (Lot 18) : cible par ressource (grade > BU > global) + détection de dérive.
-  const { validateTargets, evaluate, targetFor } = require("./domain/staffingTarget");
+  const { validateTargets, evaluate, targetFor } = require("@nt360/functions-shared/domain/staffingTarget");
   const targets = validateTargets(tgtDoc.data() || {});
   const ev = evaluate(kpi.rows, targets);
   kpi.rows = ev.rows;
@@ -1791,8 +1791,8 @@ exports.activityKpis = onCallG("activityKpis", { memoryMiB: 256, timeoutSeconds:
 // (positif). Les opportunités sont lues via scopedOpps (sécurité par enregistrement respectée).
 exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "overview");
-  const { monthsRange, buildLoad } = require("./domain/assignment");
-  const { capacityVsPipeline } = require("./domain/capacity");
+  const { monthsRange, buildLoad } = require("@nt360/functions-shared/domain/assignment");
+  const { capacityVsPipeline } = require("@nt360/functions-shared/domain/capacity");
   const now = new Date();
   const curYm = req.data?.fromMonth && /^\d{4}-\d{2}$/.test(req.data.fromMonth)
     ? req.data.fromMonth : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -1805,21 +1805,21 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
   ]);
   const consultants = sliceCapped(cSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
   const assignments = sliceCapped(aSnap.docs).docs.map((d) => ({ id: d.id, ...d.data() }));
-  const { isWorkforce } = require("./domain/consultant");
+  const { isWorkforce } = require("@nt360/functions-shared/domain/consultant");
   // Effectif EN ACTIVITÉ (staffé + intercontrat) : le banc compte dans la capacité disponible.
   const activeIds = consultants.filter((c) => isWorkforce(c.status)).map((c) => c.id);
   const { byConsultant } = buildLoad(assignments, months, activeIds);
   // Opportunités OUVERTES (étapes 1..5) pondérées — record-level respecté via scopedOpps. On calcule le
   // pondéré TIÉRÉ (`pw`, source unique du « pondéré » — CLAUDE.md) et on le passe à la capacité, au lieu de
   // laisser lire le `weighted` linéaire persisté (interdit à l'affichage).
-  const { projectionWeight, normalizeTiers } = require("./domain/projection");
-  const { isAgedLost } = require("./domain/oppLifecycle");
+  const { projectionWeight, normalizeTiers } = require("@nt360/functions-shared/domain/projection");
+  const { isAgedLost } = require("@nt360/functions-shared/domain/oppLifecycle");
   const tiers = normalizeTiers((await db.doc("config/projection").get()).data() || undefined);
   // Population alignée pipeline/vélocité : ouvertes (1-5), NON `stale`, NON périmées par âge (`isAgedLost`),
   // DÉDUPLIQUÉE par FP (parité aggregate.js — une 'saisie' ré-importée en salesData doublait sinon la demande
   // → gap de recrutement surévalué). `fp`/`updatedAt` requis par la dédup ; dormantes CONSERVÉES à dessein
   // (une affaire ouverte qui a glissé reste à STAFFER — plan de capacité = liste d'action, pas prévision de CA).
-  const { dedupOppsByFp } = require("./domain/oppPipeline");
+  const { dedupOppsByFp } = require("@nt360/functions-shared/domain/oppPipeline");
   const allOpps = await scopedOpps(req, ["bu", "amount", "weighted", "probability", "stage", "stale", "source", "ageDays", "fp", "updatedAt"]);
   const opps = dedupOppsByFp(allOpps.filter((o) => o.stale !== true && !isAgedLost(o)))
     .filter((o) => { const s = Number(o.stage) || 0; return s >= 1 && s <= 5; })
@@ -1831,7 +1831,7 @@ exports.capacityPlan = onCallG("capacityPlan", { memoryMiB: 256, timeoutSeconds:
 // === CRA / TEMPS CONSTATÉ + ACTIVITÉ ESN (Lots 15/17/19/20/21/22 « 20/10 DirOps ») EXTRAIT dans
 // handlers/timesheets.js (patron R3). CRA mensuel → TACE/occupation réels, tendance, auto-CRA ClickUp,
 // P&L par ressource et pré-facturation. Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createTimesheets } = require("./handlers/timesheets");
+const { createTimesheets } = require("@nt360/functions-shared/handlers/timesheets");
 const _timesheets = createTimesheets({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId, CLICKUP_TOKEN, CLICKUP_TEAM, recomputeNow: recomputeSummaries, logOps });
 exports.upsertTimesheet = _timesheets.upsertTimesheet;
 exports.deleteTimesheet = _timesheets.deleteTimesheet;
@@ -1846,7 +1846,7 @@ exports.deliveryMarginByAffaire = _timesheets.deliveryMarginByAffaire;
 // === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
 // (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». EXTRAIT dans
 // handlers/candidates.js (patron R3). Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createCandidates } = require("./handlers/candidates");
+const { createCandidates } = require("@nt360/functions-shared/handlers/candidates");
 const _candidates = createCandidates({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId });
 exports.upsertCandidate = _candidates.upsertCandidate;
 exports.deleteCandidate = _candidates.deleteCandidate;
@@ -1867,7 +1867,7 @@ async function loadUsersMap() {
 }
 // visibleTo d'un propriétaire (charge la hiérarchie si non fournie). ownerUid vide → [] (sans propriétaire).
 async function visibleToFor(ownerUid, usersMap) {
-  const { ownerChain } = require("./domain/hierarchy");
+  const { ownerChain } = require("@nt360/functions-shared/domain/hierarchy");
   const map = usersMap || (await loadUsersMap());
   return ownerChain(map, ownerUid);
 }
@@ -1878,7 +1878,7 @@ async function visibleToFor(ownerUid, usersMap) {
 // du commercial) en le mappant sur l'utilisateur de même nom (normalisé). Rend l'OWD « private »
 // immédiatement exploitable sur les opps importées (sinon toutes « sans propriétaire » = admins seuls).
 async function reindexAllVisibility(opts = {}) {
-  const { ownerChain } = require("./domain/hierarchy");
+  const { ownerChain } = require("@nt360/functions-shared/domain/hierarchy");
   const usersSnap = await db.collection("users").select("managerUid", "name").get();
   const usersMap = {}; const nameToUid = {};
   usersSnap.forEach((d) => {
@@ -1964,7 +1964,7 @@ exports.setManager = onCallG("setManager", { memoryMiB: 512, timeoutSeconds: 300
   const managerUid = req.data?.managerUid ? String(req.data.managerUid) : null;
   if (managerUid && managerUid === uid) throw new HttpsError("invalid-argument", "un utilisateur ne peut pas être son propre manager");
   if (managerUid) {
-    const { ownerChain } = require("./domain/hierarchy");
+    const { ownerChain } = require("@nt360/functions-shared/domain/hierarchy");
     // Cycle : si le futur manager rapporte (transitivement) déjà à uid, le lien fermerait une boucle.
     if (ownerChain(await loadUsersMap(), managerUid).includes(uid)) throw new HttpsError("failed-precondition", "cycle hiérarchique interdit");
   }
@@ -2026,8 +2026,8 @@ exports.reindexVisibility = onCallG("reindexVisibility", { memoryMiB: 512, timeo
 // Pas de recompute (métadonnée hors agrégats). Lecture via les rules (canRead('overview')). ===
 exports.upsertAccount = onCallG("upsertAccount", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const { accountId } = require("./domain/accounts");
-  const { buildClientResolver } = require("./domain/clientName");
+  const { accountId } = require("@nt360/functions-shared/domain/accounts");
+  const { buildClientResolver } = require("@nt360/functions-shared/domain/clientName");
   const d = req.data || {};
   const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
   const canon = resolve(d.name);
@@ -2060,8 +2060,8 @@ exports.upsertAccount = onCallG("upsertAccount", { memoryMiB: 256, timeoutSecond
 // Contacts rattachés à un compte (accountId = id du compte). Un seul contact « principal » par compte.
 exports.upsertContact = onCallG("upsertContact", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const { accountId } = require("./domain/accounts");
-  const { buildClientResolver } = require("./domain/clientName");
+  const { accountId } = require("@nt360/functions-shared/domain/accounts");
+  const { buildClientResolver } = require("@nt360/functions-shared/domain/clientName");
   const d = req.data || {};
   const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
   const acc = accountId(resolve(d.account));
@@ -2102,8 +2102,8 @@ exports.deleteContact = onCallG("deleteContact", { memoryMiB: 256, timeoutSecond
 // Client 360 viennent de summaries/clients (déjà agrégé, lu par le front).
 exports.accountView = onCallG("accountView", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "overview");
-  const { accountId } = require("./domain/accounts");
-  const { buildClientResolver } = require("./domain/clientName");
+  const { accountId } = require("@nt360/functions-shared/domain/accounts");
+  const { buildClientResolver } = require("@nt360/functions-shared/domain/clientName");
   const resolve = buildClientResolver(((await db.doc("config/clientAliases").get()).data() || {}).pairs || []);
   const name = resolve(req.data?.client);
   const id = accountId(name);
@@ -2133,7 +2133,7 @@ function nowISO10() { return new Date().toISOString().slice(0, 10); }
 
 exports.upsertActivity = onCallG("upsertActivity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const { validateActivity } = require("./domain/activity");
+  const { validateActivity } = require("@nt360/functions-shared/domain/activity");
   const v = validateActivity(req.data, nowISO10());
   if (!v.ok) throw new HttpsError("invalid-argument", v.error);
   const d = req.data || {};
@@ -2167,7 +2167,7 @@ exports.deleteActivity = onCallG("deleteActivity", { memoryMiB: 256, timeoutSeco
   const a = snap.data() || {};
   // Visibilité par enregistrement (parité listActivities/upsertActivity, Lot 13) : sous OWD privé, on ne
   // supprime que les activités de SON périmètre — sinon un tiers efface une activité hors de sa ligne.
-  const { activityVisible } = require("./domain/activity");
+  const { activityVisible } = require("@nt360/functions-shared/domain/activity");
   const relColl = a.relatedType === "account" ? "accounts" : "opportunities";
   const priv = (await recordAccessOwd(relColl)) === "private";
   if (!activityVisible(a, priv, await isRecordAdmin(req), req.auth.uid)) {
@@ -2201,11 +2201,11 @@ exports.listActivities = onCallG("listActivities", { memoryMiB: 256, timeoutSeco
   const oppPrivate = (await recordAccessOwd("opportunities")) === "private";
   const accPrivate = (await recordAccessOwd("accounts")) === "private";
   if ((oppPrivate || accPrivate) && !(await isRecordAdmin(req))) {
-    const { activityVisible } = require("./domain/activity"); // même prédicat que deleteActivity (source unique)
+    const { activityVisible } = require("@nt360/functions-shared/domain/activity"); // même prédicat que deleteActivity (source unique)
     rows = rows.filter((a) => activityVisible(a, a.relatedType === "account" ? accPrivate : oppPrivate, false, req.auth.uid));
   }
   if (d.openTasksOnly) rows = rows.filter((a) => a.type === "task" && a.done !== true);
-  const { isOverdue } = require("./domain/activity");
+  const { isOverdue } = require("@nt360/functions-shared/domain/activity");
   const today = nowISO10();
   const openTask = (a) => a.type === "task" && a.done !== true;
   rows.sort((a, b) => {
@@ -2230,8 +2230,8 @@ async function anyDirectionUid(exceptUid) {
 
 exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIENT_SECRET], memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "pipeline");
-  const { validateApprovalRequest, approverFor } = require("./domain/approval");
-  const { ownerChain } = require("./domain/hierarchy");
+  const { validateApprovalRequest, approverFor } = require("@nt360/functions-shared/domain/approval");
+  const { ownerChain } = require("@nt360/functions-shared/domain/hierarchy");
   const v = validateApprovalRequest(req.data);
   if (!v.ok) throw new HttpsError("invalid-argument", v.error);
   const requester = req.auth.uid;
@@ -2254,7 +2254,7 @@ exports.submitForApproval = onCallG("submitForApproval", { secrets: [GRAPH_CLIEN
     if (emailCfg.enabled && emailCfg.triggers.approvals) {
       const approver = (await db.doc(`users/${approverUid}`).get()).data() || {};
       if (approver.email) {
-        const { buildApprovalEmail } = require("./domain/emailNotify");
+        const { buildApprovalEmail } = require("@nt360/functions-shared/domain/emailNotify");
         const mail = buildApprovalEmail({ type: v.value.kind, typeLabel: v.value.kind, label: v.value.label || v.value.entityId, amount: v.value.amount, note: v.value.note, requester: doc.requestedByName || "Un collaborateur" });
         await sendEmail(emailCfg, { to: approver.email, subject: mail.subject, html: mail.html });
       }
@@ -2290,7 +2290,7 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 512, timeoutSeco
   // réécrira les mêmes valeurs). L'effet CONTRAT (renouvellement/résiliation) reste porté par le trigger.
   if (cur.entityType === "astreinte" && cur.entityId) {
     try {
-      const { isMntEnabled } = require("./domain/mntFeature");
+      const { isMntEnabled } = require("@nt360/functions-shared/domain/mntFeature");
       if (isMntEnabled((await db.doc("config/mntFeature").get()).data())) {
         const statut = decision === "approved" ? "validee" : "rejetee";
         const aRef = db.doc(`mnt_astreintes/${cur.entityId}`);
@@ -2326,7 +2326,7 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
   // approbateur/lecteur SANS droit `rentabilite`. L'approbation reste possible sur le libellé + le motif ;
   // le chiffre exact exige le droit coût. Les autres natures (remise/DR/BC) portent un montant non
   // confidentiel (pipeline) — inchangées.
-  const { canRead } = require("./domain/authz");
+  const { canRead } = require("@nt360/functions-shared/domain/authz");
   const role = req.auth.token?.nt360Role;
   const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
   const hasCost = role === "direction" || canRead(matrix, role, "rentabilite");
@@ -2350,10 +2350,10 @@ exports.listApprovals = onCallG("listApprovals", { memoryMiB: 256, timeoutSecond
 // et respecte la visibilité. Gouverné « pipeline ».
 exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
-  const { rollupForecast, rollupForecastByAm } = require("./domain/forecast");
-  const { plausibleYear, fpKey } = require("./lib/ids");
-  const { isAgedLost, isDormantClosing } = require("./domain/oppLifecycle");
-  const { dedupOppsByFp } = require("./domain/oppPipeline");
+  const { rollupForecast, rollupForecastByAm } = require("@nt360/functions-shared/domain/forecast");
+  const { plausibleYear, fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { isAgedLost, isDormantClosing } = require("@nt360/functions-shared/domain/oppLifecycle");
+  const { dedupOppsByFp } = require("@nt360/functions-shared/domain/oppPipeline");
   const [oppSnap, fiscalDoc, projDoc] = await Promise.all([
     // source/ageDays/probability : requis par isAgedLost (parité pipeline/board/scoring/vélocité).
     // fp + updatedAt : requis pour la dédup (intra/inter-source) et l'exclusion des opps DÉJÀ AU CARNET
@@ -2451,10 +2451,10 @@ exports.forecastRollup = onCallG("forecastRollup", { memoryMiB: 256, timeoutSeco
 // l'écart #5 (aucune IA prédictive). Callable, gouverné « pipeline ».
 exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
-  const { scoreOpportunity, isOpen } = require("./domain/scoring");
-  const { isAgedLost, isWonOpp, isLostOpp } = require("./domain/oppLifecycle");
-  const { calibrate } = require("./domain/scoreCalib");
-  const { dedupOppsByFp } = require("./domain/oppPipeline");
+  const { scoreOpportunity, isOpen } = require("@nt360/functions-shared/domain/scoring");
+  const { isAgedLost, isWonOpp, isLostOpp } = require("@nt360/functions-shared/domain/oppLifecycle");
+  const { calibrate } = require("@nt360/functions-shared/domain/scoreCalib");
+  const { dedupOppsByFp } = require("@nt360/functions-shared/domain/oppPipeline");
   // `source`/`ageDays` chargés pour EXCLURE la MÊME population que pipeline/board/vélocité (parité) :
   // fantômes `stale` (retirés de LIVE) et affaires périmées par âge (`isAgedLost`). `fp`/`updatedAt` : dédup
   // par FP (une 'saisie' ré-importée en salesData ne doit pas produire 2 lignes de score).
@@ -2467,7 +2467,7 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
   // étape 7 OU 9 (annulé) — l'ancienne version OMETTAIT l'étape 9 (audit session). Les AUTO-PERDUES PAR ÂGE sont
   // EXCLUES (régime unifié ADR-077 : les périmées ne comptent nulle part dans le win rate — parité avec
   // pipeline/am360/vélocité, tous sur population sans aged). Catégorie EFFECTIVE pour aligner les paliers sur le forecast.
-  const { effectiveCategory } = require("./domain/forecast");
+  const { effectiveCategory } = require("@nt360/functions-shared/domain/forecast");
   const closed = dedupOppsByFp(all)
     .filter((o) => !isAgedLost(o) && (isWonOpp(o) || isLostOpp(o)))
     .map((o) => ({ won: isWonOpp(o), forecastCategory: effectiveCategory(o) }));
@@ -2499,11 +2499,11 @@ exports.scoreOpportunities = onCallG("scoreOpportunities", { memoryMiB: 256, tim
 // pipeline pondéré, indice de vélocité) sur le périmètre VISIBLE. Callable, gouverné « pipeline ».
 exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireRead(req, "pipeline");
-  const { salesVelocity } = require("./domain/velocity");
-  const { normalizeTiers } = require("./domain/projection");
-  const { fpKey, plausibleYear } = require("./lib/ids");
-  const { dedupOppsByFp } = require("./domain/oppPipeline");
-  const { isDormantClosing, isAgedLost } = require("./domain/oppLifecycle");
+  const { salesVelocity } = require("@nt360/functions-shared/domain/velocity");
+  const { normalizeTiers } = require("@nt360/functions-shared/domain/projection");
+  const { fpKey, plausibleYear } = require("@nt360/functions-shared/lib/ids");
+  const { dedupOppsByFp } = require("@nt360/functions-shared/domain/oppPipeline");
+  const { isDormantClosing, isAgedLost } = require("@nt360/functions-shared/domain/oppLifecycle");
   const [projDoc, fiscalDoc] = await Promise.all([db.doc("config/projection").get(), db.doc("config/fiscal").get()]);
   const tiers = normalizeTiers(projDoc.data() || undefined);
   const excludeDormant = (projDoc.data() || {}).excludeDormant !== false;
@@ -2540,7 +2540,7 @@ exports.salesVelocity = onCallG("salesVelocity", { memoryMiB: 256, timeoutSecond
 // Lecture gouvernée « import ». La correction (alias) reste manuelle via setClientAliases.
 exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "import");
-  const { findFuzzyDuplicates } = require("./domain/fuzzy");
+  const { findFuzzyDuplicates } = require("@nt360/functions-shared/domain/fuzzy");
   const [ord, inv, opp] = await Promise.all([
     db.collection("orders").select("client").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("client").limit(MAX_SCAN + 1).get(),
@@ -2571,7 +2571,7 @@ exports.fuzzyDuplicateClients = onCallG("fuzzyDuplicateClients", { memoryMiB: 51
 // La correction (poser un alias) reste gouvernée par setClientAliases (direction). Scan borné (R1).
 exports.clientNames = onCallG("clientNames", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireRead(req, "import");
-  const { groupClientNames } = require("./domain/clientName");
+  const { groupClientNames } = require("@nt360/functions-shared/domain/clientName");
   const [ord, inv, opp, aliasDoc] = await Promise.all([
     db.collection("orders").select("client").limit(MAX_SCAN + 1).get(),
     db.collection("invoices").select("client").limit(MAX_SCAN + 1).get(),
@@ -2616,7 +2616,7 @@ async function scopedOpps(req, fields) {
 
 // Reporting self-service EXTRAIT dans handlers/reports.js (patron R3 — découpe du monolithe). Deps
 // d'infra + helpers injectés ; les exports restent DÉCLARÉS ici (garde-fou de déploiement par nom).
-const { createReports } = require("./handlers/reports");
+const { createReports } = require("@nt360/functions-shared/handlers/reports");
 const _reports = createReports({ onCallG, requireRead, requireWrite, db, HttpsError, FieldValue, scopedOpps, loadUsersMap, assertPlainId });
 exports.runReport = _reports.runReport;
 exports.saveReport = _reports.saveReport;
@@ -2631,7 +2631,7 @@ exports.deleteReport = _reports.deleteReport;
 exports.createApiKey = onCallG("createApiKey", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   await requireStrongAuth(req); // MFA sur l'émission d'une clé API (compte de service « voit tout »)
-  const { hashApiKey } = require("./domain/apiKey");
+  const { hashApiKey } = require("@nt360/functions-shared/domain/apiKey");
   const label = String(req.data?.label || "").trim().slice(0, 120) || "clé API";
   const scopesIn = Array.isArray(req.data?.scopes) ? req.data.scopes : ["read"];
   const scopes = scopesIn.filter((s) => ["read", "write"].includes(s));
@@ -2664,7 +2664,7 @@ exports.listApiKeys = onCallG("listApiKeys", async (req) => {
 
 // Handler HTTP de l'API REST. Authentifie la clé, applique le rate-limit, route et répond en JSON.
 async function apiHandler(req, res) {
-  const { hashApiKey, parseBearer, matchRoute } = require("./domain/apiKey");
+  const { hashApiKey, parseBearer, matchRoute } = require("@nt360/functions-shared/domain/apiKey");
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
   res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -2703,9 +2703,9 @@ async function apiHandler(req, res) {
         const b = req.body || {};
         const client = String(b.client || "").trim();
         if (!client) return send(400, { error: "champ 'client' requis" });
-        const { clampStage, oppWeighted } = require("./domain/mutations");
-        const { DEFAULT_PROBA, STAGE_LABEL } = require("./parsers/salesData");
-        const { fpKey } = require("./lib/ids");
+        const { clampStage, oppWeighted } = require("@nt360/functions-shared/domain/mutations");
+        const { DEFAULT_PROBA, STAGE_LABEL } = require("@nt360/functions-shared/parsers/salesData");
+        const { fpKey } = require("@nt360/functions-shared/lib/ids");
         const stage = clampStage(b.stage);
         const amount = Number(b.amount) || 0;
         const pr = Number(b.probability);
@@ -2748,7 +2748,7 @@ exports.api = onRequest({ memoryMiB: 512, timeoutSeconds: 60, cors: false }, api
 // sortants sur opp gagnée / approbation décidée). Complète la dimension #7 à 10/10.
 exports.setCustomFields = onCallG("setCustomFields", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  const { normalizeDefs } = require("./domain/customField");
+  const { normalizeDefs } = require("@nt360/functions-shared/domain/customField");
   const fields = normalizeDefs(req.data?.fields);
   await db.doc("config/customFields").set({ fields }, { merge: false });
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "set_custom_fields", module: "habilitations", entity: "config", entityId: "customFields", detail: { fields: fields.length }, ts: FieldValue.serverTimestamp() });
@@ -2774,14 +2774,14 @@ exports.setOutboundWebhook = onCallG("setOutboundWebhook", async (req) => {
 // Sous-système de webhooks sortants EXTRAIT dans handlers/outbound.js (R3 — 1re découpe du monolithe).
 // Les dépendances d'infra sont injectées ; l'export retryOutbound reste DÉCLARÉ ici (garde-fou de
 // déploiement). postJson/fireOutbound restent utilisables par les callables de ce fichier.
-const { createOutbound } = require("./handlers/outbound");
+const { createOutbound } = require("@nt360/functions-shared/handlers/outbound");
 const { postJson, fireOutbound, retryOutbound } = createOutbound({ db, logger, FieldValue, onSchedule });
 exports.retryOutbound = retryOutbound;
 
 // === AUTOMATISATION DÉCLARATIVE (Lot 4b) — EXTRAITE dans handlers/automations.js (patron R3). Deps
 // injectées ; les exports restent DÉCLARÉS ici (garde-fou de déploiement par nom). runAutomationsCore
 // est conservée au module scope car le planifié quotidien (plus haut) l'appelle directement.
-const { createAutomations } = require("./handlers/automations");
+const { createAutomations } = require("@nt360/functions-shared/handlers/automations");
 const _automations = createAutomations({ onCallG, HttpsError, db, FieldValue, loadUsersMap, nowISO10 });
 const runAutomationsCore = _automations.runAutomationsCore;
 exports.setAutomations = _automations.setAutomations;
@@ -2796,7 +2796,7 @@ exports.runAutomations = _automations.runAutomations;
 // === ASSAINISSEMENT (suppression d'enregistrements + annulation) — EXTRAIT dans handlers/sanitize.js
 // (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
 // pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
-const { createSanitize } = require("./handlers/sanitize");
+const { createSanitize } = require("@nt360/functions-shared/handlers/sanitize");
 const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow: recomputeSummaries, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
 exports.deleteRecords = _sanitize.deleteRecords;
 exports.setCancellation = _sanitize.setCancellation;
@@ -2813,8 +2813,8 @@ exports.patchInvoice = onCallG("patchInvoice", { memoryMiB: 512, timeoutSeconds:
   const ref = db.doc(`invoices/${id}`);
   if (!(await ref.get()).exists) throw new HttpsError("not-found", "facture introuvable");
   const d = req.data || {};
-  const { toISO } = require("./lib/sheets");
-  const { plausibleYear } = require("./lib/ids");
+  const { toISO } = require("@nt360/functions-shared/lib/sheets");
+  const { plausibleYear } = require("@nt360/functions-shared/lib/ids");
   // MÊME garde qu'à l'import (parsers/facturationDf) : une date au millésime aberrant (1850, 2206) passe
   // toISO (format valide) mais corrompt DSO/aging/overdue. On la REFUSE plutôt que de l'accepter en saisie
   // manuelle alors que l'import la rejette (asymétrie de garde).
@@ -2858,7 +2858,7 @@ exports.searchInvoices = onCallG("searchInvoices", { memoryMiB: 256, timeoutSeco
   await requireRead(req, "facturation");
   const q = String(req.data?.q || "").trim();
   if (q.length < 2) throw new HttpsError("invalid-argument", "saisir au moins 2 caractères");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const CAP = 300;
   const byId = new Map();
   // Ne renvoie QUE les champs utiles au front (type Invoice) : évite de sérialiser des Timestamp
@@ -2886,8 +2886,8 @@ exports.searchInvoices = onCallG("searchInvoices", { memoryMiB: 256, timeoutSeco
 // vente d'une fiche pilote le CAS quand la commande est de source fiche → recalcul complet. ---
 exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "rentabilite");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const d = req.data || {};
   const fp = fpKey(d.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la fiche requis");
@@ -2895,7 +2895,7 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeo
   const baseSnap = await db.doc(`projectSheets/${id}`).get();
   const mSnap = await db.doc(`projectSheetsMargin/${id}`).get();
   if (!baseSnap.exists && !mSnap.exists) throw new HttpsError("not-found", "fiche affaire introuvable");
-  const { computeFicheMargin } = require("./domain/mutations");
+  const { computeFicheMargin } = require("@nt360/functions-shared/domain/mutations");
   const cur = { ...(baseSnap.data() || {}), ...(mSnap.data() || {}) };
   const provided = (v) => v !== undefined && String(v) !== "";
   if (!provided(d.saleTotal) && !provided(d.costTotal)) throw new HttpsError("invalid-argument", "prix de vente ou de revient requis");
@@ -2921,7 +2921,7 @@ exports.patchProjectSheet = onCallG("patchProjectSheet", { memoryMiB: 512, timeo
 // `fp` (factures, lignes BC — stockés en forme canonique fpKey) sont réécrits ; les docs clés par
 // safeId(fp) (fiche affaire + marge isolée, jalons de facturation) sont déplacés sous le nouvel ID.
 async function migrateFpSatellites(oldFp, newFp) {
-  const { safeId } = require("./lib/sheets");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   for (const col of ["invoices", "bcLines"]) {
     const qs = await db.collection(col).where("fp", "==", oldFp).get();
     for (let i = 0; i < qs.docs.length; i += 400) {
@@ -2957,8 +2957,8 @@ async function migrateFpSatellites(oldFp, newFp) {
 // Le doc `orders` est clé par le FP ; corriger le FP = ré-clé (copie + suppression). Recalcule. ---
 exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const d = req.data || {};
   const fp = fpKey(d.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
@@ -2966,7 +2966,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("failed-precondition", "commande P&L introuvable (opp gagnée / fiche : corriger à la source)");
 
-  const { validateYearPo } = require("./domain/mutations");
+  const { validateYearPo } = require("@nt360/functions-shared/domain/mutations");
   const patch = {};
   if (d.yearPo != null && String(d.yearPo) !== "") {
     const y = validateYearPo(d.yearPo, new Date().getFullYear());
@@ -2999,7 +2999,7 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
   // gouvernés à la source → ré-écrasés au recompute ; l'UI ne propose l'édition que sur pnl/manuel.
   if (d.client !== undefined) patch.client = String(d.client || "").trim();
   if (d.am !== undefined) patch.am = String(d.am || "").trim();
-  if (d.bu !== undefined) { const { cleanBu } = require("./lib/ids"); patch.bu = cleanBu(d.bu); }
+  if (d.bu !== undefined) { const { cleanBu } = require("@nt360/functions-shared/lib/ids"); patch.bu = cleanBu(d.bu); }
   if (d.designation !== undefined) patch.designation = String(d.designation || "").trim();
   const newFp = d.newFp ? fpKey(d.newFp) : null;
   if (d.newFp && !newFp) throw new HttpsError("invalid-argument", "nouveau N° FP invalide");
@@ -3049,8 +3049,8 @@ exports.patchOrder = onCallG("patchOrder", { memoryMiB: 512, timeoutSeconds: 300
 // persiste que tant que le FP est absent de l'Excel. source='manuel' → visible comme telle. ---
 exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey, cleanBu } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const { fpKey, cleanBu } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const d = req.data || {};
   const fp = fpKey(d.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP requis (format FP/AAAA/N)");
@@ -3071,7 +3071,7 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
   // — une saisie non numérique est rejetée plutôt que ramenée silencieusement à 0.
   let yearPo = 0;
   if (d.yearPo != null && String(d.yearPo) !== "") {
-    const { validateYearPo } = require("./domain/mutations");
+    const { validateYearPo } = require("@nt360/functions-shared/domain/mutations");
     const y = validateYearPo(d.yearPo, new Date().getFullYear());
     if (!y.ok) throw new HttpsError("invalid-argument", "année de PO invalide");
     yearPo = y.value;
@@ -3110,11 +3110,11 @@ exports.createOrder = onCallG("createOrder", { memoryMiB: 512, timeoutSeconds: 3
 // FP déjà au carnet (aucun doublon ; ids d'opp DÉTERMINISTES → ré-exécution idempotente). Droit « import ». ---
 exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey, buildFpAliasResolver } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
-  const { planFromInvoices } = require("./domain/genFromInvoice");
-  const { STAGE_LABEL } = require("./parsers/salesData");
-  const { oppWeighted } = require("./domain/mutations");
+  const { fpKey, buildFpAliasResolver } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
+  const { planFromInvoices } = require("@nt360/functions-shared/domain/genFromInvoice");
+  const { STAGE_LABEL } = require("@nt360/functions-shared/parsers/salesData");
+  const { oppWeighted } = require("@nt360/functions-shared/domain/mutations");
   const d = req.data || {};
   const wantAll = d.all === true;
   const ids = Array.isArray(d.ids) ? [...new Set(d.ids.filter(Boolean).map(String))] : [];
@@ -3192,7 +3192,7 @@ exports.generateFromInvoices = onCallG("generateFromInvoices", { memoryMiB: 512,
 // FINALE, la fiche alimente le P&L de la commande (backbone orders + projectSheets/margin isolée),
 // consommé par mergeCommandes au prochain recompute. Doc id = safeId(FP) → 1 fiche par commande.
 // ============================================================================
-const { createFiches } = require("./handlers/fiches");
+const { createFiches } = require("@nt360/functions-shared/handlers/fiches");
 const _fiches = createFiches({ onCallG, HttpsError, db, FieldValue, requestRecompute });
 exports.createFiche = _fiches.createFiche;
 exports.updateFiche = _fiches.updateFiche;
@@ -3209,7 +3209,7 @@ exports.upsertOpsBulletin = onCallG("upsertOpsBulletin", { memoryMiB: 256 }, asy
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   const role = req.auth.token?.nt360Role;
   if (role !== "direction" && role !== "pmo") throw new HttpsError("permission-denied", "réservé à la direction / PMO (opérations)");
-  const { validateOpsBulletin, bulletinId } = require("./domain/opsBulletin");
+  const { validateOpsBulletin, bulletinId } = require("@nt360/functions-shared/domain/opsBulletin");
   const v = validateOpsBulletin(req.data);
   if (!v.ok) throw new HttpsError("invalid-argument", v.error);
   const id = bulletinId(v.value.fy, v.value.week);
@@ -3228,8 +3228,8 @@ exports.upsertOpsBulletin = onCallG("upsertOpsBulletin", { memoryMiB: 256 }, asy
 // Gouverné par le module « import » (comme patchOrder/createOrder) — ajustable via la matrice. ---
 exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   await requireWrite(req, "import");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const d = req.data || {};
   const fp = fpKey(d.fp);
   if (!fp) throw new HttpsError("invalid-argument", "N° FP de la commande requis");
@@ -3254,9 +3254,9 @@ exports.setOrderPm = onCallG("setOrderPm", { memoryMiB: 512, timeoutSeconds: 300
 //    (comme l'affectation PM / les alias FP). Gouverné « import ».
 //  • clear                     : retire la surcharge (la commande reprend son CAS P&L/opp/fiche).
 exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
-  const { oppWeighted } = require("./domain/mutations");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
+  const { oppWeighted } = require("@nt360/functions-shared/domain/mutations");
   const d = req.data || {};
   const fp = fpKey(d.fp);
   const direction = String(d.direction || "");
@@ -3330,7 +3330,7 @@ exports.syncOrderAmount = onCallG("syncOrderAmount", { memoryMiB: 512, timeoutSe
 // --- Opportunités (source saisie) : CRUD + correction + export/import en masse. EXTRAIT dans
 // handlers/opportunities.js (patron R3). Écriture « pipeline » ; recompute CIBLÉ (oppScope) ; journal de
 // transition (oppHistory). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). ---
-const { createOpportunities } = require("./handlers/opportunities");
+const { createOpportunities } = require("@nt360/functions-shared/handlers/opportunities");
 const _opps = createOpportunities({
   onCallG, HttpsError, db, FieldValue, logger,
   requireWrite, assertRecordVisible, visibleToFor, isRecordAdmin, recordAccessOwd,
@@ -3347,10 +3347,10 @@ const BC_STAGES = ["a_emettre", "emis", "livre", "facture", "solde", "annule"];
 
 exports.addBcLine = onCallG("addBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "bc");
-  const { fpKey } = require("./lib/ids");
-  const { hashId } = require("./lib/sheets");
-  const { normCur } = require("./parsers/bcPdf");
-  const { toXof } = require("./lib/fx");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { hashId } = require("@nt360/functions-shared/lib/sheets");
+  const { normCur } = require("@nt360/functions-shared/parsers/bcPdf");
+  const { toXof } = require("@nt360/functions-shared/lib/fx");
   const f = req.data?.fields || {};
   const supplier = String(f.supplier || "").replace(/\s+/g, " ").trim().toUpperCase();
   const bcNumber = String(f.bcNumber || "").replace(/\s+/g, " ").trim();
@@ -3495,7 +3495,7 @@ exports.setMntFeature = onCallG("setMntFeature", { memoryMiB: 256, timeoutSecond
 // férié). On stocke la forme NORMALISÉE (bornes sûres, fériés dédupliqués/triés). Recompute maintenance après.
 exports.setMntCalendar = onCallG("setMntCalendar", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "maintenance");
-  const { mntCalendar } = require("./domain/mntCalendar");
+  const { mntCalendar } = require("@nt360/functions-shared/domain/mntCalendar");
   const d = req.data || {};
   const norm = mntCalendar({ tzOffsetMinutes: d.tzOffsetMinutes, pays: d.pays, holidays: d.holidays, b2b: d.b2b });
   await db.doc("config/mntCalendar").set({ tzOffsetMinutes: norm.offMin, pays: norm.pays, holidays: norm.holidays, b2b: norm.b2b, updatedBy: req.auth.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -3525,15 +3525,15 @@ exports.setParFeature = onCallG("setParFeature", { memoryMiB: 512, timeoutSecond
 // à son PM. Lien FP↔tâche stocké en overlay config/clickupLinks → ré-appui = mise à jour, pas de
 // doublon. Gouverné par le module « import ». Le token vient du secret CLICKUP_TOKEN (Secret Manager).
 // Cœur du push commande → tâche, extrait (lib/clickupPush) pour être testable.
-const { pushOrderCore } = require("./lib/clickupPush");
+const { pushOrderCore } = require("@nt360/functions-shared/lib/clickupPush");
 
 // Index N° FP → taskId des tâches EXISTANTES (via le champ « Opp ID »). Scanne TOUTES les listes pays
 // par défaut (anti-doublon multi-pays : une tâche BF/GN ne doit pas être re-créée dans CI). Sert à la
 // réconciliation / adoption. `listIds` : liste(s) à scanner (défaut = les 3 pays + la liste cible).
 async function buildFpIndex(token, listIds) {
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const { fpKey } = require("./lib/ids");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const lists = Array.isArray(listIds) ? listIds : [listIds];
   const uniq = [...new Set(lists.filter(Boolean))];
   const all = [];
@@ -3554,10 +3554,10 @@ function allScanLists(listId) { return [...new Set([...CLICKUP_LISTS_ALL, String
 
 exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "import");
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -3581,7 +3581,7 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
 
   // VERROU (anti-doublon) : sérialise avec le push en masse et les autres push unitaires → ferme la
   // fenêtre TOCTOU (deux scans avant qu'une création n'ait lieu) sur double-clic concurrent du même FP.
-  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const { acquireClickupLock, releaseClickupLock } = require("@nt360/functions-shared/lib/clickupLock");
   const lock = await acquireClickupLock(db, "push", req.auth.uid);
   if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push ClickUp est déjà en cours — patientez (évite les doublons).");
   try {
@@ -3630,10 +3630,10 @@ exports.pushOrderToClickup = onCallG("pushOrderToClickup", { secrets: [CLICKUP_T
 exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations en peu de temps — patientez un instant.");
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -3652,7 +3652,7 @@ exports.pushAllOrdersToClickup = onCallG("pushAllOrdersToClickup", { secrets: [C
   // VERROU DE CONCURRENCE : deux clics rapprochés (le traitement long fait croire à un échec) lançaient
   // des push PARALLÈLES → index anti-doublon figé avant les créations des autres → tâches TRIPLÉES. Un
   // seul push en masse à la fois ; les concurrents sont refusés proprement.
-  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const { acquireClickupLock, releaseClickupLock } = require("@nt360/functions-shared/lib/clickupLock");
   const lock = await acquireClickupLock(db, "push", req.auth.uid);
   if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push ClickUp en masse est déjà en cours — patientez qu'il se termine (évite les doublons). Suivez l'avancement dans ClickUp.");
   try {
@@ -3704,8 +3704,8 @@ exports.reconcileClickupLinks = onCallG("reconcileClickupLinks", { secrets: [CLI
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
   let fpIndex;
   try { fpIndex = await buildFpIndex(token, allScanLists(listId)); }
@@ -3736,10 +3736,10 @@ exports.dedupeClickupTasks = onCallG("dedupeClickupTasks", { secrets: [CLICKUP_T
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const { fpKey } = require("./lib/ids");
-  const { planDedupe } = require("./domain/clickupDedupe");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { planDedupe } = require("@nt360/functions-shared/domain/clickupDedupe");
   const listId = String(req.data?.listId || cfg.defaultListId || CLICKUP_LIST_CI);
   // SÉCURITÉ SUPPRESSION : le dédoublonnage groupe par N° FP (Opp ID). Sur une liste NON-commande (ex. BC,
   // où plusieurs N° BC distincts partagent légitimement un FP), il proposerait de supprimer des tâches
@@ -3793,10 +3793,10 @@ exports.dedupeBcTasks = onCallG("dedupeBcTasks", { secrets: [CLICKUP_TOKEN], mem
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
-  const { safeId } = require("./lib/sheets");
-  const { planDedupe } = require("./domain/clickupDedupe");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
+  const { planDedupe } = require("@nt360/functions-shared/domain/clickupDedupe");
   const listId = bcListIdOf(cfg, req.data?.listId);
   const apply = req.data?.apply === true;
   // Même politique de fenêtre que dedupeClickupTasks : défaut 24 h, 0 EXPLICITE = toutes les époques, borné 1 an.
@@ -3837,10 +3837,10 @@ exports.dedupeBcTasks = onCallG("dedupeBcTasks", { secrets: [CLICKUP_TOKEN], mem
 async function runClickupHealth(listId) {
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new Error("token ClickUp absent (secret CLICKUP_TOKEN)");
-  const clickup = require("./lib/clickup");
-  const { clickupHealth } = require("./domain/clickupHealth");
-  const { fpKey } = require("./lib/ids");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const { clickupHealth } = require("@nt360/functions-shared/domain/clickupHealth");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
@@ -3913,7 +3913,7 @@ exports.listClickupMembers = onCallG("listClickupMembers", { secrets: [CLICKUP_T
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const clickup = require("./lib/clickup");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   let members;
   try { members = await clickup.listMembers(token, cfg.teamId || CLICKUP_TEAM); }
@@ -3940,7 +3940,7 @@ async function loadCommandeRows() {
 // l'affaire. On renvoie l'ENSEMBLE des FP couverts (canoniques). Utilisé par le push (unitaire + masse) et le
 // diagnostic. NB : lecture bornée des bcLines — opération d'admin, peu fréquente.
 async function loadFpsWithDc() {
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const set = new Set();
   const dcMap = ((await db.doc("config/dcAliases").get()).data() || {}).map || {};
   for (const v of Object.values(dcMap)) { const k = fpKey(v); if (k) set.add(k); }
@@ -3973,10 +3973,10 @@ async function runCafSync({ force }) {
   if (!token) return { pushed: 0, skipped: 0, total: 0, note: "token absent" };
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   if (!Object.keys(links).length) return { pushed: 0, skipped: 0, total: 0 };
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const { diffCaf } = require("./lib/clickupCaf");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const { diffCaf } = require("@nt360/functions-shared/lib/clickupCaf");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const listId = String(cfg.defaultListId || CLICKUP_LIST_CI);
   const fields = await clickup.listFields(token, listId);
   const cafField = cf.findField(fields, cf.FIELD_NAMES.caFacture);
@@ -4041,8 +4041,8 @@ async function runClickupPull() {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const keys = Object.keys(links);
   if (!keys.length) return { pulled: 0, total: 0 };
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
   const prev = ((await db.doc("config/clickupSync").get()).data() || {}).map || {};
   const map = {};
   for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
@@ -4084,7 +4084,7 @@ async function runClickupPull() {
   const pmFilled = await fillOrderPmFromClickup(pmUpdates);
   // Couvre tous les summaries dérivés de clickupSync : chunks commandes + Actualité (projets bloqués/
   // urgents, retard livraison) + Qualité (incohérences statut↔données).
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["commandes", "news", "dataQuality"]); }
+  try { const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate"); await recomputeAll(db, ["commandes", "news", "dataQuality"]); }
   catch (e) { logger.warn("ClickUp pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length, pmUpdated: pmFilled };
 }
@@ -4121,7 +4121,7 @@ exports.scheduledClickupPull = onSchedule({ schedule: "every day 04:30", secrets
 // config/clickupBcSync (ADDITIF : n'écrasent jamais le statut financier SOA de l'app). ClickUp fait
 // foi sur l'avancement logistique du BC.
 // ===================================================================================================
-const { pushBcCore } = require("./lib/clickupBcPush");
+const { pushBcCore } = require("@nt360/functions-shared/lib/clickupBcPush");
 
 // Lignes BC brutes (collection bcLines), issues de l'import BC (source ≠ « fiche »). L'exécution des
 // BC = achats RÉELLEMENT émis, pas les achats planifiés au niveau fiche affaire.
@@ -4133,9 +4133,9 @@ async function loadBcLines() {
 
 // Index N° BC (champ « Numéro de Commande ») → taskId des tâches BC EXISTANTES → adoption anti-doublon.
 async function buildBcClickupIndex(token, listId) {
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const tasks = await clickup.listTasks(token, listId, { includeClosed: true });
   // MÊME garde que buildFpIndex : un index TRONQUÉ (> 5000 tâches) rate des adoptions → doublons. On
   // REFUSE plutôt que de rendre un index partiel silencieux (l'appelant annule la création BC).
@@ -4150,9 +4150,9 @@ function bcListIdOf(cfg, override) { return String(override || (cfg && cfg.bcLis
 // config/clickupBcLinks → ré-appui = mise à jour, pas de doublon. Gouverné par le module « bc ».
 exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "bc");
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -4170,7 +4170,7 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
   let statuses = []; try { statuses = await clickup.getListStatuses(token, listId); } catch (e) { logger.warn("BC push: statuts illisibles", { listId, msg: e && e.message }); }
   // VERROU (anti-doublon) : sérialise avec le push BC en masse et les autres push BC unitaires — évite la
   // fenêtre TOCTOU (deux exécutions scannent l'index avant que l'une crée) sur double-clic concurrent.
-  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const { acquireClickupLock, releaseClickupLock } = require("@nt360/functions-shared/lib/clickupLock");
   const lock = await acquireClickupLock(db, "pushBc", req.auth.uid);
   if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push BC ClickUp est déjà en cours — patientez (évite les doublons).");
   try {
@@ -4198,9 +4198,9 @@ exports.pushBcToClickup = onCallG("pushBcToClickup", { secrets: [CLICKUP_TOKEN],
 exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 540 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop de synchronisations en peu de temps — patientez un instant.");
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -4208,7 +4208,7 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
   const force = req.data?.force === true;
   const listId = bcListIdOf(cfg, req.data?.listId);
   // Même verrou de concurrence que le push commandes : évite la triple création sur clics rapprochés.
-  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const { acquireClickupLock, releaseClickupLock } = require("@nt360/functions-shared/lib/clickupLock");
   const lock = await acquireClickupLock(db, "pushBc", req.auth.uid);
   if (!lock.acquired) throw new HttpsError("failed-precondition", "Un push BC ClickUp est déjà en cours — patientez qu'il se termine (évite les doublons).");
   try {
@@ -4249,8 +4249,8 @@ exports.pushAllBcToClickup = onCallG("pushAllBcToClickup", { secrets: [CLICKUP_T
 // créer ni modifier — à lancer AVANT un push en masse. Direction.
 exports.reconcileBcLinks = onCallG("reconcileBcLinks", { secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
-  const bc = require("./lib/clickupBc");
-  const { safeId } = require("./lib/sheets");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
@@ -4285,11 +4285,11 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   if (cfg.enabled === false) throw new HttpsError("failed-precondition", "intégration ClickUp désactivée (Habilitations)");
   const token = CLICKUP_TOKEN.value();
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
-  const { toXof } = require("./lib/fx");
-  const { safeId } = require("./lib/sheets");
-  const { fpKey, cleanName, bcKey: idBcKey } = require("./lib/ids");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const { toXof } = require("@nt360/functions-shared/lib/fx");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
+  const { fpKey, cleanName, bcKey: idBcKey } = require("@nt360/functions-shared/lib/ids");
   const listId = bcListIdOf(cfg, req.data?.listId);
   const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
   // BC déjà connus par une source COMPTABLE (≠ clickup) → prioritaires, on ne les réimporte pas. Le `known`
@@ -4332,7 +4332,7 @@ exports.importBcFromClickup = onCallG("importBcFromClickup", { secrets: [CLICKUP
   // « alerts » AJOUTÉ (cf. audit P1-6) : importBcFromClickup CRÉE de vraies bcLines (statut/ETA) → les
   // alertes BC (bc_en_attente / bc_en_retard) et les relances BC (bloc co-déclenché par alerts) doivent
   // se rafraîchir immédiatement, sinon elles restaient périmées jusqu'au prochain recompute couvrant.
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts", "partenariats"]); }
+  try { const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "alerts", "partenariats"]); }
   catch (e) { logger.warn("import BC: recompute partiel échoué", { msg: e && e.message }); }
   const res = { created, skippedKnown, skippedIncomplete, scanned: tasks.length };
   await db.collection("auditLog").add({ uid: req.auth.uid, action: "clickup_bc_import", module: "bc", entity: "bcLines", entityId: "import", detail: { ...res, listId }, ts: FieldValue.serverTimestamp() });
@@ -4351,8 +4351,8 @@ async function runBcPull() {
   const links = ((await db.doc("config/clickupBcLinks").get()).data() || {}).map || {};
   const keys = Object.keys(links);
   if (!keys.length) return { pulled: 0, total: 0 };
-  const clickup = require("./lib/clickup");
-  const bc = require("./lib/clickupBc");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
   const prev = ((await db.doc("config/clickupBcSync").get()).data() || {}).map || {};
   const map = {};
   for (const k of Object.keys(prev)) if (links[k]) map[k] = prev[k]; // purge les liens disparus
@@ -4379,7 +4379,7 @@ async function runBcPull() {
   if (truncated || listErrors) logger.warn("BC pull: couverture partielle", { truncated, listErrors, pulled, total: keys.length });
   await db.doc("config/clickupBcSync").set({ map, updatedAt: FieldValue.serverTimestamp() });
   // « dataQuality » (clé canonique, l'ancienne « qualite » était inerte) + « news » (bulletin BC en retard).
-  try { const { recomputeAll } = require("./lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
+  try { const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate"); await recomputeAll(db, ["suppliers", "facturation", "dataQuality", "news", "partenariats"]); }
   catch (e) { logger.warn("BC pull: recompute partiel échoué", { msg: e && e.message }); }
   return { pulled, failed, total: keys.length };
 }
@@ -4420,17 +4420,17 @@ exports.scheduledBcPull = onSchedule({ schedule: "every day 04:45", secrets: [CL
 // Applique un événement à UNE tâche : relit la tâche, met à jour l'overlay (commande OU BC) et
 // recalcule le sous-ensemble d'agrégats concerné. Idempotent (rejeu de webhook sans effet de bord).
 async function applyClickupTaskEvent(token, taskId, event) {
-  const clickup = require("./lib/clickup");
-  const cf = require("./lib/clickupFields");
-  const bc = require("./lib/clickupBc");
-  const enrich = require("./lib/clickupEnrich");
-  const { planTaskEvent } = require("./lib/clickupWebhook");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const cf = require("@nt360/functions-shared/lib/clickupFields");
+  const bc = require("@nt360/functions-shared/lib/clickupBc");
+  const enrich = require("@nt360/functions-shared/lib/clickupEnrich");
+  const { planTaskEvent } = require("@nt360/functions-shared/lib/clickupWebhook");
   const [linksDoc, bcLinksDoc] = await Promise.all([db.doc("config/clickupLinks").get(), db.doc("config/clickupBcLinks").get()]);
   const links = (linksDoc.data() || {}).map || {};
   const bcLinks = (bcLinksDoc.data() || {}).map || {};
   // Routage PUR (testé) : commande / BC / ignoré + suppression. Le wrapper applique ensuite les I/O.
   const plan = planTaskEvent(links, bcLinks, taskId, event);
-  const { recomputeAll } = require("./lib/aggregate");
+  const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
   const isComment = event === "taskCommentPosted";
   // Note ops ClickUp → app (bidirectionnel fin) : sur un commentaire, on remonte le dernier commentaire
   // HUMAIN (≠ notre synthèse) en overlay { lastComment: {by,text,at} }. Deep-merge → préserve statut/dates.
@@ -4474,7 +4474,7 @@ async function applyClickupTaskEvent(token, taskId, event) {
 // valide est rejetée (401). App Check ne s'applique pas (appel serveur-à-serveur ClickUp).
 exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
   if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
-  const { verifySignature, parseWebhook } = require("./lib/clickupWebhook");
+  const { verifySignature, parseWebhook } = require("@nt360/functions-shared/lib/clickupWebhook");
   const wcfg = (await db.doc("config/clickupWebhook").get()).data() || {};
   if (!wcfg.secret) { logger.warn("webhook reçu mais aucun secret configuré"); res.status(503).send("webhook not configured"); return; }
   const signature = req.get("X-Signature") || req.get("x-signature") || "";
@@ -4507,9 +4507,9 @@ exports.clickupWebhook = onRequest({ secrets: [CLICKUP_TOKEN], memoryMiB: 512, t
 const ODOO_MAX_RECORDS = 500;
 exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: false }, async (req, res) => {
   if (req.method !== "POST") { res.status(405).send("method not allowed"); return; }
-  const { verifySignature } = require("./lib/clickupWebhook"); // HMAC-SHA256 générique (réutilisé)
-  const { mapOdooRecord, resolveBcFp } = require("./domain/odooSync");
-  const { safeId } = require("./lib/sheets");
+  const { verifySignature } = require("@nt360/functions-shared/lib/clickupWebhook"); // HMAC-SHA256 générique (réutilisé)
+  const { mapOdooRecord, resolveBcFp } = require("@nt360/functions-shared/domain/odooSync");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const cfg = (await db.doc("config/odooWebhook").get()).data() || {};
   if (!cfg.secret) { logger.warn("odooWebhook : aucun secret configuré"); res.status(503).json({ error: "webhook non configuré" }); return; }
   if (cfg.enabled === false) { res.status(200).json({ ok: true, ignored: "integration disabled" }); return; }
@@ -4531,10 +4531,10 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
   // « à un séparateur près ». Chargé UNE fois par requête.
   let bcCtx = null;
   if (object === "bc") {
-    const bcDom = require("./domain/clickupBc");
-    const { bcKey: idBcKey } = require("./lib/ids");
-    const { normCur } = require("./parsers/bcPdf");
-    const { toXof } = require("./lib/fx");
+    const bcDom = require("@nt360/functions-shared/domain/clickupBc");
+    const { bcKey: idBcKey } = require("@nt360/functions-shared/lib/ids");
+    const { normCur } = require("@nt360/functions-shared/parsers/bcPdf");
+    const { toXof } = require("@nt360/functions-shared/lib/fx");
     const rates = ((await db.doc("config/fxRates").get()).data() || {}).rates || {};
     // Overlay de rapprochement DC → N° FP (ADR-054) : filet quand Odoo envoie un BC sans FP résoluble mais
     // avec un DC connu. Vide par défaut → aucun effet (le cas normal Odoo envoie FP+DC).
@@ -4561,7 +4561,7 @@ exports.odooWebhook = onRequest({ memoryMiB: 512, timeoutSeconds: 120, cors: fal
   // commande, ce que le périmètre « agrégats seuls » masquait. Collecté sur le lot, écrit UNE fois (arrayUnion).
   let partnerNorm = null; const partnerKeys = new Set();
   if (object === "partner") {
-    const { buildClientResolver } = require("./domain/clientName");
+    const { buildClientResolver } = require("@nt360/functions-shared/domain/clientName");
     const pairs = ((await db.doc("config/clientAliases").get()).data() || {}).pairs || [];
     partnerNorm = buildClientResolver(pairs);
   }
@@ -4706,8 +4706,8 @@ exports.setupClickupWebhook = onCallG("setupClickupWebhook", { secrets: [CLICKUP
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const endpoint = String(req.data?.endpoint || "").trim();
   if (!/^https:\/\/.+/.test(endpoint)) throw new HttpsError("invalid-argument", "endpoint HTTPS de la fonction clickupWebhook requis");
-  const clickup = require("./lib/clickup");
-  const { WEBHOOK_EVENTS } = require("./lib/clickupWebhook");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const { WEBHOOK_EVENTS } = require("@nt360/functions-shared/lib/clickupWebhook");
   const cfg = (await db.doc("config/clickup").get()).data() || {};
   const teamId = cfg.teamId || CLICKUP_TEAM;
   const stored = (await db.doc("config/clickupWebhook").get()).data() || {};
@@ -4743,7 +4743,7 @@ exports.deleteClickupWebhook = onCallG("deleteClickupWebhook", { secrets: [CLICK
   if (!token) throw new HttpsError("failed-precondition", "token ClickUp absent (secret CLICKUP_TOKEN)");
   const stored = (await db.doc("config/clickupWebhook").get()).data() || {};
   if (!stored.id) return { ok: true, note: "aucun webhook enregistré" };
-  const clickup = require("./lib/clickup");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
   try { await clickup.deleteWebhook(token, stored.id); }
   catch (e) { if (e.status !== 404) throw new HttpsError(e.status === 401 || e.status === 403 ? "permission-denied" : "internal", `ClickUp : ${e.message || "suppression impossible"}`); }
   await db.doc("config/clickupWebhook").set({ id: FieldValue.delete(), secret: FieldValue.delete(), endpoint: FieldValue.delete(), disabledBy: req.auth.uid, disabledAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -4766,17 +4766,17 @@ async function runClickupEnrich() {
   // VERROU (anti-doublon) : l'enrichissement manuel (bouton) et le scheduler 05:00 peuvent se chevaucher.
   // Deux passages concurrents liraient les MÊMES sous-tâches (vides) et créeraient tous deux « Jalon i »
   // → doublons. Un seul enrichissement à la fois ; le concurrent est ignoré proprement.
-  const { acquireClickupLock, releaseClickupLock } = require("./lib/clickupLock");
+  const { acquireClickupLock, releaseClickupLock } = require("@nt360/functions-shared/lib/clickupLock");
   const lock = await acquireClickupLock(db, "enrich", "runClickupEnrich");
   if (!lock.acquired) return { enriched: 0, total: 0, skipped: "déjà en cours" };
   try {
   const links = ((await db.doc("config/clickupLinks").get()).data() || {}).map || {};
   const keys = Object.keys(links);
   if (!keys.length) return { enriched: 0, total: 0 };
-  const clickup = require("./lib/clickup");
-  const enrich = require("./lib/clickupEnrich");
-  const { isDeliveryOverdue } = require("./domain/clickupSignals");
-  const { safeId } = require("./lib/sheets");
+  const clickup = require("@nt360/functions-shared/lib/clickup");
+  const enrich = require("@nt360/functions-shared/lib/clickupEnrich");
+  const { isDeliveryOverdue } = require("@nt360/functions-shared/domain/clickupSignals");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const orders = await loadCommandeRows();
   const orderByKey = {};
   for (const o of orders) if (o.fp) orderByKey[safeId(o.fp)] = o;
@@ -4893,7 +4893,7 @@ exports.setBcStatus = onCallG("setBcStatus", { memoryMiB: 512, timeoutSeconds: 1
 // (ex. BC en devise étrangère non convertie → montant 0). Recalcule exposition + décaissements. ---
 exports.patchBcLine = onCallG("patchBcLine", { memoryMiB: 512, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "bc");
-  const { fpKey } = require("./lib/ids");
+  const { fpKey } = require("@nt360/functions-shared/lib/ids");
   const d = req.data || {};
   const { id, fp, amountXof } = d;
   if (!id) throw new HttpsError("invalid-argument", "id requis");
@@ -4937,7 +4937,7 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
   // id = nom du fournisseur CANONIQUE (cleanName, autorité unique ADR-P20) — clé d'appariement avec
   // l'exposition (domain/fournisseurs utilise la MÊME cleanName). Compacte les espaces internes : sans ça,
   // un plafond saisi « à un espace près » ne s'appariait pas à son fournisseur agrégé.
-  const { cleanName } = require("./lib/ids");
+  const { cleanName } = require("@nt360/functions-shared/lib/ids");
   const id = cleanName(req.data?.id || "");
   if (!id) throw new HttpsError("invalid-argument", "fournisseur requis");
   assertPlainId(id, "id fournisseur");
@@ -4963,7 +4963,7 @@ exports.upsertCreditLine = onCallG("upsertCreditLine", { memoryMiB: 512, timeout
 // (les deux formes coexistaient), on GARDE la cible non vide et on supprime la source (rapporté). Réservé écriture.
 exports.migrateCreditLineKeys = onCallG("migrateCreditLineKeys", { memoryMiB: 256, timeoutSeconds: 120 }, async (req) => {
   await requireWrite(req, "fournisseurs");
-  const { cleanName } = require("./lib/ids");
+  const { cleanName } = require("@nt360/functions-shared/lib/ids");
   const snap = await db.collection("creditLines").limit(5000).get();
   let moved = 0, merged = 0; const skipped = [];
   for (const doc of snap.docs) {
@@ -5003,7 +5003,7 @@ exports.setSoaFeature = onCallG("setSoaFeature", { memoryMiB: 256, timeoutSecond
 
 exports.upsertSupplierInvoice = onCallG("upsertSupplierInvoice", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "fournisseurs");
-  const { cleanName, fpKey } = require("./lib/ids");
+  const { cleanName, fpKey } = require("@nt360/functions-shared/lib/ids");
   const d = req.data || {};
   const supplier = cleanName(d.supplier || ""); // clé fournisseur CANONIQUE (autorité unique ADR-P20)
   if (!supplier) throw new HttpsError("invalid-argument", "fournisseur requis");
@@ -5054,7 +5054,7 @@ exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 12
   await requireWrite(req, "bc");
   const b64 = req.data?.pdfB64;
   if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "PDF requis (pdfB64)");
-  const { extractPdfText, parseBcText } = require("./parsers/bcPdf");
+  const { extractPdfText, parseBcText } = require("@nt360/functions-shared/parsers/bcPdf");
   let text;
   try {
     text = await extractPdfText(Buffer.from(b64, "base64"));
@@ -5071,8 +5071,8 @@ exports.parseBcPdf = onCallG("parseBcPdf", { memoryMiB: 1024, timeoutSeconds: 12
 exports.dedupe = onCallG("dedupe", { memoryMiB: 512, timeoutSeconds: 300 }, async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
-  const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("./domain/dedupe");
-  const { buildFpAliasResolver } = require("./lib/ids");
+  const { planDedupe, invoiceKey, opportunityKey, bcKey } = require("@nt360/functions-shared/domain/dedupe");
+  const { buildFpAliasResolver } = require("@nt360/functions-shared/lib/ids");
   const KEYS = { invoices: invoiceKey, opportunities: opportunityKey, bcLines: bcKey };
   const only = (Array.isArray(req.data?.collections) ? req.data.collections : Object.keys(KEYS)).filter((c) => KEYS[c]);
   const apply = req.data?.apply !== false; // défaut : applique (l'UI propose une analyse préalable)
@@ -5125,7 +5125,7 @@ exports.exportReport = onCallG("exportReport", async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "connexion requise");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'exports en peu de temps — patientez un instant.");
   const ExcelJS = require("exceljs");
-  const { canRead } = require("./domain/authz");
+  const { canRead } = require("@nt360/functions-shared/domain/authz");
   const role = req.auth.token?.nt360Role;
   const matrix = ((await db.doc("config/permissions").get()).data() || {}).matrix || {};
   if (!canRead(matrix, role, "overview")) throw new HttpsError("permission-denied", "droit « vue d'ensemble » requis pour le rapport");
@@ -5188,7 +5188,7 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   if (req.auth?.token?.nt360Role !== "direction") throw new HttpsError("permission-denied", "admin requis");
   if (!(await rateLimit(req.auth.uid, "heavy", 30, 60_000))) throw new HttpsError("resource-exhausted", "Trop d'opérations lourdes en peu de temps — patientez un instant.");
   const b = req.data?.backup || {};
-  const { safeId } = require("./lib/sheets");
+  const { safeId } = require("@nt360/functions-shared/lib/sheets");
   const writes = [];
   const push = (path, data) => writes.push({ path, data });
   (b.uorders || []).forEach((o) => o.fp && push(`orders/${safeId(o.fp)}`, { ...o, source: o.source || "legacy" }));
@@ -5225,7 +5225,7 @@ exports.importLegacyBackup = onCallG("importLegacyBackup", async (req) => {
   // Recompute BEST-EFFORT (blindage) : la restauration a DÉJÀ écrit les docs — un échec du recalcul ne doit
   // pas faire échouer l'import legacy (le prochain recompute rattrape).
   try {
-    const { recomputeAll } = require("./lib/aggregate");
+    const { recomputeAll } = require("@nt360/functions-shared/lib/aggregate");
     await recomputeAll(db);
   } catch (re) {
     logger.error("importLegacyBackup : recompute post-restauration échoué — docs restaurés, agrégats au prochain recompute", { message: re && re.message });

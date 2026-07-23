@@ -32,12 +32,15 @@ function fullTargets() {
   return lines.map((fn) => `functions:${fn}`);
 }
 
-// Un chemin modifié impacte-t-il le DÉPLOIEMENT des fonctions ? Oui si sous functions/, SAUF les tests
+// Un chemin modifié impacte-t-il le DÉPLOIEMENT des fonctions ? Oui si sous functions/ OU functions-shared/
+// (le socle partagé : un changement y redéploie le codebase — cf. docs/SPLIT-CODEBASES.md), SAUF les tests
 // (non déployés) et la doc. deployed-functions.txt compte (change la liste des cibles). scripts/ compte
 // (conservateur : un changement d'outillage de déploiement mérite un déploiement complet de vérification).
 function affectsFunctions(path) {
-  if (!path.startsWith("functions/")) return false;
-  if (path.startsWith("functions/test/")) return false;
+  const inFunctions = path.startsWith("functions/");
+  const inShared = path.startsWith("functions-shared/");
+  if (!inFunctions && !inShared) return false;
+  if (path.startsWith("functions/test/") || path.startsWith("functions-shared/test/")) return false;
   if (path.endsWith(".md")) return false;
   return true;
 }

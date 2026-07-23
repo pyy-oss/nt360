@@ -93,12 +93,17 @@ détail et gestes GCP dans `RUNBOOK-COUTS.md`, audit via `/audit-couts`.
 ## Commandes
 
 ```
-pnpm test                 # web + functions (vitest) — 58 + 763 tests
-pnpm --filter functions test
+pnpm test                 # web + socle backend (vitest) — 58 + 763 tests
+pnpm --filter @nt360/functions-shared test   # tests domaine/lib/parsers (déplacés dans le socle partagé)
+pnpm --filter functions test:rules           # règles Firestore sous émulateur (restées dans functions/)
 pnpm --filter web build && node web/scripts/check-bundle.mjs
 pnpm emulators            # firebase emulators (nécessaire pour valider imports/règles)
 pnpm test:rules           # règles Firestore sous émulateur
 ```
+
+> **Note split** : le code serveur PARTAGÉ (`lib/`, `domain/`, `parsers/`, `handlers/`, `test/`) vit dans le
+> package `@nt360/functions-shared` ; `functions/index.js` (point d'entrée, un seul codebase déployé) l'importe
+> via `@nt360/functions-shared/…`. Voir `docs/SPLIT-CODEBASES.md`.
 
 ## Workflow Git
 

@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
-    "test": "pnpm --filter web test && pnpm --filter functions test",
+    "test": "pnpm --filter web test && pnpm --filter @nt360/functions-shared test",
     "emulators": "firebase emulators:start",
     "test:rules": "firebase emulators:exec --only firestore \"pnpm --filter functions test:rules\""
   },
