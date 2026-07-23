@@ -117,7 +117,10 @@ async function recomputeCore(db, only) {
   // + 'cashflow'/'facturation' : les DÉCAISSEMENTS (summaries/cashflow, gate facturation|cashflow) consomment
   // désormais supplierInvoices quand le drapeau ADR-P21 est actif — un recompute partiel only=['cashflow']
   // les reconstruirait sinon avec supplierInvoices=[] → payable cash effacé (même piège que needBc, P0-D).
-  const needCredit = need(["suppliers", "alerts", "news", "cashflow", "facturation"]);
+  // + 'maintenance' : la marge contrat (mnt_risque) retient max(coût planifié, coût RÉEL fournisseur) par FP
+  // (ADR-081) ; un recompute only=['maintenance'] doit donc charger supplierInvoices (sinon réel=[] → on
+  // retomberait sur le seul planifié en silence — même classe de piège que needBc/needCredit, audit P0-D).
+  const needCredit = need(["suppliers", "alerts", "news", "cashflow", "facturation", "maintenance"]);
   // 'news'/'alerts' inclus : buildNews ET alerts consomment les objectifs (écart à la cible). Sinon un
   // recompute partiel only=['…','news'|'alerts'] (pull ClickUp, webhook, seuils) reconstruirait ces
   // agrégats avec objectives=[] → alertes d'écart réelles effacées + faux « objectif absent ». Même
@@ -879,8 +882,13 @@ async function recomputeCore(db, only) {
       const pnlCostByFp = {};
       for (const o of orders) { const k = fpKey(o.fp); if (k && o.costTotal != null) pnlCostByFp[k] = (pnlCostByFp[k] || 0) + (Number(o.costTotal) || 0); }
       const astreinteByFp = aggAstreinte(mntAstreintes); // charge des astreintes VALIDÉES par FP (ADR-035)
+      // Coût RÉEL fournisseur par FP (Σ factures fournisseur) — la marge retient max(planifié, réel) par affaire
+      // (ADR-081). supplierInvoices chargé via needCredit (inclut désormais 'maintenance'). MÊME fonction/source
+      // que le callable Rentabilité → même nombre (invariant « une métrique = un nombre »).
+      const { supplierCostByFp } = require("../domain/fournisseurs");
+      const realCostByFp = supplierCostByFp(supplierInvoices);
       const margeByContrat = {};
-      for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp, astreinteByFp)) {
+      for (const row of computeContratPnl(mntContrats, mntInterv, cjmById, asOf, true, pnlCostByFp, astreinteByFp, realCostByFp)) {
         const lvl = margeRisqueNiveau(row); if (lvl) margeByContrat[row.id] = lvl;
       }
       // Calendrier SLA (ADR-P23) : fuseau/fériés/fenêtre B2B éditables. Absent ⇒ horloge historique (UTC, Lun–Ven).

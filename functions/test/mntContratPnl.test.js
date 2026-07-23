@@ -42,6 +42,28 @@ describe("computeContratPnl — rentabilité par contrat", () => {
     expect(r2[0].coutPnl).toBe(300_000);
   });
 
+  it("le coût affaire = max(planifié, réel fournisseur) par FP — prudent, reflète les dépassements (ADR-081)", () => {
+    const pnlCostByFp = { "FP/2026/1": 300_000, "FP/2026/2": 400_000 };
+    // C1 : réel (450 000) DÉPASSE le planifié (300 000) → on retient 450 000 (achat déjà décaissé, marge plus dure).
+    // C2 : réel (100 000) < planifié (400 000) → on garde 400 000 (provisions non encore facturées conservées).
+    const realCostByFp = { "FP/2026/1": 450_000, "FP/2026/2": 100_000 };
+    const rows = computeContratPnl(contrats, interventions, cjmById, asOf, true, pnlCostByFp, {}, realCostByFp);
+    const c1 = rows.find((r) => r.id === "C1");
+    expect(c1.coutPnl).toBe(450_000);          // max(300k planifié, 450k réel)
+    expect(c1.coutPnlReel).toBe(450_000);       // réel exposé pour la réconciliation front
+    expect(c1.cout).toBe(700_000);              // 250k interventions + 450k P&L retenu
+    expect(c1.marge).toBe(300_000);             // 1 000 000 − 700 000
+    const c2 = rows.find((r) => r.id === "C2");
+    expect(c2.coutPnl).toBe(400_000);           // max(400k planifié, 100k réel) → planifié conservé
+    expect(c2.coutPnlReel).toBe(100_000);
+    // Rapprochement par fpKey côté réel aussi : une graphie différente joint la même affaire.
+    const r2 = computeContratPnl([{ id: "C1", fp: "fp/2026/001", client: "ACME", statut: "actif", echeanceType: "annuel", montantEngage: 1_000_000, dateDebut: "2026-01-01", dateFin: "2027-01-01" }], [], {}, asOf, true, {}, {}, { "FP/2026/1": 500_000 });
+    expect(r2[0].coutPnl).toBe(500_000);
+    // Sans facture fournisseur (réel absent) → coût IDENTIQUE à l'existant (additif, aucune régression).
+    const base = computeContratPnl(contrats, interventions, cjmById, asOf, true, pnlCostByFp);
+    expect(base.find((r) => r.id === "C1").coutPnl).toBe(300_000);
+  });
+
   it("le coût P&L reste masqué SANS droit rentabilité", () => {
     const rows = computeContratPnl(contrats, interventions, cjmById, asOf, false, { "FP/2026/1": 300_000 });
     const c1 = rows.find((r) => r.id === "C1");

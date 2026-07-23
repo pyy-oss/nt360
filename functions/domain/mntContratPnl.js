@@ -22,12 +22,14 @@ const { fpKey } = require("../lib/ids");
  * @param {boolean} hasCost        droit « rentabilite » : sinon coût/marge masqués (null)
  * @param {Object<string,number>} pnlCostByFp  coût carnet (costTotal) par N° FP canonique (achats + provisions)
  * @param {Object<string,number>} astreinteCostByFp  charge des astreintes VALIDÉES par N° FP (ADR-035)
- * @returns {{id,fp,client,statut,revenue,jours,coutInterventions,coutPnl,coutAstreintes,cout,marge,margePct}[]}
+ * @param {Object<string,number>} realCostByFp  coût RÉEL fournisseur (Σ factures fournisseur) par N° FP (ADR-081)
+ * @returns {{id,fp,client,statut,revenue,jours,coutInterventions,coutPnl,coutPnlReel,coutAstreintes,cout,marge,margePct}[]}
  */
-function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, pnlCostByFp, astreinteCostByFp) {
+function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, pnlCostByFp, astreinteCostByFp, realCostByFp) {
   const cjm = cjmById || {};
   const pnlByFp = pnlCostByFp || {};
   const astByFp = astreinteCostByFp || {};
+  const realByFp = realCostByFp || {};
   // Coût + jours agrégés par contrat (jours CRA × CJM du consultant de l'intervention).
   const agg = {};
   for (const iv of interventions || []) {
@@ -52,7 +54,13 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, p
     const a = agg[c.id] || { jours: 0, cout: 0, joursSansCjm: 0 };
     const revenue = echeancier(c, 0, asOfIso).engage; // engagé à ce jour (indépendant du facturé)
     const fk = fpKey(c.fp);                            // rapprochement carnet par clé canonique (jamais FP brut)
-    const coutPnl = fk ? Math.round(Number(pnlByFp[fk]) || 0) : 0; // coût affaire (achats + provisions)
+    const coutPnlPlanifie = fk ? Math.round(Number(pnlByFp[fk]) || 0) : 0; // coût carnet PLANIFIÉ (achats + provisions)
+    const coutPnlReel = fk ? Math.round(Number(realByFp[fk]) || 0) : 0;    // coût RÉEL (Σ factures fournisseur, fpKey)
+    // ADR-081 : coût affaire PRUDENT = max(planifié, réel). Réel > planifié = dépassement d'achat DÉJÀ décaissé
+    // (reflété dans la marge) ; planifié > réel = provisions non encore facturées (conservées). Jamais moins-disant
+    // que le plan → la marge reste un PLANCHER (cohérent avec ADR-033). Sans facture fournisseur → réel 0 → max =
+    // planifié → chiffres IDENTIQUES à l'existant (additif).
+    const coutPnl = Math.max(coutPnlPlanifie, coutPnlReel); // coût affaire retenu (achats/provisions vs réel)
     const coutAstreintes = fk ? Math.round(Number(astByFp[fk]) || 0) : 0; // charge astreintes validées (ADR-035)
     const coutInterventions = Math.round(a.cout);      // main-d'œuvre TMA (jours CRA × CJM)
     if (!(revenue > 0) && a.jours <= 0 && coutPnl <= 0 && coutAstreintes <= 0) continue; // ni revenu, ni activité, ni coût → hors P&L
@@ -63,6 +71,7 @@ function computeContratPnl(contrats, interventions, cjmById, asOfIso, hasCost, p
       revenue, jours: Math.round(a.jours * 100) / 100,
       coutInterventions: hasCost ? coutInterventions : null,
       coutPnl: hasCost ? coutPnl : null,
+      coutPnlReel: hasCost ? coutPnlReel : null, // coût réel fournisseur retenu dans max (réconciliation front, ADR-081)
       coutAstreintes: hasCost ? coutAstreintes : null,
       cout: hasCost ? cout : null,
       marge: hasCost ? marge : null,
