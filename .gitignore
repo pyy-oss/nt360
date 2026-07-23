@@ -42,3 +42,10 @@ seed/data/
 
 # Audit coûts GCP — données/scratch d'exploration (hors contexte, non versionné)
 .audit/
+
+# Artefacts de bundle esbuild des codebases Functions (générés au predeploy, ADR-SPLIT-02)
+functions/.deploy/
+functions-par/.deploy/
+functions-rh/.deploy/
+functions-commerce/.deploy/
+functions-ops/.deploy/

@@ -12,6 +12,7 @@
     "test:rules": "firebase emulators:exec --only firestore \"pnpm --filter functions test:rules\""
   },
   "devDependencies": {
+    "esbuild": "^0.24",
     "firebase-tools": "^13"
   },
   "pnpm": {

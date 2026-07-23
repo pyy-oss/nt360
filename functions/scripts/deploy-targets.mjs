@@ -49,6 +49,9 @@ function fullTargets() {
 // (non déployés) et la doc. deployed-functions.txt compte (change la liste des cibles). scripts/ compte
 // (conservateur : un changement d'outillage de déploiement mérite un déploiement complet de vérification).
 function affectsFunctions(path) {
+  // Le bundler (ADR-SPLIT-02) et firebase.json pilotent COMMENT chaque fonction est buildée/déployée :
+  // les modifier doit redéployer TOUS les codebases (sinon un correctif d'empaquetage ne se propage pas).
+  if (path === "scripts/bundle-codebase.mjs" || path === "firebase.json") return true;
   const inFunctions = path.startsWith("functions/");
   const inShared = path.startsWith("functions-shared/");
   const inPar = path.startsWith("functions-par/");
