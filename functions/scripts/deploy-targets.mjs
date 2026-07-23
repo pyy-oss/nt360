@@ -27,6 +27,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MANIFESTS = [
   resolve(HERE, "../deployed-functions.txt"),               // codebase default (functions/)
   resolve(HERE, "../../functions-par/deployed-functions.txt"), // codebase partenariats (functions-par/)
+  resolve(HERE, "../../functions-rh/deployed-functions.txt"),  // codebase rh (functions-rh/)
 ];
 
 function fullTargets() {
@@ -49,7 +50,8 @@ function affectsFunctions(path) {
   const inFunctions = path.startsWith("functions/");
   const inShared = path.startsWith("functions-shared/");
   const inPar = path.startsWith("functions-par/");
-  if (!inFunctions && !inShared && !inPar) return false;
+  const inRh = path.startsWith("functions-rh/");
+  if (!inFunctions && !inShared && !inPar && !inRh) return false;
   if (path.startsWith("functions/test/") || path.startsWith("functions-shared/test/")) return false;
   if (path.endsWith(".md")) return false;
   return true;

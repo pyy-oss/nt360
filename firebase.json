@@ -27,7 +27,8 @@
   "storage": { "rules": "storage.rules" },
   "functions": [
     { "source": "functions", "codebase": "default", "runtime": "nodejs20" },
-    { "source": "functions-par", "codebase": "partenariats", "runtime": "nodejs20" }
+    { "source": "functions-par", "codebase": "partenariats", "runtime": "nodejs20" },
+    { "source": "functions-rh", "codebase": "rh", "runtime": "nodejs20" }
   ],
   "emulators": {
     "auth": { "port": 9099 },

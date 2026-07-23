@@ -3,3 +3,4 @@ packages:
   - "functions"
   - "functions-shared"
   - "functions-par"
+  - "functions-rh"

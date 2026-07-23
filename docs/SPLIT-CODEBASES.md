@@ -156,7 +156,16 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
      avant d'être créées de l'autre. NE PAS déployer `partenariats` seul en premier. Faire d'abord un
      `--dry-run` et **vérifier qu'AUCUNE suppression inattendue** n'est proposée (seul le transfert des 21).
    Rollback = retirer l'entrée `functions-par` de `firebase.json` + restaurer le bloc dans `functions/index.js`.
-3. **Étapes 2..n** — un codebase par PR, même procédure.
+2bis. **Étape 2 FAITE (code) — codebase `rh` (`functions-rh/`)** : démarre avec les CANDIDATS
+   (`upsertCandidate` / `deleteCandidate` / `listCandidates`), retirés de `functions/index.js`.
+   `createCandidates` est le handler **le MOINS couplé** du dépôt (aucun recompute, aucun secret, aucun
+   helper d'index.js — uniquement le socle) → **pas de préalable « recompute différé »**, seul le
+   déploiement de transfert s'applique (les 3 fonctions passent `default` → `rh`, même procédure §pt 2b).
+   staffing / timesheets rejoindront `rh` PLUS TARD en **ajout additif** (mêmes codebase → pas un transfert),
+   une fois le canal différé validé (ils écrivent des summaries).
+   Vérifié EN SANDBOX : `default` 179 + `partenariats` 21 + `rh` 3 = 203 exports (inchangé) ;
+   `check-deploy-targets` **178 + 21 + 3 = 202, disjoints** ; `check-no-undef` 173 fichiers ; 1386 tests verts.
+3. **Étapes 3..n** — un codebase par extraction, même procédure.
 4. **Étape finale** — `functions` résiduel devient `functions-core`.
 
 ## Définition de terminé

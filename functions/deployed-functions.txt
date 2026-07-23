@@ -41,7 +41,6 @@ deleteActivity
 deliveryMarginByAffaire
 generateFromInvoices
 deleteAssignment
-deleteCandidate
 deleteClickupWebhook
 deleteConsultant
 deleteMntContrat
@@ -54,7 +53,6 @@ applyMntLignee
 revertMntAutoStatut
 setMntWatch
 deleteTimesheet
-listCandidates
 listConsultants
 mntSlaSweep
 preBillingFromCra
@@ -63,7 +61,6 @@ staffingPlan
 taceHistory
 timesheetKpis
 upsertAssignment
-upsertCandidate
 submitMntDecision
 submitAstreinte
 listAstreintes

@@ -1821,14 +1821,10 @@ exports.resourcePnl = _timesheets.resourcePnl;
 exports.preBillingFromCra = _timesheets.preBillingFromCra;
 exports.deliveryMarginByAffaire = _timesheets.deliveryMarginByAffaire;
 
-// === VIVIER / RECRUTEMENT (Lot 16 « 20/10 DirOps ») — pipeline de candidats rattaché au gap de capacité
-// (Lot 14). candidates/* callable-only. Écriture « pipeline », lecture « overview ». EXTRAIT dans
-// handlers/candidates.js (patron R3). Deps injectées ; exports déclarés ici (déploiement par nom).
-const { createCandidates } = require("@nt360/functions-shared/handlers/candidates");
-const _candidates = createCandidates({ onCallG, HttpsError, db, FieldValue, requireWrite, requireRead, assertPlainId });
-exports.upsertCandidate = _candidates.upsertCandidate;
-exports.deleteCandidate = _candidates.deleteCandidate;
-exports.listCandidates = _candidates.listCandidates;
+// === VIVIER / RECRUTEMENT (candidats) : EXTRAIT dans le codebase Firebase `functions-rh/` (split,
+// docs/SPLIT-CODEBASES.md, Étape 2). Les 3 callables (createCandidates) sont désormais déclarés là-bas
+// et déployés sous le codebase `rh`. Handler partagé (@nt360/functions-shared/handlers/candidates) ; seul
+// le point d'entrée change. staffing/timesheets rejoindront `rh` plus tard (ajout additif, pas transfert).
 
 // === SÉCURITÉ PAR ENREGISTREMENT (Lot 2 « niveau Salesforce ») — modèle PROPRIÉTAIRE + HIÉRARCHIE.
 // Chaque enregistrement (opportunité, compte) porte un `ownerUid` et une liste dénormalisée
