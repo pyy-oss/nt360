@@ -56,7 +56,6 @@ upsertMntIntervention
 upsertMntTicket
 deleteContact
 deleteOpportunity
-deleteRecords
 deleteReport
 emailCodirDigest
 emailRelancesDigest
@@ -86,7 +85,6 @@ pushAllBcToClickup
 pushAllOrdersToClickup
 pushBcToClickup
 pushOrderToClickup
-purgeCollections
 recompute
 reconClient
 revokeApiKey
@@ -109,7 +107,6 @@ setAlertThresholds
 setAutomations
 setBcStatus
 setBillingMilestones
-setCancellation
 setClickupConfig
 setClientAliases
 setCustomFields

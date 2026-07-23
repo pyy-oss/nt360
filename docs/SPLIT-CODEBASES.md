@@ -178,9 +178,16 @@ simplement réparti. `functions-shared` est une dépendance `workspace:*` de cha
    `rh` seront eux additifs. Vérifié EN SANDBOX : `default` 156 + `partenariats` 21 + `rh` 18 + `commerce` 8
    = 203 (inchangé) ; `check-deploy-targets` **155 + 21 + 18 + 8 = 202, disjoints** ; `check-no-undef` 174 ;
    1386 tests verts.
-3. **Étapes 5..n** — reste : `sanitize` (→ ops, différé seul) ; puis remontée au socle des helpers d'index.js
-   (`visibleToFor`, `oppScope`, `fireOutbound`, `loadUsersMap`, `scopedOpps`, `nowISO10`, `anyDirectionUid`)
-   qui débloque `opportunities` (→ commerce), `reports`/`automations` (→ ops), `maintenance` (→ mnt).
+2quinquies. **Étape 5 FAITE (code) — codebase `ops` (`functions-ops/`)** : ASSAINISSEMENT (`deleteRecords`,
+   `setCancellation`, `purgeCollections`), retirés de `functions/index.js`. Tous deps socle (dont gardes
+   record-level) + recompute **différé**. `reports`/`automations`/`outbound` rejoindront `ops` après la
+   remontée de helpers ci-dessous. Vérifié EN SANDBOX : `default` 153 + `partenariats` 21 + `rh` 18 +
+   `commerce` 8 + `ops` 3 = 203 (inchangé) ; `check-deploy-targets` **152 + 21 + 18 + 8 + 3 = 202, disjoints** ;
+   `check-no-undef` 175 ; 1386 tests verts.
+3. **Étapes 6..n** — reste : remontée au socle des helpers d'index.js (`visibleToFor`, `oppScope`,
+   `fireOutbound`, `loadUsersMap`, `scopedOpps`, `nowISO10`, `anyDirectionUid`) puis extraction de
+   `opportunities` (→ commerce), `reports`/`automations` (→ ops), `maintenance` (→ mnt). Ces extractions
+   nécessitent d'abord de rendre les helpers partagés (comme le socle) — refactor plus profond d'index.js.
    Restent couplés (helpers d'index.js à remonter au socle d'abord) : `opportunities` (visibleToFor,
    oppScope, fireOutbound), `reports` (scopedOpps, loadUsersMap), `automations` (loadUsersMap, nowISO10),
    `maintenance` (loadUsersMap, anyDirectionUid). Extractibles avec préalable différé seul : `sanitize`,

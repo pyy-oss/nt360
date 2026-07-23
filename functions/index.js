@@ -2746,14 +2746,9 @@ exports.runAutomations = _automations.runAutomations;
 // derrière. Le DELTA reste prioritaire : si une future ligne source réintroduit ce record (même
 // clé), il réapparaît — la suppression assainit l'existant, elle ne verrouille pas contre la source.
 // Les identifiants sont des DOC IDS (pas de re-transformation : safeId n'est pas idempotent). ---
-// === ASSAINISSEMENT (suppression d'enregistrements + annulation) — EXTRAIT dans handlers/sanitize.js
-// (patron R3). Deps injectées ; exports déclarés ici (garde-fou de déploiement par nom). Voir le module
-// pour le détail (imports delta non destructifs, overlay d'annulation qui survit au ré-import, atomicité).
-const { createSanitize } = require("@nt360/functions-shared/handlers/sanitize");
-const _sanitize = createSanitize({ onCallG, HttpsError, db, FieldValue, requireWrite, assertPlainId, requestRecompute, recomputeNow: recomputeSummaries, logOps, assertRecordVisible, recordAccessOwd, isRecordAdmin, rateLimit });
-exports.deleteRecords = _sanitize.deleteRecords;
-exports.setCancellation = _sanitize.setCancellation;
-exports.purgeCollections = _sanitize.purgeCollections;
+// === ASSAINISSEMENT (suppression d'enregistrements + annulation) : EXTRAIT dans le codebase Firebase
+// `functions-ops/` (split, docs/SPLIT-CODEBASES.md, Étape 5). Handler partagé
+// (@nt360/functions-shared/handlers/sanitize) ; seul le point d'entrée change.
 
 // --- Correction d'une facture EXISTANTE : date de facturation et/ou date d'échéance (les seules
 // dérivées manquantes fiabilisables in-app). Le MONTANT n'est pas éditable (intégrité comptable :

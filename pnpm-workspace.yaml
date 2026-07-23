@@ -5,3 +5,4 @@ packages:
   - "functions-par"
   - "functions-rh"
   - "functions-commerce"
+  - "functions-ops"

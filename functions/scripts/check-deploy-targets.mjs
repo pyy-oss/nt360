@@ -21,6 +21,7 @@ const CODEBASES = [
   { name: "partenariats", root: join(here, "..", "..", "functions-par") },
   { name: "rh", root: join(here, "..", "..", "functions-rh") },
   { name: "commerce", root: join(here, "..", "..", "functions-commerce") },
+  { name: "ops", root: join(here, "..", "..", "functions-ops") },
 ];
 
 function exportsOf(root) {

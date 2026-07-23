@@ -50,6 +50,7 @@ const targets = [
   path.join(repoRoot, "functions-par", "index.js"), // codebase partenariats (split Étape 1)
   path.join(repoRoot, "functions-rh", "index.js"),  // codebase rh (split Étape 2)
   path.join(repoRoot, "functions-commerce", "index.js"), // codebase commerce (split Étape 3)
+  path.join(repoRoot, "functions-ops", "index.js"),      // codebase ops (split Étape 5)
   ...["lib", "domain", "parsers", "handlers"].map((p) => path.join(shared, p)),
 ];
 const results = await eslint.lintFiles(targets);

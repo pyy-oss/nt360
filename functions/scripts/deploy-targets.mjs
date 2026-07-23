@@ -29,6 +29,7 @@ const MANIFESTS = [
   resolve(HERE, "../../functions-par/deployed-functions.txt"), // codebase partenariats (functions-par/)
   resolve(HERE, "../../functions-rh/deployed-functions.txt"),  // codebase rh (functions-rh/)
   resolve(HERE, "../../functions-commerce/deployed-functions.txt"), // codebase commerce (functions-commerce/)
+  resolve(HERE, "../../functions-ops/deployed-functions.txt"),      // codebase ops (functions-ops/)
 ];
 
 function fullTargets() {
@@ -53,7 +54,8 @@ function affectsFunctions(path) {
   const inPar = path.startsWith("functions-par/");
   const inRh = path.startsWith("functions-rh/");
   const inCommerce = path.startsWith("functions-commerce/");
-  if (!inFunctions && !inShared && !inPar && !inRh && !inCommerce) return false;
+  const inOps = path.startsWith("functions-ops/");
+  if (!inFunctions && !inShared && !inPar && !inRh && !inCommerce && !inOps) return false;
   if (path.startsWith("functions/test/") || path.startsWith("functions-shared/test/")) return false;
   if (path.endsWith(".md")) return false;
   return true;
