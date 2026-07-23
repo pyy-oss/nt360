@@ -26,6 +26,28 @@ describe("oppFunnel — funnel de conversion depuis l'historique des transitions
     expect(r.won).toBe(2);
     expect(r.lost).toBe(1);
     expect(r.winRate).toBeCloseTo(2 / 3, 5);
+    // Win-rate EN VALEUR : 1500 gagnés / 1800 tranchés = 0,833 — plus haut que le win-rate en nombre
+    // (0,667) car les deals gagnés pèsent plus lourd que le petit deal perdu.
+    expect(r.wonAmount).toBe(1500);
+    expect(r.lostAmount).toBe(300);
+    expect(r.winRateValue).toBeCloseTo(1500 / 1800, 5);
+  });
+
+  it("le win-rate EN VALEUR diverge du win-rate EN NOMBRE quand un gros deal est perdu", () => {
+    // 2 petits gagnés (100 chacun) mais 1 gros perdu (10 000) : en nombre 2/3 ≈ 0,67 (sain),
+    // en valeur seulement 200/10 200 ≈ 0,02 (alarmant). C'est tout l'intérêt de la vue valeur.
+    const r = oppFunnel([
+      { from: 5, to: 6, amount: 100 },
+      { from: 5, to: 6, amount: 100 },
+      { from: 5, to: 7, amount: 10_000 },
+    ]);
+    expect(r.winRate).toBeCloseTo(2 / 3, 5);
+    expect(r.winRateValue).toBeCloseTo(200 / 10_200, 5);
+    // Assiette vide (aucun gagné ni perdu) → 0, jamais NaN.
+    const empty = oppFunnel([{ from: 1, to: 2, amount: 500 }]);
+    expect(empty.winRateValue).toBe(0);
+    expect(empty.wonAmount).toBe(0);
+    expect(empty.lostAmount).toBe(0);
   });
 
   it("compte les reculs (regressed) dans le funnel actif", () => {

@@ -219,8 +219,9 @@ export const Pipeline: FC<Props> = ({ period }) => {
       <Card title="Funnel de conversion — transitions d'étape (réel)">
         {(funnelC?.total ?? 0) > 0 ? (
           <>
-            <div className={grid4}>
+            <div className={grid5}>
               <Kpi label="Taux de gain (transitions)" value={pct(funnelC?.winRate)} tone={(funnelC?.winRate ?? 0) >= 0.5 ? "emerald" : "gold"} sub={`gagné ${funnelC?.won ?? 0} / perdu ${funnelC?.lost ?? 0}`} />
+              <Kpi label="Taux de gain (valeur)" value={pct(funnelC?.winRateValue)} tone={(funnelC?.winRateValue ?? 0) >= 0.5 ? "emerald" : "gold"} sub={`${money(funnelC?.wonAmount ?? 0)} gagnés / ${money(funnelC?.lostAmount ?? 0)} perdus`} />
               <Kpi label="Progressions" value={String(funnelC?.advanced ?? 0)} tone="emerald" sub="avancées d'étape" />
               <Kpi label="Reculs" value={String(funnelC?.regressed ?? 0)} tone="clay" sub="retours en arrière" />
               <Kpi label="Transitions" value={String(funnelC?.total ?? 0)} sub="mouvements journalisés" />
