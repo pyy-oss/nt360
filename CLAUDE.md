@@ -77,6 +77,19 @@ Voir la skill `claude-api` pour l'ID de modèle exact et les paramètres à jour
 - Recompute sérialisé : verrou à bail (`config/recomputeLock`, `RECOMPUTE_LEASE_MS`) + coalescing
   (`lib/aggregate.js`). Différé via `requestRecompute` → `onRecomputeRequest`.
 
+### Coûts GCP — règles de déploiement (ne JAMAIS contourner)
+Un empilement de Cloud Builds a déjà coûté cher (~2600 builds). Ces règles rendent la récidive impossible ;
+détail et gestes GCP dans `RUNBOOK-COUTS.md`, audit via `/audit-couts`.
+- **Ne déploie JAMAIS le codebase entier des fonctions** : toujours des cibles **nommées** (`--only
+  functions:<nom>`). Le hook `.claude/hooks/guard-deploy.py` bloque le reste — ne le désactive pas.
+- **Un seul déploiement à la fois** : garde les blocs `concurrency` des workflows (deploy = `cancel-in-progress:
+  false`, CI/preview = `true`). Ne rétablis pas `push:["**"]` sur le CI (double run).
+- **Déploiement sélectif** : `functions/scripts/deploy-targets.mjs` dérive les cibles du git diff — ne
+  redéploie pas de fonctions pour un changement doc/web seul.
+- **Tout appel IA passe par un callable avec `rateLimit`** (bucket `"ai"`) + cap sur le lot. Jamais dans une
+  boucle non bornée ni un cron sans plafond.
+- **Aucun `minInstances > 0`** sans besoin chiffré. Nouveau projet ⇒ dérouler `docs/CHECKLIST-NOUVEAU-PROJET-GCP.md`.
+
 ## Commandes
 
 ```
