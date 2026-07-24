@@ -5,6 +5,8 @@
 
 import { slaState, type SlaCalendar } from "./mntSla";
 import { TYPES_MAINTENANCE } from "./mntContrat";
+import { fpKey } from "./ids";
+import type { RisqueItem } from "./mntRisque";
 
 // ADR-041 : miroir EXACT du SEUIL back (functions/domain/mntRisque.js) — fenêtre unifiée à 90 j.
 // ATTENTION — la VALEUR du seuil est identique des deux côtés, mais la POPULATION de `echeancesProches`
@@ -94,6 +96,44 @@ export function recurringRevenue(contrats: ContratLike[]): MntRecurring {
     byClient: toGroups(client),
     byPeriodicite: toGroups(per),
   };
+}
+
+// Reconnaissance du revenu CONSOLIDÉE (lot allocation revenu, 2026-07-24). Réconcilie le revenu maintenance
+// RECONNU (engagé à ce jour, échéancier) au FACTURÉ réel, en ATTRIBUANT le facturé de l'affaire au périmètre
+// maintenance par PLAFOND À L'ENGAGÉ (décision d'arbitrage) : aucune facture ne portant de discriminant
+// maintenance/projet, on ne peut attribuer à la maintenance PLUS que ce qu'elle a engagé — le surplus facturé
+// est du projet, jamais compté ici. Dérivée du summary de risque (sousFacturation par contrat) → MÊME source,
+// mêmes nombres, aucun backend. Groupé par fpKey (C11) : l'engagé se SOMME sur les contrats d'un FP, mais le
+// facturé affaire est pris UNE fois (identique pour tous les contrats d'un FP) — c'est précisément le double-
+// compte qui avait coulé la v1 (journal 2026-07-18) qu'on évite ainsi.
+export interface MntRecognition {
+  reconnu: number;     // Σ_FP engagé à ce jour (revenu maintenance reconnu)
+  facture: number;     // Σ_FP min(facturé affaire, engagé) — facturé attribué à la maintenance (plafonné)
+  aFacturer: number;   // Σ_FP max(0, engagé − facturé) — reconnu non encore facturé (CA couru)
+  nbAffaires: number;  // nb de FP (affaires) avec un engagement maintenance rapproché
+}
+
+/** Reconnaissance consolidée du revenu maintenance (plafond à l'engagé, groupé par fpKey). PUR. */
+export function recognitionConsolidated(items: RisqueItem[]): MntRecognition {
+  const byFp = new Map<string, { engage: number; facture: number }>();
+  for (const it of items || []) {
+    const key = fpKey(it.fp);             // canonicalise (C11) ; null (placeholder/absent) ⇒ pas d'affaire → écarté
+    if (!key) continue;
+    const sf = it.sousFacturation || { engage: 0, facture: 0 };
+    const e = byFp.get(key) || { engage: 0, facture: 0 };
+    e.engage += Math.max(0, Math.round(Number(sf.engage) || 0)); // engagé SOMMÉ sur les contrats du FP
+    // Facturé affaire IDENTIQUE pour tous les contrats d'un même FP (Σ factures par fpKey côté back) → pris
+    // UNE fois (max = même valeur), JAMAIS sommé (le double-compte de la v1 retirée, journal 2026-07-18).
+    e.facture = Math.max(e.facture, Math.max(0, Math.round(Number(sf.facture) || 0)));
+    byFp.set(key, e);
+  }
+  let reconnu = 0, facture = 0, aFacturer = 0;
+  for (const v of byFp.values()) {
+    reconnu += v.engage;
+    facture += Math.min(v.facture, v.engage);        // plafond à l'engagé (surplus = projet, exclu)
+    aFacturer += Math.max(0, v.engage - v.facture);   // couru : reconnu non encore facturé
+  }
+  return { reconnu, facture, aFacturer, nbAffaires: byFp.size };
 }
 
 /** Agrège les contrats + tickets à une date donnée (asOfIso, AAAA-MM-JJ). PUR. */

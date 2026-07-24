@@ -34,7 +34,7 @@ import {
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
+import { computeMntDashboard, recurringRevenue, recognitionConsolidated, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, FilterNote, HBars, useCommandesRows } from "./_shared";
 import { Spark, ScoreRing } from "./_viz";
@@ -481,6 +481,9 @@ export const Maintenance: FC<Props> = () => {
   // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
   // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
   const recurring = useMemo(() => recurringRevenue(vContrats), [vContrats]);
+  // Reconnaissance du revenu consolidée (lot allocation revenu) — plafond à l'engagé, groupée par fpKey.
+  // MÊME source que le risque (sousFacturation) ET le même sous-filtre (risqueItems) → chiffres cohérents.
+  const recognition = useMemo(() => recognitionConsolidated(risqueItems), [risqueItems]);
   // TENDANCE MRR (Lot 5b, ADR-043) — dérivée du snapshot quotidien historisé. Compare le dernier point au
   // point ~30 j avant (sinon au plus ancien disponible). Le MRR LIVE reste recurring.totalMrr (même assiette).
   const mrrTrend = useMemo(() => {
@@ -891,6 +894,20 @@ export const Maintenance: FC<Props> = () => {
                 <Badge key={g.key} tone="steel">{label(ECHEANCE_LABEL, g.key)} · {money(g.arr)}/an · {g.contrats}</Badge>
               ))}
             </div>
+          </div>
+        </Card>
+      )}
+      {/* Reconnaissance du revenu CONSOLIDÉE (lot allocation revenu) — le revenu maintenance RECONNU (engagé à
+          ce jour) confronté au FACTURÉ réel attribué au périmètre maintenance par PLAFOND À L'ENGAGÉ : une
+          facture ne distingue pas maintenance et projet, donc on n'attribue jamais à la maintenance plus que
+          son engagé (le surplus est du projet). Dérivée du summary de risque → mêmes nombres, aucun backend. */}
+      {tab === "pilotage" && recognition.nbAffaires > 0 && (
+        <Card title="Reconnaissance du revenu (consolidée)">
+          <Tip>Revenu maintenance <b>reconnu</b> (engagé à ce jour, échéancier) confronté au <b>facturé réel</b>. Le facturé d'une affaire est attribué à la maintenance <b>plafonné à l'engagé</b> (une facture ne distingue pas maintenance et projet — le surplus est du projet). <b>À facturer</b> = reconnu pas encore facturé (« CA qui dort »). Sur {recognition.nbAffaires.toLocaleString("fr-FR")} affaire(s).</Tip>
+          <div className="grid grid-cols-3 gap-3">
+            <Kpi label="Reconnu à ce jour" value={fmt(recognition.reconnu)} tone="ink" sub="FCFA · engagé (échéancier)" />
+            <Kpi label="Facturé (maintenance)" value={fmt(recognition.facture)} tone="ink" sub="plafonné à l'engagé" />
+            <Kpi label="À facturer" value={fmt(recognition.aFacturer)} tone={recognition.aFacturer > 0 ? "gold" : "emerald"} sub={recognition.aFacturer > 0 ? "reconnu non encore facturé" : "à jour"} />
           </div>
         </Card>
       )}
