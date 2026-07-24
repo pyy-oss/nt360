@@ -2,7 +2,14 @@
 
 > Runbook opérationnel. Le module est **livré, fusionné dans `main`, et éteint par défaut**
 > (`config/mntFeature`). Ce document décrit comment le **recetter** puis l'**activer** en production,
-> et comment **revenir en arrière** sans redéploiement. À jour au 2026-07-15 (Lots 0→5 + audit).
+> et comment **revenir en arrière** sans redéploiement.
+>
+> **Mis à jour le 2026-07-24** (audit adverse + lot allocation revenu). Le module a été **fortement enrichi**
+> depuis les Lots 0→5 : le parcours R1→R12 (§2) couvre le **socle** (contrat, ticket, intervention, SLA,
+> échéancier, renouvellement, risque) ; les **surfaces additionnelles** livrées depuis (§2bis) — IA, import,
+> calendrier, auto-statut, versions, abonnements, centre de surveillance, MRR, astreintes, reconnaissance du
+> revenu — sont listées avec leur intention de recette. La surface réelle est de **~19 callables `mnt`** (voir
+> `functions/deployed-functions.txt`), non plus 8.
 
 ## 0. Principe
 
@@ -23,10 +30,14 @@ Tout est déjà sur `main`. Vérifier que le déploiement de prod embarque bien 
 
 | Élément | Où | Garde CI |
 |---|---|---|
-| 8 callables/cron (`upsert/deleteMntContrat`, `upsert/deleteMntTicket`, `upsert/deleteMntIntervention`, `submitMntDecision`, `mntSlaSweep`) | `functions/index.js` + `deployed-functions.txt` | `check-deploy-targets.mjs` |
-| Règles `mnt_*` + `summaries/mnt_risque` (double verrou drapeau + droit) | `firestore.rules` | `test:rules` |
-| Bloc recompute `summaries/mnt_risque` gaté | `functions/lib/aggregate.js` | `mntRecomputeGate.test.js` |
+| **~19 callables + cron** `mnt` — socle : `upsert/deleteMntContrat`, `upsert/deleteMntTicket`, `upsert/deleteMntIntervention`, `submitMntDecision`, `mntSlaSweep` ; enrichissements : `importMntContrats`, `aiSuggestMntContrats`, `aiMntLignees`, `applyMntLignee`, `aiMntContratStatut`, `setMntContratStatut`, `revertMntAutoStatut`, `submitAstreinte`, `listAstreintes`, `aiAnalyzeChurn`, `mntContratPnl`, `setMntWatch`, `setMntCalendar`, `setMntFeature` | `functions/index.js` + `deployed-functions.txt` | `check-deploy-targets.mjs` |
+| Règles `mnt_*` (double verrou drapeau + droit) sur **toutes** les collections : `mnt_contrats`, `mnt_engagementsSla`, `mnt_tickets`, `mnt_interventions`, `mnt_evenementsSla`, `mnt_contratsVersions`, `mnt_watches` ; `mnt_astreintes` (callable-only lecture ET écriture) ; summaries `mnt_risque`/`mnt_surveillance`/`mnt_mrr` | `firestore.rules` | `test:rules` |
+| Bloc recompute gaté écrivant **3** summaries (`mnt_risque`, `mnt_surveillance`, `mnt_mrrSnapshot`) | `functions-shared/lib/aggregate.js` | `mntRecomputeGate.test.js` |
 | Écran lazy `maintenance` | `web/src/modules/maintenance.tsx` + `MODULES[]` | `check-bundle.mjs` |
+
+> **NB post-split** : le code serveur du module vit dans le package `@nt360/functions-shared` (`domain/mnt*.js`,
+> `handlers/maintenance.js`, `lib/aggregate.js`, `test/`) ; `functions/index.js` (un seul codebase déployé)
+> l'importe et déclare les exports. La garde `check-deploy-targets.mjs` vérifie l'ensemble des 5 codebases.
 
 > **Secret e-mail** : le digest quotidien `mntSlaSweep` (07:30) utilise `GRAPH_CLIENT_SECRET` (déjà
 > provisionné pour `alertDigest`/`emailRelancesDigest`). Aucun nouveau secret requis. Sans config
@@ -57,6 +68,26 @@ Allumer `config/mntFeature` puis dérouler ce parcours. **Chaque étape a un cri
 | R10 | Lancer **Recalculer** (recompute) puis ouvrir la carte **« Risque des contrats »** | Le contrat porte un **score** + palier (Vert/Ambre/Rouge/Critique) ; les KPI par palier somment au total |
 | R11 | Forcer un signal (échéance < 60 j, SLA rompu, quota dépassé, sous-facturation) puis recompute | Le contrat monte de palier ; les signaux listés sont exacts |
 | R12 | **Éteindre** le drapeau (`enabled:false`) | L'onglet disparaît ; TACE/marge/pré-facturation **redeviennent celles d'avant** ; aucun `summaries/mnt_risque` ; digest cron no-op |
+
+## 2bis. Surfaces additionnelles (livrées depuis les Lots 0→5)
+
+Enrichissements ajoutés après le socle. Chacun reste **gaté par le drapeau + le droit `maintenance`** (donc
+inerte à drapeau éteint, invariant tenu) ; à recetter en plus de R1→R12. Intention de recette (le critère
+mécanique précis est à figer avec la donnée réelle en bac à sable) :
+
+| # | Surface | Callable / collection | Intention de recette |
+|---|---|---|---|
+| R13 | **Calendrier SLA** (ADR-P23) | `setMntCalendar` / `config/mntCalendar` | Régler fuseau/fériés/fenêtre B2B → l'horloge SLA des tickets change en conséquence ; **absent** = horloge historique (UTC, Lun–Ven). Édition refusée drapeau éteint (garde ajoutée, audit 24/07). |
+| R14 | **Import de contrats** | `importMntContrats` | Import d'un lot de contrats (aperçu → validation) ; rapproché par `fpKey` ; rate-limit « heavy ». |
+| R15 | **Suggestions IA** (contrats sans FP, lignées) | `aiSuggestMntContrats`, `aiMntLignees`, `applyMntLignee` | L'IA propose des affaires récurrentes / des lignées ; création **sur validation** (jamais auto) ; cap `CAP_AI`, rate-limit « ai ». |
+| R16 | **Statut automatique** | `aiMntContratStatut`, `setMntContratStatut`, `revertMntAutoStatut` | Proposition/application de statut ; **révocable** ; sortie IA re-validée (énum, fp connus). |
+| R17 | **Versions de contrat** (opposabilité SLA) | `mnt_contratsVersions` | Toute modification versionne ; les engagements opposables à un ticket sont ceux figés à son ouverture (snapshot). |
+| R18 | **Abonnements** | `setMntWatch` / `mnt_watches` | « Suivre » un contrat / le parc ; « Mes abonnements » filtre le centre de surveillance ; isolé par utilisateur (rules `uid`). |
+| R19 | **Centre de surveillance** | `summaries/mnt_surveillance` | Après recompute, flux d'événements (SLA/échéance/quota/sous-facturation) trié par gravité, en direct. |
+| R20 | **MRR/ARR** (snapshot + tendance) | `summaries/mnt_mrrSnapshot` | Le recompute produit un snapshot quotidien ; la tendance MRR s'affiche ; le MRR live vient de `recurringRevenue`. |
+| R21 | **Astreintes** (ADR-035) | `submitAstreinte`, `listAstreintes` / `mnt_astreintes` | Demande d'astreinte (montant = **charge confidentielle**) → workflow d'approbation ; **montant masqué** sans droit `rentabilite` (y compris webhook sortant, audit 24/07) ; comptabilisée en coût à la validation. |
+| R22 | **Rentabilité contrat** (ADR-033/034/081) | `mntContratPnl`, `aiAnalyzeChurn` | Marge = revenu engagé − (interventions + P&L affaire + astreintes) ; coûts **masqués** sans `rentabilite` ; le palier de marge (jamais le montant) entre dans le score de risque. |
+| R23 | **Reconnaissance du revenu (consolidée)** (lot 24/07) | dérivé `summaries/mnt_risque` | Onglet pilotage : reconnu (engagé) vs facturé **plafonné à l'engagé** par FP vs à facturer ; cohérent avec la table de risque (même source). |
 
 ## 3. Activation en production
 
