@@ -34,7 +34,7 @@ import {
   TYPES_MAINTENANCE, TYPE_MAINTENANCE_LABEL,
 } from "../lib/mntContrat";
 import { NIVEAU_LABEL, niveauTone, signalText, label as riskLabel, type RisqueSummary, type RisqueItem } from "../lib/mntRisque";
-import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
+import { computeMntDashboard, recurringRevenue, recognitionConsolidated, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, MNT_TYPES, ECHEANCE_PROCHE_JOURS, type MntTypeCount, type SlaAgendaItem, type MntComplianceItem, type MntRenouvellement, type MntRecurringGroup } from "../lib/mntDashboard";
 import { suggestMntContrats, mntCandidatePool, buildContratDraft, type MntSuggestion } from "../lib/mntSuggest";
 import { FpLink, FilterNote, HBars, useCommandesRows } from "./_shared";
 import { Spark, ScoreRing } from "./_viz";
@@ -73,8 +73,8 @@ const SlaCalendarCard: FC<{ doc?: MntCalendarDoc | null; canWrite: boolean }> = 
     <Card title="Calendrier SLA">
       <Tip>Règle l'<b>horloge SLA</b> : décalage de <b>fuseau</b> (Abidjan = 0), <b>jours fériés</b> chômés (sautés comme un week-end) et <b>fenêtre d'heures ouvrées</b> (couverture « Heures ouvrées (B2B) »). Vide = <b>Lun–Ven pleins, UTC, sans férié</b> (comportement d'origine). {canWrite ? "Toute modification re-score le risque des contrats." : "Lecture seule — droit « maintenance » en écriture requis pour éditer."}</Tip>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Field label="Fuseau (min. vs UTC)"><input type="number" value={tz} onChange={(e) => setTz(e.target.value)} disabled={!canWrite} className="px-2 py-1 rounded border border-hair bg-transparent" aria-label="Décalage de fuseau en minutes" /></Field>
-        <Field label="Pays / zone"><input type="text" value={pays} onChange={(e) => setPays(e.target.value)} disabled={!canWrite} placeholder="Côte d'Ivoire…" className="px-2 py-1 rounded border border-hair bg-transparent" aria-label="Pays ou zone" /></Field>
+        <Field label="Fuseau (min. vs UTC)"><input type="number" value={tz} onChange={(e) => setTz(e.target.value)} disabled={!canWrite} className="field" aria-label="Décalage de fuseau en minutes" /></Field>
+        <Field label="Pays / zone"><input type="text" value={pays} onChange={(e) => setPays(e.target.value)} disabled={!canWrite} placeholder="Côte d'Ivoire…" className="field" aria-label="Pays ou zone" /></Field>
         <Field label="Ouverture B2B"><Select value={b2bStart} onChange={setB2bStart} options={HEURES} ariaLabel="Heure d'ouverture B2B" disabled={!canWrite} /></Field>
         <Field label="Fermeture B2B"><Select value={b2bEnd} onChange={setB2bEnd} options={HEURES} ariaLabel="Heure de fermeture B2B" disabled={!canWrite} /></Field>
       </div>
@@ -458,7 +458,7 @@ export const Maintenance: FC<Props> = () => {
     colText("N° FP", (r: RisqueItem) => <FpLink fp={r.fp || undefined} />),
     colText("Affaire", (r: RisqueItem) => affaireCell(r.fp), (r: RisqueItem) => affaireOf(r.fp)),
     colText("Niveau", (r: RisqueItem) => <Badge tone={niveauTone(r.niveau)}>{riskLabel(NIVEAU_LABEL, r.niveau)}</Badge>),
-    colNum("Score", (r: RisqueItem) => String(r.score), (r: RisqueItem) => r.score),
+    colNum("Score", (r: RisqueItem) => r.score.toLocaleString("fr-FR"), (r: RisqueItem) => r.score),
     colText("Signaux", (r: RisqueItem) => (
       <div className="flex flex-wrap gap-1">
         {(r.signals || []).map((s, i) => <Badge key={i} tone="steel">{signalText(s)}</Badge>)}
@@ -481,6 +481,9 @@ export const Maintenance: FC<Props> = () => {
   // Revenu récurrent CONSOLIDÉ (DO Lot 4) — MRR/ARR des contrats actifs, ventilé par BU/client/périodicité.
   // Vue direction PURE (recurringRevenue), dérivée des contrats déjà chargés. Même annualise() → même ARR.
   const recurring = useMemo(() => recurringRevenue(vContrats), [vContrats]);
+  // Reconnaissance du revenu consolidée (lot allocation revenu) — plafond à l'engagé, groupée par fpKey.
+  // MÊME source que le risque (sousFacturation) ET le même sous-filtre (risqueItems) → chiffres cohérents.
+  const recognition = useMemo(() => recognitionConsolidated(risqueItems), [risqueItems]);
   // TENDANCE MRR (Lot 5b, ADR-043) — dérivée du snapshot quotidien historisé. Compare le dernier point au
   // point ~30 j avant (sinon au plus ancien disponible). Le MRR LIVE reste recurring.totalMrr (même assiette).
   const mrrTrend = useMemo(() => {
@@ -502,7 +505,7 @@ export const Maintenance: FC<Props> = () => {
   // du MRR consolidé (Σ lignes ≠ total). Le MRR n'est donc affiché QUE consolidé (KPI). Audit gardien.
   const rrCols = (keyHeader: string, keyLabel?: (k: string) => string) => [
     colText(keyHeader, (g: MntRecurringGroup) => (keyLabel ? keyLabel(g.key) : g.key || "—"), (g: MntRecurringGroup) => g.key),
-    colNum("Contrats", (g: MntRecurringGroup) => String(g.contrats), (g: MntRecurringGroup) => g.contrats),
+    colNum("Contrats", (g: MntRecurringGroup) => g.contrats.toLocaleString("fr-FR"), (g: MntRecurringGroup) => g.contrats),
     colNum("ARR", (g: MntRecurringGroup) => money(g.arr), (g: MntRecurringGroup) => g.arr),
   ];
   // Conformité (Lot 3/7) : manques bloquants sur les contrats ACTIFS (sans SLA, sans date de fin, échéance
@@ -567,7 +570,7 @@ export const Maintenance: FC<Props> = () => {
     colText("N° FP", (r: MntRenouvellement) => <FpLink fp={r.fp || undefined} />),
     colText("Affaire", (r: MntRenouvellement) => affaireCell(r.fp), (r: MntRenouvellement) => affaireOf(r.fp)),
     colText("Fin", (r: MntRenouvellement) => frDate(r.dateFin)),
-    colNum("Jours restants", (r: MntRenouvellement) => String(r.jours), (r: MntRenouvellement) => r.jours),
+    colNum("Jours restants", (r: MntRenouvellement) => r.jours.toLocaleString("fr-FR"), (r: MntRenouvellement) => r.jours),
     colText("", (r: MntRenouvellement) => (canWrite ? (
       <div className="flex items-center justify-end gap-1.5">
         <Busy variant="ghost" label="Renouveler" okMsg="Renouvellement soumis à approbation" errMsg="Soumission refusée" fn={() => submitMntDecision(r.id, "renouvellement_contrat")} />
@@ -586,7 +589,7 @@ export const Maintenance: FC<Props> = () => {
     colText("Client", (r: MntContratPnlRow) => r.client || "—", (r: MntContratPnlRow) => r.client || ""),
     colText("N° FP", (r: MntContratPnlRow) => <FpLink fp={r.fp || undefined} />),
     colNum("Revenu engagé", (r: MntContratPnlRow) => money(r.revenue), (r: MntContratPnlRow) => r.revenue),
-    colNum("Jours", (r: MntContratPnlRow) => String(r.jours), (r: MntContratPnlRow) => r.jours),
+    colNum("Jours", (r: MntContratPnlRow) => r.jours.toLocaleString("fr-FR"), (r: MntContratPnlRow) => r.jours),
     ...(pnl.hasCost ? [
       colNum("Coût", (r: MntContratPnlRow) => (
         <span className="tabnum" title={`Interventions (TMA) ${money(r.coutInterventions || 0)} + P&L affaire ${money(r.coutPnl || 0)}${(r.coutPnlReel || 0) > 0 ? ` (dont réel fournisseur ${money(r.coutPnlReel || 0)} — coût retenu = max planifié/réel, ADR-081)` : ""} + Astreintes ${money(r.coutAstreintes || 0)}`}>{money(r.cout || 0)}</span>
@@ -798,9 +801,9 @@ export const Maintenance: FC<Props> = () => {
             <Kpi label="Contrats actifs" value={`${dash.contratsActifs}/${dash.contratsTotal}`} tone="emerald"
               sub={dash.contratsTotal > 0 ? `${pct(dash.contratsActifs / dash.contratsTotal)} du parc` : undefined} />
             <Kpi label="Revenu récurrent annuel (ARR)" value={fmt(dash.arrActifs)} tone="ink" sub={`FCFA · ≈ ${fmt(Math.round(dash.arrActifs / 12))}/mois (MRR)`} />
-            <Kpi label="Tickets ouverts" value={String(dash.ticketsOuverts)} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"}
+            <Kpi label="Tickets ouverts" value={dash.ticketsOuverts.toLocaleString("fr-FR")} tone={dash.ticketsOuverts > 0 ? "gold" : "ink"}
               sub={dash.ticketsOuverts > 0 ? `sur ${dash.ticketsTotal} ticket(s)` : "aucun en attente"} />
-            <Kpi label="Contrats à risque" value={String(atRiskCount)} tone={atRiskCount > 0 ? "clay" : "emerald"}
+            <Kpi label="Contrats à risque" value={atRiskCount.toLocaleString("fr-FR")} tone={atRiskCount > 0 ? "clay" : "emerald"}
               sub={dash.contratsActifs > 0 ? `${pct(atRiskCount / dash.contratsActifs)} des actifs` : undefined} />
             </div>
           </div>
@@ -855,7 +858,7 @@ export const Maintenance: FC<Props> = () => {
               VENTILATION (par BU / client / périodicité). Un chiffre, un endroit. */}
           <div className="grid grid-cols-2 gap-3">
             <Kpi label="MRR consolidé" value={fmt(recurring.totalMrr)} tone="ink" sub={`revenu mensuel · ${recurring.contratsActifs} contrat(s) actif(s)`} />
-            <Kpi label="Clients récurrents" value={String(recurring.byClient.length)} tone="ink" sub="au moins un contrat actif" />
+            <Kpi label="Clients récurrents" value={recurring.byClient.length.toLocaleString("fr-FR")} tone="ink" sub="au moins un contrat actif" />
           </div>
           {/* Tendance MRR : la COURBE (sparkline partagée) en plus du delta chiffré — pente et cassures visibles. */}
           {(mrrSpark.length >= 2 || (mrrTrend && mrrTrend.deltaMrr !== 0)) && (
@@ -894,6 +897,20 @@ export const Maintenance: FC<Props> = () => {
           </div>
         </Card>
       )}
+      {/* Reconnaissance du revenu CONSOLIDÉE (lot allocation revenu) — le revenu maintenance RECONNU (engagé à
+          ce jour) confronté au FACTURÉ réel attribué au périmètre maintenance par PLAFOND À L'ENGAGÉ : une
+          facture ne distingue pas maintenance et projet, donc on n'attribue jamais à la maintenance plus que
+          son engagé (le surplus est du projet). Dérivée du summary de risque → mêmes nombres, aucun backend. */}
+      {tab === "pilotage" && recognition.nbAffaires > 0 && (
+        <Card title="Reconnaissance du revenu (consolidée)">
+          <Tip>Revenu maintenance <b>reconnu</b> (engagé à ce jour, échéancier) confronté au <b>facturé réel</b>. Le facturé d'une affaire est attribué à la maintenance <b>plafonné à l'engagé</b> (une facture ne distingue pas maintenance et projet — le surplus est du projet). <b>À facturer</b> = reconnu pas encore facturé (« CA qui dort »). Sur {recognition.nbAffaires.toLocaleString("fr-FR")} affaire(s).</Tip>
+          <div className="grid grid-cols-3 gap-3">
+            <Kpi label="Reconnu à ce jour" value={fmt(recognition.reconnu)} tone="ink" sub="FCFA · engagé (échéancier)" />
+            <Kpi label="Facturé (maintenance)" value={fmt(recognition.facture)} tone="ink" sub="plafonné à l'engagé" />
+            <Kpi label="À facturer" value={fmt(recognition.aFacturer)} tone={recognition.aFacturer > 0 ? "gold" : "emerald"} sub={recognition.aFacturer > 0 ? "reconnu non encore facturé" : "à jour"} />
+          </div>
+        </Card>
+      )}
       {/* Maintenance par type (ADR-025) — agrégé sur tout le parc : tickets ET interventions comptés
           SÉPARÉMENT par type. Vue d'ensemble (sans colonne Objectif — les objectifs sont par contrat,
           visibles en consultation). N'apparaît que si au moins un item est classé. */}
@@ -920,9 +937,9 @@ export const Maintenance: FC<Props> = () => {
           )}>
           <Tip>Événements clés dérivés du <b>moteur de risque</b> (SLA rompus, renouvellements, quotas, sous-facturation), <b>les plus graves d'abord</b>. « <b>Suivre</b> » abonne à un contrat (ou tout le parc) : « <b>Mes abonnements</b> » ne montre alors que ce qui vous concerne. Diffusion <b>en direct</b>, sans e-mail.</Tip>
           <div className="grid grid-cols-3 gap-3 mb-3">
-            <Kpi label="Urgent" value={String(survCounts.high || 0)} tone={survCounts.high ? "clay" : "ink"} />
-            <Kpi label="À surveiller" value={String(survCounts.medium || 0)} tone={survCounts.medium ? "gold" : "ink"} />
-            <Kpi label="Info" value={String(survCounts.low || 0)} tone="ink" />
+            <Kpi label="Urgent" value={(survCounts.high || 0).toLocaleString("fr-FR")} tone={survCounts.high ? "clay" : "ink"} />
+            <Kpi label="À surveiller" value={(survCounts.medium || 0).toLocaleString("fr-FR")} tone={survCounts.medium ? "gold" : "ink"} />
+            <Kpi label="Info" value={(survCounts.low || 0).toLocaleString("fr-FR")} tone="ink" />
           </div>
           {survRows.length === 0
             ? <EmptyState label={survScope === "abonnements" ? (watched ? "Aucun événement sur vos abonnements." : "Aucun abonnement — « Suivre » un contrat ou tout le parc pour un suivi ciblé.") : "Aucun événement — parc sous contrôle."} />
@@ -933,11 +950,11 @@ export const Maintenance: FC<Props> = () => {
         <Card title="Risque des contrats">
           <Tip>Score matérialisé au dernier recalcul, à partir de 4 signaux : <b>SLA rompus</b>, <b>échéance proche</b>, <b>quota dépassé</b>, <b>sous-facturation</b>. Un contrat au repos <b>et complet</b> reste Vert ; un contrat sans données de pilotage (engagement, date de fin, montant) est <b>Non scoré</b> — à compléter, jamais « sain » par défaut.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
-            <Kpi label="Critique" value={String(counts.critique || 0)} tone="plum" />
-            <Kpi label="Rouge" value={String(counts.rouge || 0)} tone="clay" />
-            <Kpi label="Ambre" value={String(counts.ambre || 0)} tone="gold" />
-            <Kpi label="Vert" value={String(counts.vert || 0)} tone="emerald" />
-            <Kpi label="Non scoré" value={String(counts.incomplet || 0)} sub="données à compléter" />
+            <Kpi label="Critique" value={(counts.critique || 0).toLocaleString("fr-FR")} tone="plum" />
+            <Kpi label="Rouge" value={(counts.rouge || 0).toLocaleString("fr-FR")} tone="clay" />
+            <Kpi label="Ambre" value={(counts.ambre || 0).toLocaleString("fr-FR")} tone="gold" />
+            <Kpi label="Vert" value={(counts.vert || 0).toLocaleString("fr-FR")} tone="emerald" />
+            <Kpi label="Non scoré" value={(counts.incomplet || 0).toLocaleString("fr-FR")} sub="données à compléter" />
           </div>
           {atRisk.length === 0 ? <EmptyState label="Aucun contrat à risque." /> : <Table columns={risqueCols} rows={atRisk} colsKey="mnt_risque" />}
           {/* CONTRAT SANS AFFAIRE (Lot 5b) — contrats dont le N° FP n'est pas au carnet (orphelins, fpKey).
@@ -994,9 +1011,9 @@ export const Maintenance: FC<Props> = () => {
           <Tip>Contrôle de <b>complétude</b> des contrats <b>actifs</b> : un contrat en vigueur doit avoir un <b>engagement SLA</b>, une <b>date de fin</b> et un <b>montant d'engagement</b>. Une échéance <b>dépassée</b> n'est pas un défaut de conformité — elle relève des <b>renouvellements</b> ci-dessus. « Corriger » ouvre la fiche.</Tip>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             <Kpi label="Conformes" value={`${compliance.conformes}/${compliance.activeTotal}`} tone={compliance.items.length === 0 ? "emerald" : "gold"} />
-            <Kpi label="Sans SLA" value={String(compliance.byIssue.sans_sla)} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
-            <Kpi label="Sans date de fin" value={String(compliance.byIssue.sans_echeance)} tone={compliance.byIssue.sans_echeance ? "gold" : "ink"} />
-            <Kpi label="Montant nul" value={String(compliance.byIssue.montant_nul)} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
+            <Kpi label="Sans SLA" value={compliance.byIssue.sans_sla.toLocaleString("fr-FR")} tone={compliance.byIssue.sans_sla ? "gold" : "ink"} />
+            <Kpi label="Sans date de fin" value={compliance.byIssue.sans_echeance.toLocaleString("fr-FR")} tone={compliance.byIssue.sans_echeance ? "gold" : "ink"} />
+            <Kpi label="Montant nul" value={compliance.byIssue.montant_nul.toLocaleString("fr-FR")} tone={compliance.byIssue.montant_nul ? "gold" : "ink"} />
           </div>
           {compliance.items.length === 0 ? <EmptyState label="Tous les contrats actifs sont conformes." /> : <Table columns={complianceCols} rows={compliance.items} colsKey="mnt_conformite" />}
         </Card>
@@ -1060,12 +1077,12 @@ export const Maintenance: FC<Props> = () => {
           ) : undefined}>
           {aiSug ? (
             <>
-              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. Coche des lignes pour <b>créer en masse</b>, ou « Créer » pour ouvrir une fiche <b>pré-remplie</b> (échéance = date de commande + 12 mois). Rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
+              <Tip>L'<b>IA</b> a jugé <b>{aiSug.analyzed}</b> affaire(s) sans contrat et retenu celles relevant d'une <b>prestation récurrente</b> (au-delà des seuls mots-clés), avec sa <b>confiance</b> et son analyse. Cochez des lignes pour <b>créer en masse</b>, ou « Créer » pour ouvrir une fiche <b>pré-remplie</b> (échéance = date de commande + 12 mois). Rien n'est créé automatiquement.{aiSug.truncated ? ` Lot borné aux ${aiSug.analyzed} affaires les plus probables.` : ""}</Tip>
               {aiRows.length === 0 ? <EmptyState label="L'IA n'a retenu aucune affaire récurrente dans le carnet." /> : <>{bulkBar}<Table columns={aiCols} rows={aiRows} colsKey="mnt_suggest_ai" /></>}
             </>
           ) : (
             <>
-              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. Coche des lignes pour <b>créer en masse</b> (échéance = date de commande + 12 mois), ou « Créer » pour une fiche <b>pré-remplie</b>.</Tip>
+              <Tip>Affaires du carnet de commandes qui <b>ressemblent à de la maintenance</b> (mots-clés sur la désignation) et n'ont <b>pas encore de contrat</b>. « <b>Doper à l'IA</b> » demande à Claude de juger le fond — il écarte les faux positifs et repère les affaires récurrentes sans mot-clé évident. Cochez des lignes pour <b>créer en masse</b> (échéance = date de commande + 12 mois), ou « Créer » pour une fiche <b>pré-remplie</b>.</Tip>
               {suggestions.length === 0 ? <EmptyState label="Aucun signal par mots-clés — lancez l'analyse IA pour un jugement au fond." /> : <>{bulkBar}<Table columns={suggestCols} rows={suggestions} colsKey="mnt_suggest" /></>}
             </>
           )}

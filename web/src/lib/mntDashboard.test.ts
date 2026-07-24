@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { computeMntDashboard, recurringRevenue, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import { computeMntDashboard, recurringRevenue, recognitionConsolidated, slaAgenda, engagementsForTicket, mntCompliance, mntRenouvellements, mntTypeStats, ECHEANCE_PROCHE_JOURS } from "./mntDashboard";
+import type { RisqueItem } from "./mntRisque";
 
 const asOf = "2026-07-15";
 
@@ -256,5 +257,41 @@ describe("mntTypeStats — maintenance par type vs objectifs (ADR-025)", () => {
     const r = mntTypeStats([c("A", { predictive: 2 })], [], []);
     expect(r.parContrat).toHaveLength(1);
     expect(r.parContrat[0].tickets).toEqual({ predictive: 0, corrective: 0, evolutive: 0, veille: 0 });
+  });
+});
+
+describe("recognitionConsolidated (plafond à l'engagé, groupé par fpKey)", () => {
+  // Item de risque minimal : la fonction ne lit que fp + sousFacturation.
+  const item = (fp: string | null, engage: number, facture: number): RisqueItem =>
+    ({ fp, sousFacturation: { engage, facture, ecart: engage - facture } } as RisqueItem);
+
+  it("un FP sous-facturé : reconnu = engagé, facturé = facturé, à facturer = écart", () => {
+    const r = recognitionConsolidated([item("FP/2026/1", 1_000_000, 600_000)]);
+    expect(r).toEqual({ reconnu: 1_000_000, facture: 600_000, aFacturer: 400_000, nbAffaires: 1 });
+  });
+
+  it("PLAFOND À L'ENGAGÉ : un facturé affaire > engagé (surplus = projet) n'est PAS compté maintenance", () => {
+    const r = recognitionConsolidated([item("FP/2026/1", 1_000_000, 1_500_000)]);
+    // facturé attribué plafonné à l'engagé (1M), le surplus 0,5M est du projet → jamais dans la maintenance.
+    expect(r).toEqual({ reconnu: 1_000_000, facture: 1_000_000, aFacturer: 0, nbAffaires: 1 });
+  });
+
+  it("DEUX contrats d'un même FP : engagé SOMMÉ, facturé affaire pris UNE fois (anti double-compte v1)", () => {
+    // Le facturé affaire (800k) est IDENTIQUE sur les deux items (Σ factures par fpKey côté back).
+    const r = recognitionConsolidated([item("FP/2026/2", 500_000, 800_000), item("FP/2026/2", 500_000, 800_000)]);
+    // engagéFP = 1M ; facturéFP = 800k (UNE fois, pas 1,6M) → facturé attribué = min(800k,1M)=800k, à facturer=200k.
+    // Si le facturé était sommé (bug v1), on aurait facturé=min(1,6M,1M)=1M et à facturer=0 : FAUX.
+    expect(r).toEqual({ reconnu: 1_000_000, facture: 800_000, aFacturer: 200_000, nbAffaires: 1 });
+  });
+
+  it("canonicalise par fpKey (zéros de tête) et écarte les FP absents/placeholders", () => {
+    const r = recognitionConsolidated([
+      item("FP/2026/013", 300_000, 100_000), // « 013 » et « 13 » = MÊME affaire → groupées
+      item("FP/2026/13", 200_000, 100_000),  // facturé affaire identique (100k)
+      item(null, 999_000, 999_000),          // pas d'affaire → écarté
+      item("FP/2026/0000", 999_000, 999_000),// placeholder → écarté
+    ]);
+    // 1 seule affaire : engagé 500k, facturé 100k → reconnu 500k, facturé 100k, à facturer 400k.
+    expect(r).toEqual({ reconnu: 500_000, facture: 100_000, aFacturer: 400_000, nbAffaires: 1 });
   });
 });
