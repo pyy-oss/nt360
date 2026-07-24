@@ -31,6 +31,60 @@
 
 ---
 
+## 2026-07-24 — Audit adverse du module (état courant main, post-split) + remédiation
+
+**Fait** — audit adverse en 3 axes parallèles (agents dédiés) sur l'état courant de `main` (#600, module vivant
+désormais dans `@nt360/functions-shared`) : sécurité/RBAC/confidentialité, non-régression backend + chasse aux
+bugs, conformité UI. **Verdict d'ensemble : module sain** — le gardien confirme 1386 tests `functions-shared` +
+313 web verts, invariant « éteint = ERP d'avant » propre sur TOUS les consommateurs backend, recompute C3 intact
+(triple summary `mnt_risque`/`mnt_surveillance`/`mnt_mrrSnapshot`, doublement gaté), miroirs front↔back
+byte-identiques, aucun bug certain/plausible dans le domaine pur. **4 correctifs ciblés appliqués, chacun vérifié :**
+
+- **Fuite confidentielle (webhook sortant)** — `index.js:2259` `fireOutbound("approval_decided", …)` envoyait
+  `amount` en clair **même pour une astreinte** (charge confidentielle ADR-035), alors que `listApprovals`/
+  `listAstreintes` la masquent sans droit `rentabilite`. Le webhook n'a pas de contexte RBAC → masquage
+  `amount: entityType === "astreinte" ? null : …`. Ferme la promesse « masqué de bout en bout ».
+- **`setMntCalendar` sans garde de drapeau** — `index.js:3439` avait `requireWrite("maintenance")` seul. Un rôle
+  `maintenance:write` pouvait écrire `config/mntCalendar` + déclencher un recompute **drapeau éteint** — entorse
+  à l'invariant « éteint = ERP strictement d'avant » (règle intouchable n°6). Ajout de la double garde
+  `isMntEnabled` (patron des 22 callables du handler). **Durcit le choix d'ADR-P23** (qui gouvernait cette config
+  « opérationnelle » par le seul droit d'écriture) : la règle intouchable prime sur la commodité de pré-config.
+- **Conformité UI (classe `field`)** — `maintenance.tsx:76-77` : les inputs Fuseau/Pays de `SlaCalendarCard`
+  étaient stylés à la main (`px-2 py-1 rounded border border-hair bg-transparent`) au lieu de la classe d'input
+  unique de l'ERP `field` (191 occ.). Alignés.
+- **Finitions UI** — compteurs entiers (`colNum` score/jours/contrats + `Kpi` de tous les tableaux de bord)
+  rendus via `String(...)` → `.toLocaleString("fr-FR")` (séparateur de milliers = espace, idiome dominant, ex.
+  `backlog.tsx:1218`) ; tutoiement « Coche des lignes » → « Cochez » (vouvoiement, dominant + cohérence interne).
+
+**Appris sur l'existant**
+- **`index.js` reste non testé unitairement** (aucun harnais, dette documentée) : les 2 correctifs backend y
+  vivent, vérifiés par inspection + no-undef + suite complète verte + gardes CI. Le pattern du dépôt.
+- **P2 (signalé, non corrigé, par conception)** : les montants de *revenu* (`sousFacturation {engage,facture,ecart}`)
+  transitent vers un rôle `maintenance` seul via `mnt_risque`/`mnt_surveillance` — c'est le signal #4 (ADR-034),
+  voulu. La promesse de confidentialité ne couvre que le *coût*, jamais le revenu. Rien à corriger.
+- **Docs périmées** : le runbook `07` (8 callables, état 15/07) et ce journal (arrêté au 18/07) ne couvrent pas
+  le chantier récent (IA lignées/suggestion/statut, import, calendrier, versions, watch, surveillance, MRR,
+  `setMntFeature`, split). ~19 callables `mnt` + 5 collections nouvelles réellement déployés. À mettre à jour.
+
+**Dette assumée**
+- Correctifs backend non couverts par un test dédié (monolithe `index.js` non testé — dette pré-existante,
+  identique aux lots précédents). Une extraction du masquage confidentiel en helper pur testable serait la voie ;
+  hors périmètre de cette remédiation.
+
+**Décidé**
+- Durcissement `setMntCalendar` : la règle intouchable n°6 (« éteint = ERP d'avant ») **prime** sur l'intention
+  d'ADR-P23 (config opérationnelle éditable par le seul droit d'écriture). ADR-P23 n'ayant pas d'entrée formelle
+  dans `05-DECISIONS.md`, la décision est tracée ici.
+
+**Suivant**
+- Mettre à jour le runbook `07` (surface réelle) + backfiller la doc du chantier récent.
+- Lot dédié « reconnaissance du revenu consolidée » (allocation facture↔périmètre maintenance) — à arbitrer.
+
+**Vérif** : functions-shared 1386 (143 fichiers) · web 313 (33 fichiers) · build OK · bundle 121,5 KB ≤ 122 ·
+no-undef 176 · deploy-targets 202 (5 codebases) — tout vert.
+
+---
+
 ## 2026-07-18 — Remédiation d'audit revenu (retrait Reconnaissance incohérente + fix arrondi MRR)
 
 **Fait** — audit adverse (gardien) des lots revenu #453/#454 sous la barre « zéro incohérence ». 2 constats

@@ -2256,7 +2256,10 @@ exports.decideApproval = onCallG("decideApproval", { memoryMiB: 512, timeoutSeco
       }
     } catch (e) { logger.error("decideApproval : effet astreinte en échec (décision enregistrée)", { id, message: e && e.message }); }
   }
-  await fireOutbound("approval_decided", { approvalId: id, decision, kind: cur.kind, entityId: cur.entityId, amount: cur.amount ?? null }); // Lot 7b
+  // Le montant d'une astreinte est une CHARGE confidentielle (ADR-035) : masqué (null) hors du système
+  // aussi — le webhook sortant n'a pas de contexte RBAC, donc jamais le chiffre en clair (cohérent avec
+  // listApprovals/listAstreintes qui le masquent sans droit `rentabilite`). Autres natures inchangées.
+  await fireOutbound("approval_decided", { approvalId: id, decision, kind: cur.kind, entityId: cur.entityId, amount: cur.entityType === "astreinte" ? null : (cur.amount ?? null) }); // Lot 7b
   return { ok: true, id, status: decision };
 });
 
@@ -3438,6 +3441,11 @@ exports.setMntFeature = onCallG("setMntFeature", { memoryMiB: 256, timeoutSecond
 // férié). On stocke la forme NORMALISÉE (bornes sûres, fériés dédupliqués/triés). Recompute maintenance après.
 exports.setMntCalendar = onCallG("setMntCalendar", { memoryMiB: 256, timeoutSeconds: 60 }, async (req) => {
   await requireWrite(req, "maintenance");
+  // DOUBLE garde (ADR-009, révision ADR-P23) : le module doit être ALLUMÉ. Sinon, un rôle porteur de
+  // `maintenance:write` pourrait écrire config/mntCalendar + déclencher un recompute drapeau éteint —
+  // entorse à l'invariant « éteint = ERP strictement d'avant ». Aligné sur les callables du handler.
+  const { isMntEnabled } = require("@nt360/functions-shared/domain/mntFeature");
+  if (!isMntEnabled((await db.doc("config/mntFeature").get()).data())) throw new HttpsError("failed-precondition", "module Contrats de maintenance désactivé");
   const { mntCalendar } = require("@nt360/functions-shared/domain/mntCalendar");
   const d = req.data || {};
   const norm = mntCalendar({ tzOffsetMinutes: d.tzOffsetMinutes, pays: d.pays, holidays: d.holidays, b2b: d.b2b });
